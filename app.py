@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 
 # --- Default Slopes ---
 SLOPES = {
-    "SPX_HIGH": -0.048837,
-    "SPX_CLOSE": -0.048837,
-    "SPX_LOW": -0.048837,
+    "SPX_HIGH": -0.2792,
+    "SPX_CLOSE": -0.2792,
+    "SPX_LOW": -0.2792,
     "TSLA": -0.1508,
     "NVDA": -0.0504,
     "AAPL": -0.1156,
