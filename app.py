@@ -92,7 +92,12 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("Slopes")
     for key in SLOPES:
-        SLOPES[key] = st.number_input(key.replace("_", " "), value=SLOPES[key], format="%.4f")
+        SLOPES[key] = st.number_input(
+            key.replace("_", " "),
+            value=SLOPES[key],
+            format="%.4f",
+            key=f"slope_{key}"
+        )
     st.markdown("---")
     st.caption("Configure anchors in each tab below")
 
@@ -101,7 +106,7 @@ tab_spx, tab_tsla, tab_nvda, tab_aapl, tab_amzn, tab_googl = st.tabs(
     ["🧭 SPX", "🚗 TSLA", "🧠 NVDA", "🍎 AAPL", "📦 AMZN", "🔍 GOOGL"]
 )
 
-# --- SPX Tab ---
+# --- SPX Tab with corrected number_input (value= ) ---
 with tab_spx:
     st.markdown('<div class="tab-header">SPX Forecast (Yesterday’s High/Close/Low)</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
