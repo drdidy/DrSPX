@@ -22,7 +22,7 @@ def generate_time_blocks():
 def calculate_spx_blocks(anchor_dt, target_dt):
     dt, blocks = anchor_dt, 0
     while dt < target_dt:
-        if dt.hour != 16:  # skip maintenance window 16:00–16:59
+        if dt.hour != 16:
             blocks += 1
         dt += timedelta(minutes=30)
     return blocks
@@ -54,11 +54,9 @@ def generate_stock_forecast(low_price, high_price, slope, anchor_low_dt, anchor_
     rows = []
     for slot in generate_time_blocks():
         h, m = map(int, slot.split(":"))
-        # entry line
         tgt_low = anchor_low_dt.replace(hour=h, minute=m)
         bl = calculate_stock_blocks(anchor_low_dt, tgt_low)
         entry = low_price + slope * bl
-        # exit line
         tgt_high = anchor_high_dt.replace(hour=h, minute=m)
         bh = calculate_stock_blocks(anchor_high_dt, tgt_high)
         exit_ = high_price - slope * bh
@@ -94,7 +92,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("Slopes")
     for key in SLOPES:
-        SLOPES[key] = st.number_input(key.replace("_", " "), SLOPES[key], format="%.4f")
+        SLOPES[key] = st.number_input(key.replace("_", " "), value=SLOPES[key], format="%.4f")
     st.markdown("---")
     st.caption("Configure anchors in each tab below")
 
@@ -107,11 +105,11 @@ tab_spx, tab_tsla, tab_nvda, tab_aapl, tab_amzn, tab_googl = st.tabs(
 with tab_spx:
     st.markdown('<div class="tab-header">SPX Forecast (Yesterday’s High/Close/Low)</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
-    spx_high_p = c1.number_input("High Price", 6185.8, key="spx_hp")
+    spx_high_p = c1.number_input("High Price", value=6185.8, format="%.2f", key="spx_hp")
     spx_high_t = c1.time_input("High Time", value=datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
-    spx_close_p = c2.number_input("Close Price", 6170.2, key="spx_cp")
+    spx_close_p = c2.number_input("Close Price", value=6170.2, format="%.2f", key="spx_cp")
     spx_close_t = c2.time_input("Close Time", value=datetime(2025,1,1,15,0).time(), step=1800, key="spx_ct")
-    spx_low_p = c3.number_input("Low Price", 6130.4, key="spx_lp")
+    spx_low_p = c3.number_input("Low Price", value=6130.4, format="%.2f", key="spx_lp")
     spx_low_t = c3.time_input("Low Time", value=datetime(2025,1,1,13,30).time(), step=1800, key="spx_lt")
 
     if st.button("🔮 Generate SPX Forecast", key="btn_spx"):
@@ -133,12 +131,10 @@ def stock_tab(tab, label):
     with tab:
         st.markdown(f'<div class="tab-header">{label} Forecast (Dynamic Low/High Anchors)</div>', unsafe_allow_html=True)
         col = st.columns(2)[0]
-        low_price = col.number_input(f"{label} Low Price", 0.0, key=f"{label}_low_p")
-        low_time  = col.time_input(f"{label} Low Time", value=datetime(2025,1,1,3,0).time(),
-                                  step=1800, key=f"{label}_low_t")
-        high_price = col.number_input(f"{label} High Price", 0.0, key=f"{label}_high_p")
-        high_time  = col.time_input(f"{label} High Time", value=datetime(2025,1,1,3,0).time(),
-                                   step=1800, key=f"{label}_high_t")
+        low_price = col.number_input(f"{label} Low Price", value=0.0, format="%.2f", key=f"{label}_low_p")
+        low_time  = col.time_input(f"{label} Low Time", value=datetime(2025,1,1,3,0).time(), step=1800, key=f"{label}_low_t")
+        high_price = col.number_input(f"{label} High Price", value=0.0, format="%.2f", key=f"{label}_high_p")
+        high_time  = col.time_input(f"{label} High Time", value=datetime(2025,1,1,3,0).time(), step=1800, key=f"{label}_high_t")
 
         if st.button(f"🔮 Generate {label}", key=f"btn_{label}"):
             anchor_low_dt  = datetime.combine(forecast_date, low_time)
