@@ -237,7 +237,7 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"], start=1):
     with tabs[i]:
         st.markdown(f'<div class="tab-header">{icons[label]} {label} Forecast</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="input-card"><h2>Set Anchors & Date</h2>', unsafe_allow_html=True)
+        st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         lp = col1.number_input("🔽 Prev-Day Low Price", 0.0, format="%.2f", key=f"{label}_low_price")
         lt = col1.time_input("🕒 Prev-Day Low Time", datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_low_time")
