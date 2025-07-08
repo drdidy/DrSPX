@@ -2,7 +2,6 @@ import streamlit as st
 from datetime import datetime, time, timedelta
 import pandas as pd
 import altair as alt
-from st_aggrid import AgGrid, GridOptionsBuilder
 
 # --- SLOPE SETTINGS ---
 SLOPES = {
@@ -68,7 +67,6 @@ LIGHT_CSS = """
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
 <style>
-/* Animated gradient background */
 @keyframes bgMove {
   0%{background-position:0% 50%}
   50%{background-position:100% 50%}
@@ -81,29 +79,22 @@ body {
   font-family:'Poppins',sans-serif;
   margin:0;
 }
-/* Sticky header & sidebar */
 .app-header {position:sticky;top:0;z-index:1000;}
 .sidebar .sidebar-content {position:sticky;top:0;overflow:auto;height:100vh;}
-
-/* Neumorphic cards */
 .card {
   background:#e0e5ec;margin:1rem 2rem;padding:1rem;border-radius:1rem;
-  box-shadow:-6px -6px 16px #ffffff,6px 6px 16px rgba(0,0,0,0.1);
+  box-shadow:-6px -6px 16px #fff,6px 6px 16px rgba(0,0,0,0.1);
   transition:transform .2s,box-shadow .2s;
 }
 .card:hover {
   transform:translateY(-4px);
-  box-shadow:-8px -8px 24px #ffffff,8px 8px 24px rgba(0,0,0,0.15);
+  box-shadow:-8px -8px 24px #fff,8px 8px 24px rgba(0,0,0,0.15);
 }
 .card-high {border-left:8px solid #ff6b6b;}
 .card-close{border-left:8px solid #4ecdc4;}
 .card-low  {border-left:8px solid #f7b731;}
-
-/* Tabs & header */
 .app-header, .tab-header {color:#333;}
 .tab-header {margin:1.5rem 2rem 0.5rem;font-size:1.3rem;font-weight:600;}
-
-/* Buttons */
 .stButton>button {
   background:#e0e5ec;color:#333;border:none;
   box-shadow:-4px -4px 12px #fff,4px 4px 12px rgba(0,0,0,0.1);
@@ -118,18 +109,10 @@ body {
   transform:scale(.98);
   box-shadow:-2px -2px 6px #fff,2px 2px 6px rgba(0,0,0,0.1);
 }
-
-/* AG-Grid zebra stripes */
-.ag-theme-streamlit .ag-row:nth-child(odd) {background:#f7f9fc;}
-.ag-theme-streamlit .ag-row:nth-child(even){background:#e9edf3;}
-
-/* Footer */
 .footer {
   position:fixed;bottom:0;width:100%;text-align:center;
   padding:.5rem;font-size:.8rem;color:rgba(0,0,0,0.5);
 }
-
-/* Responsive */
 @media(max-width:768px){
   .card {margin:1rem;}
   .tab-header {margin:1rem;font-size:1.1rem;}
@@ -155,7 +138,6 @@ body {
 }
 .app-header {position:sticky;top:0;z-index:1000;}
 .sidebar .sidebar-content {position:sticky;top:0;overflow:auto;height:100vh;}
-
 .card {
   background:#2b2f36;margin:1rem 2rem;padding:1rem;border-radius:1rem;
   box-shadow:inset 4px 4px 12px rgba(0,0,0,0.6),-4px -4px 12px rgba(255,255,255,0.05);
@@ -168,10 +150,8 @@ body {
 .card-high {border-left:8px solid #e74c3c;}
 .card-close{border-left:8px solid #1abc9c;}
 .card-low  {border-left:8px solid #f1c40f;}
-
 .app-header, .tab-header {color:#e0e0e0;}
 .tab-header {margin:1.5rem 2rem 0.5rem;font-size:1.3rem;font-weight:600;}
-
 .stButton>button {
   background:#2b2f36;color:#e0e0e0;border:none;
   box-shadow:inset 2px 2px 6px rgba(0,0,0,0.6),-2px -2px 6px rgba(255,255,255,0.1);
@@ -186,15 +166,10 @@ body {
   transform:scale(.98);
   box-shadow:inset 1px 1px 4px rgba(0,0,0,0.6),-1px -1px 4px rgba(255,255,255,0.1);
 }
-
-.ag-theme-streamlit .ag-row:nth-child(odd) {background:#34383f;}
-.ag-theme-streamlit .ag-row:nth-child(even){background:#2b2f36;}
-
 .footer {
   position:fixed;bottom:0;width:100%;text-align:center;
   padding:.5rem;font-size:.8rem;color:rgba(255,255,255,0.5);
 }
-
 @media(max-width:768px){
   .card {margin:1rem;}
   .tab-header {margin:1rem;font-size:1.1rem;}
@@ -202,10 +177,10 @@ body {
 </style>
 """
 
-# --- PAGE CONFIG & THEME SELECTOR ---
+# --- PAGE CONFIG & THEME ---
 st.set_page_config(page_title="Dr Didy Forecast", page_icon="📈", layout="wide")
-mode = st.sidebar.radio("🎨 Theme", ["Light Mode","Dark Mode"])
-st.markdown(LIGHT_CSS if mode=="Light Mode" else DARK_CSS, unsafe_allow_html=True)
+theme = st.sidebar.radio("🎨 Theme", ["Light Mode", "Dark Mode"])
+st.markdown(LIGHT_CSS if theme == "Light Mode" else DARK_CSS, unsafe_allow_html=True)
 
 # --- HEADER ---
 st.markdown(
@@ -216,7 +191,7 @@ st.markdown(
 # --- SIDEBAR CONTROLS ---
 with st.sidebar:
     st.header("⚙️ Settings")
-    forecast_date = st.date_input("Forecast Date", datetime.now().date()+timedelta(days=1))
+    forecast_date = st.date_input("Forecast Date", datetime.now().date() + timedelta(days=1))
     st.divider()
     st.subheader("Adjust Slopes")
     for k in SLOPES:
@@ -232,15 +207,12 @@ tabs = st.tabs([
     '<i class="fas fa-search"></i> GOOGL',
 ])
 
-# --- RENDERING ---
-icons = {"SPX_HIGH":"🔼","SPX_CLOSE":"⏹️","SPX_LOW":"🔽"}
-stock_icons = {"TSLA":"🔗","NVDA":"🔗","AAPL":"🔗","AMZN":"🔗","GOOGL":"🔗"}
-
-for idx,label in enumerate(["SPX","TSLA","NVDA","AAPL","AMZN","GOOGL"]):
+# --- RENDER TABS ---
+for idx, label in enumerate(["SPX","TSLA","NVDA","AAPL","AMZN","GOOGL"]):
     with tabs[idx]:
         st.markdown(f'<div class="tab-header">{label} Forecast</div>', unsafe_allow_html=True)
-        cols = st.columns(2 if label!="SPX" else 3)
-        if label=="SPX":
+        cols = st.columns(3 if label=="SPX" else 2)
+        if label == "SPX":
             hp = cols[0].number_input("High Price", 6185.8, format="%.2f", key="spx_hp")
             ht = cols[0].time_input("High Time", datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
             cp = cols[1].number_input("Close Price",6170.2,format="%.2f",key="spx_cp")
@@ -248,36 +220,30 @@ for idx,label in enumerate(["SPX","TSLA","NVDA","AAPL","AMZN","GOOGL"]):
             lp = cols[2].number_input("Low Price",6130.4,format="%.2f",key="spx_lp")
             lt = cols[2].time_input("Low Time",datetime(2025,1,1,13,30).time(),step=1800,key="spx_lt")
             if st.button("Generate SPX"):
-                anchor_times = {
+                anchors = {
                     "SPX_HIGH": datetime.combine(forecast_date - timedelta(days=1), ht),
-                    "SPX_CLOSE":datetime.combine(forecast_date - timedelta(days=1),ct),
-                    "SPX_LOW":  datetime.combine(forecast_date - timedelta(days=1),lt),
+                    "SPX_CLOSE": datetime.combine(forecast_date - timedelta(days=1), ct),
+                    "SPX_LOW": datetime.combine(forecast_date - timedelta(days=1), lt),
                 }
-                # metrics with spinner + success
-                with st.spinner("Computing…"):
-                    for key in ["SPX_HIGH","SPX_CLOSE","SPX_LOW"]:
-                        pass
-                st.success("Done!")
-                # show metrics
+                st.success("Computed!")
                 mcols = st.columns(3)
-                for col,key in zip(mcols,["SPX_HIGH","SPX_CLOSE","SPX_LOW"]):
-                    val = {"SPX_HIGH":hp,"SPX_CLOSE":cp,"SPX_LOW":lp}[key]
-                    col.metric(f"{icons[key]} {key.replace('SPX_','').title()} Anchor",
+                for col, key in zip(mcols, anchors):
+                    val = {"SPX_HIGH":hp, "SPX_CLOSE":cp, "SPX_LOW":lp}[key]
+                    icon = {"SPX_HIGH":"🔼","SPX_CLOSE":"⏹️","SPX_LOW":"🔽"}[key]
+                    col.metric(f"{icon} {key.replace('SPX_','').title()} Anchor",
                                f"{val:.2f}",
                                delta=f"{SLOPES[key]:.4f}/blk")
-                # tables via AG-Grid
-                for key in ["SPX_HIGH","SPX_CLOSE","SPX_LOW"]:
-                    with st.expander(f"{icons[key]} {key.replace('SPX_','').title()} Anchor Table"):
+                for key in anchors:
+                    icon = {"SPX_HIGH":"🔼","SPX_CLOSE":"⏹️","SPX_LOW":"🔽"}[key]
+                    title = key.replace("SPX_","").title() + " Anchor"
+                    with st.expander(f"{icon} {title} Table"):
                         df = generate_spx(
                             {"SPX_HIGH":hp,"SPX_CLOSE":cp,"SPX_LOW":lp}[key],
                             SLOPES[key],
-                            anchor_times[key],
+                            anchors[key],
                             forecast_date
                         )
-                        gb = GridOptionsBuilder.from_dataframe(df)
-                        gb.configure_pagination(paginationAutoPageSize=True)
-                        gb.configure_default_column(flex=1,sortable=True,filter=True)
-                        AgGrid(df,gridOptions=gb.build(),theme="streamlit")
+                        st.dataframe(df.round(2), use_container_width=True)
         else:
             lp = cols[0].number_input("Prev-Day Low",0.0,format="%.2f",key=f"{label}_lp")
             lt = cols[0].time_input("Prev-Day Low Time",datetime(2025,1,1,8,30).time(),step=1800,key=f"{label}_lt")
@@ -286,24 +252,16 @@ for idx,label in enumerate(["SPX","TSLA","NVDA","AAPL","AMZN","GOOGL"]):
             if st.button(f"Generate {label}"):
                 anchor_low  = datetime.combine(forecast_date - timedelta(days=1), lt)
                 anchor_high = datetime.combine(forecast_date - timedelta(days=1), ht)
-                st.success("Done!")
+                st.success("Computed!")
                 scols = st.columns(2)
-                scols[0].metric(f"🔽 Low Anchor", f"{lp:.2f}", delta=f"{SLOPES[label]:.4f}/blk")
-                scols[1].metric(f"🔼 High Anchor",f"{hp:.2f}",delta=f"{SLOPES[label]:.4f}/blk")
-                # low table
+                scols[0].metric("🔽 Low Anchor", f"{lp:.2f}", delta=f"{SLOPES[label]:.4f}/blk")
+                scols[1].metric("🔼 High Anchor", f"{hp:.2f}", delta=f"{SLOPES[label]:.4f}/blk")
                 with st.expander("🔻 Low Anchor Table"):
-                    df = generate_stock(lp,SLOPES[label],anchor_low,forecast_date,invert=True)
-                    gb = GridOptionsBuilder.from_dataframe(df)
-                    gb.configure_pagination(paginationAutoPageSize=True)
-                    gb.configure_default_column(flex=1,sortable=True,filter=True)
-                    AgGrid(df,gridOptions=gb.build(),theme="streamlit")
-                # high table
+                    df_low = generate_stock(lp, SLOPES[label], anchor_low, forecast_date, invert=True)
+                    st.dataframe(df_low.round(2), use_container_width=True)
                 with st.expander("🔺 High Anchor Table"):
-                    df = generate_stock(hp,SLOPES[label],anchor_high,forecast_date,invert=False)
-                    gb = GridOptionsBuilder.from_dataframe(df)
-                    gb.configure_pagination(paginationAutoPageSize=True)
-                    gb.configure_default_column(flex=1,sortable=True,filter=True)
-                    AgGrid(df,gridOptions=gb.build(),theme="streamlit")
+                    df_high = generate_stock(hp, SLOPES[label], anchor_high, forecast_date, invert=False)
+                    st.dataframe(df_high.round(2), use_container_width=True)
 
 # --- FOOTER ---
 st.markdown(
