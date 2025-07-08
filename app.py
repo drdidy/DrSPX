@@ -212,7 +212,7 @@ st.markdown("""
 </style>
 <div class="app-banner">
   <h1>📊 Dr Didy Forecast</h1>
-  <p>Precision Entry & Exit Projections in Stunning Detail</p>
+  <p>Precision Entry & Exit Projections</p>
 </div>
 """, unsafe_allow_html=True)
 
