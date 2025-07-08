@@ -83,7 +83,8 @@ body {background:#eef2f6; color:#333; font-family:'Segoe UI',sans-serif; margin:
 .app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
 .input-card {background:#fff; margin:1rem auto; padding:1.5rem 2rem;
              max-width:1200px; border-radius:1rem;
-             box-shadow:0 4px 12px rgba(0,0,0,0.05);}
+             box-shadow:0 4px 12px rgba(0,0,0,0.05);
+             text-align:center;}              /* centered */
 .input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#1f4068;}
 .stButton>button {background:#1f4068; color:#fff; border:none;
                   padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
@@ -105,6 +106,7 @@ body {background:#eef2f6; color:#333; font-family:'Segoe UI',sans-serif; margin:
 .anchor-low {background:#f7b731; color:#333;}
 .card {background:#fff; margin:1rem auto; padding:1rem; max-width:1200px;
        border-radius:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.05);}
+
 @media(max-width:768px){
   .metric-cards {flex-direction:column;}
   .input-card, .card {margin:1rem;}
@@ -124,7 +126,8 @@ body {background:#1f1f1f; color:#e0e0e0; font-family:'Segoe UI',sans-serif; marg
 .app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
 .input-card {background:#292b2f; margin:1rem auto; padding:1.5rem 2rem;
              max-width:1200px; border-radius:1rem;
-             box-shadow:0 4px 12px rgba(0,0,0,0.6);}
+             box-shadow:0 4px 12px rgba(0,0,0,0.6);
+             text-align:center;}               /* centered */
 .input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#f0f0f0;}
 .stButton>button {background:#444; color:#e0e0e0; border:none;
                   padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
@@ -146,6 +149,7 @@ body {background:#1f1f1f; color:#e0e0e0; font-family:'Segoe UI',sans-serif; marg
 .anchor-low {background:#f1c40f; color:#1f1f1f;}
 .card {background:#292b2f; margin:1rem auto; padding:1rem; max-width:1200px;
        border-radius:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.6);}
+
 @media(max-width:768px){
   .metric-cards {flex-direction:column;}
   .input-card, .card {margin:1rem;}
@@ -184,7 +188,7 @@ tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","📦 AMZN","🔍
 with tabs[0]:
     st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
 
-    # input card
+    # centralized input card
     st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     hp = c1.number_input("🔼 High Price", 6185.8, format="%.2f", key="spx_hp")
