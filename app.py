@@ -56,12 +56,10 @@ def generate_stock_table(price, slope, anchor_dt, forecast_date, invert=False):
         tgt = datetime.combine(forecast_date, time(h, m))
         b = calculate_stock_blocks(anchor_dt, tgt)
         if invert:
-            # low anchor: entry descends, exit ascends
             out.append({"Time": slot,
                         "Entry": round(price - slope * b, 2),
                         "Exit":  round(price + slope * b, 2)})
         else:
-            # high anchor: entry ascends, exit descends
             out.append({"Time": slot,
                         "Entry": round(price + slope * b, 2),
                         "Exit":  round(price - slope * b, 2)})
@@ -102,34 +100,33 @@ with st.sidebar:
     st.divider()
     st.subheader("Adjust Slopes")
     for k in SLOPES:
-        SLOPES[k] = st.slider(k.replace("_"," "),
-                              min_value=-1.0, max_value=1.0,
+        SLOPES[k] = st.slider(f"{k.replace('_',' ')}", -1.0, 1.0,
                               value=SLOPES[k], step=0.0001)
 
 # --- Tabs ---
-tabs = st.tabs(["SPX","TSLA","NVDA","AAPL","AMZN","GOOGL"])
+tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","📦 AMZN","🔍 GOOGL"])
 
 # --- SPX Tab ---
 with tabs[0]:
-    st.markdown('<div class="tab-header">SPX Forecast (Yesterday’s Anchors)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="tab-header">🧭 SPX Forecast (Yesterday’s Anchors)</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
-    hp = c1.number_input("High Price", value=6185.8, format="%.2f", key="spx_hp")
-    ht = c1.time_input("High Time", value=datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
-    cp = c2.number_input("Close Price", value=6170.2, format="%.2f", key="spx_cp")
-    ct = c2.time_input("Close Time", value=datetime(2025,1,1,15,0).time(), step=1800, key="spx_ct")
-    lp = c3.number_input("Low Price", value=6130.4, format="%.2f", key="spx_lp")
-    lt = c3.time_input("Low Time", value=datetime(2025,1,1,13,30).time(), step=1800, key="spx_lt")
+    hp = c1.number_input("🔼 High Price", value=6185.8, format="%.2f", key="spx_hp")
+    ht = c1.time_input("🕒 High Time",   value=datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
+    cp = c2.number_input("⏹️ Close Price", value=6170.2, format="%.2f", key="spx_cp")
+    ct = c2.time_input("🕒 Close Time",  value=datetime(2025,1,1,15,0).time(), step=1800, key="spx_ct")
+    lp = c3.number_input("🔽 Low Price",  value=6130.4, format="%.2f", key="spx_lp")
+    lt = c3.time_input("🕒 Low Time",    value=datetime(2025,1,1,13,30).time(), step=1800, key="spx_lt")
 
     if st.button("🔮 Generate SPX"):
         ah = datetime.combine(forecast_date - timedelta(days=1), ht)
         ac = datetime.combine(forecast_date - timedelta(days=1), ct)
         al = datetime.combine(forecast_date - timedelta(days=1), lt)
-        for title, price, slope, anchor in [
-            ("High Anchor", hp, SLOPES["SPX_HIGH"], ah),
-            ("Close Anchor", cp, SLOPES["SPX_CLOSE"], ac),
-            ("Low Anchor",   lp, SLOPES["SPX_LOW"],   al),
+        for icon, title, price, slope, anchor in [
+            ("🔼", "High Anchor", hp, SLOPES["SPX_HIGH"], ah),
+            ("⏹️", "Close Anchor", cp, SLOPES["SPX_CLOSE"], ac),
+            ("🔽", "Low Anchor", lp, SLOPES["SPX_LOW"], al),
         ]:
-            st.markdown(f"### 🔹 {title}")
+            st.markdown(f"### {icon} {title}")
             with st.container():
                 st.markdown('<div class="card">', unsafe_allow_html=True)
                 st.dataframe(generate_spx_forecast(price, slope, anchor, forecast_date),
@@ -137,14 +134,15 @@ with tabs[0]:
                 st.markdown('</div>', unsafe_allow_html=True)
 
 # --- Stock Tabs ---
+icons = {"TSLA":"🚗","NVDA":"🧠","AAPL":"🍎","AMZN":"📦","GOOGL":"🔍"}
 for i, label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"], start=1):
     with tabs[i]:
-        st.markdown(f'<div class="tab-header">{label} Forecast (Prev-Day Anchors)</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="tab-header">{icons[label]} {label} Forecast (Prev-Day Anchors)</div>', unsafe_allow_html=True)
         col = st.columns(2)[0]
-        low_p  = col.number_input("Prev-Day Low Price",  value=0.0, format="%.2f", key=f"{label}_low_p")
-        low_t  = col.time_input("Prev-Day Low Time",   value=datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_low_t")
-        high_p = col.number_input("Prev-Day High Price", value=0.0, format="%.2f", key=f"{label}_high_p")
-        high_t = col.time_input("Prev-Day High Time",  value=datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_high_t")
+        low_p  = col.number_input(f"🔽 Prev-Day Low Price",  value=0.0, format="%.2f", key=f"{label}_low_p")
+        low_t  = col.time_input(f"🕒 Prev-Day Low Time",    value=datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_low_t")
+        high_p = col.number_input(f"🔼 Prev-Day High Price", value=0.0, format="%.2f", key=f"{label}_high_p")
+        high_t = col.time_input(f"🕒 Prev-Day High Time",   value=datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_high_t")
 
         if st.button(f"🔮 Generate {label}"):
             a_low  = datetime.combine(forecast_date - timedelta(days=1), low_t)
