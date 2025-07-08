@@ -79,23 +79,18 @@ light_css = """
   margin: 0 auto;
   padding: 0 1rem;
 }
-/* global */
 body {background:#eef2f6; color:#333; font-family:'Segoe UI',sans-serif; margin:0;}
 .sidebar .sidebar-content {background:#1f1f3b; color:#fff; padding:1rem; border-radius:0 1rem 1rem 0;}
-/* header */
 .app-header {margin:1rem 0; padding:1.5rem; background:linear-gradient(90deg,#2a5d84,#1f4068);
             border-radius:1rem; text-align:center; color:#fff; box-shadow:0 4px 12px rgba(0,0,0,0.15);}
 .app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
-/* input card */
 .input-card {background:#fff; padding:1.5rem 2rem; border-radius:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.05);
              text-align:center;}
 .input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#1f4068;}
-/* button */
 .stButton>button {background:#1f4068; color:#fff; border:none;
                   padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
                   border-radius:0.75rem; margin-top:1rem;}
 .stButton>button:hover {background:#16314f;}
-/* anchor cards */
 .metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem 0;}
 .anchor-card {flex:1 1 30%; display:flex; align-items:center;
              padding:1rem 1.5rem; border-radius:1rem; color:#fff;
@@ -110,7 +105,6 @@ body {background:#eef2f6; color:#333; font-family:'Segoe UI',sans-serif; margin:
 .anchor-high {background:#ff6b6b;}
 .anchor-close {background:#4ecdc4;}
 .anchor-low {background:#f7b731; color:#333;}
-/* tables */
 .card {background:#fff; padding:1rem; border-radius:1rem;
        box-shadow:0 4px 12px rgba(0,0,0,0.05); margin-bottom:2rem;}
 @media(max-width:768px){
@@ -194,26 +188,48 @@ tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","📦 AMZN","🔍
 with tabs[0]:
     st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2>', unsafe_allow_html=True)
+    # centralized input card
+    st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
-    hp = c1.number_input("🔼 High Price", 6185.8, format="%.2f", key="spx_hp")
-    ht = c1.time_input("🕒 High Time", datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
-    cp = c2.number_input("⏹️ Close Price", 6170.2, format="%.2f", key="spx_cp")
-    ct = c2.time_input("🕒 Close Time", datetime(2025,1,1,15,0).time(), step=1800, key="spx_ct")
-    lp = c3.number_input("🔽 Low Price", 6130.4, format="%.2f", key="spx_lp")
-    lt = c3.time_input("🕒 Low Time", datetime(2025,1,1,13,30).time(), step=1800, key="spx_lt")
-    st.markdown('</div>', unsafe_allow_html=True)
+    hp = c1.number_input("🔼 High Price",
+                         min_value=0.0,
+                         value=6185.8,
+                         format="%.2f",
+                         key="spx_hp")
+    ht = c1.time_input("🕒 High Time",
+                       datetime(2025,1,1,11,30).time(),
+                       step=1800,
+                       key="spx_ht")
+    cp = c2.number_input("⏹️ Close Price",
+                         min_value=0.0,
+                         value=6170.2,
+                         format="%.2f",
+                         key="spx_cp")
+    ct = c2.time_input("🕒 Close Time",
+                       datetime(2025,1,1,15,0).time(),
+                       step=1800,
+                       key="spx_ct")
+    lp = c3.number_input("🔽 Low Price",
+                         min_value=0.0,
+                         value=6130.4,
+                         format="%.2f",
+                         key="spx_lp")
+    lt = c3.time_input("🕒 Low Time",
+                       datetime(2025,1,1,13,30).time(),
+                       step=1800,
+                       key="spx_lt")
 
     if st.button("🔮 Generate SPX", key="btn_spx"):
         ah = datetime.combine(forecast_date - timedelta(days=1), ht)
         ac = datetime.combine(forecast_date - timedelta(days=1), ct)
         al = datetime.combine(forecast_date - timedelta(days=1), lt)
 
+        # anchor cards
         st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
         for cls, icon, title, val in [
-            ("anchor-high","🔼","High Anchor", hp),
-            ("anchor-close","⏹️","Close Anchor", cp),
-            ("anchor-low","🔽","Low Anchor", lp),
+            ("anchor-high",  "🔼", "High Anchor",  hp),
+            ("anchor-close", "⏹️", "Close Anchor", cp),
+            ("anchor-low",   "🔽", "Low Anchor",   lp),
         ]:
             card = f'''
             <div class="anchor-card {cls}">
@@ -227,10 +243,11 @@ with tabs[0]:
             st.markdown(card, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
+        # tables
         for icon, title, price, slope, anchor in [
-            ("🔼","High Anchor", hp, SLOPES["SPX_HIGH"], ah),
-            ("⏹️","Close Anchor",cp, SLOPES["SPX_CLOSE"],ac),
-            ("🔽","Low Anchor", lp, SLOPES["SPX_LOW"],  al),
+            ("🔼","High Anchor",  hp, SLOPES["SPX_HIGH"],  ah),
+            ("⏹️","Close Anchor", cp, SLOPES["SPX_CLOSE"], ac),
+            ("🔽","Low Anchor",   lp, SLOPES["SPX_LOW"],   al),
         ]:
             st.subheader(f"{icon} {title} Table")
             st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -244,13 +261,26 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"], start=1):
     with tabs[i]:
         st.markdown(f'<div class="tab-header">{icons[label]} {label} Forecast</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2>', unsafe_allow_html=True)
+        st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2></div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
-        lp = col1.number_input("🔽 Prev-Day Low Price", 0.0, format="%.2f", key=f"{label}_low_price")
-        lt = col1.time_input("🕒 Prev-Day Low Time", datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_low_time")
-        hp = col2.number_input("🔼 Prev-Day High Price",0.0, format="%.2f", key=f"{label}_high_price")
-        ht = col2.time_input("🕒 Prev-Day High Time",datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_high_time")
-        st.markdown('</div>', unsafe_allow_html=True)
+        lp = col1.number_input("🔽 Prev-Day Low Price",
+                               min_value=0.0,
+                               value=0.0,
+                               format="%.2f",
+                               key=f"{label}_low_price")
+        lt = col1.time_input("🕒 Prev-Day Low Time",
+                             datetime(2025,1,1,8,30).time(),
+                             step=1800,
+                             key=f"{label}_low_time")
+        hp = col2.number_input("🔼 Prev-Day High Price",
+                               min_value=0.0,
+                               value=0.0,
+                               format="%.2f",
+                               key=f"{label}_high_price")
+        ht = col2.time_input("🕒 Prev-Day High Time",
+                             datetime(2025,1,1,8,30).time(),
+                             step=1800,
+                             key=f"{label}_high_time")
 
         if st.button(f"🔮 Generate {label}", key=f"btn_{label}"):
             a_low  = datetime.combine(forecast_date - timedelta(days=1), lt)
@@ -258,8 +288,8 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"], start=1):
 
             st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
             for cls, icon, title, val in [
-                ("anchor-low","🔽","Low Anchor", lp),
-                ("anchor-high","🔼","High Anchor", hp),
+                ("anchor-low",  "🔽", "Low Anchor",  lp),
+                ("anchor-high", "🔼", "High Anchor", hp),
             ]:
                 card = f'''
                 <div class="anchor-card {cls}">
