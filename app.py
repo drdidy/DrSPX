@@ -55,56 +55,128 @@ def generate_stock(price, slope, anchor, fd, invert=False):
             out.append({"Time": slot, "Entry": round(price + slope*b,2), "Exit": round(price - slope*b,2)})
     return out
 
-# --- Streamlit Setup & Enhanced CSS ---
+# --- Streamlit Setup & Supercharge CSS ---
 st.set_page_config(page_title="Dr Didy Forecast", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body {background: #f0f2f6; font-family: 'Segoe UI', sans-serif;}
+/* Responsive */
+meta[name="viewport"] {width=device-width; initial-scale=1}
+
+/* Base */
+body {background: #eef2f6; font-family: 'Segoe UI', sans-serif; margin:0;}
+.stApp {padding: 0;}
+
+/* Sidebar */
 .sidebar .sidebar-content {
-    background: #1b1f3b; color: #fff; padding: 1rem; border-radius: 0 0.5rem 0.5rem 0;
-    box-shadow: 2px 0 8px rgba(0,0,0,0.3);
+  background: #252b42;
+  color: #fff;
+  padding: 1.2rem;
+  border-radius: 0 1rem 1rem 0;
+  box-shadow: 4px 0 20px rgba(0,0,0,0.3);
 }
+
 /* Header */
 .app-header {
-    background: linear-gradient(90deg, #344771, #1b1f3b);
-    padding: 2rem; border-radius: 1rem; margin-bottom: 2rem;
-    text-align: center; color: #fff; box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+  background: linear-gradient(135deg, #3a506b, #1b1f3b);
+  padding: 2rem;
+  border-radius: 1rem;
+  margin: 1rem 2rem 2rem 2rem;
+  text-align: center;
+  color: #fff;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.3);
 }
-.app-header h1 {margin: 0; font-size: 2.5rem; letter-spacing: 1px;}
-.app-header p {margin: 0.5rem 0 0; font-size: 1.1rem; color: #ccd6f6;}
-.tab-header {font-size: 1.2rem; color: #1b1f3b; font-weight: 600; margin-top: 1rem;}
-/* Card styles */
+.app-header h1 {
+  margin: 0;
+  font-size: 3rem;
+  letter-spacing: 2px;
+  text-shadow: 2px 2px 8px rgba(0,0,0,0.5);
+}
+.app-header p {
+  margin: 0.5rem 0 0;
+  font-size: 1.2rem;
+  color: #c5d2e0;
+  opacity: 0.9;
+}
+
+/* Tabs */
+.tab-header {
+  font-size: 1.3rem;
+  color: #252b42;
+  font-weight: 700;
+  margin-top: 1.5rem;
+}
+
+/* Card Base */
 .card {
-    background: #fff; padding: 1rem; margin-bottom: 1.5rem;
-    border-radius: 1rem; position: relative;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.1), inset 0 0 0 1px rgba(0,0,0,0.05);
-    transition: transform 0.2s, box-shadow 0.2s;
+  background: #fff;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  margin: 1rem 2rem;
+  position: relative;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  box-shadow:
+    0 4px 15px rgba(0,0,0,0.1),
+    inset 0 0 0 1px rgba(0,0,0,0.05);
 }
+
+/* Card Hover for 3D lift */
 .card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 24px rgba(0,0,0,0.15), inset 0 0 0 1px rgba(0,0,0,0.1);
+  transform: translateY(-8px) rotateX(2deg);
+  box-shadow:
+    0 16px 40px rgba(0,0,0,0.2),
+    inset 0 0 0 1px rgba(0,0,0,0.08);
 }
-/* Accent borders per anchor type */
+
+/* Accent Borders */
 .card-high {border-left: 8px solid #ff6b6b;}
-.card-close {border-left: 8px solid #4ecdc4;}
-.card-low {border-left: 8px solid #f7b731;}
-.metric-container {margin-bottom: 1.5rem;}
-.stButton>button {border-radius: 0.5rem; padding: 0.5rem 1rem;}
-@media(max-width:768px) {
-    .app-header {padding: 1rem;}
-    .app-header h1 {font-size: 1.8rem;}
-    .tab-header {font-size: 1rem;}
+.card-close{border-left: 8px solid #4ecdc4;}
+.card-low  {border-left: 8px solid #f7b731;}
+
+/* Metrics container */
+.metric-container {
+  margin: 1rem 2rem;
+}
+
+/* Buttons */
+.stButton>button {
+  background: linear-gradient(135deg, #3a506b, #1b1f3b) !important;
+  color: #fff !important;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  font-size: 1rem;
+  border-radius: 0.6rem;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+  transition: background 0.3s ease, transform 0.2s ease;
+}
+.stButton>button:hover {
+  background: linear-gradient(135deg, #50638c, #2b324f) !important;
+  transform: translateY(-2px);
+}
+
+/* DataFrame Styling */
+.element-container .stDataFrame>div {
+  border-radius: 1rem !important;
+  overflow: hidden;
+}
+
+/* Responsive Tweaks */
+@media(max-width: 768px) {
+  .app-header {padding: 1rem; margin: 1rem;}
+  .app-header h1 {font-size: 2rem;}
+  .tab-header {font-size: 1.1rem;}
+  .card {margin: 1rem;}
+  .metric-container {margin: 1rem;}
 }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="app-header"><h1>📊 Dr Didy Forecast</h1><p>Interactive Entry/Exit Projections</p></div>',
+    '<div class="app-header"><h1>📊 Dr Didy Forecast</h1>'
+    '<p>Precision Entry/Exit Projections in Stunning 3D</p></div>',
     unsafe_allow_html=True
 )
 
-# --- Sidebar ---
+# --- Sidebar Controls ---
 with st.sidebar:
     st.header("⚙️ Settings")
     forecast_date = st.date_input("Forecast Date", datetime.now().date() + timedelta(days=1))
@@ -114,12 +186,12 @@ with st.sidebar:
         SLOPES[k] = st.slider(k.replace("_"," "), -1.0, 1.0, SLOPES[k], step=0.0001)
 
 # --- Tabs ---
-tabs = st.tabs(["🧭 SPX", "🚗 TSLA", "🧠 NVDA", "🍎 AAPL", "📦 AMZN", "🔍 GOOGL"])
+tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","📦 AMZN","🔍 GOOGL"])
 
 # --- SPX Tab ---
 with tabs[0]:
     st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
+    c1,c2,c3 = st.columns(3)
     hp = c1.number_input("🔼 High Price", value=6185.8, format="%.2f", key="spx_hp")
     ht = c1.time_input("🕒 High Time", value=datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
     cp = c2.number_input("⏹️ Close Price", value=6170.2, format="%.2f", key="spx_cp")
@@ -132,16 +204,16 @@ with tabs[0]:
         al = datetime.combine(forecast_date - timedelta(days=1), lt)
         # metrics
         st.markdown('<div class="metric-container">', unsafe_allow_html=True)
-        m1, m2, m3 = st.columns(3)
+        m1,m2,m3 = st.columns(3)
         m1.metric("High Anchor", f"{hp:.2f}", delta=f"{SLOPES['SPX_HIGH']:.4f}/blk")
         m2.metric("Close Anchor", f"{cp:.2f}", delta=f"{SLOPES['SPX_CLOSE']:.4f}/blk")
         m3.metric("Low Anchor", f"{lp:.2f}", delta=f"{SLOPES['SPX_LOW']:.4f}/blk")
-        st.markdown("</div>", unsafe_allow_html=True)
-        # anchor tables
+        st.markdown('</div>', unsafe_allow_html=True)
+        # tables
         for cls, icon, title, price, slope, anchor in [
-            ("card-high", "🔼", "High", hp, SLOPES["SPX_HIGH"], ah),
+            ("card-high","🔼","High", hp, SLOPES["SPX_HIGH"], ah),
             ("card-close","⏹️","Close",cp, SLOPES["SPX_CLOSE"],ac),
-            ("card-low",  "🔽","Low",  lp, SLOPES["SPX_LOW"],  al),
+            ("card-low","🔽","Low",  lp, SLOPES["SPX_LOW"],  al),
         ]:
             with st.expander(f"{icon} {title} Anchor Table"):
                 st.markdown(f'<div class="card {cls}">', unsafe_allow_html=True)
@@ -149,8 +221,8 @@ with tabs[0]:
                 st.markdown("</div>", unsafe_allow_html=True)
 
 # --- Stock Tabs ---
-icons = {"TSLA":"🚗","NVDA":"🧠","AAPL":"🍎","AMZN":"📦","GOOGL":"🔍"}
-for i,label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"], start=1):
+icons={"TSLA":"🚗","NVDA":"🧠","AAPL":"🍎","AMZN":"📦","GOOGL":"🔍"}
+for i,label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"],start=1):
     with tabs[i]:
         st.markdown(f'<div class="tab-header">{icons[label]} {label} Forecast</div>', unsafe_allow_html=True)
         col = st.columns(2)[0]
@@ -163,10 +235,10 @@ for i,label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"], start=1):
             a_high = datetime.combine(forecast_date - timedelta(days=1), high_t)
             # metrics
             st.markdown('<div class="metric-container">', unsafe_allow_html=True)
-            s1, s2 = st.columns(2)
-            s1.metric("Low Anchor", f"{low_p:.2f}", delta=f"{SLOPES[label]:.4f}/blk")
+            s1,s2 = st.columns(2)
+            s1.metric("Low Anchor",  f"{low_p:.2f}", delta=f"{SLOPES[label]:.4f}/blk")
             s2.metric("High Anchor", f"{high_p:.2f}", delta=f"{SLOPES[label]:.4f}/blk")
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
             # tables
             with st.expander("🔻 Low-Anchor Table"):
                 st.markdown(f'<div class="card card-low">', unsafe_allow_html=True)
