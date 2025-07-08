@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 from datetime import datetime, time, timedelta
 import pandas as pd
@@ -288,4 +287,3 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"], start=1):
 
 # --- CLOSE MAIN CONTAINER ---
 st.markdown('</div>', unsafe_allow_html=True)
-```
