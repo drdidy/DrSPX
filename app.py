@@ -185,7 +185,7 @@ with tabs[0]:
     st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
 
     # input card
-    st.markdown('<div class="input-card"><h2>Set Anchors & Date</h2>', unsafe_allow_html=True)
+    st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     hp = c1.number_input("🔼 High Price", 6185.8, format="%.2f", key="spx_hp")
     ht = c1.time_input("🕒 High Time", datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
