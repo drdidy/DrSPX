@@ -2,7 +2,6 @@ import streamlit as st
 from datetime import datetime, time, timedelta
 import pandas as pd
 import altair as alt
-import plotly.express as px
 
 # --- SLOPE SETTINGS ---
 SLOPES = {
@@ -19,7 +18,7 @@ SLOPES = {
 # --- HELPERS ---
 def generate_time_blocks():
     base = datetime.strptime("08:30", "%H:%M")
-    return [(base + timedelta(minutes=30 * i)).strftime("%H:%M") for i in range(13)]
+    return [(base + timedelta(minutes=30*i)).strftime("%H:%M") for i in range(13)]
 
 def calculate_spx_blocks(a, t):
     dt, blocks = a, 0
@@ -32,50 +31,52 @@ def calculate_spx_blocks(a, t):
 def calculate_stock_blocks(a, t):
     prev_close = a.replace(hour=15, minute=0)
     bp = max(0, int((prev_close - a).total_seconds() // 1800))
-    next_open  = datetime.combine(t.date(), time(8,30))
-    next_close = datetime.combine(t.date(), time(15,0))
+    next_open = datetime.combine(t.date(), time(8,30))
+    next_close= datetime.combine(t.date(), time(15,0))
     bn = 0 if t <= next_open else int((min(t,next_close) - next_open).total_seconds() // 1800)
     return bp + bn
 
 def generate_spx(price, slope, anchor, fd):
-    out = []
+    rows = []
     for slot in generate_time_blocks():
-        h, m = map(int, slot.split(":"))
-        tgt = datetime.combine(fd, time(h, m))
+        h,m = map(int, slot.split(":"))
+        tgt = datetime.combine(fd, time(h,m))
         b = calculate_spx_blocks(anchor, tgt)
-        out.append({"Time": slot, "Entry": price + slope * b, "Exit": price - slope * b})
-    return pd.DataFrame(out)
+        rows.append({"Time": slot, "Entry": price + slope*b, "Exit": price - slope*b})
+    return pd.DataFrame(rows)
 
 def generate_stock(price, slope, anchor, fd, invert=False):
-    out = []
+    rows = []
     for slot in generate_time_blocks():
-        h, m = map(int, slot.split(":"))
-        tgt = datetime.combine(fd, time(h, m))
+        h,m = map(int, slot.split(":"))
+        tgt = datetime.combine(fd, time(h,m))
         b = calculate_stock_blocks(anchor, tgt)
-        entry = price - slope * b if invert else price + slope * b
-        exit_ = price + slope * b if invert else price - slope * b
-        out.append({"Time": slot, "Entry": entry, "Exit": exit_})
-    return pd.DataFrame(out)
+        if invert:
+            entry = price - slope*b
+            exit_ = price + slope*b
+        else:
+            entry = price + slope*b
+            exit_ = price - slope*b
+        rows.append({"Time": slot, "Entry": entry, "Exit": exit_})
+    return pd.DataFrame(rows)
 
 # --- CSS THEMES ---
 neumo_css = """<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-body {background:#e0e5ec; font-family:'Inter',sans-serif; margin:0;}
+body {background:#e0e5ec;font-family:'Inter',sans-serif;margin:0;}
 .sidebar .sidebar-content {
-  background:#e0e5ec; color:#333;
-  box-shadow:4px 0 12px rgba(0,0,0,0.06);
-  padding:1rem; border-radius:0 1rem 1rem 0;
+  background:#e0e5ec;color:#333;box-shadow:4px 0 12px rgba(0,0,0,0.06);
+  padding:1rem;border-radius:0 1rem 1rem 0;
 }
 .app-header {
-  margin:1rem 2rem; padding:1.5rem;
-  background:#e0e5ec; border-radius:1rem;
+  margin:1rem 2rem;padding:1.5rem;background:#e0e5ec;border-radius:1rem;
   box-shadow:-8px -8px 16px #fff,8px 8px 16px rgba(0,0,0,0.1);
-  text-align:center; color:#333;
+  text-align:center;color:#333;
 }
-.app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
-.tab-header {margin:1.5rem 2rem 0.5rem; font-size:1.25rem; color:#333;}
+.app-header h1 {margin:0;font-size:2.5rem;font-weight:600;}
+.tab-header {margin:1.5rem 2rem 0.5rem;font-size:1.25rem;color:#333;font-weight:600;}
 .card {
-  background:#e0e5ec; margin:1rem 2rem; padding:1rem; border-radius:1rem;
+  background:#e0e5ec;margin:1rem 2rem;padding:1rem;border-radius:1rem;
   box-shadow:-6px -6px 12px #fff,6px 6px 12px rgba(0,0,0,0.08);
   transition:transform 0.2s,box-shadow 0.2s;
 }
@@ -88,34 +89,35 @@ body {background:#e0e5ec; font-family:'Inter',sans-serif; margin:0;}
 .card-low  {border-left:8px solid #f7b731;}
 .metric-container {margin:1rem 2rem;}
 .stButton>button {
-  background:#e0e5ec; color:#333;
+  background:#e0e5ec;color:#333;
   box-shadow:-4px -4px 8px #fff,4px 4px 8px rgba(0,0,0,0.06);
-  border-radius:0.75rem; padding:0.5rem 1rem;
+  border-radius:0.75rem;padding:0.5rem 1rem;transition:transform 0.1s;
 }
-.element-container .stDataFrame>div {border-radius:1rem!important; overflow:hidden;}
+.stButton>button:hover{transform:translateY(-2px);}
+.element-container .stDataFrame>div{border-radius:1rem!important;overflow:hidden;}
 @media(max-width:768px){
-  .app-header{margin:1rem; padding:1rem;}
-  .tab-header{margin:1rem; font-size:1.1rem;}
+  .app-header{margin:1rem;padding:1rem;}
+  .tab-header{margin:1rem;font-size:1.1rem;}
   .card{margin:1rem;}
   .metric-container{margin:1rem;}
 }
 </style>"""
 dark_css = """<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-body {background:#1f1f1f; color:#e0e0e0; font-family:'Inter',sans-serif;}
+body {background:#1f1f1f;color:#e0e0e0;font-family:'Inter',sans-serif;}
 .sidebar .sidebar-content {
-  background:#292b2f; color:#e0e0e0; padding:1rem;
-  box-shadow:4px 0 12px rgba(0,0,0,0.6); border-radius:0 1rem 1rem 0;
+  background:#292b2f;color:#e0e0e0;padding:1rem;
+  box-shadow:4px 0 12px rgba(0,0,0,0.6);border-radius:0 1rem 1rem 0;
 }
 .app-header {
-  margin:1rem 2rem; padding:1.5rem; border-radius:1rem;
+  margin:1rem 2rem;padding:1.5rem;border-radius:1rem;
   background:linear-gradient(90deg,#0f0c29,#24243e);
-  box-shadow:0 8px 20px rgba(0,0,0,0.5); text-align:center; color:#f0f0f0;
+  box-shadow:0 8px 20px rgba(0,0,0,0.5);text-align:center;color:#f0f0f0;
 }
-.app-header h1{margin:0; font-size:2.5rem; font-weight:600;}
-.tab-header{margin:1.5rem 2rem 0.5rem; font-size:1.25rem; color:#e0e0e0;}
+.app-header h1{margin:0;font-size:2.5rem;font-weight:600;}
+.tab-header{margin:1.5rem 2rem 0.5rem;font-size:1.25rem;color:#e0e0e0;font-weight:600;}
 .card {
-  background:#292b2f; margin:1rem 2rem; padding:1rem; border-radius:1rem;
+  background:#292b2f;margin:1rem 2rem;padding:1rem;border-radius:1rem;
   box-shadow:inset 4px 4px 8px rgba(0,0,0,0.6),-4px -4px 8px rgba(255,255,255,0.1);
 }
 .card:hover {
@@ -127,14 +129,15 @@ body {background:#1f1f1f; color:#e0e0e0; font-family:'Inter',sans-serif;}
 .card-low{border-left:8px solid #f1c40f;}
 .metric-container{margin:1rem 2rem;}
 .stButton>button {
-  background:#292b2f; color:#e0e0e0;
+  background:#292b2f;color:#e0e0e0;
   box-shadow:inset 2px 2px 4px rgba(0,0,0,0.6),-2px -2px 4px rgba(255,255,255,0.1);
-  border-radius:0.75rem; padding:0.5rem 1rem;
+  border-radius:0.75rem;padding:0.5rem 1rem;transition:transform 0.1s;
 }
-.element-container .stDataFrame>div{border-radius:1rem!important; overflow:hidden;}
+.stButton>button:hover{transform:translateY(-2px);}
+.element-container .stDataFrame>div{border-radius:1rem!important;overflow:hidden;}
 @media(max-width:768px){
-  .app-header{margin:1rem; padding:1rem;}
-  .tab-header{margin:1rem; font-size:1.1rem;}
+  .app-header{margin:1rem;padding:1rem;}
+  .tab-header{margin:1rem;font-size:1.1rem;}
   .card{margin:1rem;}
   .metric-container{margin:1rem;}
 }
@@ -143,19 +146,19 @@ light_css = """<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
 body{background:#fafafa;color:#333;font-family:'Inter',sans-serif;}
 .sidebar .sidebar-content {
-  background:#fff;color:#333; padding:1rem;
-  box-shadow:4px 0 12px rgba(0,0,0,0.1); border-radius:0 1rem 1rem 0;
+  background:#fff;color:#333;padding:1rem;
+  box-shadow:4px 0 12px rgba(0,0,0,0.1);border-radius:0 1rem 1rem 0;
 }
 .app-header {
-  margin:1rem 2rem; padding:1.5rem; border-radius:1rem;
-  background:#fff; box-shadow:0 8px 20px rgba(0,0,0,0.1);
-  text-align:center; color:#333;
+  margin:1rem 2rem;padding:1.5rem;border-radius:1rem;
+  background:#fff;box-shadow:0 8px 20px rgba(0,0,0,0.1);
+  text-align:center;color:#333;
 }
-.app-header h1{margin:0; font-size:2.5rem; font-weight:600;}
-.tab-header{margin:1.5rem 2rem 0.5rem; font-size:1.25rem; color:#333;}
+.app-header h1{margin:0;font-size:2.5rem;font-weight:600;}
+.tab-header{margin:1.5rem 2rem 0.5rem;font-size:1.25rem;color:#333;font-weight:600;}
 .card {
-  background:#fff; margin:1rem 2rem; padding:1rem; border-radius:1rem;
-  box-shadow:0 4px 12px rgba(0,0,0,0.05);
+  background:#fff;margin:1rem 2rem;padding:1rem;border-radius:1rem;
+  box-shadow:0 4px 12px rgba(0,0,0,0.05);transition:transform 0.2s,box-shadow 0.2s;
 }
 .card:hover {
   transform:translateY(-4px);
@@ -168,18 +171,19 @@ body{background:#fafafa;color:#333;font-family:'Inter',sans-serif;}
 .stButton>button {
   background:#fff;color:#333;
   box-shadow:2px 2px 6px rgba(0,0,0,0.1);
-  border-radius:0.75rem;padding:0.5rem 1rem;
+  border-radius:0.75rem;padding:0.5rem 1rem;transition:transform 0.1s;
 }
-.element-container .stDataFrame>div{border-radius:1rem!important; overflow:hidden;}
+.stButton>button:hover{transform:translateY(-2px);}
+.element-container .stDataFrame>div{border-radius:1rem!important;overflow:hidden;}
 @media(max-width:768px){
-  .app-header{margin:1rem; padding:1rem;}
-  .tab-header{margin:1rem; font-size:1.1rem;}
+  .app-header{margin:1rem;padding:1rem;}
+  .tab-header{margin:1rem;font-size:1.1rem;}
   .card{margin:1rem;}
   .metric-container{margin:1rem;}
 }
 </style>"""
 
-# --- PAGE & THEME SELECTOR ---
+# --- CONFIG & THEME SELECTOR ---
 st.set_page_config(page_title="Dr Didy Forecast", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 theme = st.sidebar.radio("🎨 Theme", ["Neumorphic","Dark Mode","Light Mode"])
 if theme == "Dark Mode":
@@ -242,7 +246,7 @@ for idx, label in enumerate(tab_labels):
                     ("SPX_HIGH","SPX_CLOSE","SPX_LOW")
                 ):
                     col_.metric(name, f"{df_['Entry'].iloc[0]:.2f}", delta=f"{SLOPES[slope_key]:.4f}/blk")
-                    spark = alt.Chart(df_).mark_line(size=2).encode(x='Time', y='Entry').properties(width=100, height=40)
+                    spark = alt.Chart(df_).mark_line(size=2).encode(x='Time:N', y='Entry:Q').properties(width=100, height=40)
                     col_.altair_chart(spark, use_container_width=True)
                 for cls, ico, df_ in zip(
                     ("card-high","card-close","card-low"),
@@ -252,9 +256,13 @@ for idx, label in enumerate(tab_labels):
                     with st.expander(f"{ico} {ico} Table"):
                         st.markdown(f'<div class="card {cls}">', unsafe_allow_html=True)
                         st.dataframe(df_.round(2), use_container_width=True)
-                        fig = px.line(df_, x='Time', y=['Entry','Exit'], markers=True)
-                        fig.update_layout(margin=dict(t=10,b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                        st.plotly_chart(fig, use_container_width=True)
+                        df_long = df_.melt(id_vars='Time', value_vars=['Entry','Exit'], var_name='Type', value_name='Price')
+                        chart = alt.Chart(df_long).mark_line(point=True).encode(
+                            x='Time:N',
+                            y='Price:Q',
+                            color='Type:N'
+                        ).properties(width='container', height=300)
+                        st.altair_chart(chart, use_container_width=True)
                         st.markdown("</div>", unsafe_allow_html=True)
         else:
             low_p  = col.number_input("🔽 Prev-Day Low Price", 0.0, format="%.2f", key=f"{label}_lp")
@@ -264,24 +272,28 @@ for idx, label in enumerate(tab_labels):
             if st.button(f"🔮 Generate {label}", key=f"btn_{label}"):
                 a_low  = datetime.combine(forecast_date - timedelta(days=1), low_t)
                 a_high = datetime.combine(forecast_date - timedelta(days=1), high_t)
-                dfL = generate_stock(low_p, SLOPES[label], a_low, forecast_date, invert=True)
+                dfL = generate_stock(low_p,  SLOPES[label], a_low,  forecast_date, invert=True)
                 dfH = generate_stock(high_p, SLOPES[label], a_high, forecast_date, invert=False)
                 s1,s2 = st.columns(2)
                 for col_, df_, name in zip((s1,s2), (dfL,dfH), ("Low Anchor","High Anchor")):
                     col_.metric(name, f"{df_['Entry'].iloc[0]:.2f}", delta=f"{SLOPES[label]:.4f}/blk")
-                    spark = alt.Chart(df_).mark_line(size=2).encode(x='Time', y='Entry').properties(width=100, height=40)
+                    spark = alt.Chart(df_).mark_line(size=2).encode(x='Time:N', y='Entry:Q').properties(width=100, height=40)
                     col_.altair_chart(spark, use_container_width=True)
                 with st.expander("🔻 Low-Anchor Table"):
                     st.markdown(f'<div class="card card-low">', unsafe_allow_html=True)
                     st.dataframe(dfL.round(2), use_container_width=True)
-                    fig = px.line(dfL, x='Time', y=['Entry','Exit'], markers=True)
-                    fig.update_layout(margin=dict(t=10,b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig, use_container_width=True)
+                    df_long = dfL.melt(id_vars='Time', value_vars=['Entry','Exit'], var_name='Type', value_name='Price')
+                    chart = alt.Chart(df_long).mark_line(point=True).encode(
+                        x='Time:N', y='Price:Q', color='Type:N'
+                    ).properties(width='container', height=300)
+                    st.altair_chart(chart, use_container_width=True)
                     st.markdown("</div>", unsafe_allow_html=True)
                 with st.expander("🔺 High-Anchor Table"):
                     st.markdown(f'<div class="card card-high">', unsafe_allow_html=True)
                     st.dataframe(dfH.round(2), use_container_width=True)
-                    fig = px.line(dfH, x='Time', y=['Entry','Exit'], markers=True)
-                    fig.update_layout(margin=dict(t=10,b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig, use_container_width=True)
+                    df_long = dfH.melt(id_vars='Time', value_vars=['Entry','Exit'], var_name='Type', value_name='Price')
+                    chart = alt.Chart(df_long).mark_line(point=True).encode(
+                        x='Time:N', y='Price:Q', color='Type:N'
+                    ).properties(width='container', height=300)
+                    st.altair_chart(chart, use_container_width=True)
                     st.markdown("</div>", unsafe_allow_html=True)
