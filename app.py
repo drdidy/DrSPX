@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 from datetime import datetime, time, timedelta
 import pandas as pd
@@ -74,23 +75,29 @@ st.set_page_config(
 # --- THEME CSS BLOCKS ---
 light_css = """
 <style>
+.main-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+/* global */
 body {background:#eef2f6; color:#333; font-family:'Segoe UI',sans-serif; margin:0;}
 .sidebar .sidebar-content {background:#1f1f3b; color:#fff; padding:1rem; border-radius:0 1rem 1rem 0;}
-.app-header {margin:1rem auto; padding:1.5rem; max-width:1200px;
-            background:linear-gradient(90deg,#2a5d84,#1f4068);
-            border-radius:1rem; text-align:center; color:#fff;
-            box-shadow:0 4px 12px rgba(0,0,0,0.15);}
+/* header */
+.app-header {margin:1rem 0; padding:1.5rem; background:linear-gradient(90deg,#2a5d84,#1f4068);
+            border-radius:1rem; text-align:center; color:#fff; box-shadow:0 4px 12px rgba(0,0,0,0.15);}
 .app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
-.input-card {background:#fff; margin:1rem auto; padding:1.5rem 2rem;
-             max-width:1200px; border-radius:1rem;
-             box-shadow:0 4px 12px rgba(0,0,0,0.05);
-             text-align:center;}              /* centered */
+/* input card */
+.input-card {background:#fff; padding:1.5rem 2rem; border-radius:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.05);
+             text-align:center;}
 .input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#1f4068;}
+/* button */
 .stButton>button {background:#1f4068; color:#fff; border:none;
                   padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
                   border-radius:0.75rem; margin-top:1rem;}
 .stButton>button:hover {background:#16314f;}
-.metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem auto; max-width:1200px;}
+/* anchor cards */
+.metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem 0;}
 .anchor-card {flex:1 1 30%; display:flex; align-items:center;
              padding:1rem 1.5rem; border-radius:1rem; color:#fff;
              box-shadow:0 8px 20px rgba(0,0,0,0.1);
@@ -104,36 +111,36 @@ body {background:#eef2f6; color:#333; font-family:'Segoe UI',sans-serif; margin:
 .anchor-high {background:#ff6b6b;}
 .anchor-close {background:#4ecdc4;}
 .anchor-low {background:#f7b731; color:#333;}
-.card {background:#fff; margin:1rem auto; padding:1rem; max-width:1200px;
-       border-radius:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.05);}
-
+/* tables */
+.card {background:#fff; padding:1rem; border-radius:1rem;
+       box-shadow:0 4px 12px rgba(0,0,0,0.05); margin-bottom:2rem;}
 @media(max-width:768px){
   .metric-cards {flex-direction:column;}
-  .input-card, .card {margin:1rem;}
-  .app-header {margin:1rem; padding:1rem;}
 }
 </style>
 """
 
 dark_css = """
 <style>
+.main-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
 body {background:#1f1f1f; color:#e0e0e0; font-family:'Segoe UI',sans-serif; margin:0;}
 .sidebar .sidebar-content {background:#2b2b2b; color:#e0e0e0; padding:1rem; border-radius:0 1rem 1rem 0;}
-.app-header {margin:1rem auto; padding:1.5rem; max-width:1200px;
-            background:linear-gradient(90deg,#0f0c29,#24243e);
+.app-header {margin:1rem 0; padding:1.5rem; background:linear-gradient(90deg,#0f0c29,#24243e);
             border-radius:1rem; text-align:center; color:#f0f0f0;
             box-shadow:0 4px 12px rgba(0,0,0,0.5);}
 .app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
-.input-card {background:#292b2f; margin:1rem auto; padding:1.5rem 2rem;
-             max-width:1200px; border-radius:1rem;
-             box-shadow:0 4px 12px rgba(0,0,0,0.6);
-             text-align:center;}               /* centered */
+.input-card {background:#292b2f; padding:1.5rem 2rem; border-radius:1rem;
+             box-shadow:0 4px 12px rgba(0,0,0,0.6); text-align:center;}
 .input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#f0f0f0;}
 .stButton>button {background:#444; color:#e0e0e0; border:none;
                   padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
                   border-radius:0.75rem; margin-top:1rem;}
 .stButton>button:hover {background:#555;}
-.metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem auto; max-width:1200px;}
+.metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem 0;}
 .anchor-card {flex:1 1 30%; display:flex; align-items:center;
              padding:1rem 1.5rem; border-radius:1rem; color:#fff;
              box-shadow:0 8px 20px rgba(0,0,0,0.5);
@@ -147,13 +154,10 @@ body {background:#1f1f1f; color:#e0e0e0; font-family:'Segoe UI',sans-serif; marg
 .anchor-high {background:#e74c3c;}
 .anchor-close {background:#1abc9c;}
 .anchor-low {background:#f1c40f; color:#1f1f1f;}
-.card {background:#292b2f; margin:1rem auto; padding:1rem; max-width:1200px;
-       border-radius:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.6);}
-
+.card {background:#292b2f; padding:1rem; border-radius:1rem;
+       box-shadow:0 4px 12px rgba(0,0,0,0.6); margin-bottom:2rem;}
 @media(max-width:768px){
   .metric-cards {flex-direction:column;}
-  .input-card, .card {margin:1rem;}
-  .app-header {margin:1rem; padding:1rem;}
 }
 </style>
 """
@@ -165,6 +169,9 @@ if theme == "Dark":
     st.markdown(dark_css, unsafe_allow_html=True)
 else:
     st.markdown(light_css, unsafe_allow_html=True)
+
+# --- WRAP ALL CONTENT IN MAIN CONTAINER ---
+st.markdown('<div class="main-container">', unsafe_allow_html=True)
 
 # --- HEADER ---
 st.markdown(
@@ -188,7 +195,6 @@ tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","📦 AMZN","🔍
 with tabs[0]:
     st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
 
-    # centralized input card
     st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     hp = c1.number_input("🔼 High Price", 6185.8, format="%.2f", key="spx_hp")
@@ -204,7 +210,6 @@ with tabs[0]:
         ac = datetime.combine(forecast_date - timedelta(days=1), ct)
         al = datetime.combine(forecast_date - timedelta(days=1), lt)
 
-        # anchor cards
         st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
         for cls, icon, title, val in [
             ("anchor-high","🔼","High Anchor", hp),
@@ -223,7 +228,6 @@ with tabs[0]:
             st.markdown(card, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # tables
         for icon, title, price, slope, anchor in [
             ("🔼","High Anchor", hp, SLOPES["SPX_HIGH"], ah),
             ("⏹️","Close Anchor",cp, SLOPES["SPX_CLOSE"],ac),
@@ -281,3 +285,7 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","AMZN","GOOGL"], start=1):
             df_high = generate_stock(hp, SLOPES[label], a_high, forecast_date, invert=False)
             st.dataframe(df_high.round(2), use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
+
+# --- CLOSE MAIN CONTAINER ---
+st.markdown('</div>', unsafe_allow_html=True)
+```
