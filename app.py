@@ -21,7 +21,7 @@ BASE_SLOPES = {
     "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
     "TSLA": -0.1508, "NVDA": -0.0485, "AAPL": -0.0750,
     "MSFT": -0.17, "AMZN": -0.03, "GOOGL": -0.07,
-    "META": -0.0900,  "NFLX": -0.1100,           # ← new tickers
+    "META": -0.035,  "NFLX": -0.1100,           # ← new tickers
 }
 ICONS = {
     "SPX":"🧭","TSLA":"🚗","NVDA":"🧠","AAPL":"🍎",
