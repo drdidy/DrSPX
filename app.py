@@ -28,7 +28,7 @@ def calculate_spx_blocks(a, t):
         dt += timedelta(minutes=30)
     return blocks
 
-# Simplified stock block counter
+# ← simplified stock block counter: straight 30m increments from anchor to target
 def calculate_stock_blocks(a, t):
     if t <= a:
         return 0
@@ -47,19 +47,16 @@ def generate_spx(price, slope, anchor, fd):
         })
     return pd.DataFrame(rows)
 
-def generate_stock(price, slope, anchor, fd, invert=False):
+# ← updated: no invert, same slope logic for both anchors
+def generate_stock(price, slope, anchor, fd):
     rows = []
     for slot in generate_time_blocks():
         h, m = map(int, slot.split(":"))
         tgt = datetime.combine(fd, time(h, m))
         b = calculate_stock_blocks(anchor, tgt)
-        if invert:
-            e = price - slope * b
-            x = price + slope * b
-        else:
-            e = price + slope * b
-            x = price - slope * b
-        rows.append({"Time": slot, "Entry": round(e,2), "Exit": round(x,2)})
+        entry = price + slope * b
+        exit_ = price - slope * b
+        rows.append({"Time": slot, "Entry": round(entry, 2), "Exit": round(exit_, 2)})
     return pd.DataFrame(rows)
 
 # --- PAGE CONFIG ---
@@ -70,10 +67,82 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- THEME CSS BLOCKS (unchanged) ---
-light_css = """<style>…</style>"""
-dark_css  = """<style>…</style>"""
+# --- THEME CSS BLOCKS ---
+light_css = """
+<style>
+.main-container { max-width:1200px; margin:0 auto; padding:0 1rem; }
+body {background:#eef2f6; color:#333; font-family:'Segoe UI',sans-serif; margin:0;}
+.sidebar .sidebar-content {background:#1f1f3b; color:#fff; padding:1rem; border-radius:0 1rem 1rem 0;}
+.app-header {margin:1rem 0; padding:1.5rem; background:linear-gradient(90deg,#2a5d84,#1f4068);
+            border-radius:1rem; text-align:center; color:#fff; box-shadow:0 4px 12px rgba(0,0,0,0.15);}
+.app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
+.input-card {background:#fff; padding:1.5rem 2rem; border-radius:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.05);
+             text-align:center;}
+.input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#1f4068;}
+.stButton>button {background:#1f4068; color:#fff; border:none;
+                  padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
+                  border-radius:0.75rem; margin-top:1rem;}
+.stButton>button:hover {background:#16314f;}
+.metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem 0;}
+.anchor-card {flex:1 1 30%; display:flex; align-items:center;
+             padding:1rem 1.5rem; border-radius:1rem; color:#fff;
+             box-shadow:0 8px 20px rgba(0,0,0,0.1);
+             transition:transform .2s,box-shadow .2s;}
+.anchor-card:hover {transform:translateY(-4px); box-shadow:0 12px 30px rgba(0,0,0,0.15);}
+.icon-wrapper {width:48px; height:48px; background:#fff; border-radius:50%;
+               display:flex; align-items:center; justify-content:center;
+               margin-right:1rem; font-size:1.5rem;}
+.content .title {font-weight:600; font-size:1.1rem;}
+.content .value {font-weight:300; font-size:2rem; margin-top:0.25rem;}
+.anchor-high {background:#ff6b6b;}
+.anchor-close {background:#4ecdc4;}
+.anchor-low {background:#f7b731; color:#333;}
+.card {background:#fff; padding:1rem; border-radius:1rem;
+       box-shadow:0 4px 12px rgba(0,0,0,0.05); margin-bottom:2rem;}
+@media(max-width:768px){
+  .metric-cards {flex-direction:column;}
+}
+</style>
+"""
+dark_css = """
+<style>
+.main-container { max-width:1200px; margin:0 auto; padding:0 1rem; }
+body {background:#1f1f1f; color:#e0e0e0; font-family:'Segoe UI',sans-serif; margin:0;}
+.sidebar .sidebar-content {background:#2b2b2b; color:#e0e0e0; padding:1rem; border-radius:0 1rem 1rem 0;}
+.app-header {margin:1rem 0; padding:1.5rem; background:linear-gradient(90deg,#0f0c29,#24243e);
+            border-radius:1rem; text-align:center; color:#f0f0f0;
+            box-shadow:0 4px 12px rgba(0,0,0,0.5);}
+.app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
+.input-card {background:#292b2f; padding:1.5rem 2rem; border-radius:1rem;
+             box-shadow:0 4px 12px rgba(0,0,0,0.6); text-align:center;}
+.input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#f0f0f0;}
+.stButton>button {background:#444; color:#e0e0e0; border:none;
+                  padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
+                  border-radius:0.75rem; margin-top:1rem;}
+.stButton>button:hover {background:#555;}
+.metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem 0;}
+.anchor-card {flex:1 1 30%; display:flex; align-items:center;
+             padding:1rem 1.5rem; border-radius:1rem; color:#fff;
+             box-shadow:0 8px 20px rgba(0,0,0,0.5);
+             transition:transform .2s,box-shadow .2s;}
+.anchor-card:hover {transform:translateY(-4px); box-shadow:0 12px 30px rgba(0,0,0,0.6);}
+.icon-wrapper {width:48px; height:48px; background:#e0e0e0; border-radius:50%;
+               display:flex; align-items:center; justify-content:center;
+               margin-right:1rem; font-size:1.5rem; color:#1f1f1f;}
+.content .title {font-weight:600; font-size:1.1rem;}
+.content .value {font-weight:300; font-size:2rem; margin-top:0.25rem;}
+.anchor-high {background:#e74c3c;}
+.anchor-close {background:#1abc9c;}
+.anchor-low {background:#f1c40f; color:#1f1f1f;}
+.card {background:#292b2f; padding:1rem; border-radius:1rem;
+       box-shadow:0 4px 12px rgba(0,0,0,0.6); margin-bottom:2rem;}
+@media(max-width:768px){
+  .metric-cards {flex-direction:column;}
+}
+</style>
+"""
 
+# --- THEME SWITCHER ---
 with st.sidebar:
     theme = st.radio("🎨 Theme", ["Light","Dark"])
 if theme == "Dark":
@@ -84,13 +153,13 @@ else:
 # --- MAIN CONTAINER WRAP ---
 st.markdown('<div class="main-container">', unsafe_allow_html=True)
 
-# --- 🏷️ RESTORED BANNER ---
+# --- RESTORED BANNER ---
 st.markdown(
     '<div class="app-header"><h1>📊 Dr Didy Forecast</h1></div>',
     unsafe_allow_html=True
 )
 
-# --- SIDEBAR SETTINGS (unchanged) ---
+# --- SIDEBAR SETTINGS ---
 with st.sidebar:
     st.header("⚙️ Settings")
     forecast_date = st.date_input("Forecast Date", datetime.now().date() + timedelta(days=1))
@@ -99,13 +168,12 @@ with st.sidebar:
     for k in SLOPES:
         SLOPES[k] = st.slider(k.replace("_"," "), -1.0, 1.0, SLOPES[k], step=0.0001)
 
-# --- TABS (with MSFT) ---
+# --- TABS (including MSFT) ---
 tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","🪟 MSFT","📦 AMZN","🔍 GOOGL"])
 
-# --- SPX TAB (Mon/Wed/Fri, Tue, Thu logic) ---
+# --- SPX TAB ---
 with tabs[0]:
     st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
-
     c1, c2, c3 = st.columns(3)
     hp = c1.number_input("🔼 High Price",   min_value=0.0, value=6185.8, format="%.2f", key="spx_hp")
     ht = c1.time_input("🕒 High Time",      datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
@@ -163,7 +231,6 @@ with tabs[0]:
             dt2 = datetime.combine(forecast_date - timedelta(days=1), low2_time)
             n12 = calculate_spx_blocks(dt1, dt2) or 1
             alt_slope = (low2_price - low1_price) / n12
-
             st.subheader("🌀 Thu: OTM-Line Forecast")
             orows = []
             for slot in generate_time_blocks():
@@ -172,7 +239,6 @@ with tabs[0]:
                 b = calculate_spx_blocks(dt1, tgt)
                 orows.append({"Time": slot, "Projected": round(low1_price + alt_slope * b, 2)})
             st.dataframe(pd.DataFrame(orows), use_container_width=True)
-
             bounce_dt = datetime.combine(forecast_date - timedelta(days=1), bounce_time)
             bslope = SLOPES["SPX_LOW"]
             st.subheader("📈 Thu: Bounce-Low Slope Forecast")
@@ -201,7 +267,6 @@ with tabs[0]:
                 </div>'''
                 st.markdown(card, unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
-
             for icon, title, price, slope, anchor in [
                 ("🔼","High Anchor",  hp, SLOPES["SPX_HIGH"],  ah),
                 ("🔽","Low Anchor",   lp, SLOPES["SPX_LOW"],   al),
@@ -218,14 +283,10 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","MSFT","AMZN","GOOGL"], start=1)
         st.markdown(f'<div class="tab-header">{icons[label]} {label} Forecast</div>', unsafe_allow_html=True)
         st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2></div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
-        lp = col1.number_input("🔽 Prev-Day Low Price", min_value=0.0, value=0.0, format="%.2f",
-                                key=f"{label}_low_price")
-        lt = col1.time_input("🕒 Prev-Day Low Time", datetime(2025,1,1,8,30).time(), step=1800,
-                             key=f"{label}_low_time")
-        hp = col2.number_input("🔼 Prev-Day High Price", min_value=0.0, value=0.0, format="%.2f",
-                                key=f"{label}_high_price")
-        ht = col2.time_input("🕒 Prev-Day High Time", datetime(2025,1,1,8,30).time(), step=1800,
-                              key=f"{label}_high_time")
+        lp = col1.number_input("🔽 Prev-Day Low Price", min_value=0.0, value=0.0, format="%.2f", key=f"{label}_low_price")
+        lt = col1.time_input("🕒 Prev-Day Low Time", datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_low_time")
+        hp = col2.number_input("🔼 Prev-Day High Price", min_value=0.0, value=0.0, format="%.2f", key=f"{label}_high_price")
+        ht = col2.time_input("🕒 Prev-Day High Time", datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_high_time")
 
         if st.button(f"🔮 Generate {label}", key=f"btn_{label}"):
             a_low  = datetime.combine(forecast_date - timedelta(days=1), lt)
@@ -248,11 +309,11 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","MSFT","AMZN","GOOGL"], start=1)
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.subheader("🔻 Low Anchor Table")
-            df_low = generate_stock(lp, SLOPES[label], a_low, forecast_date, invert=True)
+            df_low = generate_stock(lp, SLOPES[label], a_low, forecast_date)
             st.dataframe(df_low.round(2), use_container_width=True)
 
             st.subheader("🔺 High Anchor Table")
-            df_high = generate_stock(hp, SLOPES[label], a_high, forecast_date, invert=False)
+            df_high = generate_stock(hp, SLOPES[label], a_high, forecast_date)
             st.dataframe(df_high.round(2), use_container_width=True)
 
 # --- CLOSE MAIN CONTAINER ---
