@@ -150,9 +150,9 @@ with tabs[0]:
     # contract inputs (now always visible)
     st.subheader("Contract Line (Low-1 ↔ Low-2)")
     o1,o2 = cols(2)
-    l1_t,l1_p = o1.time_input("Low-1 Time", time(2)), \
+    l1_t,l1_p = o1.time_input("Low-1 Time", time(2), step=300)), \
                 o1.number_input("Low-1 Price", value=10.0, min_value=0.0, step=0.1, key="l1")
-    l2_t,l2_p = o2.time_input("Low-2 Time", time(3,30)), \
+    l2_t,l2_p = o2.time_input("Low-2 Time", time(3,30), step=300), \
                 o2.number_input("Low-2 Price", value=12.0, min_value=0.0, step=0.1, key="l2")
 
     if st.button("Run Forecast"):
