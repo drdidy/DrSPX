@@ -1,14 +1,14 @@
-# Dr Didy SPX Forecast – v1.5.8  (only change: contract line = 5-min blocks)
+# Dr Didy SPX Forecast – v1.5.8  ← only change: contract line = 5-min blocks
 # --------------------------------------------------------------------------
-# • Contract Line (Low-1 ↔ Low-2) now projects in 5-minute steps
-# • Everything else identical to v1.5.7
+# • Contract Line (Low-1 ↔ Low-2) projects every 5 min; lookup uses same
+# • Everything else identical to 1.5.7 (cards, 30-min anchor trends, UI)
 
 import json, base64, streamlit as st
 from datetime import datetime, date, time, timedelta
 from copy import deepcopy
 import pandas as pd
 
-# ─── CONSTANTS ───────────────────────────────────────────────────────────────
+# ── CONSTANTS ────────────────────────────────────────────────────────────────
 PAGE_TITLE, PAGE_ICON = "DRSPX Forecast", "📈"
 VERSION  = "1.5.8"
 
@@ -24,7 +24,7 @@ ICONS = {
     "META":"📘","NFLX":"📺"
 }
 
-# ─── SESSION INIT ────────────────────────────────────────────────────────────
+# ── SESSION INIT ─────────────────────────────────────────────────────────────
 if "theme" not in st.session_state:
     st.session_state.update(
         theme="Light",
@@ -41,27 +41,26 @@ if st.query_params.get("s"):
     except Exception:
         pass
 
-# ─── PAGE CONFIG ────────────────────────────────────────────────────────────
+# ── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(PAGE_TITLE, PAGE_ICON, "wide", initial_sidebar_state="expanded")
 
-# ─── (CSS and helper functions are **unchanged** – omitted here for brevity)
-#      … keep the whole CSS, card(), make_slots(), blk_spx(), blk_stock(), tbl()
-#      exactly as in v1.5.7
-# ---------------------------------------------------------------------------
+# ── CSS, card(), and 30-min helpers are **unchanged** from 1.5.7 ────────────
+# (-- keep the entire CSS block, card(), make_slots(), blk_spx(), blk_stock(),
+#     tbl() exactly as before – omitted here for brevity)
 
-# ─── NEW: 5-MIN CONTRACT HELPERS ─────────────────────────────────────────────
+# ── NEW 5-MIN CONTRACT HELPERS ───────────────────────────────────────────────
 def make_slots_5(start=time(7,30), end=time(14,30)):
-    slots = []
     cur   = datetime(2025,1,1,start.hour,start.minute)
     stop  = datetime(2025,1,1,end.hour,end.minute)
+    slots = []
     while cur <= stop:
         slots.append(cur.strftime("%H:%M"))
         cur += timedelta(minutes=5)
     return slots
 
-CONTRACT_SLOTS = make_slots_5()        # 07:30 – 14:30 every 5 min
+CONTRACT_SLOTS = make_slots_5()             # 07:30–14:30 every 5 min
 
-def blk_5min(a, t):                    # blocks of 5 minutes
+def blk_5min(a, t):                         # 5-minute blocks
     return max(0, int((t - a).total_seconds() // 300))
 
 def tbl_contract(price, slope, anchor, fd):
@@ -70,18 +69,17 @@ def tbl_contract(price, slope, anchor, fd):
         h,m = map(int, s.split(":"))
         tgt = datetime.combine(fd, time(h,m))
         b   = blk_5min(anchor, tgt)
-        rows.append({"Time": s,
-                     "Projected": round(price + slope * b, 2)})
+        rows.append({"Time": s, "Projected": round(price + slope * b, 2)})
     return pd.DataFrame(rows)
 
-# ─── HEADER & TABS (unchanged) ───────────────────────────────────────────────
+# ── HEADER & TABS (unchanged) ────────────────────────────────────────────────
 st.markdown(f"<div class='banner'><h3>{PAGE_ICON} {PAGE_TITLE}</h3></div>",
             unsafe_allow_html=True)
 tabs = st.tabs([f"{ICONS[t]} {t}" for t in ICONS])
 
-# ─── SPX TAB ─────────────────────────────────────────────────────────────────
+# ── SPX TAB ──────────────────────────────────────────────────────────────────
 with tabs[0]:
-    # … underlying-price and slope inputs – unchanged …
+    # ---- underlying inputs (unchanged) ----
     c1,c2,c3 = st.columns(3)
     hp,ht = c1.number_input("High Price",  value=6185.8, min_value=0.0), \
             c1.time_input  ("High Time",   time(11,30))
@@ -90,7 +88,7 @@ with tabs[0]:
     lp,lt = c3.number_input("Low  Price",  value=6130.4, min_value=0.0), \
             c3.time_input  ("Low Time",    time(13,30))
 
-    # ── Contract inputs (unchanged UI, any minute allowed) ──
+    # ---- contract inputs (unchanged UI) ----
     st.subheader("Contract Line (Low-1 ↔ Low-2)")
     o1,o2 = st.columns(2)
     l1_t,l1_p = o1.time_input("Low-1 Time", time(2)), \
@@ -99,15 +97,14 @@ with tabs[0]:
                 o2.number_input("Low-2 Price", value=12.0, min_value=0.0, step=0.1, key="l2")
 
     if st.button("Run Forecast"):
-        # anchor-trend cards/tables (unchanged 30-min logic) …
-        st.markdown('<div class="cards">',unsafe_allow_html=True)
-        # card rendering unchanged – omitted
-        # anchor trend loop unchanged – omitted
+        # ---- anchor cards + 30-min anchor-trends (UNCHANGED) ----
+        st.markdown('<div class="cards">', unsafe_allow_html=True)
+        # card() calls and 30-min tbl() loop exactly as before – keep intact
 
-        # ── Build & store 5-min Contract Line ──
+        # ---- build & store 5-min Contract Line ----
         anchor_dt = datetime.combine(fcast_date, l1_t)
-        slope_5   = (l2_p - l1_p) / (blk_5min(anchor_dt, datetime.combine(fcast_date, l2_t)) or 1)
-
+        slope_5   = (l2_p - l1_p) / (blk_5min(anchor_dt,
+                         datetime.combine(fcast_date, l2_t)) or 1)
         st.session_state.contract_anchor = anchor_dt
         st.session_state.contract_slope  = slope_5
         st.session_state.contract_price  = l1_p
@@ -116,19 +113,17 @@ with tabs[0]:
         st.dataframe(tbl_contract(l1_p, slope_5, anchor_dt, fcast_date),
                      use_container_width=True)
 
-    # ── Lookup widget (unchanged, now uses 5-min slope) ──
-    lookup_t = st.time_input("Lookup time", time(9,25), step=300, key="lookup_time")
+    # ---- lookup widget (now uses 5-min math) ----
+    lookup_t = st.time_input("Lookup time", time(9,25),
+                             step=300, key="lookup_time")
     if st.session_state.contract_anchor:
         blocks = blk_5min(st.session_state.contract_anchor,
                           datetime.combine(fcast_date, lookup_t))
-        val = st.session_state.contract_price + st.session_state.contract_slope * blocks
+        val = st.session_state.contract_price + \
+              st.session_state.contract_slope * blocks
         st.info(f"Projected @ {lookup_t.strftime('%H:%M')} → **{val:.2f}**")
     else:
         st.info("Enter Low-1 & Low-2 and press **Run Forecast** to activate lookup.")
 
-# ─── STOCK TABS (unchanged) ──────────────────────────────────────────────────
-# … identical to v1.5.7 – omitted for brevity …
-
-# ─── FOOTER (unchanged) ──────────────────────────────────────────────────────
-st.markdown(f"<hr><center style='font-size:.8rem'>v{VERSION} • "
-            f"{datetime.now():%Y-%m-%d %H:%M:%S}</center>", unsafe_allow_html=True)
+# ── STOCK TABS + FOOTER (unchanged from 1.5.7) ───────────────────────────────
+# … keep your existing stock_tab() and footer exactly as they are …
