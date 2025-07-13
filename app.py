@@ -5,7 +5,7 @@ import io
 import urllib.parse
 from datetime import datetime, date, time, timedelta
 from dataclasses import dataclass
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -32,7 +32,7 @@ if "theme" not in st.session_state:
 
 # ── THEME & COLORS ───────────────────────────────────────────────────────────
 st.session_state.theme = st.sidebar.selectbox(
-    "🎨 Theme", ["Light", "Dark"], index=["Light","Dark"].index(st.session_state.theme)
+    "🎨 Theme", ["Light", "Dark"], index=["Light", "Dark"].index(st.session_state.theme)
 )
 st.session_state.primary_color = st.sidebar.color_picker(
     "Primary Color", st.session_state.primary_color
@@ -41,18 +41,21 @@ st.session_state.card_bg = st.sidebar.color_picker(
     "Card Background", st.session_state.card_bg
 )
 
-# ── UPDATED CSS: proper arrow instead of ligature text ────────────────────────
+# ── UPDATED CSS: proper collapse icon + clean styling ────────────────────────
 BASE_CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
 * {{ font-family:'Inter',sans-serif!important; }}
-/* hide default text and inject real arrows */
-[data-testid="collapsedControl"] span {{ display: none !important; }}
-[data-testid="collapsedControl"]::before {{
-  content: '≫';
-  font-size: 1.5rem;
-  color: var(--text, #888);
+/* style collapse-sidebar button as real icon */
+button[data-testid="collapsedControl"] > span {{
+  font-family: 'Material Icons' !important;
+  font-size: 1.5rem !important;
+  line-height: 1 !important;
+  display: inline-block !important;
 }}
+/* hide any fallback text */
+button[data-testid="collapsedControl"] > span > * {{ display: none !important; }}
 :root {{
   --bg: #fff; --text: #1f2937;
   --primary: {st.session_state.primary_color};
@@ -103,7 +106,7 @@ class Anchor:
     icon: str
 
 TIME_SLOTS = [
-    (datetime.strptime("07:30","%H:%M") + timedelta(minutes=30*i)).strftime("%H:%M")
+    (datetime.strptime("07:30", "%H:%M") + timedelta(minutes=30*i)).strftime("%H:%M")
     for i in range(15)
 ]
 ICONS = {"SPX":"🧭","TSLA":"🚗","NVDA":"🧠","AAPL":"🍎","MSFT":"🪟","AMZN":"📦","GOOGL":"🔍"}
@@ -167,7 +170,7 @@ elif page == "Scenarios":
         c1, c2, c3 = st.columns([4,1,1])
         c1.write(nm)
         if c2.button(f"Load##{nm}"):
-            st.session_state.slopes      = cfg["slopes"].copy()
+            st.session_state.slopes       = cfg["slopes"].copy()
             st.session_state.primary_color = cfg["primary_color"]
             st.session_state.card_bg       = cfg["card_bg"]
             st.session_state.theme         = cfg["theme"]
@@ -178,7 +181,6 @@ else:
     st.markdown("""
     <div class="hero">
       <h1>📊 Dr Didy Forecast</h1>
-      <p style="opacity:.8;">Standalone intraday block projections<br/>SPX & Top Tech</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -189,12 +191,12 @@ else:
     with tabs[0]:
         st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
-        hp = c1.number_input("🔼 High Price", 6185.8, format="%.2f", key="spx_hp")
-        ht = c1.time_input("🕒 High Time", time(11,30), step=1800, key="spx_ht")
-        cp = c2.number_input("⏹️ Close Price", 6170.2, format="%.2f", key="spx_cp")
-        ct = c2.time_input("🕒 Close Time", time(15,0), step=1800, key="spx_ct")
-        lp = c3.number_input("🔽 Low Price", 6130.4, format="%.2f", key="spx_lp")
-        lt = c3.time_input("🕒 Low Time", time(13,30), step=1800, key="spx_lt")
+        hp = c1.number_input("🔼 High Price", value=6185.8, format="%.2f", key="spx_hp")
+        ht = c1.time_input("🕒 High Time", value=time(11,30), step=1800, key="spx_ht")
+        cp = c2.number_input("⏹️ Close Price", value=6170.2, format="%.2f", key="spx_cp")
+        ct = c2.time_input("🕒 Close Time", value=time(15,0), step=1800, key="spx_ct")
+        lp = c3.number_input("🔽 Low Price", value=6130.4, format="%.2f", key="spx_lp")
+        lt = c3.time_input("🕒 Low Time", value=time(13,30), step=1800, key="spx_lt")
 
         if st.button("🔮 Generate SPX", use_container_width=True):
             anchors = [
@@ -234,15 +236,15 @@ else:
                 tweet_url = "https://twitter.com/intent/tweet?text=" + urllib.parse.quote(tweet_text)
                 st.markdown(f"[🐦 Tweet {a.label} Forecast]({tweet_url})")
 
-    # other stocks
+    # Other stocks
     for idx, sym in enumerate(list(ICONS)[1:], start=1):
         with tabs[idx]:
             st.markdown(f'<div class="tab-header">{ICONS[sym]} {sym} Forecast</div>', unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             low_p  = c1.number_input("🔽 Low Price", format="%.2f", key=f"{sym}_lp")
-            low_t  = c1.time_input("🕒 Low Time", time(7,30), step=1800, key=f"{sym}_lt")
+            low_t  = c1.time_input("🕒 Low Time", value=time(7,30), step=1800, key=f"{sym}_lt")
             high_p = c2.number_input("🔼 High Price", format="%.2f", key=f"{sym}_hp")
-            high_t = c2.time_input("🕒 High Time", time(7,30), step=1800, key=f"{sym}_ht")
+            high_t = c2.time_input("🕒 High Time", value=time(7,30), step=1800, key=f"{sym}_ht")
 
             if st.button(f"🔮 Generate {sym}", use_container_width=True):
                 anchors = [
@@ -272,13 +274,12 @@ else:
                             color="variable:N",
                             tooltip=["Time","value"]
                         )
-                        .properties(height=300)
                     )
                     st.altair_chart(chart, use_container_width=True)
                     csv = df.to_csv(index=False).encode()
                     st.download_button(f"⬇️ Download {sym} {a.label} CSV", csv, f"{sym}_{a.label}.csv", use_container_width=True)
 
     st.markdown(
-        "<footer>© 2025 Dr Didy Forecast • Standalone • Built with ❤ & Streamlit</footer>",
+        "<footer>© 2025 Dr Didy Forecast • Built with ❤ & Streamlit</footer>",
         unsafe_allow_html=True
     )
