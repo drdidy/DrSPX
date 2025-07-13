@@ -173,21 +173,21 @@ with st.sidebar:
     for k in SLOPES:
         SLOPES[k] = st.slider(k.replace("_"," "), -1.0, 1.0, SLOPES[k], step=0.0001)
 
-# --- TABS ---
+# --- TABS (with MSFT included) ---
 tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","🪟 MSFT","📦 AMZN","🔍 GOOGL"])
 
-# --- SPX TAB (Mon/Wed/Fri, Tue, Thu logic) ---
+# --- SPX TAB ---
 with tabs[0]:
     st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
-    hp = c1.number_input("🔼 High Price",   min_value=0.0, value=6185.8, format="%.2f", key="spx_hp")
-    ht = c1.time_input("🕒 High Time",      datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
-    cp = c2.number_input("⏹️ Close Price",  min_value=0.0, value=6170.2, format="%.2f", key="spx_cp")
-    ct = c2.time_input("🕒 Close Time",     datetime(2025,1,1,15,0).time(),  step=1800, key="spx_ct")
-    lp = c3.number_input("🔽 Low Price",    min_value=0.0, value=6130.4, format="%.2f", key="spx_lp")
-    lt = c3.time_input("🕒 Low Time",       datetime(2025,1,1,13,30).time(), step=1800, key="spx_lt")
+    hp = c1.number_input("🔼 High Price", min_value=0.0, value=6185.8, format="%.2f", key="spx_hp")
+    ht = c1.time_input("🕒 High Time", datetime(2025,1,1,11,30).time(), step=1800, key="spx_ht")
+    cp = c2.number_input("⏹️ Close Price", min_value=0.0, value=6170.2, format="%.2f", key="spx_cp")
+    ct = c2.time_input("🕒 Close Time", datetime(2025,1,1,15,0).time(), step=1800, key="spx_ct")
+    lp = c3.number_input("🔽 Low Price", min_value=0.0, value=6130.4, format="%.2f", key="spx_lp")
+    lt = c3.time_input("🕒 Low Time", datetime(2025,1,1,13,30).time(), step=1800, key="spx_lt")
 
     is_tue = forecast_date.weekday() == 1
     is_thu = forecast_date.weekday() == 3
