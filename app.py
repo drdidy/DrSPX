@@ -1,257 +1,169 @@
-import streamlit as st
-import pandas as pd
-import altair as alt
-from datetime import datetime, date, time, timedelta
-from dataclasses import dataclass
-from typing import List
+import streamlit as st import pandas as pd import altair as alt from datetime import datetime, date, time, timedelta from dataclasses import dataclass from typing import List
 
-# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Dr Didy Forecast",
-    page_icon="📈",
-    layout="wide"
-)
+── PAGE CONFIG ───────────────────────────────────────────────────────────────
 
-# ── STATE: SLOPES ──────────────────────────────────────────────────────────────
-if "slopes" not in st.session_state:
-    st.session_state.slopes = {
-        "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
-        "TSLA": -0.1500,     "NVDA": -0.0485,      "AAPL": -0.075,
-        "MSFT": -0.1964,     "AMZN": -0.0782,      "GOOGL": -0.0485,
-    }
+st.set_page_config( page_title="Dr Didy Forecast", page_icon="📈", layout="wide" )
 
-# ── THEME SWITCHER ────────────────────────────────────────────────────────────
-theme = st.sidebar.radio("🎨 Theme", ["Light", "Dark"])
-light_css = """
+── STATE: SLOPES ──────────────────────────────────────────────────────────────
+
+if "slopes" not in st.session_state: st.session_state.slopes = { "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792, "TSLA": -0.1500,     "NVDA": -0.0485,      "AAPL": -0.075, "MSFT": -0.1964,     "AMZN": -0.0782,      "GOOGL": -0.0485, }
+
+── THEME SWITCHER ────────────────────────────────────────────────────────────
+
+theme = st.sidebar.radio("🎨 Theme", ["Light", "Dark"]) light_css = """
+
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
 * { font-family: 'Inter', sans-serif!important; }
-/* hide collapse handle */
-[data-testid="collapsedControl"] { display: none!important; }
 :root {
   --bg: #ffffff; --text: #1f2937; --primary: #3b82f6;
-  --card-bg: #f3f4f6; --radius: 8px; --shadow: 0 4px 12px rgba(0,0,0,0.05);
+  --card-bg: #f9fafb; --radius: 12px; --shadow: 0 4px 16px rgba(0,0,0,0.06);
 }
-body { background: var(--bg)!important; color: var(--text)!important; }
+body {
+  background: var(--bg)!important;
+  color: var(--text)!important;
+  transition: background 0.3s ease;
+}
+header, .stSidebar, footer {
+  transition: all 0.3s ease;
+}
+section[data-testid="stSidebar"] {
+  border-top-right-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  box-shadow: 4px 0 12px rgba(0,0,0,0.05);
+}
+section[data-testid="stSidebar"]::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 4px;
+  background: var(--primary);
+  border-top-left-radius: var(--radius);
+  border-bottom-left-radius: var(--radius);
+}
+button[data-testid="collapsedControl"] {
+  border-radius: 50%;
+  background-color: var(--primary)!important;
+  color: #fff!important;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+  border: none;
+  width: 36px; height: 36px;
+  transition: background 0.3s ease, transform 0.2s ease;
+}
+button[data-testid="collapsedControl"]:hover {
+  background-color: #2563eb!important;
+  transform: scale(1.05);
+}
 .hero {
   background: linear-gradient(135deg, var(--primary), #9333ea);
   padding: 2rem; border-radius: var(--radius); margin-bottom: 1.5rem;
   color: #fff; animation: glow 4s ease-in-out infinite;
+  text-align: center;
 }
 @keyframes glow {
-  0%,100% { box-shadow: 0 0 8px rgba(255,255,255,0.3); }
-  50%    { box-shadow: 0 0 20px rgba(255,255,255,0.6); }
+  0%,100% { box-shadow: 0 0 8px rgba(255,255,255,0.2); }
+  50%    { box-shadow: 0 0 20px rgba(255,255,255,0.4); }
 }
-.tab-header { font-size: 1.5rem; font-weight: 600; margin: 1rem 0; }
-.metric-cards { display: flex; gap: 1rem; margin: 1rem 0; }
+.metric-cards {
+  display: flex;
+  gap: 1rem;
+  margin: 1rem 0;
+}
 .anchor-card {
-  background: var(--card-bg); padding: 1rem; border-radius: var(--radius);
-  box-shadow: var(--shadow); flex: 1; display: flex; align-items: center;
+  background: var(--card-bg);
+  padding: 1rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: transform 0.2s ease;
 }
-.anchor-card .icon { font-size: 1.75rem; margin-right: .5rem; }
+.anchor-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+}
+.anchor-card .icon {
+  font-size: 1.75rem;
+  margin-right: .5rem;
+}
 .stButton>button {
-  background: var(--primary)!important; color: #fff!important;
-  border-radius: var(--radius)!important; padding: .5rem 1rem!important;
-  transition: transform .1s;
+  background: var(--primary)!important;
+  color: #fff!important;
+  border-radius: var(--radius)!important;
+  padding: .5rem 1rem!important;
+  transition: transform .1s, background 0.3s;
 }
-.stButton>button:hover { transform: scale(1.03); }
-footer { text-align: center; color: gray; margin-top: 2rem; font-size: .8rem; }
-</style>
-"""
-dark_css = light_css.replace(
-    "--bg: #ffffff", "--bg: #0f172a"
-).replace(
-    "--text: #1f2937", "--text: #e2e8f0"
-).replace(
-    "--card-bg: #f3f4f6", "--card-bg: #1e293b"
-).replace(
-    "rgba(0,0,0,0.05)", "rgba(0,0,0,0.2)"
-)
-st.markdown(dark_css if theme == "Dark" else light_css, unsafe_allow_html=True)
+.stButton>button:hover {
+  transform: scale(1.03);
+  background: #1d4ed8!important;
+}
+footer {
+  text-align: center;
+  color: gray;
+  margin-top: 2rem;
+  font-size: .8rem;
+}
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 8px;
+}
+</style>""" dark_css = light_css.replace( "--bg: #ffffff", "--bg: #0f172a" ).replace( "--text: #1f2937", "--text: #e2e8f0" ).replace( "--card-bg: #f9fafb", "--card-bg: #1e293b" ).replace( "rgba(0,0,0,0.06)", "rgba(0,0,0,0.25)" ) st.markdown(dark_css if theme == "Dark" else light_css, unsafe_allow_html=True)
 
-# ── NAVIGATION ────────────────────────────────────────────────────────────────
-pages = ["SPX","TSLA","NVDA","AAPL","MSFT","AMZN","GOOGL","Settings"]
-page = st.sidebar.radio("Navigate", pages)
+── INTRO HERO ────────────────────────────────────────────────────────────────
 
-# ── DATA STRUCTURES & HELPERS ─────────────────────────────────────────────────
-@dataclass
-class Anchor:
-    label: str
-    price: float
-    t: time
-    slope: float
-    icon: str
+st.markdown("""
 
-TIME_SLOTS = [
-    (datetime.strptime("07:30","%H:%M") + timedelta(minutes=30*i)).strftime("%H:%M")
-    for i in range(15)
-]
-ICONS = {"SPX":"🧭","TSLA":"🚗","NVDA":"🧠","AAPL":"🍎","MSFT":"🪟","AMZN":"📦","GOOGL":"🔍"}
+<div class="hero">
+  <h1>📊 Dr Didy Forecast</h1>
+  <p>Visualize projected price movement with elegance and precision.</p>
+</div>
+""", unsafe_allow_html=True)── SPARKLINE DEMO SECTION (Preview Only) ─────────────────────────────────────
 
-@st.cache_data
-def calculate_blocks(anchor: datetime, target: datetime, skip_16: bool) -> int:
-    cnt, cur = 0, anchor
-    while cur < target:
-        if not (skip_16 and cur.hour == 16):
-            cnt += 1
-        cur += timedelta(minutes=30)
-    return cnt
+spark_df = pd.DataFrame({ "Time": ["7:30", "8:00", "8:30", "9:00", "9:30"], "Entry": [6230, 6220, 6205, 6190, 6178], "Exit": [6235, 6240, 6250, 6265, 6280] }) sparkline = alt.Chart(spark_df.melt(id_vars="Time")).mark_line().encode( x=alt.X("Time:N", axis=None), y=alt.Y("value:Q", axis=None), color="variable:N" ).properties(height=50, width=150)
 
-@st.cache_data
-def build_table(anc: Anchor, is_spx: bool, fd: date) -> pd.DataFrame:
-    rows = []
-    anchor_dt = datetime.combine(fd - timedelta(days=1) if is_spx else fd, anc.t)
-    for slot in TIME_SLOTS:
-        h,m = map(int, slot.split(":"))
-        tgt = datetime.combine(fd, time(h,m))
-        b   = calculate_blocks(anchor_dt, tgt, skip_16=is_spx)
-        e   = anc.price + anc.slope * b
-        x   = anc.price - anc.slope * b
-        rows.append({"Time": slot, "Entry": round(e,2), "Exit": round(x,2)})
-    return pd.DataFrame(rows)
+st.markdown("### 📈 Sample Sparkline") st.altair_chart(sparkline, use_container_width=False)
 
-# ── SETTINGS PAGE ─────────────────────────────────────────────────────────────
-if page == "Settings":
-    st.header("⚙️ Settings")
-    st.subheader("Adjust Slopes")
-    for k, v in st.session_state.slopes.items():
-        st.session_state.slopes[k] = st.slider(
-            k.replace("_"," "), -1.0, 1.0, v, step=0.0001
-        )
+── AI SIDEBAR CHAT BOT (DYNAMIC RESPONSE) ────────────────────────────────────
 
-# ── SPX & STOCK PAGES ─────────────────────────────────────────────────────────
-else:
-    st.markdown('<div class="hero"><h1>📊 Dr Didy Forecast</h1></div>', unsafe_allow_html=True)
-    fd = st.date_input("Forecast Date", date.today()+timedelta(days=1))
+st.sidebar.markdown("---") st.sidebar.markdown("### 🤖 Ask ForecastBot") user_question = st.sidebar.text_input("Your question:") if user_question: if "highest" in user_question.lower(): max_slope_key = max(st.session_state.slopes, key=st.session_state.slopes.get) st.sidebar.success(f"ForecastBot: The highest slope is {max_slope_key}: {st.session_state.slopes[max_slope_key]:.4f}") elif "lowest" in user_question.lower(): min_slope_key = min(st.session_state.slopes, key=st.session_state.slopes.get) st.sidebar.success(f"ForecastBot: The lowest slope is {min_slope_key}: {st.session_state.slopes[min_slope_key]:.4f}") elif "slope" in user_question.lower(): st.sidebar.info("ForecastBot: A slope represents expected price change per time block based on your anchor.") else: st.sidebar.info("ForecastBot: Sorry, I didn't understand that. Try asking about 'highest slope' or 'slope meaning'.")
 
-    if page == "SPX":
-        # Prev-day anchors
-        hp = st.number_input("🔼 Prev-Day High Price", 6185.8, format="%.2f", key="spx_hp")
-        ht = st.time_input("🕒 Prev-Day High Time", time(11,30), step=1800, key="spx_ht")
-        cp = st.number_input("⏹️ Prev-Day Close Price", 6170.2, format="%.2f", key="spx_cp")
-        ct = st.time_input("🕒 Prev-Day Close Time", time(15,0), step=1800, key="spx_ct")
-        lp = st.number_input("🔽 Prev-Day Low Price", 6130.4, format="%.2f", key="spx_lp")
-        lt = st.time_input("🕒 Prev-Day Low Time", time(13,30), step=1800, key="spx_lt")
+── DAILY HIGHLIGHT CARDS (DYNAMIC + TOOLTIP & ICON) ──────────────────────────
 
-        is_tue = fd.weekday() == 1
-        is_thu = fd.weekday() == 3
+def trend_icon(value): return "⬆️" if value > 0 else "⬇️"
 
-        if is_tue:
-            st.markdown("**Tuesday: Contract-Low Entry Projection**")
-            t1,t2 = st.columns(2)
-            tue_t = t1.time_input("Contract Low Time", time(7,30), key="tue_t")
-            tue_p = t2.number_input("Contract Low Price", 5.0, step=0.1, key="tue_p")
-            if st.button("🔮 Generate Tuesday"):
-                rows=[]
-                for slot in TIME_SLOTS:
-                    h,m=map(int,slot.split(":"))
-                    tgt=datetime.combine(fd,time(h,m))
-                    b=calculate_blocks(datetime.combine(fd,tue_t),tgt,skip_16=False)
-                    rows.append({"Time":slot,"Projected":round(tue_p+(-0.5250)*b,2)})
-                st.dataframe(pd.DataFrame(rows),use_container_width=True)
+def slope_tooltip(value): return f"{value:.4f} per 30-minute block"
 
-        elif is_thu:
-            st.markdown("**Thursday: OTM-Line & Bounce-Low**")
-            o1,o2=st.columns(2)
-            low1_t=o1.time_input("OTM Low 1 Time",time(7,30),key="low1_t")
-            low1_p=o1.number_input("OTM Low 1 Price",10.0,step=0.1,key="low1_p")
-            low2_t=o2.time_input("OTM Low 2 Time",time(8,0),key="low2_t")
-            low2_p=o2.number_input("OTM Low 2 Price",12.0,step=0.1,key="low2_p")
-            st.markdown("<br><strong>8 EMA Bounce-Low</strong>",unsafe_allow_html=True)
-            b1,b2=st.columns(2)
-            bounce_t=b1.time_input("Bounce Low Time",time(7,30),key="bounce_t")
-            bounce_p=b2.number_input("Bounce Low Price",6100.0,step=0.1,key="bounce_p")
-            if st.button("🔮 Generate Thursday"):
-                n12=calculate_blocks(
-                    datetime.combine(fd,low1_t),
-                    datetime.combine(fd,low2_t),
-                    skip_16=False
-                ) or 1
-                alt_slope=(low2_p-low1_p)/n12
-                orows=[{"Time":slot,"Projected":
-                        round(low1_p+alt_slope*
-                              calculate_blocks(datetime.combine(fd,low1_t),
-                                               datetime.combine(fd,time(*map(int,slot.split(":")))),
-                                               skip_16=False),2)}
-                       for slot in TIME_SLOTS]
-                st.subheader("OTM-Line Forecast"); st.dataframe(pd.DataFrame(orows),use_container_width=True)
-                brows=[{"Time":slot,"Projected":
-                        round(bounce_p+st.session_state.slopes["SPX_LOW"]*
-                              calculate_blocks(datetime.combine(fd,bounce_t),
-                                               datetime.combine(fd,time(*map(int,slot.split(":")))),
-                                               skip_16=False),2)}
-                       for slot in TIME_SLOTS]
-                st.subheader("Bounce-Low Forecast"); st.dataframe(pd.DataFrame(brows),use_container_width=True)
+max_slope = max(st.session_state.slopes.items(), key=lambda x: x[1]) min_slope = min(st.session_state.slopes.items(), key=lambda x: x[1])
 
-        else:
-            if st.button("🔮 Generate SPX"):
-                anchors=[
-                    Anchor("High Anchor",hp,ht,st.session_state.slopes["SPX_HIGH"],"🔼"),
-                    Anchor("Close Anchor",cp,ct,st.session_state.slopes["SPX_CLOSE"],"⏹️"),
-                    Anchor("Low Anchor",lp,lt,st.session_state.slopes["SPX_LOW"],"🔽")
-                ]
-                st.markdown('<div class="metric-cards">',unsafe_allow_html=True)
-                for a in anchors:
-                    st.markdown(f'''
-                        <div class="anchor-card">
-                          <div class="icon">{a.icon}</div>
-                          <div>
-                            <div class="title">{a.label}</div>
-                            <div class="value">{a.price:.2f}</div>
-                          </div>
-                        </div>
-                    ''',unsafe_allow_html=True)
-                st.markdown('</div>',unsafe_allow_html=True)
-                for a in anchors:
-                    df=build_table(a,is_spx=True,fd=fd)
-                    st.subheader(f"{a.icon} {a.label}")
-                    st.dataframe(df,use_container_width=True)
-                    chart=(alt.Chart(df.reset_index().melt(id_vars="Time",value_vars=["Entry","Exit"]))
-                           .mark_line(point=True)
-                           .encode(x=alt.X("Time:N",sort=TIME_SLOTS),
-                                   y="value:Q",color="variable:N",
-                                   tooltip=["Time","value"])
-                           .properties(height=300))
-                    st.altair_chart(chart,use_container_width=True)
-                    csv=df.to_csv(index=False).encode()
-                    st.download_button(f"⬇️ Download {a.label} CSV",csv,f"SPX_{a.label}.csv",use_container_width=True)
+st.markdown("""
 
-    else:
-        st.markdown(f'<h2 class="tab-header">{ICONS[page]} {page} Forecast</h2>',unsafe_allow_html=True)
-        c1,c2=st.columns(2)
-        low_p=c1.number_input("🔽 Prev-Day Low Price",format="%.2f",key=f"{page}_lp")
-        low_t=c1.time_input("🕒 Prev-Day Low Time",time(7,30),step=1800,key=f"{page}_lt")
-        high_p=c2.number_input("🔼 Prev-Day High Price",format="%.2f",key=f"{page}_hp")
-        high_t=c2.time_input("🕒 Prev-Day High Time",time(7,30),step=1800,key=f"{page}_ht")
-        if st.button(f"🔮 Generate {page}"):
-            anchors=[
-                Anchor("Low Anchor",low_p,low_t,st.session_state.slopes[page],"🔽"),
-                Anchor("High Anchor",high_p,high_t,st.session_state.slopes[page],"🔼")
-            ]
-            st.markdown('<div class="metric-cards">',unsafe_allow_html=True)
-            for a in anchors:
-                st.markdown(f'''
-                    <div class="anchor-card">
-                      <div class="icon">{a.icon}</div>
-                      <div>
-                        <div class="title">{a.label}</div>
-                        <div class="value">{a.price:.2f}</div>
-                      </div>
-                    </div>
-                ''',unsafe_allow_html=True)
-            st.markdown('</div>',unsafe_allow_html=True)
-            for a in anchors:
-                df=build_table(a,is_spx=False,fd=fd)
-                st.subheader(f"{a.icon} {a.label}")
-                st.dataframe(df,use_container_width=True)
-                chart=(alt.Chart(df.reset_index().melt(id_vars="Time",value_vars=["Entry","Exit"]))
-                       .mark_line(point=True)
-                       .encode(x=alt.X("Time:N",sort=TIME_SLOTS),
-                               y="value:Q",color="variable:N",
-                               tooltip=["Time","value"]))
-                st.altair_chart(chart,use_container_width=True)
-                csv=df.to_csv(index=False).encode()
-                st.download_button(f"⬇️ Download {page} {a.label} CSV",csv,f"{page}_{a.label}.csv",use_container_width=True)
+<div class="metric-cards">
+  <div class="anchor-card" title="{1}">
+    <div class="icon">📈 {0}</div>
+    <div><div class="title">Highest Slope</div><div class="value">{2} {3}</div></div>
+  </div>
+  <div class="anchor-card" title="{5}">
+    <div class="icon">📉 {4}</div>
+    <div><div class="title">Lowest Slope</div><div class="value">{6} {7}</div></div>
+  </div>
+</div>
+""".format(
+    max_slope[0], slope_tooltip(max_slope[1]), trend_icon(max_slope[1]), f"{max_slope[1]:.4f}",
+    min_slope[0], slope_tooltip(min_slope[1]), trend_icon(min_slope[1]), f"{min_slope[1]:.4f}"
+), unsafe_allow_html=True)── STOCK FILTERS ─────────────────────────────────────────────────────────────
 
-# ── FOOTER ───────────────────────────────────────────────────────────────────
-st.markdown('<footer>© 2025 Dr Didy Forecast • Built with ❤ & Streamlit</footer>',unsafe_allow_html=True)
+st.markdown("### 🔍 Select Stocks to Display") all_stocks = list(st.session_state.slopes.keys()) selected_stocks = st.multiselect("Choose stocks: ", all_stocks, default=all_stocks[:4]) st.write("You selected:", selected_stocks)
+
+── EXPORTABLE PDF (CSV TABLE FOR NOW) ────────────────────────────────────────
+
+st.markdown("### 📄 Export Forecast Data") data = pd.DataFrame(st.session_state.slopes.items(), columns=["Stock", "Slope"]) csv = data.to_csv(index=False).encode("utf-8") st.download_button("Download Slope Data as CSV", csv, "forecast_slopes.csv")
+
+── FOOTER ───────────────────────────────────────────────────────────────────
+
+st.markdown('<footer>© 2025 Dr Didy Forecast • Built with ❤ & Streamlit</footer>', unsafe_allow_html=True)
+
