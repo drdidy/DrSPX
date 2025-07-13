@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import altair as alt
 import io
 import urllib.parse
 from datetime import datetime, date, time, timedelta
@@ -17,12 +17,6 @@ st.set_page_config(
 # ── SESSION STATE DEFAULTS ────────────────────────────────────────────────────
 if "scenarios" not in st.session_state:
     st.session_state.scenarios: Dict[str, Any] = {}
-if "theme" not in st.session_state:
-    st.session_state.theme = "Light"
-if "primary_color" not in st.session_state:
-    st.session_state.primary_color = "#3b82f6"
-if "card_bg" not in st.session_state:
-    st.session_state.card_bg = "#f3f4f6"
 if "slopes" not in st.session_state:
     st.session_state.slopes = {
         "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
@@ -31,6 +25,13 @@ if "slopes" not in st.session_state:
     }
 
 # ── THEME & COLORS ───────────────────────────────────────────────────────────
+if "primary_color" not in st.session_state:
+    st.session_state.primary_color = "#3b82f6"
+if "card_bg" not in st.session_state:
+    st.session_state.card_bg = "#f3f4f6"
+if "theme" not in st.session_state:
+    st.session_state.theme = "Light"
+
 st.session_state.theme = st.sidebar.selectbox("🎨 Theme", ["Light", "Dark"], index=["Light","Dark"].index(st.session_state.theme))
 st.session_state.primary_color = st.sidebar.color_picker("Primary Color", st.session_state.primary_color)
 st.session_state.card_bg       = st.sidebar.color_picker("Card Background", st.session_state.card_bg)
@@ -106,10 +107,10 @@ def calculate_blocks(anchor: datetime, target: datetime, skip16: bool) -> int:
     return cnt
 
 @st.cache_data
-def build_table(anc: Anchor, is_spx: bool) -> pd.DataFrame:
+def build_table(anc: Anchor, is_spx: bool, forecast_date: date) -> pd.DataFrame:
     rows = []
     anchor_dt = datetime.combine(
-        (forecast_date - timedelta(days=1)) if is_spx else forecast_date,
+        forecast_date - timedelta(days=1) if is_spx else forecast_date,
         anc.t
     )
     for slot in TIME_SLOTS:
@@ -126,18 +127,21 @@ if page == "Settings":
     st.header("⚙️ Global Settings")
     st.subheader("Slopes (keep strategy intact)")
     for k, v in st.session_state.slopes.items():
-        st.session_state.slopes[k] = st.slider(k.replace("_"," "), -1.0, 1.0, v, step=0.0001, help="Block slope")
+        st.session_state.slopes[k] = st.slider(k.replace("_"," "), -1.0, 1.0, v, step=0.0001)
     st.markdown("---")
     st.subheader("Theme & Colors")
-    st.write("Choose your app palette")
-    # color pickers already in sidebar
+    st.write("Use the sidebar to set your palette.")
     st.markdown("---")
-    st.subheader("Export Slopes / Colors")
+    st.subheader("Export Settings")
     df_settings = pd.DataFrame({
-        "setting": list(st.session_state.slopes.keys()) + ["primary_color","card_bg","theme"],
-        "value": list(st.session_state.slopes.values()) + [st.session_state.primary_color, st.session_state.card_bg, st.session_state.theme]
+        "Setting": list(st.session_state.slopes.keys()) + ["Primary Color","Card Background","Theme"],
+        "Value": list(st.session_state.slopes.values()) + [
+            st.session_state.primary_color,
+            st.session_state.card_bg,
+            st.session_state.theme
+        ]
     })
-    st.data_editor(df_settings, num_rows="dynamic", use_container_width=True)
+    st.data_editor(df_settings, use_container_width=True)
 
 # ── SCENARIOS PAGE ────────────────────────────────────────────────────────────
 elif page == "Scenarios":
@@ -151,14 +155,14 @@ elif page == "Scenarios":
             "theme": st.session_state.theme
         }
     for nm, cfg in st.session_state.scenarios.items():
-        col1, col2, col3 = st.columns([4,1,1])
-        col1.write(nm)
-        if col2.button(f"Load##{nm}"):
+        c1, c2, c3 = st.columns([4,1,1])
+        c1.write(nm)
+        if c2.button(f"Load##{nm}"):
             st.session_state.slopes      = cfg["slopes"].copy()
             st.session_state.primary_color = cfg["primary_color"]
             st.session_state.card_bg       = cfg["card_bg"]
             st.session_state.theme         = cfg["theme"]
-        if col3.button(f"Del##{nm}"):
+        if c3.button(f"Del##{nm}"):
             del st.session_state.scenarios[nm]
 
 # ── FORECAST PAGE ─────────────────────────────────────────────────────────────
@@ -170,27 +174,73 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-    forecast_date = st.date_input("Forecast Date", date.today() + timedelta(days=1),
-                                  help="Choose date for your forecast", key="fdate")
+    forecast_date = st.date_input("Forecast Date", date.today() + timedelta(days=1))
+
+    tabs = st.tabs([f"{ICONS[s]} {s}" for s in ICONS])
 
     # SPX Tab
-    tabs = st.tabs([f"{ICONS[s]} {s}" for s in ICONS])
     with tabs[0]:
-        st.markdown(f'<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
+        st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
-        hp = c1.number_input("🔼 High Price",    value=6185.8, format="%.2f", key="spx_hp", help="Prev-day high")
-        ht = c1.time_input("🕒 High Time",       value=time(11,30), step=1800, key="spx_ht", help="Time of high")
-        cp = c2.number_input("⏹️ Close Price",   value=6170.2, format="%.2f", key="spx_cp", help="Prev-day close")
-        ct = c2.time_input("🕒 Close Time",      value=time(15,0),  step=1800, key="spx_ct", help="Time of close")
-        lp = c3.number_input("🔽 Low Price",     value=6130.4, format="%.2f", key="spx_lp", help="Prev-day low")
-        lt = c3.time_input("🕒 Low Time",        value=time(13,30), step=1800, key="spx_lt", help="Time of low")
+        hp = c1.number_input("🔼 High Price", value=6185.8, format="%.2f", key="spx_hp")
+        ht = c1.time_input("🕒 High Time", value=time(11,30), step=1800, key="spx_ht")
+        cp = c2.number_input("⏹️ Close Price", value=6170.2, format="%.2f", key="spx_cp")
+        ct = c2.time_input("🕒 Close Time", value=time(15,0), step=1800, key="spx_ct")
+        lp = c3.number_input("🔽 Low Price", value=6130.4, format="%.2f", key="spx_lp")
+        lt = c3.time_input("🕒 Low Time", value=time(13,30), step=1800, key="spx_lt")
 
         if st.button("🔮 Generate SPX", use_container_width=True):
-            with st.spinner("Building SPX tables & charts…"):
+            anchors = [
+                Anchor("High Anchor",  hp, ht, st.session_state.slopes["SPX_HIGH"],  "🔼"),
+                Anchor("Close Anchor", cp, ct, st.session_state.slopes["SPX_CLOSE"], "⏹️"),
+                Anchor("Low Anchor",   lp, lt, st.session_state.slopes["SPX_LOW"],   "🔽"),
+            ]
+            st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
+            for a in anchors:
+                st.markdown(f'''
+                    <div class="anchor-card">
+                      <div class="icon">{a.icon}</div>
+                      <div><div class="title">{a.label}</div><div class="value">{a.price:.2f}</div></div>
+                    </div>
+                ''', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            for a in anchors:
+                df = build_table(a, is_spx=True, forecast_date=forecast_date)
+                st.subheader(f"{a.icon} {a.label}")
+                st.data_editor(df, use_container_width=True)
+                chart = (
+                    alt.Chart(df.reset_index().melt(id_vars="Time", value_vars=["Entry","Exit"]))
+                    .mark_line(point=True)
+                    .encode(
+                        x=alt.X("Time:N", sort=TIME_SLOTS),
+                        y="value:Q",
+                        color="variable:N",
+                        tooltip=["Time","value"]
+                    )
+                    .properties(height=300)
+                )
+                st.altair_chart(chart, use_container_width=True)
+                csv = df.to_csv(index=False).encode()
+                st.download_button(f"⬇️ Download {a.label} CSV", csv, f"SPX_{a.label}.csv", use_container_width=True)
+                tweet_text = f"SPX {a.label} forecast for {forecast_date}: Entry {df['Entry'].iloc[0]}"
+                tweet_url = "https://twitter.com/intent/tweet?text=" + urllib.parse.quote(tweet_text)
+                st.markdown(f"[🐦 Tweet {a.label} Forecast]({tweet_url})")
+
+    # Other stock tabs
+    for idx, sym in enumerate(list(ICONS)[1:], start=1):
+        with tabs[idx]:
+            st.markdown(f'<div class="tab-header">{ICONS[sym]} {sym} Forecast</div>', unsafe_allow_html=True)
+            c1, c2 = st.columns(2)
+            low_p  = c1.number_input("🔽 Low Price", format="%.2f", key=f"{sym}_lp")
+            low_t  = c1.time_input("🕒 Low Time", value=time(7,30), step=1800, key=f"{sym}_lt")
+            high_p = c2.number_input("🔼 High Price", format="%.2f", key=f"{sym}_hp")
+            high_t = c2.time_input("🕒 High Time", value=time(7,30), step=1800, key=f"{sym}_ht")
+
+            if st.button(f"🔮 Generate {sym}", use_container_width=True):
                 anchors = [
-                    Anchor("High Anchor",  hp, ht, st.session_state.slopes["SPX_HIGH"],  "🔼"),
-                    Anchor("Close Anchor", cp, ct, st.session_state.slopes["SPX_CLOSE"], "⏹️"),
-                    Anchor("Low Anchor",   lp, lt, st.session_state.slopes["SPX_LOW"],   "🔽"),
+                    Anchor("Low Anchor",  low_p,  low_t,  st.session_state.slopes[sym], "🔽"),
+                    Anchor("High Anchor", high_p, high_t, st.session_state.slopes[sym], "🔼"),
                 ]
                 st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
                 for a in anchors:
@@ -203,62 +253,22 @@ else:
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 for a in anchors:
-                    df = build_table(a, is_spx=True)
+                    df = build_table(a, is_spx=False, forecast_date=forecast_date)
                     st.subheader(f"{a.icon} {a.label}")
                     st.data_editor(df, use_container_width=True)
-                    fig = px.line(df.reset_index().melt(id_vars="Time", value_vars=["Entry","Exit"]),
-                                  x="Time", y="value", color="variable", markers=True,
-                                  title=f"{a.label} Projection")
-                    st.plotly_chart(fig, use_container_width=True)
-                    # Excel download
-                    buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                        df.to_excel(writer, sheet_name=a.label, index=False)
-                    st.download_button(f"⬇️ Excel {a.label}", buf.getvalue(), f"SPX_{a.label}.xlsx")
-
-                    # Tweet link
-                    tweet = f"Forecast for {forecast_date}: {a.label} Entry at {df['Entry'].iloc[0]}"
-                    url = "https://twitter.com/intent/tweet?text=" + urllib.parse.quote(tweet)
-                    st.markdown(f"[🐦 Tweet {a.label} Forecast]({url})")
-
-    # Other stock tabs
-    for idx, sym in enumerate(list(ICONS)[1:], start=1):
-        with tabs[idx]:
-            st.markdown(f'<div class="tab-header">{ICONS[sym]} {sym} Forecast</div>', unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            low_p  = c1.number_input("🔽 Low Price", format="%.2f", key=f"{sym}_lp", help="Prev-day low")
-            low_t  = c1.time_input("🕒 Low Time", value=time(7,30), step=1800, key=f"{sym}_lt", help="Time of low")
-            high_p = c2.number_input("🔼 High Price", format="%.2f", key=f"{sym}_hp", help="Prev-day high")
-            high_t = c2.time_input("🕒 High Time", value=time(7,30), step=1800, key=f"{sym}_ht", help="Time of high")
-
-            if st.button(f"🔮 Generate {sym}", use_container_width=True):
-                with st.spinner(f"Building {sym} tables & charts…"):
-                    anchors = [
-                        Anchor("Low Anchor",  low_p,  low_t,  st.session_state.slopes[sym], "🔽"),
-                        Anchor("High Anchor", high_p, high_t, st.session_state.slopes[sym], "🔼"),
-                    ]
-                    st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
-                    for a in anchors:
-                        st.markdown(f'''
-                            <div class="anchor-card">
-                              <div class="icon">{a.icon}</div>
-                              <div><div class="title">{a.label}</div><div class="value">{a.price:.2f}</div></div>
-                            </div>
-                        ''', unsafe_allow_html=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-                    for a in anchors:
-                        df = build_table(a, is_spx=False)
-                        st.subheader(f"{a.icon} {a.label}")
-                        st.data_editor(df, use_container_width=True)
-                        fig = px.line(df.reset_index().melt(id_vars="Time", value_vars=["Entry","Exit"]),
-                                      x="Time", y="value", color="variable", markers=True,
-                                      title=f"{sym} {a.label}")
-                        st.plotly_chart(fig, use_container_width=True)
-                        buf = io.BytesIO()
-                        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                            df.to_excel(writer, sheet_name=a.label, index=False)
-                        st.download_button(f"⬇️ Excel {sym} {a.label}", buf.getvalue(),
-                                           f"{sym}_{a.label}.xlsx")
+                    chart = (
+                        alt.Chart(df.reset_index().melt(id_vars="Time", value_vars=["Entry","Exit"]))
+                        .mark_line(point=True)
+                        .encode(
+                            x=alt.X("Time:N", sort=TIME_SLOTS),
+                            y="value:Q",
+                            color="variable:N",
+                            tooltip=["Time","value"]
+                        )
+                        .properties(height=300)
+                    )
+                    st.altair_chart(chart, use_container_width=True)
+                    csv = df.to_csv(index=False).encode()
+                    st.download_button(f"⬇️ Download {sym} {a.label} CSV", csv, f"{sym}_{a.label}.csv", use_container_width=True)
 
     st.markdown("<footer>© 2025 Dr Didy Forecast • Standalone • Built with ❤ & Streamlit</footer>", unsafe_allow_html=True)
