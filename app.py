@@ -1,7 +1,9 @@
-# Dr Didy SPX Forecast – v1.4.7
-# • large colourful anchor cards
-# • no charts
-# • SPX trends 08:30-14:30, others 07:30-14:30
+# Dr Didy SPX Forecast – v1.4.8
+# -------------------------------------------
+# • colourful, extra-large anchor cards
+# • SPX anchor trends 08:30-14:30; others 07:30-14:30
+# • no charts (tables only)
+# • KeyError fix – uses ah/ac/al directly
 # • 16:00-17:00 block skipped for SPX
 
 import json, base64, streamlit as st
@@ -11,20 +13,23 @@ import pandas as pd
 
 # ───────────────────────── CONSTANTS ──────────────────────────────────────────
 PAGE_TITLE, PAGE_ICON = "DRSPX Forecast", "📈"
-VERSION  = "1.4.7"
-FIXED_CL_SLOPE = -0.5250   # Tue fixed slope
+VERSION  = "1.4.8"
+FIXED_CL_SLOPE = -0.5250      # Tuesday fixed slope
 
 BASE_SLOPES = {
     "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
     "TSLA": -0.1508, "NVDA": -0.0485, "AAPL": -0.0750, "MSFT": -0.1964,
     "AMZN": -0.0782, "GOOGL": -0.0485,
 }
-ICONS = {"SPX":"🧭","TSLA":"🚗","NVDA":"🧠","AAPL":"🍎","MSFT":"🪟","AMZN":"📦","GOOGL":"🔍"}
+ICONS = {"SPX":"🧭","TSLA":"🚗","NVDA":"🧠","AAPL":"🍎",
+         "MSFT":"🪟","AMZN":"📦","GOOGL":"🔍"}
 
-# ───────────────────────── SESSION INIT ───────────────────────────────────────
+# ─────────────────────── SESSION INIT ─────────────────────────────────────────
 if "theme" not in st.session_state:
-    st.session_state.update(theme="Light", slopes=deepcopy(BASE_SLOPES),
-                            presets={}, mobile=False)
+    st.session_state.update(theme="Light",
+                            slopes=deepcopy(BASE_SLOPES),
+                            presets={},
+                            mobile=False)
 
 # restore slopes from share-suffix
 if st.query_params.get("s"):
@@ -53,8 +58,7 @@ body.light{--card:#f5f5f5} body.dark{--card:#1e293b;background:#0f172a;color:#e2
 /* anchor cards */
 .cards{display:flex;gap:1rem;overflow-x:auto;margin-bottom:1rem}
 .card{flex:1;min-width:220px;padding:1.4rem;border-radius:var(--radius);
-      display:flex;align-items:center;box-shadow:var(--shadow);
-      background:var(--card)}
+      display:flex;align-items:center;box-shadow:var(--shadow);background:var(--card)}
 .ic{width:3rem;height:3rem;border-radius:var(--radius);
     display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;
     margin-right:.9rem}
@@ -78,13 +82,13 @@ body.dark .low   {background:rgba(239,68,68,.25)}
   .card{min-width:170px;padding:1.1rem}
   .ic{width:2.4rem;height:2.4rem;font-size:1.6rem}
   .val{font-size:1.55rem}
-  body{padding-bottom:80px} /* avoid Streamlit Cloud footer overlap */
+  body{padding-bottom:80px} /* for Streamlit Cloud bar */
 }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
 
-# helper to output one coloured card
+# helper to output a coloured card
 def coloured_card(kind:str, symbol:str, title:str, value:float):
     st.markdown(
         f"""<div class="card {kind}">
@@ -94,8 +98,8 @@ def coloured_card(kind:str, symbol:str, title:str, value:float):
         unsafe_allow_html=True
     )
 
-# simple responsive column helper
-cols = lambda n: (st,) if st.session_state.mobile else st.columns(n)
+# responsive column helper
+cols = lambda n:(st,) if st.session_state.mobile else st.columns(n)
 
 # ───────────────────────── SIDEBAR ────────────────────────────────────────────
 st.session_state.theme = st.sidebar.radio("🎨 Theme",["Light","Dark"],
@@ -149,35 +153,39 @@ def build_table(price,slope,anchor,fd,slots,spx=True,fan=False):
             rows.append({"Time":s,"Projected":round(price+slope*b,2)})
     return pd.DataFrame(rows)
 
-# ───────────────────────── HEADER / TABS ──────────────────────────────────────
+# ───────────────────── HEADER & TABS ──────────────────────────────────────────
 st.markdown(f"<div class='banner'><h3>{PAGE_ICON} {PAGE_TITLE}</h3></div>", unsafe_allow_html=True)
 tabs=st.tabs([f"{ICONS[t]} {t}" for t in ICONS])
 
 # ─────────────────────────── SPX TAB ──────────────────────────────────────────
 with tabs[0]:
     st.write(f"### {ICONS['SPX']} SPX Forecast ({day_grp})")
-    c1,c2,c3=cols(3)
+    c1,c2,c3 = cols(3)
     hp,ht = c1.number_input("High Price",6185.8), c1.time_input("High Time",time(11,30))
     cp,ct = c2.number_input("Close Price",6170.2), c2.time_input("Close Time",time(15))
     lp,lt = c3.number_input("Low Price",6130.4),  c3.time_input("Low Time", time(13,30))
 
-    # extra inputs for Tue / Thu
+    # extra inputs for Tuesday / Thursday lines
     if day_grp=="Tuesday":
         st.subheader("Overnight Contract Line")
         o1,o2=cols(2)
         cl1_t,cl1_p=o1.time_input("Low-1 Time",time(2)),  o1.number_input("Low-1 Price",6100.0)
         cl2_t,cl2_p=o2.time_input("Low-2 Time",time(3,30)),o2.number_input("Low-2 Price",6120.0)
-        cl_t,cl_p  =st.time_input("Contract Low Time",time(7,30)),st.number_input("Contract Low Price",5.0)
+        cl_t, cl_p = st.time_input("Contract Low Time",time(7,30)), st.number_input("Contract Low Price",5.0)
 
     if day_grp=="Thursday":
         st.subheader("Overnight Contract Line")
         p1,p2=cols(2)
-        ol1_t,ol1_p=p1.time_input("Low-1 Time",time(2)),p1.number_input("Low-1 Price",6100.0)
+        ol1_t,ol1_p=p1.time_input("Low-1 Time",time(2)),  p1.number_input("Low-1 Price",6100.0)
         ol2_t,ol2_p=p2.time_input("Low-2 Time",time(3,30)),p2.number_input("Low-2 Price",6120.0)
-        b_t,b_p    =st.time_input("Bounce Low Time",time(7,30)),st.number_input("Bounce Low Price",6100.0)
+        b_t, b_p  = st.time_input("Bounce Low Time",time(7,30)), st.number_input("Bounce Low Price",6100.0)
 
     if st.button("Run Forecast"):
-        # ── Tuesday logic ──
+        ah = datetime.combine(fcast_date-timedelta(days=1),ht)
+        ac = datetime.combine(fcast_date-timedelta(days=1),ct)
+        al = datetime.combine(fcast_date-timedelta(days=1),lt)
+
+        # Tuesday lines
         if day_grp=="Tuesday":
             dt1,dt2=[datetime.combine(fcast_date-timedelta(days=1),t) for t in (cl1_t,cl2_t)]
             alt_slope=(cl2_p-cl1_p)/(blk_spx(dt1,dt2) or 1)
@@ -185,10 +193,11 @@ with tabs[0]:
             st.dataframe(build_table(cl1_p,alt_slope,dt1,fcast_date,GEN_SLOTS),use_container_width=True)
 
             st.subheader("Fixed SPX Line")
-            st.dataframe(build_table(cl_p,FIXED_CL_SLOPE,datetime.combine(fcast_date,cl_t),
-                                     fcast_date,GEN_SLOTS),use_container_width=True)
+            st.dataframe(build_table(cl_p,FIXED_CL_SLOPE,
+                                     datetime.combine(fcast_date,cl_t),fcast_date,GEN_SLOTS),
+                         use_container_width=True)
 
-        # ── Thursday logic ──
+        # Thursday lines
         elif day_grp=="Thursday":
             dt1,dt2=[datetime.combine(fcast_date-timedelta(days=1),t) for t in (ol1_t,ol2_t)]
             alt_slope=(ol2_p-ol1_p)/(blk_spx(dt1,dt2) or 1)
@@ -200,36 +209,41 @@ with tabs[0]:
                                      datetime.combine(fcast_date-timedelta(days=1),b_t),
                                      fcast_date,GEN_SLOTS),use_container_width=True)
 
-        # ── Mon / Wed / Fri ──
+        # Mon / Wed / Fri baseline
         else:
             st.markdown('<div class="cards">', unsafe_allow_html=True)
-            coloured_card("high","▲","High Anchor" ,hp)
+            coloured_card("high" ,"▲","High Anchor" ,hp)
             coloured_card("close","■","Close Anchor",cp)
-            coloured_card("low","▼","Low Anchor"  ,lp)
+            coloured_card("low" ,"▼","Low Anchor"  ,lp)
             st.markdown('</div>', unsafe_allow_html=True)
 
-            anchors=[("High",hp,"SPX_HIGH",time(11,30), "▲","high"),
-                     ("Close",cp,"SPX_CLOSE",time(15) ,  "■","close"),
-                     ("Low" ,lp,"SPX_LOW" ,time(13,30),"▼","low" )]
-            for txt,val,key,_,_,kind in anchors:
-                st.subheader(f"{txt} Anchor Trend")
-                anchor_dt = datetime.combine(fcast_date-timedelta(days=1), locals()[key.split('_')[1].lower()+'t'] )
-                # use 08:30 slots
-                df=build_table(val,st.session_state.slopes[key],anchor_dt,fcast_date,SPX_SLOTS,fan=True)
+            anchors = [
+                ("High" , hp, "SPX_HIGH", ah),
+                ("Close", cp, "SPX_CLOSE", ac),
+                ("Low"  , lp, "SPX_LOW" , al),
+            ]
+            for label, price, slope_key, anchor_dt in anchors:
+                st.subheader(f"{label} Anchor Trend")
+                df = build_table(price,
+                                 st.session_state.slopes[slope_key],
+                                 anchor_dt,
+                                 fcast_date,
+                                 SPX_SLOTS,
+                                 fan=True)
                 st.dataframe(df,use_container_width=True)
 
-# ───────────── OTHER TICKER TABS (07:30-14:30) ────────────────────────────────
+# ───────────────────── OTHER TICKER TABS ──────────────────────────────────────
 def stock_tab(idx,tic):
     with tabs[idx]:
         st.write(f"### {ICONS[tic]} {tic}")
         a,b=cols(2)
-        lp,lt=a.number_input("Prev-day Low",key=f"{tic}lp"),a.time_input("Low Time",time(7,30),key=f"{tic}lt")
-        hp,ht=b.number_input("Prev-day High",key=f"{tic}hp"),b.time_input("High Time",time(7,30),key=f"{tic}ht")
+        lp,lt=a.number_input("Prev-day Low",key=f"{tic}lp"), a.time_input("Low Time",time(7,30),key=f"{tic}lt")
+        hp,ht=b.number_input("Prev-day High",key=f"{tic}hp"), b.time_input("High Time",time(7,30),key=f"{tic}ht")
         if st.button("Generate",key=f"go_{tic}"):
             low  = build_table(lp,st.session_state.slopes[tic],datetime.combine(fcast_date,lt),
-                               fcast_date,GEN_SLOTS,False,True)
+                               fcast_date,GEN_SLOTS,False,fan=True)
             high = build_table(hp,st.session_state.slopes[tic],datetime.combine(fcast_date,ht),
-                               fcast_date,GEN_SLOTS,False,True)
+                               fcast_date,GEN_SLOTS,False,fan=True)
             st.subheader("Low Anchor Trend");  st.dataframe(low ,use_container_width=True)
             st.subheader("High Anchor Trend"); st.dataframe(high,use_container_width=True)
 
