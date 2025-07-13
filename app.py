@@ -1,233 +1,243 @@
-import streamlit as st
-import pandas as pd
+# Dr Didy Forecast  – v1.4
+# a single-file Streamlit dashboard with:
+# • mobile-friendly layout      • gradient header & hover cards
+# • per-day strategies          • JSON presets / link-share
+# • persistent session settings • Altair interactive charts
+# • Excel multi-sheet exporter   • zero extra pip installs
+
+import json, base64, altair as alt
+from io import BytesIO
+from copy import deepcopy
 from datetime import datetime, date, time, timedelta
-from io import StringIO, BytesIO
-import zipfile
 
-# ── CONFIG ────────────────────────────────────────────────────────────────────
-PAGE_TITLE  = "Dr Didy Forecast"
-PAGE_ICON   = "📈"
-LAYOUT      = "wide"
-SIDEBAR     = "expanded"
-VERSION     = "1.1"          # bump whenever you tweak
+import pandas as pd
+import streamlit as st
 
-SLOPES = {
-    "SPX_HIGH": -0.2792,
-    "SPX_CLOSE": -0.2792,
-    "SPX_LOW": -0.2792,
-    "TSLA": -0.1508,          # user’s latest default
-    "NVDA": -0.0485,
-    "AAPL": -0.0750,
-    "MSFT": -0.1964,
-    "AMZN": -0.0782,
-    "GOOGL": -0.0485,
+# ─────────────────────────── CONSTANTS ────────────────────────────────────────
+PAGE_TITLE, PAGE_ICON, LAYOUT, SIDEBAR = "Dr Didy Forecast", "📈", "wide", "expanded"
+VERSION  = "1.4"
+FIXED_CL_SLOPE = -0.5250                          # Tuesday SPX line
+
+BASE_SLOPES = {
+    "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
+    "TSLA": -0.1508, "NVDA": -0.0485, "AAPL": -0.075, "MSFT": -0.1964,
+    "AMZN": -0.0782, "GOOGL": -0.0485,
 }
+STRAT = {k: deepcopy(BASE_SLOPES) for k in ["Mon/Wed/Fri", "Tuesday", "Thursday"]}
 
-ICONS = {
-    "SPX": "🧭",
-    "TSLA": "🚗",
-    "NVDA": "🧠",
-    "AAPL": "🍎",
-    "MSFT": "🪟",
-    "AMZN": "📦",
-    "GOOGL": "🔍",
-}
+ICONS = {"SPX":"🧭","TSLA":"🚗","NVDA":"🧠","AAPL":"🍎","MSFT":"🪟","AMZN":"📦","GOOGL":"🔍"}
+CB_COLORS = ["#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f","#edc948","#af7aa1"]
 
-# ── THEME ─────────────────────────────────────────────────────────────────────
-BASE_CSS = """
+# ─────────────────────────── SESSION SETUP ────────────────────────────────────
+if "theme" not in st.session_state:
+    st.session_state.update(theme="Light", slopes=deepcopy(BASE_SLOPES),
+                            presets={}, mobile=False)
+
+# url-state restore (if present)
+q = st.query_params
+if q and "s" in q:
+    try:
+        st.session_state.slopes.update(json.loads(base64.b64decode(q["s"][0]).decode()))
+    except Exception: pass
+
+# simple viewport check – hides columns on narrow screens
+st.session_state.mobile = st.sidebar.checkbox("📱 Mobile mode", value=st.session_state.mobile)
+
+# ─────────────────────────── THEME & CSS ──────────────────────────────────────
+GRADIENT = "linear-gradient(90deg,#0062E6 0%,#33AEFF 100%)"
+CSS = f"""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-  :root {{
-    --bg: #FFFFFF;         /* replaced in dark mode */
-    --text: #1F2937;
-    --primary: #3B82F6;
-    --card-bg: #F3F4F6;
-    --radius: 8px;
-    --shadow: 0 4px 12px rgba(0,0,0,0.05);
-  }}
-  html,body,section,div,span{{ background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }}
-  .stApp {{ background:var(--bg); }}
-  .main-container{{ padding:1rem; max-width:1200px; margin:auto; }}
-  .app-header{{ padding:1rem; border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:1rem;
-                background:var(--primary); color:#fff; }}
-  .tab-header{{ font-size:1.5rem; font-weight:600; margin-bottom:0.5rem; }}
-  .metric-cards{{ display:flex; gap:1rem; margin-bottom:1rem; overflow-x:auto; }}
-  .anchor-card{{ background:var(--card-bg); border-radius:var(--radius); box-shadow:var(--shadow);
-                 padding:1rem; flex:1; display:flex; align-items:center; min-width:160px; }}
-  .anchor-card .icon-wrapper{{ font-size:2rem; margin-right:0.5rem; }}
-  .anchor-card .title{{ font-size:0.875rem; opacity:0.7; }}
-  .anchor-card .value{{ font-size:1.25rem; font-weight:600; }}
-  .stDataFrame>div{{ border:none!important; }}
-  .stButton>button{{ border:none; border-radius:var(--radius)!important; padding:0.5rem 1rem;
-                     font-weight:600; transition:opacity .2s; background:var(--primary); color:#fff; }}
-  .stButton>button:hover{{ opacity:.9; }}
-</style>
-"""
+  :root {{ --radius:8px; --shadow:0 4px 12px rgba(0,0,0,.06); }}
+  body,html,div,section {{ font-family:'Inter',sans-serif; }}
+  .hdr {{ background:{GRADIENT};color:#fff;padding:1rem;border-radius:var(--radius);
+          box-shadow:var(--shadow);margin-bottom:1rem; }}
+  .cards {{ display:flex;gap:1rem;overflow-x:auto;margin-bottom:1rem; }}
+  .card {{ flex:1;min-width:160px;background:#f5f5f5;border-radius:var(--radius);
+           padding:1rem;display:flex;align-items:center;transition:all .2s;
+           box-shadow:var(--shadow); }}
+  .card:hover {{ transform:translateY(-2px);box-shadow:0 8px 18px rgba(0,0,0,.12); }}
+  .ic   {{ font-size:1.8rem;margin-right:.5rem; }}
+  .ttl  {{ font-size:.85rem;opacity:.7; }}
+  .val  {{ font-size:1.25rem;font-weight:700; }}
+  .dark body {{ background:#0f172a;color:#e2e8f0; }}
+  .dark .card {{ background:#1e293b; }}
+  .dark .hdr {{ background:linear-gradient(90deg,#3677FF 0%,#7695FF 100%); }}
+</style>"""
+st.markdown(CSS, unsafe_allow_html=True)
 
-DARK_SWAP = {
-    "--bg: #FFFFFF;": "--bg: #0F172A;",
-    "--text: #1F2937;": "--text: #E2E8F0;",
-    "--primary: #3B82F6;": "--primary: #6366F1;",
-    "--card-bg: #F3F4F6;": "--card-bg: #1E293B;",
-    "rgba(0,0,0,0.05)": "rgba(0,0,0,0.25)",
-}
-DARK_CSS = BASE_CSS
-for k, v in DARK_SWAP.items():
-    DARK_CSS = DARK_CSS.replace(k, v)
-
-# ── PAGE SETUP ────────────────────────────────────────────────────────────────
+# ─────────────────────────── SIDEBAR ──────────────────────────────────────────
 st.set_page_config(PAGE_TITLE, PAGE_ICON, LAYOUT, initial_sidebar_state=SIDEBAR)
-theme_choice = st.sidebar.radio("🎨 Theme", ["Light", "Dark"], horizontal=True)
-st.markdown(DARK_CSS if theme_choice == "Dark" else BASE_CSS, unsafe_allow_html=True)
+st.session_state.theme = st.sidebar.radio("🎨 Theme",["Light","Dark"],index=0 if st.session_state.theme=="Light" else 1)
+if st.session_state.theme=="Dark":
+    st.markdown('<body class="dark">', unsafe_allow_html=True)
 
-# ── UTILITIES ────────────────────────────────────────────────────────────────
-def gen_time_slots(start: time, end: time, freq: int = 30) -> list[str]:
-    out, cur = [], datetime.combine(date.today(), start)
-    end_dt   = datetime.combine(date.today(), end)
-    while cur <= end_dt:
-        out.append(cur.strftime("%H:%M"))
-        cur += timedelta(minutes=freq)
-    return out
+fcast_date = st.sidebar.date_input("Forecast Date", date.today()+timedelta(days=1))
+wd = fcast_date.weekday()
+day_group = "Tuesday" if wd==1 else "Thursday" if wd==3 else "Mon/Wed/Fri"
 
-@st.cache_data(show_spinner=False)
-def generate_table(price: float, slope: float, anchor: datetime,
-                   skip_4pm: bool = False, slots: list[str] | None = None) -> pd.DataFrame:
-    rows, slots = [], slots or TIME_SLOTS
-    for t in slots:
-        h, m = map(int, t.split(":"))
-        ts   = datetime.combine(forecast_date, time(h, m))
-        blocks = 0
-        cur = anchor
-        while cur < ts:
-            if not (skip_4pm and cur.hour == 16):
-                blocks += 1
-            cur += timedelta(minutes=30)
-        rows.append({"Time": t,
-                     "Entry": round(price + slope * blocks, 2),
-                     "Exit":  round(price - slope * blocks, 2)})
+# slope sliders
+with st.sidebar.expander("📉 Slopes"):
+    for k,v in st.session_state.slopes.items():
+        st.session_state.slopes[k] = st.slider(k, -1.0, 1.0, v, 0.0001)
+
+# preset save/load
+with st.sidebar.expander("💾 Presets"):
+    preset_name = st.text_input("Preset name")
+    if st.button("Save current"):
+        st.session_state.presets[preset_name] = deepcopy(st.session_state.slopes)
+    if st.session_state.presets:
+        sel = st.selectbox("Load preset", list(st.session_state.presets))
+        if st.button("Load"):
+            st.session_state.slopes.update(st.session_state.presets[sel])
+
+# share-link
+enc = base64.b64encode(json.dumps(st.session_state.slopes).encode()).decode()
+share_url = f"{st.get_url()}?s={enc}"
+st.sidebar.markdown(f"[🔗 Share this view]({share_url})", unsafe_allow_html=True)
+
+# ─────────────────────────── TIME HELPERS ─────────────────────────────────────
+def blocks_spx(a,t):
+    b=0
+    while a<t:
+        if a.hour!=16: b+=1
+        a+=timedelta(minutes=30)
+    return b
+def blocks_stock(a,t): return max(0,int((t-a).total_seconds()//1800))
+def gen_slots(): return [(datetime(2025,1,1,7,30)+timedelta(minutes=30*i)).strftime("%H:%M") for i in range(15)]
+
+def line(price,slope,anchor,fd,spx=True):
+    rows=[]
+    for s in gen_slots():
+        h,m=map(int,s.split(":"))
+        tgt=datetime.combine(fd,time(h,m))
+        b = blocks_spx(anchor,tgt) if spx else blocks_stock(anchor,tgt)
+        rows.append({"Time":s,"Projected":round(price+slope*b,2)})
     return pd.DataFrame(rows)
 
-def to_csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode("utf-8")
+def fan(price,slope,anchor,fd,spx=True):
+    rows=[]
+    for s in gen_slots():
+        h,m=map(int,s.split(":"))
+        tgt=datetime.combine(fd,time(h,m))
+        b = blocks_spx(anchor,tgt) if spx else blocks_stock(anchor,tgt)
+        rows.append({"Time":s,"Entry":round(price+slope*b,2),"Exit":round(price-slope*b,2)})
+    return pd.DataFrame(rows)
 
-# ── SIDEBAR SETTINGS ──────────────────────────────────────────────────────────
-forecast_date = st.sidebar.date_input("Forecast Date", date.today() + timedelta(days=1))
+# ─────────────────────────── UI HEADER & TABS ────────────────────────────────
+st.markdown(f'<div class="hdr"><h2>{PAGE_ICON} {PAGE_TITLE}</h2></div>', unsafe_allow_html=True)
+tabs = st.tabs([f"{ICONS[k]} {k}" for k in ICONS])
 
-with st.sidebar.expander("⏱ Time Slots"):
-    start_t = st.time_input("Start", value=time(7,30), step=1800)
-    end_t   = st.time_input("End",   value=time(14,30), step=1800)
-    freq    = st.number_input("Interval (min)", 15, 60, 30, 15)
-TIME_SLOTS = gen_time_slots(start_t, end_t, freq)
-
-st.sidebar.divider()
-
-with st.sidebar.expander("📉 Slopes"):
-    for k in SLOPES:
-        SLOPES[k] = st.slider(k.replace("_"," "), -1.0, 1.0, SLOPES[k], 0.0001)
-
-with st.sidebar.container():
-    st.markdown(f"<small>Version {VERSION}</small>", unsafe_allow_html=True)
-
-# ── HEADER ────────────────────────────────────────────────────────────────────
-st.markdown('<div class="main-container">', unsafe_allow_html=True)
-st.markdown(f'<div class="app-header"><h1>{PAGE_ICON} {PAGE_TITLE}</h1></div>', unsafe_allow_html=True)
-tabs = st.tabs([f"{ICONS[t]} {t}" for t in ICONS])
-
-# ── SPX TAB ───────────────────────────────────────────────────────────────────
+# ─────────────────────────── SPX TAB ──────────────────────────────────────────
 with tabs[0]:
-    st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
-    c1,c2,c3 = st.columns(3)
-    hp = c1.number_input("🔼 High Price", 6185.8, key="spx_hp", format="%.2f")
-    ht = c1.time_input("🕒 High Time",  time(11,30), key="spx_ht")
-    cp = c2.number_input("⏹️ Close Price", 6170.2, key="spx_cp", format="%.2f")
-    ct = c2.time_input("🕒 Close Time", time(15,0),   key="spx_ct")
-    lp = c3.number_input("🔽 Low Price", 6130.4, key="spx_lp", format="%.2f")
-    lt = c3.time_input("🕒 Low Time",   time(13,30), key="spx_lt")
+    st.write(f"### {ICONS['SPX']} SPX Forecast ({day_group})")
+    lay = (lambda *a: (st,)) if st.session_state.mobile else st.columns
+    c1,c2,c3 = lay(3)
+    hp = c1.number_input("High Price",6185.8,help="Yesterday’s intraday high")
+    ht = c1.time_input("High Time", time(11,30))
+    cp = c2.number_input("Close Price",6170.2)
+    ct = c2.time_input("Close Time", time(15,0))
+    lp = c3.number_input("Low Price",6130.4)
+    lt = c3.time_input("Low Time",  time(13,30))
 
-    if st.button("🔮 Generate SPX"):
-        with st.spinner("Calculating forecasts…"):
-            df_high  = generate_table(hp, SLOPES["SPX_HIGH"],
-                                      datetime.combine(forecast_date - timedelta(days=1), ht),
-                                      True)
-            df_close = generate_table(cp, SLOPES["SPX_CLOSE"],
-                                      datetime.combine(forecast_date - timedelta(days=1), ct),
-                                      True)
-            pred_open  = df_high.iloc[0]["Entry"]
-            pred_close = df_close.iloc[-1]["Exit"]
+    if day_group=="Tuesday":
+        st.subheader("Overnight Contract Line")
+        o1,o2 = lay(2)
+        cl1_t = o1.time_input("Low-1 Time", time(2,0))
+        cl1_p = o1.number_input("Low-1 Price",6100.0,step=0.1)
+        cl2_t = o2.time_input("Low-2 Time", time(3,30))
+        cl2_p = o2.number_input("Low-2 Price",6120.0,step=0.1)
+        cl_t,cl_p = st.time_input("Contract Low Time", time(7,30)), st.number_input("Contract Low Price",5.0)
 
-        st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
-        for t,v,i in [("Predicted Open",pred_open,"📈"),("Predicted Close",pred_close,"📉")]:
-            st.markdown(f"""
-              <div class="anchor-card">
-                <div class="icon-wrapper">{i}</div>
-                <div><div class="title">{t}</div><div class="value">{v:.2f}</div></div>
-              </div>""", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+    if day_group=="Thursday":
+        st.subheader("Overnight Contract Line")
+        p1,p2 = lay(2)
+        ol1_t = p1.time_input("Low-1 Time", time(2,0))
+        ol1_p = p1.number_input("Low-1 Price",6100.0,step=0.1)
+        ol2_t = p2.time_input("Low-2 Time", time(3,30))
+        ol2_p = p2.number_input("Low-2 Price",6120.0,step=0.1)
+        b_t,b_p = st.time_input("Bounce Low Time", time(7,30)), st.number_input("Bounce Low Price",6100.0)
 
-        # anchor tables
-        pack = BytesIO()
-        with zipfile.ZipFile(pack, "w") as zf:
-            for title, price, slope, tme in [
-                ("High Anchor",hp,SLOPES["SPX_HIGH"],ht),
-                ("Close Anchor",cp,SLOPES["SPX_CLOSE"],ct),
-                ("Low Anchor",lp,SLOPES["SPX_LOW"],lt),
-            ]:
-                skip = True   # SPX skip rule
-                df = generate_table(price, slope,
-                                    datetime.combine(forecast_date - timedelta(days=1), tme),
-                                    skip)
-                st.subheader(f"{'🔼' if 'High' in title else '⏹️' if 'Close' in title else '🔽'} {title}")
-                st.dataframe(df, use_container_width=True)
-                csv_bytes = to_csv_bytes(df)
-                st.download_button(f"Download {title} CSV", csv_bytes,
-                                   f"SPX_{title.replace(' ','_')}.csv", "text/csv")
-                st.line_chart(df.set_index("Time")[["Entry","Exit"]])
-                zf.writestr(f"SPX_{title.replace(' ','_')}.csv", csv_bytes)
-        st.download_button("⬇️ Download All SPX CSVs (Zip)", pack.getvalue(),
-                           "SPX_Forecasts.zip", "application/zip")
-        st.balloons()
+    if st.button("Run Forecast"):
+        prog = st.progress(0.0)
+        ah,ac,al = [datetime.combine(fcast_date-timedelta(days=1),t) for t in (ht,ct,lt)]
 
-# ── OTHER STOCKS ──────────────────────────────────────────────────────────────
-for idx, tic in enumerate(list(ICONS)[1:], 1):
+        if day_group=="Tuesday":
+            dt1,dt2 = datetime.combine(fcast_date-timedelta(days=1),cl1_t), datetime.combine(fcast_date-timedelta(days=1),cl2_t)
+            alt_slope = (cl2_p-cl1_p)/(blocks_spx(dt1,dt2) or 1)
+            st.write("#### Contract Line (2-pt slope)")
+            df=line(cl1_p,alt_slope,dt1,fcast_date); st.dataframe(df,use_container_width=True)
+            alt.Chart(df).mark_line().encode(x="Time",y="Projected",tooltip=["Time","Projected"]).interactive().properties(height=180).configure_line(color=CB_COLORS[0]).display()
+            prog.progress(0.4)
+
+            st.write("#### Fixed SPX Line (-0.525)")
+            df2=line(cl_p,FIXED_CL_SLOPE,datetime.combine(fcast_date,cl_t),fcast_date); st.dataframe(df2,use_container_width=True)
+            alt.Chart(df2).mark_line().encode(x="Time",y="Projected").properties(height=180).display()
+            prog.progress(0.8)
+
+        elif day_group=="Thursday":
+            dt1,dt2 = datetime.combine(fcast_date-timedelta(days=1),ol1_t), datetime.combine(fcast_date-timedelta(days=1),ol2_t)
+            alt_slope = (ol2_p-ol1_p)/(blocks_spx(dt1,dt2) or 1)
+            st.write("#### Contract Line (2-pt slope)")
+            df=line(ol1_p,alt_slope,dt1,fcast_date); st.dataframe(df,use_container_width=True)
+            alt.Chart(df).mark_line().encode(x="Time",y="Projected").properties(height=180).display()
+            prog.progress(0.5)
+
+            st.write("#### Bounce-Low Line")
+            df2=line(b_p,st.session_state.slopes["SPX_LOW"],datetime.combine(fcast_date-timedelta(days=1),b_t),fcast_date)
+            st.dataframe(df2,use_container_width=True)
+            alt.Chart(df2).mark_line(strokeDash=[4,2]).encode(x="Time",y="Projected").properties(height=180).display()
+            prog.progress(0.8)
+
+        else:
+            st.markdown('<div class="cards">','unsafe_allow_html')
+            for t,v,i,c in [("High",hp,"🔼",CB_COLORS[0]),("Close",cp,"⏹️",CB_COLORS[1]),("Low",lp,"🔽",CB_COLORS[2])]:
+                st.markdown(f'<div class="card"><span class="ic">{i}</span>'
+                            f'<div><div class="ttl">{t} Anchor</div><div class="val">{v:.2f}</div></div></div>',unsafe_allow_html=True)
+            st.markdown('</div>',unsafe_allow_html=True)
+            for t,v,s,an,col in [("High",hp,"SPX_HIGH",ah,CB_COLORS[0]),
+                                 ("Close",cp,"SPX_CLOSE",ac,CB_COLORS[1]),
+                                 ("Low", lp,"SPX_LOW", al,CB_COLORS[2])]:
+                st.write(f"#### {t} Anchor Fan")
+                df=fan(v,st.session_state.slopes[s],an,fcast_date)
+                st.dataframe(df,use_container_width=True)
+                alt.Chart(df).transform_fold(["Entry","Exit"]).mark_line().encode(
+                    x="Time",y="value:Q",color="key:N").properties(height=180).display()
+            prog.progress(0.9)
+        prog.empty()
+        st.success("Done!")
+
+# ───────────────────────── OTHER TICKERS ──────────────────────────────────────
+def stock_tab(idx,tic,color):
     with tabs[idx]:
-        st.markdown(f'<div class="tab-header">{ICONS[tic]} {tic} Forecast</div>', unsafe_allow_html=True)
-        c1,c2 = st.columns(2)
-        low_p = c1.number_input("🔽 Prev-Day Low Price", key=f"{tic}_low_p", format="%.2f")
-        low_t = c1.time_input ("🕒 Prev-Day Low Time",  time(7,30), key=f"{tic}_low_t")
-        high_p= c2.number_input("🔼 Prev-Day High Price",key=f"{tic}_high_p", format="%.2f")
-        high_t= c2.time_input ("🕒 Prev-Day High Time", time(7,30), key=f"{tic}_high_t")
+        st.write(f"### {ICONS[tic]} {tic}")
+        col = (lambda *a:(st,)) if st.session_state.mobile else st.columns
+        a,b = col(2)
+        lp,lt = a.number_input("Prev-day Low",key=f"{tic}lp"), a.time_input("Low Time",time(7,30),key=f"{tic}lt")
+        hp,ht = b.number_input("Prev-day High",key=f"{tic}hp"), b.time_input("High Time",time(7,30),key=f"{tic}ht")
+        if st.button("Generate",key=f"go{tic}"):
+            a_low,a_high=[datetime.combine(fcast_date,t) for t in (lt,ht)]
+            df_low  = fan(lp,st.session_state.slopes[tic],a_low ,fcast_date,spx=False)
+            df_high = fan(hp,st.session_state.slopes[tic],a_high,fcast_date,spx=False)
+            st.dataframe(df_low,use_container_width=True)
+            st.dataframe(df_high,use_container_width=True)
+            alt.layer(
+                alt.Chart(df_low).mark_line(strokeDash=[2,2]).encode(x="Time",y="Entry"),
+                alt.Chart(df_high).mark_line().encode(x="Time",y="Entry")
+            ).properties(height=180).display()
 
-        if st.button(f"🔮 Generate {tic}"):
-            st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
-            for t,v,i in [("Low Anchor",low_p,"🔽"),("High Anchor",high_p,"🔼")]:
-                st.markdown(f"""
-                  <div class="anchor-card">
-                    <div class="icon-wrapper">{i}</div>
-                    <div><div class="title">{t}</div><div class="value">{v:.2f}</div></div>
-                  </div>""", unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+for i,(tic,col) in enumerate(zip(list(ICONS)[1:],CB_COLORS[1:]),1): stock_tab(i,tic,col)
 
-            buf = BytesIO()
-            with zipfile.ZipFile(buf,"w") as zf:
-                for title, price, tme in [("Low Anchor",low_p,low_t),("High Anchor",high_p,high_t)]:
-                    df = generate_table(price, SLOPES[tic],
-                                        datetime.combine(forecast_date, tme),
-                                        False)
-                    st.subheader(f"{'🔻' if 'Low' in title else '🔺'} {title}")
-                    st.dataframe(df, use_container_width=True)
-                    csvb = to_csv_bytes(df)
-                    st.download_button(f"Download {tic}_{title}.csv", csvb,
-                                       f"{tic}_{title.replace(' ','_')}.csv", "text/csv")
-                    st.line_chart(df.set_index("Time")[["Entry","Exit"]])
-                    zf.writestr(f"{tic}_{title.replace(' ','_')}.csv", csvb)
-            st.download_button(f"⬇️ Download All {tic} CSVs (Zip)", buf.getvalue(),
-                               f"{tic}_Forecasts.zip", "application/zip")
-            st.snow()
+# ───────────────────────── EXPORT EXCEL ───────────────────────────────────────
+with st.sidebar:
+    if st.button("📤 Export all tabs to Excel"):
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer,engine="xlsxwriter") as xw:
+            for tic in ICONS:
+                tmp = st.session_state.get(f"df_{tic}")
+                if tmp is not None: tmp.to_excel(xw,sheet_name=tic,index=False)
+        st.download_button("Download workbook",buffer.getvalue(),"forecast.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# ── FOOTER ────────────────────────────────────────────────────────────────────
-st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown(
-    f"<div style='text-align:center;font-size:0.8rem;'>"
-    f"Dr Didy Forecast v{VERSION} — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    f"</div>", unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
+# ───────────────────────── FOOTER ─────────────────────────────────────────────
+st.markdown(f"<hr><center style='font-size:.8rem'>v{VERSION} • "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</center>",unsafe_allow_html=True)
