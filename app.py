@@ -183,7 +183,7 @@ with st.sidebar:
         SLOPES[k] = st.slider(k.replace("_"," "), -1.0, 1.0, SLOPES[k], step=0.0001)
 
 # --- TABS ---
-tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","📦 AMZN","🔍 GOOGL"])
+tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA",    "🪟 MSFT","🍎 AAPL","📦 AMZN","🔍 GOOGL"])
 
 # --- SPX TAB ---
 with tabs[0]:
