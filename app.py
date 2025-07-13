@@ -14,7 +14,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# ── SESSION STATE DEFAULTS ────────────────────────────────────────────────────
+# ── SESSION STATE DEFAULTS ───────────────────────────────────────────────────
 if "scenarios" not in st.session_state:
     st.session_state.scenarios: Dict[str, Any] = {}
 if "slopes" not in st.session_state:
@@ -41,11 +41,18 @@ st.session_state.card_bg = st.sidebar.color_picker(
     "Card Background", st.session_state.card_bg
 )
 
+# ── UPDATED CSS: proper arrow instead of ligature text ────────────────────────
 BASE_CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
 * {{ font-family:'Inter',sans-serif!important; }}
+/* hide default text and inject real arrows */
+[data-testid="collapsedControl"] span {{ display: none !important; }}
+[data-testid="collapsedControl"]::before {{
+  content: '≫';
+  font-size: 1.5rem;
+  color: var(--text, #888);
+}}
 :root {{
   --bg: #fff; --text: #1f2937;
   --primary: {st.session_state.primary_color};
@@ -127,18 +134,16 @@ def build_table(anc: Anchor, is_spx: bool, forecast_date: date) -> pd.DataFrame:
         rows.append({"Time": slot, "Entry": round(e,2), "Exit": round(x,2)})
     return pd.DataFrame(rows)
 
-# ── SETTINGS PAGE ─────────────────────────────────────────────────────────────
+# ── PAGES ──────────────────────────────────────────────────────────────────────
 if page == "Settings":
-    st.header("⚙️ Global Settings")
-    st.subheader("Slopes (keep strategy intact)")
+    st.header("⚙️ Settings")
     for k, v in st.session_state.slopes.items():
         st.session_state.slopes[k] = st.slider(k.replace("_"," "), -1.0, 1.0, v, step=0.0001)
     st.markdown("---")
     st.subheader("Theme & Colors")
-    st.write("Use the sidebar to set your palette.")
+    st.write("Use sidebar to pick colors.")
     st.markdown("---")
-    st.subheader("Export Settings")
-    df_settings = pd.DataFrame({
+    df = pd.DataFrame({
         "Setting": list(st.session_state.slopes.keys()) + ["Primary Color","Card Background","Theme"],
         "Value": list(st.session_state.slopes.values()) + [
             st.session_state.primary_color,
@@ -146,13 +151,12 @@ if page == "Settings":
             st.session_state.theme
         ]
     })
-    st.data_editor(df_settings, use_container_width=True)
+    st.data_editor(df, use_container_width=True)
 
-# ── SCENARIOS PAGE ────────────────────────────────────────────────────────────
 elif page == "Scenarios":
-    st.header("💾 Saved Scenarios")
-    name = st.text_input("Scenario Name")
-    if st.button("Save Scenario"):
+    st.header("💾 Scenarios")
+    name = st.text_input("Name")
+    if st.button("Save"):
         st.session_state.scenarios[name] = {
             "slopes": st.session_state.slopes.copy(),
             "primary_color": st.session_state.primary_color,
@@ -170,29 +174,27 @@ elif page == "Scenarios":
         if c3.button(f"Del##{nm}"):
             del st.session_state.scenarios[nm]
 
-# ── FORECAST PAGE ─────────────────────────────────────────────────────────────
 else:
     st.markdown("""
     <div class="hero">
       <h1>📊 Dr Didy Forecast</h1>
-      <p style="opacity:.8;">Standalone intraday block projections<br/>SPX & Top Tech Stocks</p>
+      <p style="opacity:.8;">Standalone intraday block projections<br/>SPX & Top Tech</p>
     </div>
     """, unsafe_allow_html=True)
 
     forecast_date = st.date_input("Forecast Date", date.today() + timedelta(days=1))
-
     tabs = st.tabs([f"{ICONS[s]} {s}" for s in ICONS])
 
-    # SPX Tab
+    # SPX tab
     with tabs[0]:
         st.markdown('<div class="tab-header">🧭 SPX Forecast</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
-        hp = c1.number_input("🔼 High Price", value=6185.8, format="%.2f", key="spx_hp")
-        ht = c1.time_input("🕒 High Time", value=time(11,30), step=1800, key="spx_ht")
-        cp = c2.number_input("⏹️ Close Price", value=6170.2, format="%.2f", key="spx_cp")
-        ct = c2.time_input("🕒 Close Time", value=time(15,0), step=1800, key="spx_ct")
-        lp = c3.number_input("🔽 Low Price", value=6130.4, format="%.2f", key="spx_lp")
-        lt = c3.time_input("🕒 Low Time", value=time(13,30), step=1800, key="spx_lt")
+        hp = c1.number_input("🔼 High Price", 6185.8, format="%.2f", key="spx_hp")
+        ht = c1.time_input("🕒 High Time", time(11,30), step=1800, key="spx_ht")
+        cp = c2.number_input("⏹️ Close Price", 6170.2, format="%.2f", key="spx_cp")
+        ct = c2.time_input("🕒 Close Time", time(15,0), step=1800, key="spx_ct")
+        lp = c3.number_input("🔽 Low Price", 6130.4, format="%.2f", key="spx_lp")
+        lt = c3.time_input("🕒 Low Time", time(13,30), step=1800, key="spx_lt")
 
         if st.button("🔮 Generate SPX", use_container_width=True):
             anchors = [
@@ -202,12 +204,12 @@ else:
             ]
             st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
             for a in anchors:
-                st.markdown(f'''
+                st.markdown(f"""
                     <div class="anchor-card">
                       <div class="icon">{a.icon}</div>
                       <div><div class="title">{a.label}</div><div class="value">{a.price:.2f}</div></div>
                     </div>
-                ''', unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
             for a in anchors:
@@ -232,15 +234,15 @@ else:
                 tweet_url = "https://twitter.com/intent/tweet?text=" + urllib.parse.quote(tweet_text)
                 st.markdown(f"[🐦 Tweet {a.label} Forecast]({tweet_url})")
 
-    # Other stock tabs
+    # other stocks
     for idx, sym in enumerate(list(ICONS)[1:], start=1):
         with tabs[idx]:
             st.markdown(f'<div class="tab-header">{ICONS[sym]} {sym} Forecast</div>', unsafe_allow_html=True)
             c1, c2 = st.columns(2)
             low_p  = c1.number_input("🔽 Low Price", format="%.2f", key=f"{sym}_lp")
-            low_t  = c1.time_input("🕒 Low Time", value=time(7,30), step=1800, key=f"{sym}_lt")
+            low_t  = c1.time_input("🕒 Low Time", time(7,30), step=1800, key=f"{sym}_lt")
             high_p = c2.number_input("🔼 High Price", format="%.2f", key=f"{sym}_hp")
-            high_t = c2.time_input("🕒 High Time", value=time(7,30), step=1800, key=f"{sym}_ht")
+            high_t = c2.time_input("🕒 High Time", time(7,30), step=1800, key=f"{sym}_ht")
 
             if st.button(f"🔮 Generate {sym}", use_container_width=True):
                 anchors = [
@@ -249,12 +251,12 @@ else:
                 ]
                 st.markdown('<div class="metric-cards">', unsafe_allow_html=True)
                 for a in anchors:
-                    st.markdown(f'''
+                    st.markdown(f"""
                         <div class="anchor-card">
                           <div class="icon">{a.icon}</div>
                           <div><div class="title">{a.label}</div><div class="value">{a.price:.2f}</div></div>
                         </div>
-                    ''', unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 for a in anchors:
