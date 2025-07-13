@@ -68,8 +68,175 @@ st.set_page_config(
 )
 
 # --- THEME CSS BLOCKS ---
-light_css = """<style>…</style>"""
-dark_css  = """<style>…</style>"""
+light_css = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+:root {
+  --bg: #ffffff;
+  --text: #1f2937;
+  --primary: #3b82f6;
+  --card-bg: #f3f4f6;
+  --radius: 8px;
+  --shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+body {
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+.main-container {
+  padding: 1rem;
+  max-width: 1200px;
+  margin: auto;
+}
+.app-header {
+  background-color: var(--primary);
+  color: #fff;
+  padding: 1rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+.tab-header {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.input-card {
+  background-color: var(--card-bg);
+  padding: 1rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+.metric-cards {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.anchor-card {
+  background-color: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.anchor-card .icon-wrapper {
+  font-size: 2rem;
+  margin-right: 0.5rem;
+}
+.anchor-card .title {
+  font-size: 0.875rem;
+  color: var(--text);
+}
+.anchor-card .value {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.stButton>button {
+  background-color: var(--primary) !important;
+  color: #fff !important;
+  border: none;
+  border-radius: var(--radius) !important;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  transition: opacity 0.2s;
+}
+.stButton>button:hover {
+  opacity: 0.9;
+}
+.stDataFrame > div {
+  border: none !important;
+}
+</style>
+"""
+
+dark_css = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+:root {
+  --bg: #0f172a;
+  --text: #e2e8f0;
+  --primary: #6366f1;
+  --card-bg: #1e293b;
+  --radius: 8px;
+  --shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+body {
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+  font-family: 'Inter', sans-serif !important;
+}
+.main-container {
+  padding: 1rem;
+  max-width: 1200px;
+  margin: auto;
+}
+.app-header {
+  background-color: var(--primary);
+  color: #fff;
+  padding: 1rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+.tab-header {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.input-card {
+  background-color: var(--card-bg);
+  padding: 1rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+.metric-cards {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.anchor-card {
+  background-color: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.anchor-card .icon-wrapper {
+  font-size: 2rem;
+  margin-right: 0.5rem;
+}
+.anchor-card .title {
+  font-size: 0.875rem;
+  color: var(--text);
+}
+.anchor-card .value {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.stButton>button {
+  background-color: var(--primary) !important;
+  color: #fff !important;
+  border: none;
+  border-radius: var(--radius) !important;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  transition: opacity 0.2s;
+}
+.stButton>button:hover {
+  opacity: 0.9;
+}
+.stDataFrame > div {
+  border: none !important;
+}
+</style>
+"""
 
 with st.sidebar:
     theme = st.radio("🎨 Theme", ["Light","Dark"])
@@ -219,7 +386,6 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","MSFT","AMZN","GOOGL"], start=1)
         ht = col2.time_input("🕒 Prev-Day High Time", datetime(2025,1,1,7,30).time(), step=1800, key=f"{label}_high_time")
 
         if st.button(f"🔮 Generate {label}", key=f"btn_{label}"):
-            # ← anchor now uses forecast_date, not yesterday
             a_low  = datetime.combine(forecast_date, lt)
             a_high = datetime.combine(forecast_date, ht)
 
