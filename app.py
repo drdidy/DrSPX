@@ -1,5 +1,4 @@
-# Dr Didy Forecast  – v1.4.1
-# fixes: share-link & Altair rendering
+# Dr Didy Forecast – v1.4.2  (uses st.query_params)
 
 import json, base64, altair as alt
 from io import BytesIO
@@ -11,12 +10,12 @@ import streamlit as st
 
 # ───────────────────────── CONSTANTS ──────────────────────────────────────────
 PAGE_TITLE, PAGE_ICON, LAYOUT, SIDEBAR = "Dr Didy Forecast", "📈", "wide", "expanded"
-VERSION  = "1.4.1"
+VERSION  = "1.4.2"
 FIXED_CL_SLOPE = -0.5250
 
 BASE_SLOPES = {
     "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
-    "TSLA": -0.1508, "NVDA": -0.0485, "AAPL": -0.075, "MSFT": -0.1964,
+    "TSLA": -0.1508, "NVDA": -0.0485, "AAPL": -0.0750, "MSFT": -0.1964,
     "AMZN": -0.0782, "GOOGL": -0.0485,
 }
 STRAT = {k: deepcopy(BASE_SLOPES) for k in ["Mon/Wed/Fri", "Tuesday", "Thursday"]}
@@ -31,8 +30,8 @@ if "theme" not in st.session_state:
     st.session_state.update(theme="Light", slopes=deepcopy(BASE_SLOPES),
                             presets={}, mobile=False)
 
-# restore settings from URL suffix
-q = st.experimental_get_query_params()
+# restore settings from URL suffix (now using st.query_params)
+q = st.query_params
 if q.get("s"):
     try:
         st.session_state.slopes.update(
@@ -93,10 +92,9 @@ with st.sidebar.expander("💾 Presets"):
         if st.button("Load"):
             st.session_state.slopes.update(st.session_state.presets[sel])
 
-# share link (relative suffix—just append to the current URL)
+# share link suffix (append to current URL)
 enc = base64.b64encode(json.dumps(st.session_state.slopes).encode()).decode()
-share_suffix = f"?s={enc}"
-st.sidebar.text_input("🔗 Share-link suffix", value=share_suffix, disabled=True)
+st.sidebar.text_input("🔗 Share-link suffix", value=f"?s={enc}", disabled=True)
 
 # ───────────────────────── TIME HELPERS ───────────────────────────────────────
 def slots(): return [(datetime(2025,1,1,7,30)+timedelta(minutes=30*i)).strftime("%H:%M") for i in range(15)]
@@ -126,7 +124,6 @@ def fan(p,s,anchor,fd,spx=True):
         rows.append({"Time":sstr,"Entry":round(p+s*b,2),"Exit":round(p-s*b,2)})
     return pd.DataFrame(rows)
 
-# ───────────────────────── LAYOUT HELPERS ─────────────────────────────────────
 def cols(n): return (st,) if st.session_state.mobile else st.columns(n)
 
 # ───────────────────────── HEADER & TABS ──────────────────────────────────────
@@ -159,7 +156,6 @@ with tabs[0]:
         prog = st.progress(0.0)
         ah,ac,al = [datetime.combine(fcast_date-timedelta(days=1),t) for t in (ht,ct,lt)]
 
-        # Tuesday logic
         if day_group == "Tuesday":
             dt1,dt2 = datetime.combine(fcast_date-timedelta(days=1),cl1_t), datetime.combine(fcast_date-timedelta(days=1),cl2_t)
             alt_slope = (cl2_p-cl1_p)/(blk_spx(dt1,dt2) or 1)
@@ -180,7 +176,6 @@ with tabs[0]:
             )
             prog.progress(0.8)
 
-        # Thursday logic
         elif day_group == "Thursday":
             dt1,dt2 = datetime.combine(fcast_date-timedelta(days=1),ol1_t), datetime.combine(fcast_date-timedelta(days=1),ol2_t)
             alt_slope = (ol2_p-ol1_p)/(blk_spx(dt1,dt2) or 1)
@@ -201,8 +196,7 @@ with tabs[0]:
             )
             prog.progress(0.8)
 
-        # Mon/Wed/Fri logic
-        else:
+        else:  # Mon/Wed/Fri
             st.markdown('<div class="cards">', unsafe_allow_html=True)
             for t,v,i,c in [("High",hp,"🔼",CB_COLORS[0]),("Close",cp,"⏹️",CB_COLORS[1]),("Low",lp,"🔽",CB_COLORS[2])]:
                 st.markdown(f'<div class="card"><span class="ic">{i}</span>'
@@ -215,9 +209,11 @@ with tabs[0]:
                 st.write(f"#### {t} Anchor Fan")
                 df = fan(v,st.session_state.slopes[s],anc,fcast_date)
                 st.dataframe(df,use_container_width=True)
-                chart = alt.Chart(df).transform_fold(["Entry","Exit"]).mark_line().encode(
-                    x="Time",y="value:Q",color="key:N")
-                st.altair_chart(chart,use_container_width=True)
+                st.altair_chart(
+                    alt.Chart(df).transform_fold(["Entry","Exit"]).mark_line().encode(
+                        x="Time",y="value:Q",color="key:N"),
+                    use_container_width=True
+                )
             prog.progress(0.9)
 
         prog.empty()
@@ -237,11 +233,13 @@ def stock(idx,tic,color):
             df_high = fan(hp, st.session_state.slopes[tic], high_anchor, fcast_date, spx=False)
             st.dataframe(df_low,use_container_width=True)
             st.dataframe(df_high,use_container_width=True)
-            layer = alt.layer(
-                alt.Chart(df_low ).mark_line(strokeDash=[3,3],color=color).encode(x="Time",y="Entry"),
-                alt.Chart(df_high).mark_line(color=color).encode(x="Time",y="Entry")
+            st.altair_chart(
+                alt.layer(
+                    alt.Chart(df_low ).mark_line(strokeDash=[3,3],color=color).encode(x="Time",y="Entry"),
+                    alt.Chart(df_high).mark_line(color=color).encode(x="Time",y="Entry")
+                ),
+                use_container_width=True
             )
-            st.altair_chart(layer,use_container_width=True)
 
 for i,(tic,col) in enumerate(zip(list(ICONS)[1:],CB_COLORS[1:]),1):
     stock(i,tic,col)
