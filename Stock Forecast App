@@ -23,8 +23,6 @@ if "slopes" not in st.session_state:
         "TSLA": -0.1500,     "NVDA": -0.0485,      "AAPL": -0.075,
         "MSFT": -0.1964,     "AMZN": -0.0782,      "GOOGL": -0.0485,
     }
-
-# ── THEME & COLORS ───────────────────────────────────────────────────────────
 if "primary_color" not in st.session_state:
     st.session_state.primary_color = "#3b82f6"
 if "card_bg" not in st.session_state:
@@ -32,15 +30,22 @@ if "card_bg" not in st.session_state:
 if "theme" not in st.session_state:
     st.session_state.theme = "Light"
 
-st.session_state.theme = st.sidebar.selectbox("🎨 Theme", ["Light", "Dark"], index=["Light","Dark"].index(st.session_state.theme))
-st.session_state.primary_color = st.sidebar.color_picker("Primary Color", st.session_state.primary_color)
-st.session_state.card_bg       = st.sidebar.color_picker("Card Background", st.session_state.card_bg)
+# ── THEME & COLORS ───────────────────────────────────────────────────────────
+st.session_state.theme = st.sidebar.selectbox(
+    "🎨 Theme", ["Light", "Dark"], index=["Light","Dark"].index(st.session_state.theme)
+)
+st.session_state.primary_color = st.sidebar.color_picker(
+    "Primary Color", st.session_state.primary_color
+)
+st.session_state.card_bg = st.sidebar.color_picker(
+    "Card Background", st.session_state.card_bg
+)
 
 BASE_CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
 * {{ font-family:'Inter',sans-serif!important; }}
-[data-testid="collapsedControl"] {{ visibility: hidden!important; }}
 :root {{
   --bg: #fff; --text: #1f2937;
   --primary: {st.session_state.primary_color};
@@ -271,4 +276,7 @@ else:
                     csv = df.to_csv(index=False).encode()
                     st.download_button(f"⬇️ Download {sym} {a.label} CSV", csv, f"{sym}_{a.label}.csv", use_container_width=True)
 
-    st.markdown("<footer>© 2025 Dr Didy Forecast • Standalone • Built with ❤ & Streamlit</footer>", unsafe_allow_html=True)
+    st.markdown(
+        "<footer>© 2025 Dr Didy Forecast • Standalone • Built with ❤ & Streamlit</footer>",
+        unsafe_allow_html=True
+    )
