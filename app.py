@@ -1,23 +1,23 @@
-# Dr Didy SPX Forecast – v1.5.2
+# Dr Didy SPX Forecast – v1.5.3
 # -------------------------------------------------
 # • META & NFLX coverage
-# • Tuesday & Thursday now show anchor-trend tables first,
-#   then their special contract-line tables
-# • Contract-Low input exists only on Tuesday
-# • Removed mobile-mode checkbox (auto-responsive)
-# • 08:30-14:30 SPX trends; 07:30-14:30 others
-# • 16:00-17:00 block skipped for SPX
-# • Playbook page unchanged
+# • Anchor cards + three SPX anchor-trend tables shown every weekday
+# • Tuesday adds: 2-point contract line + fixed contract line
+# • Thursday adds: 2-point contract line + bounce-low line
+# • Low-1 / Low-2 / Contract-Low inputs now accept small option prices
+# • 08:30-14:30 SPX trends; others 07:30-14:30
+# • 16:00-17:00 block skipped for SPX maintenance
+# • Playbook page lives in /pages/1_Playbook.py
 
 import json, base64, streamlit as st
 from datetime import datetime, date, time, timedelta
 from copy import deepcopy
 import pandas as pd
 
-# ── CONSTANTS ────────────────────────────────────────────────────────────────
+# ───────────────────────── CONSTANTS ──────────────────────────────────────────
 PAGE_TITLE, PAGE_ICON = "DRSPX Forecast", "📈"
-VERSION  = "1.5.2"
-FIXED_CL_SLOPE = -0.5250
+VERSION  = "1.5.3"
+FIXED_CL_SLOPE = -0.5250   # Tuesday fixed line
 
 BASE_SLOPES = {
     "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
@@ -31,9 +31,10 @@ ICONS = {
     "META":"📘","NFLX":"📺"
 }
 
-# ── SESSION INIT ─────────────────────────────────────────────────────────────
+# ─────────────────────── SESSION INIT ─────────────────────────────────────────
 if "theme" not in st.session_state:
-    st.session_state.update(theme="Light", slopes=deepcopy(BASE_SLOPES),
+    st.session_state.update(theme="Light",
+                            slopes=deepcopy(BASE_SLOPES),
                             presets={})
 
 if st.query_params.get("s"):
@@ -43,10 +44,10 @@ if st.query_params.get("s"):
     except Exception:
         pass
 
-# ── PAGE CONFIG ──────────────────────────────────────────────────────────────
+# ───────────────────────── PAGE CONFIG ────────────────────────────────────────
 st.set_page_config(PAGE_TITLE, PAGE_ICON, "wide", initial_sidebar_state="expanded")
 
-# ── CSS (cards + banner) ─────────────────────────────────────────────────────
+# ──────────────────────────── CSS ─────────────────────────────────────────────
 st.markdown(
 """<style>
 html,body{font-family:'Inter',sans-serif}
@@ -79,9 +80,9 @@ def card(kind,sym,title,val):
     <div><div class="ttl">{title}</div><div class="val">{val:.2f}</div></div></div>""",
     unsafe_allow_html=True)
 
-cols = st.columns  # always responsive; Streamlit stacks on phones
+cols = st.columns  # Streamlit handles responsiveness automatically
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
+# ───────────────────────── SIDEBAR ────────────────────────────────────────────
 st.session_state.theme = st.sidebar.radio("🎨 Theme",["Light","Dark"],
     index=0 if st.session_state.theme=="Light" else 1)
 
@@ -94,23 +95,24 @@ with st.sidebar.expander("📉 Slopes"):
         st.session_state.slopes[k]=st.slider(k,-1.0,1.0,st.session_state.slopes[k],0.0001)
 
 with st.sidebar.expander("💾 Presets"):
-    pn = st.text_input("Preset name")
-    if st.button("Save current"):
-        st.session_state.presets[pn]=deepcopy(st.session_state.slopes)
+    pn=st.text_input("Preset name")
+    if st.button("Save current"): st.session_state.presets[pn]=deepcopy(st.session_state.slopes)
     if st.session_state.presets:
         sel=st.selectbox("Load preset", list(st.session_state.presets))
         if st.button("Load"): st.session_state.slopes.update(st.session_state.presets[sel])
 
-st.sidebar.text_input("🔗 Share-suffix",
+st.sidebar.text_input(
+    "🔗 Share-suffix",
     f"?s={base64.b64encode(json.dumps(st.session_state.slopes).encode()).decode()}",
     disabled=True)
 
-# ── TIME / TABLE HELPERS ─────────────────────────────────────────────────────
+# ───────────────────── TIME & TABLE HELPERS ───────────────────────────────────
 def make_slots(start=time(7,30)):
     base=datetime(2025,1,1,start.hour,start.minute)
     return [(base+timedelta(minutes=30*i)).strftime("%H:%M")
             for i in range(15-(start.hour==8 and start.minute==30)*2)]
-SPX_SLOTS=make_slots(time(8,30)); GEN_SLOTS=make_slots()
+SPX_SLOTS = make_slots(time(8,30))
+GEN_SLOTS = make_slots()
 
 def blk_spx(a,t):
     b=0
@@ -130,36 +132,44 @@ def tbl(price,slope,anchor,fd,slots,spx=True,fan=False):
                     {"Time":s,"Entry":round(price+slope*b,2),"Exit":round(price-slope*b,2)})
     return pd.DataFrame(rows)
 
-# ── HEADER & TABS ────────────────────────────────────────────────────────────
-st.markdown(f"<div class='banner'><h3>{PAGE_ICON} {PAGE_TITLE}</h3></div>", unsafe_allow_html=True)
+# ───────────────────── HEADER & TABS ──────────────────────────────────────────
+st.markdown(f"<div class='banner'><h3>{PAGE_ICON} {PAGE_TITLE}</h3></div>",unsafe_allow_html=True)
 tabs=st.tabs([f"{ICONS[t]} {t}" for t in ICONS])
 
-# ── SPX TAB ───────────────────────────────────────────────────────────────────
+# ─────────────────────────── SPX TAB ──────────────────────────────────────────
 with tabs[0]:
     st.write(f"### {ICONS['SPX']} SPX Forecast ({day_grp})")
-    c1,c2,c3=cols(3)
-    hp,ht=c1.number_input("High Price",6185.8), c1.time_input("High Time",time(11,30))
-    cp,ct=c2.number_input("Close Price",6170.2), c2.time_input("Close Time",time(15))
-    lp,lt=c3.number_input("Low Price",6130.4),  c3.time_input("Low Time", time(13,30))
+    c1,c2,c3 = cols(3)
+    hp,ht = c1.number_input("High Price",6185.8,min_value=0.0), c1.time_input("High Time",time(11,30))
+    cp,ct = c2.number_input("Close Price",6170.2,min_value=0.0), c2.time_input("Close Time",time(15))
+    lp,lt = c3.number_input("Low Price",6130.4 ,min_value=0.0), c3.time_input("Low Time", time(13,30))
 
+    # ── Tuesday contract inputs ──────────────────────────────────────────────
     if day_grp=="Tuesday":
         st.subheader("Overnight Contract Line (Low-1 & Low-2)")
         o1,o2=cols(2)
-        cl1_t,cl1_p=o1.time_input("Low-1 Time",time(2)),  o1.number_input("Low-1 Price",6100.0)
-        cl2_t,cl2_p=o2.time_input("Low-2 Time",time(3,30)),o2.number_input("Low-2 Price",6120.0)
-        cl_t, cl_p = st.time_input("Contract Low Time",time(7,30)), st.number_input("Contract Low Price",5.0)
+        cl1_t,cl1_p=o1.time_input("Low-1 Time",time(2)),   \
+                   o1.number_input("Low-1 Price",10.0 ,min_value=0.0,step=0.1)
+        cl2_t,cl2_p=o2.time_input("Low-2 Time",time(3,30)),\
+                   o2.number_input("Low-2 Price",12.0 ,min_value=0.0,step=0.1)
+        cl_t,cl_p  =  st.time_input("Contract Low Time",time(7,30)), \
+                     st.number_input("Contract Low Price",5.0 ,min_value=0.0,step=0.1)
 
+    # ── Thursday contract inputs ─────────────────────────────────────────────
     if day_grp=="Thursday":
         st.subheader("Overnight Contract Line (Low-1 & Low-2)")
         p1,p2=cols(2)
-        ol1_t,ol1_p=p1.time_input("Low-1 Time",time(2)),  p1.number_input("Low-1 Price",6100.0)
-        ol2_t,ol2_p=p2.time_input("Low-2 Time",time(3,30)),p2.number_input("Low-2 Price",6120.0)
-        b_t,b_p=st.time_input("Bounce Low Time",time(7,30)), st.number_input("Bounce Low Price",6100.0)
+        ol1_t,ol1_p=p1.time_input("Low-1 Time",time(2)),   \
+                   p1.number_input("Low-1 Price",10.0 ,min_value=0.0,step=0.1)
+        ol2_t,ol2_p=p2.time_input("Low-2 Time",time(3,30)),\
+                   p2.number_input("Low-2 Price",12.0 ,min_value=0.0,step=0.1)
+        b_t,b_p    =  st.time_input("Bounce Low Time",time(7,30)), \
+                     st.number_input("Bounce Low Price",6100.0)
 
     if st.button("Run Forecast"):
         ah,ac,al=[datetime.combine(fcast_date-timedelta(days=1),t) for t in (ht,ct,lt)]
 
-        # ── ① Cards + anchor-trend tables (shown every day) ───────────────────
+        # ① Gradient cards + anchor-trend tables (shown every day) ------------
         st.markdown('<div class="cards">',unsafe_allow_html=True)
         card("high","▲","High Anchor",hp)
         card("close","■","Close Anchor",cp)
@@ -168,42 +178,52 @@ with tabs[0]:
 
         for lbl,price,key,anc in [("High",hp,"SPX_HIGH",ah),
                                   ("Close",cp,"SPX_CLOSE",ac),
-                                  ("Low",lp,"SPX_LOW",al)]:
+                                  ("Low", lp,"SPX_LOW",al)]:
             st.subheader(f"{lbl} Anchor Trend")
             st.dataframe(tbl(price,st.session_state.slopes[key],anc,
                              fcast_date,SPX_SLOTS,fan=True),use_container_width=True)
 
-        # ── ② Tuesday extras ─────────────────────────────────────────────────
+        # ② Tuesday special contract lines -----------------------------------
         if day_grp=="Tuesday":
             dt1,dt2=[datetime.combine(fcast_date-timedelta(days=1),t) for t in (cl1_t,cl2_t)]
             alt_slope=(cl2_p-cl1_p)/(blk_spx(dt1,dt2) or 1)
-            st.subheader("Contract Line (2-pt)"); st.dataframe(tbl(cl1_p,alt_slope,dt1,fcast_date,GEN_SLOTS))
-            st.subheader("Fixed SPX Contract Line"); st.dataframe(tbl(cl_p,FIXED_CL_SLOPE,
-                datetime.combine(fcast_date,cl_t),fcast_date,GEN_SLOTS))
+            st.subheader("Contract Line (2-pt)")
+            st.dataframe(tbl(cl1_p,alt_slope,dt1,fcast_date,GEN_SLOTS))
+            st.subheader("Fixed SPX Contract Line")
+            st.dataframe(tbl(cl_p,FIXED_CL_SLOPE,
+                             datetime.combine(fcast_date,cl_t),fcast_date,GEN_SLOTS))
 
-        # ── ③ Thursday extras ────────────────────────────────────────────────
+        # ③ Thursday special contract lines ----------------------------------
         if day_grp=="Thursday":
             dt1,dt2=[datetime.combine(fcast_date-timedelta(days=1),t) for t in (ol1_t,ol2_t)]
             alt_slope=(ol2_p-ol1_p)/(blk_spx(dt1,dt2) or 1)
-            st.subheader("Contract Line (2-pt)"); st.dataframe(tbl(ol1_p,alt_slope,dt1,fcast_date,GEN_SLOTS))
-            st.subheader("Bounce-Low Line"); st.dataframe(tbl(b_p,st.session_state.slopes["SPX_LOW"],
-                datetime.combine(fcast_date-timedelta(days=1),b_t),fcast_date,GEN_SLOTS))
+            st.subheader("Contract Line (2-pt)")
+            st.dataframe(tbl(ol1_p,alt_slope,dt1,fcast_date,GEN_SLOTS))
+            st.subheader("Bounce-Low Line")
+            st.dataframe(tbl(b_p,st.session_state.slopes["SPX_LOW"],
+                             datetime.combine(fcast_date-timedelta(days=1),b_t),
+                             fcast_date,GEN_SLOTS))
 
-# ── STOCK TABS ────────────────────────────────────────────────────────────────
+# ───────────────────── STOCK TABS ─────────────────────────────────────────────
 def stock_tab(idx,tic):
     with tabs[idx]:
         st.write(f"### {ICONS[tic]} {tic}")
         a,b=cols(2)
-        lp,lt=a.number_input("Prev-day Low",key=f"{tic}lp"), a.time_input("Low Time",time(7,30),key=f"{tic}lt")
-        hp,ht=b.number_input("Prev-day High",key=f"{tic}hp"), b.time_input("High Time",time(7,30),key=f"{tic}ht")
+        lp,lt=a.number_input("Prev-day Low",key=f"{tic}lp",min_value=0.0), \
+               a.time_input("Low Time",time(7,30),key=f"{tic}lt")
+        hp,ht=b.number_input("Prev-day High",key=f"{tic}hp",min_value=0.0), \
+               b.time_input("High Time",time(7,30),key=f"{tic}ht")
         if st.button("Generate",key=f"go_{tic}"):
-            low  = tbl(lp,st.session_state.slopes[tic],datetime.combine(fcast_date,lt),fcast_date,GEN_SLOTS,False,True)
-            high = tbl(hp,st.session_state.slopes[tic],datetime.combine(fcast_date,ht),fcast_date,GEN_SLOTS,False,True)
+            low  = tbl(lp,st.session_state.slopes[tic],datetime.combine(fcast_date,lt),
+                       fcast_date,GEN_SLOTS,False,fan=True)
+            high = tbl(hp,st.session_state.slopes[tic],datetime.combine(fcast_date,ht),
+                       fcast_date,GEN_SLOTS,False,fan=True)
             st.subheader("Low Anchor Trend");  st.dataframe(low ,use_container_width=True)
             st.subheader("High Anchor Trend"); st.dataframe(high,use_container_width=True)
 
 for i,tic in enumerate(list(ICONS)[1:],1): stock_tab(i,tic)
 
-# ── FOOTER ────────────────────────────────────────────────────────────────────
-st.markdown(f"<hr><center style='font-size:.8rem'>v{VERSION} • {datetime.now():%Y-%m-%d %H:%M:%S}</center>",
-            unsafe_allow_html=True)
+# ───────────────────────── FOOTER ─────────────────────────────────────────────
+st.markdown(
+    f"<hr><center style='font-size:.8rem'>v{VERSION} • {datetime.now():%Y-%m-%d %H:%M:%S}</center>",
+    unsafe_allow_html=True)
