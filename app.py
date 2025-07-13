@@ -1,4 +1,4 @@
-# Dr Didy SPX Forecast – v1.5.7
+# Dr Didy SPX Forecast – v1.5.7   (contract-time inputs now 1-min resolution)
 # -----------------------------------------------------------------
 # • Contract Line (Low-1 ↔ Low-2) + persistent Lookup on ALL weekdays
 # • Anchor cards + three SPX anchor-trend tables remain
@@ -147,12 +147,12 @@ with tabs[0]:
     lp,lt = c3.number_input("Low  Price",  value=6130.4, min_value=0.0), \
             c3.time_input  ("Low Time",    time(13,30))
 
-    # contract inputs (now always visible)
+    # contract inputs (now allow 1-min resolution)
     st.subheader("Contract Line (Low-1 ↔ Low-2)")
     o1,o2 = cols(2)
-    l1_t,l1_p = o1.time_input("Low-1 Time", time(2)), \
+    l1_t,l1_p = o1.time_input("Low-1 Time", time(2),    step=60), \
                 o1.number_input("Low-1 Price", value=10.0, min_value=0.0, step=0.1, key="l1")
-    l2_t,l2_p = o2.time_input("Low-2 Time", time(3,30)), \
+    l2_t,l2_p = o2.time_input("Low-2 Time", time(3,30), step=60), \
                 o2.number_input("Low-2 Price", value=12.0, min_value=0.0, step=0.1, key="l2")
 
     if st.button("Run Forecast"):
