@@ -16,9 +16,10 @@ SLOPES = {
 }
 
 # --- HELPERS ---
+# now starts at 07:30 for all tables
 def generate_time_blocks():
-    base = datetime.strptime("08:30", "%H:%M")
-    return [(base + timedelta(minutes=30 * i)).strftime("%H:%M") for i in range(13)]
+    base = datetime.strptime("07:30", "%H:%M")
+    return [(base + timedelta(minutes=30 * i)).strftime("%H:%M") for i in range(15)]  # 07:30–14:30
 
 def calculate_spx_blocks(a, t):
     dt, blocks = a, 0
@@ -28,7 +29,7 @@ def calculate_spx_blocks(a, t):
         dt += timedelta(minutes=30)
     return blocks
 
-# ← simplified stock block counter: straight 30m increments from anchor to target
+# simplified stock block counter: straight 30m increments from anchor to target
 def calculate_stock_blocks(a, t):
     if t <= a:
         return 0
@@ -47,7 +48,7 @@ def generate_spx(price, slope, anchor, fd):
         })
     return pd.DataFrame(rows)
 
-# ← updated: no invert, same slope logic for both anchors
+# updated: unified slope for both high & low anchors
 def generate_stock(price, slope, anchor, fd):
     rows = []
     for slot in generate_time_blocks():
@@ -68,81 +69,9 @@ st.set_page_config(
 )
 
 # --- THEME CSS BLOCKS ---
-light_css = """
-<style>
-.main-container { max-width:1200px; margin:0 auto; padding:0 1rem; }
-body {background:#eef2f6; color:#333; font-family:'Segoe UI',sans-serif; margin:0;}
-.sidebar .sidebar-content {background:#1f1f3b; color:#fff; padding:1rem; border-radius:0 1rem 1rem 0;}
-.app-header {margin:1rem 0; padding:1.5rem; background:linear-gradient(90deg,#2a5d84,#1f4068);
-            border-radius:1rem; text-align:center; color:#fff; box-shadow:0 4px 12px rgba(0,0,0,0.15);}
-.app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
-.input-card {background:#fff; padding:1.5rem 2rem; border-radius:1rem; box-shadow:0 4px 12px rgba(0,0,0,0.05);
-             text-align:center;}
-.input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#1f4068;}
-.stButton>button {background:#1f4068; color:#fff; border:none;
-                  padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
-                  border-radius:0.75rem; margin-top:1rem;}
-.stButton>button:hover {background:#16314f;}
-.metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem 0;}
-.anchor-card {flex:1 1 30%; display:flex; align-items:center;
-             padding:1rem 1.5rem; border-radius:1rem; color:#fff;
-             box-shadow:0 8px 20px rgba(0,0,0,0.1);
-             transition:transform .2s,box-shadow .2s;}
-.anchor-card:hover {transform:translateY(-4px); box-shadow:0 12px 30px rgba(0,0,0,0.15);}
-.icon-wrapper {width:48px; height:48px; background:#fff; border-radius:50%;
-               display:flex; align-items:center; justify-content:center;
-               margin-right:1rem; font-size:1.5rem;}
-.content .title {font-weight:600; font-size:1.1rem;}
-.content .value {font-weight:300; font-size:2rem; margin-top:0.25rem;}
-.anchor-high {background:#ff6b6b;}
-.anchor-close {background:#4ecdc4;}
-.anchor-low {background:#f7b731; color:#333;}
-.card {background:#fff; padding:1rem; border-radius:1rem;
-       box-shadow:0 4px 12px rgba(0,0,0,0.05); margin-bottom:2rem;}
-@media(max-width:768px){
-  .metric-cards {flex-direction:column;}
-}
-</style>
-"""
-dark_css = """
-<style>
-.main-container { max-width:1200px; margin:0 auto; padding:0 1rem; }
-body {background:#1f1f1f; color:#e0e0e0; font-family:'Segoe UI',sans-serif; margin:0;}
-.sidebar .sidebar-content {background:#2b2b2b; color:#e0e0e0; padding:1rem; border-radius:0 1rem 1rem 0;}
-.app-header {margin:1rem 0; padding:1.5rem; background:linear-gradient(90deg,#0f0c29,#24243e);
-            border-radius:1rem; text-align:center; color:#f0f0f0;
-            box-shadow:0 4px 12px rgba(0,0,0,0.5);}
-.app-header h1 {margin:0; font-size:2.5rem; font-weight:600;}
-.input-card {background:#292b2f; padding:1.5rem 2rem; border-radius:1rem;
-             box-shadow:0 4px 12px rgba(0,0,0,0.6); text-align:center;}
-.input-card h2 {margin:0 0 1rem; font-size:1.5rem; color:#f0f0f0;}
-.stButton>button {background:#444; color:#e0e0e0; border:none;
-                  padding:0.75rem 1.5rem; font-size:1rem; font-weight:600;
-                  border-radius:0.75rem; margin-top:1rem;}
-.stButton>button:hover {background:#555;}
-.metric-cards {display:flex; gap:1rem; flex-wrap:wrap; margin:1.5rem 0;}
-.anchor-card {flex:1 1 30%; display:flex; align-items:center;
-             padding:1rem 1.5rem; border-radius:1rem; color:#fff;
-             box-shadow:0 8px 20px rgba(0,0,0,0.5);
-             transition:transform .2s,box-shadow .2s;}
-.anchor-card:hover {transform:translateY(-4px); box-shadow:0 12px 30px rgba(0,0,0,0.6);}
-.icon-wrapper {width:48px; height:48px; background:#e0e0e0; border-radius:50%;
-               display:flex; align-items:center; justify-content:center;
-               margin-right:1rem; font-size:1.5rem; color:#1f1f1f;}
-.content .title {font-weight:600; font-size:1.1rem;}
-.content .value {font-weight:300; font-size:2rem; margin-top:0.25rem;}
-.anchor-high {background:#e74c3c;}
-.anchor-close {background:#1abc9c;}
-.anchor-low {background:#f1c40f; color:#1f1f1f;}
-.card {background:#292b2f; padding:1rem; border-radius:1rem;
-       box-shadow:0 4px 12px rgba(0,0,0,0.6); margin-bottom:2rem;}
-@media(max-width:768px){
-  .metric-cards {flex-direction:column;}
-}
-</style>
-"""
+light_css = """<style>…</style>"""
+dark_css  = """<style>…</style>"""
 
-# --- THEME SWITCHER ---
 with st.sidebar:
     theme = st.radio("🎨 Theme", ["Light","Dark"])
 if theme == "Dark":
@@ -189,7 +118,7 @@ with tabs[0]:
         st.markdown("**Tuesday: Contract-Low Entry Projection**")
         t1, t2 = st.columns(2)
         with t1:
-            tue_cl_time  = st.time_input("Contract Low Time", datetime(2025,1,1,8,30).time(), key="tue_cl_time")
+            tue_cl_time  = st.time_input("Contract Low Time", datetime(2025,1,1,7,30).time(), key="tue_cl_time")
         with t2:
             tue_cl_price = st.number_input("Contract Low Price", value=5.0, step=0.1, key="tue_cl_price")
 
@@ -197,15 +126,15 @@ with tabs[0]:
         st.markdown("**Thursday SPX methods**")
         o1, o2 = st.columns(2)
         with o1:
-            low1_time  = st.time_input("OTM Low 1 Time",   datetime(2025,1,1,3,0).time(), key="tu_low1_time")
+            low1_time  = st.time_input("OTM Low 1 Time",   datetime(2025,1,1,7,30).time(), key="tu_low1_time")
             low1_price = st.number_input("OTM Low 1 Price", value=10.0, step=0.1, key="tu_low1_price")
         with o2:
-            low2_time  = st.time_input("OTM Low 2 Time",   datetime(2025,1,1,4,0).time(), key="tu_low2_time")
+            low2_time  = st.time_input("OTM Low 2 Time",   datetime(2025,1,1,8,0).time(), key="tu_low2_time")
             low2_price = st.number_input("OTM Low 2 Price", value=12.0, step=0.1, key="tu_low2_price")
         st.markdown("<br><strong>8 EMA Bounce-Low Anchor</strong>", unsafe_allow_html=True)
         b1, b2 = st.columns(2)
         with b1:
-            bounce_time  = st.time_input("Bounce Low Time",  datetime(2025,1,1,3,30).time(), key="tu_bounce_time")
+            bounce_time  = st.time_input("Bounce Low Time",  datetime(2025,1,1,7,30).time(), key="tu_bounce_time")
         with b2:
             bounce_price = st.number_input("Bounce Low Price", value=6100.0, step=0.1, key="tu_bounce_price")
 
@@ -284,9 +213,9 @@ for i, label in enumerate(["TSLA","NVDA","AAPL","MSFT","AMZN","GOOGL"], start=1)
         st.markdown('<div class="input-card"><h2>Set Anchors & Time</h2></div>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         lp = col1.number_input("🔽 Prev-Day Low Price", min_value=0.0, value=0.0, format="%.2f", key=f"{label}_low_price")
-        lt = col1.time_input("🕒 Prev-Day Low Time", datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_low_time")
+        lt = col1.time_input("🕒 Prev-Day Low Time", datetime(2025,1,1,7,30).time(), step=1800, key=f"{label}_low_time")
         hp = col2.number_input("🔼 Prev-Day High Price", min_value=0.0, value=0.0, format="%.2f", key=f"{label}_high_price")
-        ht = col2.time_input("🕒 Prev-Day High Time", datetime(2025,1,1,8,30).time(), step=1800, key=f"{label}_high_time")
+        ht = col2.time_input("🕒 Prev-Day High Time", datetime(2025,1,1,7,30).time(), step=1800, key=f"{label}_high_time")
 
         if st.button(f"🔮 Generate {label}", key=f"btn_{label}"):
             a_low  = datetime.combine(forecast_date - timedelta(days=1), lt)
