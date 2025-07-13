@@ -20,7 +20,7 @@ FIXED_CL_SLOPE = -0.5250      # Tuesday fixed slope
 BASE_SLOPES = {
     "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
     "TSLA": -0.1508, "NVDA": -0.0485, "AAPL": -0.0750,
-    "MSFT": -0.17, "AMZN": -0.0782, "GOOGL": -0.0485,
+    "MSFT": -0.17, "AMZN": -0.035, "GOOGL": -0.0485,
     "META": -0.0900,  "NFLX": -0.1100,           # ← new tickers
 }
 ICONS = {
