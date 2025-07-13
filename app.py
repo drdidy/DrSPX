@@ -1,10 +1,11 @@
-# Dr Didy SPX Forecast – v1.4.8
+# Dr Didy SPX Forecast – v1.5.0
 # -------------------------------------------
-# • colourful, extra-large anchor cards
-# • SPX anchor trends 08:30-14:30; others 07:30-14:30
-# • no charts (tables only)
-# • KeyError fix – uses ah/ac/al directly
+# • META & NFLX coverage
+# • colourful gradient anchor cards
+# • banner slide-in animation
+# • SPX trends 08:30-14:30; others 07:30-14:30
 # • 16:00-17:00 block skipped for SPX
+# • Education content lives in /pages/1_Playbook.py
 
 import json, base64, streamlit as st
 from datetime import datetime, date, time, timedelta
@@ -13,23 +14,26 @@ import pandas as pd
 
 # ───────────────────────── CONSTANTS ──────────────────────────────────────────
 PAGE_TITLE, PAGE_ICON = "DRSPX Forecast", "📈"
-VERSION  = "1.4.8"
+VERSION  = "1.5.0"
 FIXED_CL_SLOPE = -0.5250      # Tuesday fixed slope
 
 BASE_SLOPES = {
     "SPX_HIGH": -0.2792, "SPX_CLOSE": -0.2792, "SPX_LOW": -0.2792,
-    "TSLA": -0.1508, "NVDA": -0.0485, "AAPL": -0.0750, "MSFT": -0.1964,
-    "AMZN": -0.0782, "GOOGL": -0.0485,
+    "TSLA": -0.1508, "NVDA": -0.0485, "AAPL": -0.0750,
+    "MSFT": -0.1964, "AMZN": -0.0782, "GOOGL": -0.0485,
+    "META": -0.0900,  "NFLX": -0.1100,           # ← new tickers
 }
-ICONS = {"SPX":"🧭","TSLA":"🚗","NVDA":"🧠","AAPL":"🍎",
-         "MSFT":"🪟","AMZN":"📦","GOOGL":"🔍"}
+ICONS = {
+    "SPX":"🧭","TSLA":"🚗","NVDA":"🧠","AAPL":"🍎",
+    "MSFT":"🪟","AMZN":"📦","GOOGL":"🔍",
+    "META":"📘","NFLX":"📺"                      # ← new icons
+}
 
 # ─────────────────────── SESSION INIT ─────────────────────────────────────────
 if "theme" not in st.session_state:
     st.session_state.update(theme="Light",
                             slopes=deepcopy(BASE_SLOPES),
-                            presets={},
-                            mobile=False)
+                            presets={}, mobile=False)
 
 # restore slopes from share-suffix
 if st.query_params.get("s"):
@@ -53,24 +57,28 @@ body.light{--card:#f5f5f5} body.dark{--card:#1e293b;background:#0f172a;color:#e2
 /* banner */
 .banner{background:linear-gradient(90deg,#0062e6 0%,#33aeff 100%);
         text-align:center;color:#fff;border-radius:var(--radius);
-        padding:.8rem;margin-bottom:1rem;box-shadow:var(--shadow)}
+        padding:.8rem;margin-bottom:1rem;box-shadow:var(--shadow);
+        animation:slide 0.6s ease-out;}
+@keyframes slide{from{opacity:0;transform:translateY(-25px)} to{opacity:1}}
 
 /* anchor cards */
 .cards{display:flex;gap:1rem;overflow-x:auto;margin-bottom:1rem}
 .card{flex:1;min-width:220px;padding:1.4rem;border-radius:var(--radius);
-      display:flex;align-items:center;box-shadow:var(--shadow);background:var(--card)}
+      display:flex;align-items:center;box-shadow:var(--shadow);background:var(--card);
+      transition:.25s ease}
+.card:hover{transform:translateY(-4px);box-shadow:0 10px 24px rgba(0,0,0,.15)}
 .ic{width:3rem;height:3rem;border-radius:var(--radius);
     display:flex;align-items:center;justify-content:center;font-size:2rem;color:#fff;
     margin-right:.9rem}
 .val{font-size:2rem;font-weight:800;letter-spacing:-.5px}
 .ttl{font-size:.95rem;opacity:.75}
 
-/* colour sets */
-.high  {background:rgba(16,185,129,.12)}
+/* colour gradients */
+.high  {background:radial-gradient(circle at 30% 30%,rgba(16,185,129,.25),transparent 70%),rgba(16,185,129,.12)}
 .high .ic  {background:#10b981}
-.close {background:rgba(59,130,246,.12)}
+.close {background:radial-gradient(circle at 30% 30%,rgba(59,130,246,.25),transparent 70%),rgba(59,130,246,.12)}
 .close .ic {background:#3b82f6}
-.low   {background:rgba(239,68,68,.12)}
+.low   {background:radial-gradient(circle at 30% 30%,rgba(239,68,68,.25),transparent 70%),rgba(239,68,68,.12)}
 .low .ic   {background:#ef4444}
 body.dark .high  {background:rgba(16,185,129,.25)}
 body.dark .close {background:rgba(59,130,246,.25)}
@@ -217,12 +225,10 @@ with tabs[0]:
             coloured_card("low" ,"▼","Low Anchor"  ,lp)
             st.markdown('</div>', unsafe_allow_html=True)
 
-            anchors = [
+            for label, price, slope_key, anchor_dt in [
                 ("High" , hp, "SPX_HIGH", ah),
                 ("Close", cp, "SPX_CLOSE", ac),
-                ("Low"  , lp, "SPX_LOW" , al),
-            ]
-            for label, price, slope_key, anchor_dt in anchors:
+                ("Low"  , lp, "SPX_LOW" , al)]:
                 st.subheader(f"{label} Anchor Trend")
                 df = build_table(price,
                                  st.session_state.slopes[slope_key],
