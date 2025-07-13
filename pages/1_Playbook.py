@@ -18,7 +18,7 @@ st.markdown("""
 ---
 
 ### Tuesday contract play  
-* Identify **two overnight option prints \$400–\$500 apart**.  
+* Identify **two overnight option low points that rise \$400–\$500 **.  
 * Use them to set the Tuesday contract slope (handled in the SPX tab).
 
 ### Thursday contract play  
