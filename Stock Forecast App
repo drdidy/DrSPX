@@ -18,7 +18,7 @@ SLOPES = {
 # --- HELPERS ---
 def generate_time_blocks():
     base = datetime.strptime("07:30", "%H:%M")
-    return [(base + timedelta(minutes=30 * i)).strftime("%H:%M") for i in range(15)]  # 07:30–14:30
+    return [(base + timedelta(minutes=30 * i)).strftime("%H:%M") for i in range(15)]
 
 def calculate_spx_blocks(a, t):
     dt, blocks = a, 0
@@ -67,7 +67,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- THEME CSS BLOCKS (no collapse tweaks) ---
+# --- THEME CSS BLOCKS (no collapse hacks) ---
 light_css = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
@@ -105,6 +105,7 @@ body {
 .stDataFrame > div { border: none!important; }
 </style>
 """
+
 dark_css = light_css.replace(
     "--bg: #ffffff", "--bg: #0f172a"
 ).replace(
@@ -139,7 +140,7 @@ with st.sidebar:
     st.divider()
     st.subheader("Adjust Slopes")
     for k in SLOPES:
-        SLOPES[k] = st.slider(k.replace("_"," "), -1.0, 1.0, SLOPES[k], step=0.0001)
+        SLOPES[k] = st.slider(k.replace("_", " "), -1.0, 1.0, SLOPES[k], step=0.0001)
 
 # --- TABS (including MSFT) ---
 tabs = st.tabs(["🧭 SPX","🚗 TSLA","🧠 NVDA","🍎 AAPL","🪟 MSFT","📦 AMZN","🔍 GOOOGL"])
