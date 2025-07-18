@@ -85,7 +85,7 @@ st.session_state.theme = st.sidebar.radio("🎨 Theme",["Light","Dark"],
 
 fcast_date = st.sidebar.date_input("Forecast Date", date.today()+timedelta(days=1))
 wd = fcast_date.weekday()
-day_grp = ["Mon/Wed/Fri","Tuesday","Wednesday","Thursday","Friday"][wd]  # label just for banner
+day_grp = ["Mon/Wed/Fri","Tuesday","Wednesday","Thursday","Friday","Sunday"][wd]  # label just for banner
 
 with st.sidebar.expander("📉 Slopes"):
     for k in st.session_state.slopes:
