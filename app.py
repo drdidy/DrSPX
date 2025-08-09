@@ -1,23 +1,19 @@
 from __future__ import annotations
-import io, json, zipfile
+import io, zipfile
 from datetime import datetime, date, time, timedelta
 
 import pandas as pd
-import numpy as np
 import streamlit as st
-import altair as alt
 
 APP_NAME = "MarketLens"
-VERSION = "3.1.2"
+VERSION = "3.2.0"
 
-# Hidden strategy constants (per 30-min block)
+# Strategy constants (hidden in UI) — per 30-min block
 SPX_SLOPES_DOWN = {"HIGH": -0.2792, "CLOSE": -0.2792, "LOW": -0.2792}
 SPX_SLOPES_UP   = {"HIGH": +0.3171, "CLOSE": +0.3171, "LOW": +0.3171}
 TICK = 0.25
 
 ICON_HIGH, ICON_CLOSE, ICON_LOW = "▲", "■", "▼"
-COLOR_HIGH, COLOR_CLOSE, COLOR_LOW = "#16A34A", "#2563EB", "#DC2626"
-COLOR_ENTRY, COLOR_EXIT = "#0B1220", "#2A3443"
 
 SPX_GOLDEN_RULES = [
     "Exit levels are exits - never entries",
@@ -55,7 +51,7 @@ SPX_ANCHOR_RULES = {
 CONTRACT_STRATEGIES = {
     "tuesday_play": [
         "Identify two overnight option low points that rise $400-$500",
-        "Use them to set Tuesday contract slope (handled in SPX tab)",
+        "Use them to set Tuesday contract slope",
         "Tuesday contract setups often provide best mid-week momentum",
     ],
     "thursday_play": [
@@ -110,63 +106,77 @@ RISK_RULES = {
     ],
 }
 
-CSS = """
+# ---------- Light-first Apple-like styling (dark is a toggle) ----------
+CSS_BASE = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 :root{
-  --bg1:#0B0F14; --bg2:#11161D; --card:#0E141C; --border:rgba(255,255,255,.08);
-  --text:#E9EEF6; --muted:#9BA7B6; --radius:14px; --shadow:0 10px 28px rgba(0,0,0,.28);
-  --accent:#2A6CFB; --good:#16A34A; --bad:#DC2626;
+  --bg:#FFFFFF; --surface:#F7F8FA; --card:#FFFFFF; --border:#E6E9EF;
+  --text:#0F172A; --muted:#62708A; --accent:#2A6CFB; --good:#16A34A; --bad:#DC2626;
+  --radius:14px; --shadow:0 8px 24px rgba(16,24,40,.06);
 }
-html,body,.stApp{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
-.stApp{background:linear-gradient(135deg,var(--bg1),var(--bg2));color:var(--text);}
+html,body,.stApp{font-family:Inter, -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;}
+.stApp{background:var(--surface); color:var(--text);}
 #MainMenu, footer, .stDeployButton{display:none!important;}
 
 .header{
-  display:flex;align-items:center;justify-content:space-between;gap:1rem;
-  padding:12px 16px;border:1px solid var(--border);border-radius:var(--radius);
-  background:linear-gradient(90deg,rgba(255,255,255,.03),rgba(255,255,255,.015));
-  box-shadow:var(--shadow);position:sticky;top:.5rem;z-index:10;
+  display:flex; align-items:center; justify-content:space-between; gap:1rem;
+  padding:14px 18px; border:1px solid var(--border); border-radius:var(--radius);
+  background:var(--card); box-shadow:var(--shadow); position:sticky; top:.5rem; z-index:10;
 }
-.brand{font-weight:800;letter-spacing:.2px}
-.meta{color:var(--muted);font-size:.9rem}
+.brand{font-weight:800; letter-spacing:.2px}
+.meta{color:var(--muted); font-size:.9rem}
 
 .card{
-  background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.015));
-  border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);
-  padding:16px;margin:.8rem 0 1rem 0;
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+  box-shadow:var(--shadow); padding:16px; margin:.8rem 0 1rem 0;
 }
-.hline{height:2px;border-radius:2px;background:rgba(255,255,255,.06);margin:4px 0 12px 0}
+.hline{height:1px; background:#EEF1F6; margin:8px 0 12px 0}
 
-.section-title{font-weight:700;letter-spacing:.2px;margin-bottom:.2rem}
-.subtle{color:var(--muted);font-size:.92rem}
+.section-title{font-weight:700; letter-spacing:.2px; margin-bottom:.2rem}
+.subtle{color:var(--muted); font-size:.92rem}
 
-.table-wrap{border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)}
-.dataframe th{background:rgba(255,255,255,.04)!important;font-weight:600!important;}
-.dataframe td, .dataframe th{font-size:0.95rem!important}
-
-.good{color:var(--good)} .bad{color:var(--bad)}
+.bad{color:var(--bad)} .good{color:var(--good)}
 
 .icon-chip{
-  display:inline-flex;align-items:center;gap:.5rem;
-  padding:.28rem .6rem;border:1px solid var(--border);
-  border-radius:999px;background:rgba(255,255,255,.02);font-weight:600;
+  display:inline-flex;align-items:center;gap:.5rem;padding:.28rem .6rem;
+  border:1px solid var(--border); border-radius:999px;background:#F5F7FB;
+  font-weight:600; color:#0F172A;
 }
 .icon{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;
-  border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,.04);font-size:.85rem}
-.i-high{color:#16A34A}.i-close{color:#2563EB}.i-low{color:#DC2626}
+  border:1px solid var(--border);border-radius:6px;background:#FFF;font-size:.85rem}
+.i-high{color:#16A34A}.i-close{color:#2A6CFB}.i-low{color:#DC2626}
 
-.light *{background:#fff!important;color:#111!important;box-shadow:none!important}
+/* Dataframes */
+.table-wrap{border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)}
+.dataframe th{background:#F5F7FB!important;font-weight:600!important;color:#0F172A!important;}
+.dataframe td, .dataframe th{font-size:0.95rem!important}
+
+/* Dark theme override */
+body.dark{
+  --bg:#0B0F14; --surface:#0F141B; --card:#0E141C; --border:#1E2633;
+  --text:#E9EEF6; --muted:#9BA7B6; --accent:#4D7CFF;
+  --shadow:0 10px 28px rgba(0,0,0,.28);
+}
 </style>
 """
+INJECT_DARK_TOGGLE = """
+<script>
+const setMode = (mode) => {
+  const b = window.parent.document.body;
+  if(mode === 'Dark'){ b.classList.add('dark'); } else { b.classList.remove('dark'); }
+}
+</script>
+"""
 
+# ---------- Helpers ----------
 RTH_START, RTH_END = time(8,30), time(15,30)
 
 def spx_blocks_between(t1: datetime, t2: datetime) -> int:
     if t2 < t1: t1, t2 = t2, t1
     blocks, cur = 0, t1
     while cur < t2:
-        if cur.hour != 16:
+        if cur.hour != 16:  # skip 16:00–16:59
             blocks += 1
         cur += timedelta(minutes=30)
     return blocks
@@ -205,7 +215,7 @@ def easter_date(y:int)->date:
 
 def us_market_holidays(year:int)->set[date]:
     def nth_weekday(month, weekday, n):
-        d=date(year,month,1); 
+        d=date(year,month,1)
         while d.weekday()!=weekday: d+=timedelta(days=1)
         return d+timedelta(days=7*(n-1))
     def last_weekday(month, weekday):
@@ -222,17 +232,18 @@ def us_market_holidays(year:int)->set[date]:
     d=date(year,12,25); hol.add(d if d.weekday()<5 else (d-timedelta(days=1) if d.weekday()==5 else d+timedelta(days=1)))
     return hol
 
+# ---------- State ----------
 if "init" not in st.session_state:
     st.session_state.init = True
-    st.session_state.theme = "Dark"
+    st.session_state.theme = "Light"      # Light by default
     st.session_state.locked_anchors = False
     st.session_state.forecasts_generated = False
     st.session_state.contract = {"anchor_time": None, "anchor_price": None, "slope": None, "label": "Manual"}
-    st.session_state.show_charts = True
     st.session_state.print_mode = False
 
 st.set_page_config(page_title=f"{APP_NAME} — SPX Console", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
-st.markdown(CSS, unsafe_allow_html=True)
+st.markdown(CSS_BASE, unsafe_allow_html=True)
+st.markdown(INJECT_DARK_TOGGLE, unsafe_allow_html=True)
 
 @st.cache_data(ttl=60)
 def fetch_spx_summary():
@@ -254,6 +265,7 @@ def fetch_spx_summary():
     except Exception:
         return {"ok": False}
 
+# ---------- Header ----------
 st.markdown(
     f"""
     <div class="header">
@@ -265,15 +277,14 @@ st.markdown(
 
 sumy = fetch_spx_summary()
 if sumy.get("ok"):
-    color_bg = "rgba(22,163,74,.11)" if sumy["chg"]>=0 else "rgba(220,38,38,.12)"
-    chg_txt = f"{sumy['chg']:+.2f} ({sumy['pct']:+.2f}%)"
+    color = "good" if sumy["chg"]>=0 else "bad"
     st.markdown(
         f"""
-        <div class="card" style="padding:10px 14px;background:{color_bg}">
+        <div class="card" style="padding:12px 16px;">
           <div style="display:flex;align-items:center;gap:16px;">
             <div class="icon-chip"><span class="icon i-close">{ICON_CLOSE}</span><span>SPX</span></div>
             <div style="font-weight:700">{sumy['price']:.2f}</div>
-            <div class="{ 'good' if sumy['chg']>=0 else 'bad' }">{chg_txt}</div>
+            <div class="{color}">{sumy['chg']:+.2f} ({sumy['pct']:+.2f}%)</div>
             <div style="margin-left:auto" class="subtle">H:{sumy['high']:.2f} · L:{sumy['low']:.2f}</div>
           </div>
         </div>
@@ -282,31 +293,26 @@ if sumy.get("ok"):
 else:
     st.markdown(
         """
-        <div class="card" style="padding:10px 14px;">
+        <div class="card" style="padding:12px 16px;">
           <div class="subtle">Live SPX price unavailable (yfinance not installed or no connectivity).</div>
         </div>
         """, unsafe_allow_html=True
     )
 
+# ---------- Sidebar ----------
 with st.sidebar:
-    st.subheader("Display")
-    st.session_state.theme = st.radio("Theme", ["Dark","Light"], index=0 if st.session_state.theme=="Dark" else 1, horizontal=True)
+    st.subheader("Appearance")
+    st.session_state.theme = st.radio("Theme", ["Light","Dark"], index=0 if st.session_state.theme=="Light" else 1, horizontal=True)
+    st.markdown(f"<script>setMode('{st.session_state.theme}')</script>", unsafe_allow_html=True)
     st.session_state.print_mode = st.toggle("Print-friendly", value=st.session_state.print_mode)
     if st.session_state.print_mode:
-        st.markdown('<style>.stApp{background:#fff!important;color:#111!important}.card{background:#fff!important;border-color:#ddd!important}</style>', unsafe_allow_html=True)
+        st.markdown('<style>.stApp{background:#fff!important;color:#111!important}.card{background:#fff!important;border-color:#ddd!important;box-shadow:none!important}</style>', unsafe_allow_html=True)
 
     st.divider()
     st.subheader("Forecast Date")
     forecast_date = st.date_input("Target session", value=date.today() + timedelta(days=1))
-    wd = forecast_date.weekday()
-    day_names = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
-    st.info(f"{day_names[wd]} session • anchors reference the previous day.")
-    msg=[]
-    if wd>=5: msg.append("Weekend selected.")
-    try:
-        if forecast_date in us_market_holidays(forecast_date.year): msg.append("U.S. market holiday.")
-    except Exception: pass
-    if msg: st.warning(" ".join(msg))
+    days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+    st.info(f"{days[forecast_date.weekday()]} session • anchors reference the previous day.")
 
     st.divider()
     st.subheader("Documentation")
@@ -325,10 +331,7 @@ with st.sidebar:
         st.markdown("**Volume Patterns**");       [st.markdown(f"- {r}") for r in TIME_RULES["volume_patterns"]]
         st.markdown("**Multi-Timeframe**");       [st.markdown(f"- {r}") for r in TIME_RULES["multi_timeframe"]]
 
-    st.divider()
-    st.subheader("Utilities")
-    st.session_state.show_charts = st.toggle("Show charts", value=st.session_state.show_charts)
-
+# ---------- Anchors ----------
 def anchor_inputs(prefix: str, default_price: float, default_time: time):
     price = st.number_input(f"{prefix} price", value=float(default_price), step=0.1, min_value=0.0, key=f"{prefix}_price")
     when  = st.time_input(f"{prefix} time",  value=default_time, step=300, key=f"{prefix}_time")
@@ -357,6 +360,7 @@ with st.container():
         generate = st.button("Generate forecast", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ---------- Forecast tables (no charts) ----------
 def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> pd.DataFrame:
     rows=[]; anchor_dt = datetime.combine(forecast_date - timedelta(days=1), anchor_time)
     for slot in SPX_SLOTS:
@@ -364,47 +368,25 @@ def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> p
         blocks = spx_blocks_between(anchor_dt, tdt)
         entry = project(anchor_price, SPX_SLOPES_DOWN[anchor_label], blocks)
         exit_ = project(anchor_price, SPX_SLOPES_UP[anchor_label],   blocks)
-        rows.append({"Time":slot,"Entry":entry,"Exit":exit_,"Blocks":blocks,"Δ from Anchor":entry - anchor_price})
+        rows.append({"Time":slot,"Entry":round(entry,2),"Exit":round(exit_,2),"Blocks":blocks,"Δ from Anchor":round(entry - anchor_price,2)})
     return pd.DataFrame(rows)
-
-def plot_fan(df: pd.DataFrame, title: str, color_main: str):
-    y_vals = pd.concat([df["Entry"], df["Exit"]])
-    ymin, ymax = float(y_vals.min()), float(y_vals.max()); pad = max(1.0, (ymax-ymin)*0.05)
-    y_domain = [ymin - pad, ymax + pad]
-    df_long = pd.melt(df[["Time","Entry","Exit"]], id_vars=["Time"], var_name="Series", value_name="Value")
-    time_sort = list(df["Time"])
-    chart = (
-        alt.Chart(df_long)
-        .mark_line()
-        .encode(
-            x=alt.X("Time:N", sort=time_sort, axis=alt.Axis(labelAngle=45)),
-            y=alt.Y("Value:Q", scale=alt.Scale(domain=y_domain)),
-            color=alt.Color("Series:N", scale=alt.Scale(domain=["Entry","Exit"], range=[COLOR_ENTRY, COLOR_EXIT]), legend=alt.Legend(title=None)),
-            strokeDash=alt.StrokeDash("Series:N", scale=alt.Scale(domain=["Entry","Exit"], range=[[1,0],[6,3]])),
-            tooltip=["Time:N","Series:N",alt.Tooltip("Value:Q",format=".2f")],
-        )
-        .properties(title=title, height=220)
-        .configure_title(color=color_main, fontSize=12)
-        .configure_axis(grid=True, gridOpacity=0.12, labelColor="#C7D2E0", titleColor="#C7D2E0")
-    )
-    st.altair_chart(chart, use_container_width=True)
 
 if generate or st.session_state.get("forecasts_generated", False):
     st.session_state.forecasts_generated = True
     with st.container():
-        st.markdown('<div class="card"><div class="section-title">SPX Forecast Fans (08:30–15:30)</div><div class="hline"></div>', unsafe_allow_html=True)
-        df_high = build_fan_df("HIGH", high_price, high_time)
-        if st.session_state.show_charts: plot_fan(df_high, f"{ICON_HIGH} High Anchor Fan", COLOR_HIGH)
-        st.dataframe(df_high.round({"Entry":2,"Exit":2,"Δ from Anchor":2}), use_container_width=True, hide_index=True)
-
+        st.markdown('<div class="card"><div class="section-title">SPX Forecast (08:30–15:30)</div><div class="hline"></div>', unsafe_allow_html=True)
+        df_high  = build_fan_df("HIGH",  high_price,  high_time)
         df_close = build_fan_df("CLOSE", close_price, close_time)
-        if st.session_state.show_charts: plot_fan(df_close, f"{ICON_CLOSE} Close Anchor Fan", COLOR_CLOSE)
-        st.dataframe(df_close.round({"Entry":2,"Exit":2,"Δ from Anchor":2}), use_container_width=True, hide_index=True)
+        df_low   = build_fan_df("LOW",   low_price,   low_time)
 
-        df_low = build_fan_df("LOW", low_price, low_time)
-        if st.session_state.show_charts: plot_fan(df_low, f"{ICON_LOW} Low Anchor Fan", COLOR_LOW)
-        st.dataframe(df_low.round({"Entry":2,"Exit":2,"Δ from Anchor":2}), use_container_width=True, hide_index=True)
+        st.markdown("**High anchor fan**")
+        st.dataframe(df_high, use_container_width=True, hide_index=True)
+        st.markdown("**Close anchor fan**")
+        st.dataframe(df_close, use_container_width=True, hide_index=True)
+        st.markdown("**Low anchor fan**")
+        st.dataframe(df_low, use_container_width=True, hide_index=True)
 
+# ---------- Contract Line ----------
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Contract Line</div><div class="hline"></div>', unsafe_allow_html=True)
     col1,col2,col3 = st.columns([1,1,1])
@@ -420,6 +402,15 @@ with st.container():
         line_label = st.selectbox("Label", ["Manual","Tuesday Play","Thursday Play"], index=0)
         rth_only = st.toggle("RTH slots only", value=True)
     gen_contract = st.button("Calculate contract line", use_container_width=True)
+
+    def spx_blocks_between(t1: datetime, t2: datetime) -> int:
+        if t2 < t1: t1, t2 = t2, t1
+        blocks, cur = 0, t1
+        while cur < t2:
+            if cur.hour != 16:
+                blocks += 1
+            cur += timedelta(minutes=30)
+        return blocks
 
     if gen_contract:
         t1 = datetime.combine(forecast_date, low1_time); t2 = datetime.combine(forecast_date, low2_time)
@@ -443,37 +434,22 @@ with st.container():
         for slot in slots:
             hh,mm = map(int, slot.split(":")); tdt = datetime.combine(forecast_date, time(hh,mm))
             blk = spx_blocks_between(contract["anchor_time"], tdt)
-            proj= project(contract["anchor_price"], contract["slope"], blk)
+            proj= contract["anchor_price"] + contract["slope"] * blk
             rows.append({"Time":slot,"Projected":round_to_tick(proj),"Blocks":blk,"Δ from Anchor": round(proj - contract["anchor_price"],2)})
         df_contract = pd.DataFrame(rows)
-
-        if st.session_state.show_charts:
-            y = df_contract["Projected"]; ymin,ymax = float(y.min()), float(y.max())
-            pad = max(TICK,(ymax-ymin)*0.05); y_domain=[ymin-pad,ymax+pad]
-            time_sort=list(df_contract["Time"])
-            chart = (
-                alt.Chart(df_contract).mark_line()
-                .encode(
-                    x=alt.X("Time:N", sort=time_sort, axis=alt.Axis(labelAngle=45)),
-                    y=alt.Y("Projected:Q", scale=alt.Scale(domain=y_domain)),
-                    color=alt.value(COLOR_CLOSE),
-                    tooltip=["Time:N", alt.Tooltip("Projected:Q", format=".2f"), "Blocks:Q", alt.Tooltip("Δ from Anchor:Q", format=".2f")],
-                ).properties(title="Contract Projection", height=220)
-                .configure_axis(grid=True, gridOpacity=0.12)
-            )
-            st.altair_chart(chart, use_container_width=True)
-
         st.dataframe(df_contract, use_container_width=True, hide_index=True)
 
+        # Real-time lookup
         lk1, lk2 = st.columns([1,2])
         with lk1:
             lookup_time = st.time_input("Lookup time", value=time(9,30), step=300, key="lookup_time")
         with lk2:
             tdt = datetime.combine(forecast_date, lookup_time)
             blk = spx_blocks_between(contract["anchor_time"], tdt)
-            proj = project(contract["anchor_price"], contract["slope"], blk)
+            proj = contract["anchor_price"] + contract["slope"] * blk
             st.success(f"Projected @ {lookup_time.strftime('%H:%M')} → ${round_to_tick(proj):.2f} · {blk} blocks · Δ {proj - contract['anchor_price']:+.2f}")
 
+# ---------- Fibonacci (up-bounce only) ----------
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Fibonacci Bounce (up-bounce only)</div><div class="hline"></div>', unsafe_allow_html=True)
     fb1,fb2,fb3,fb4 = st.columns([1,1,1,1])
@@ -493,20 +469,40 @@ with st.container():
         df_fib = pd.DataFrame(rows)
         st.dataframe(df_fib, use_container_width=True, hide_index=True)
 
-        nh_time = (datetime.combine(forecast_date, fib_low_time) + timedelta(hours=1)).time()
+        # Next-30-minute confluence card
+        next_30_time = (datetime.combine(forecast_date, fib_low_time) + timedelta(minutes=30)).time()
         key_0786 = round_to_tick(levels["0.786"])
-        st.markdown("**Next-hour confluence (vs. Contract Line)**")
         contract = st.session_state.contract
+        st.markdown("**Next-30-min confluence (vs. Contract Line)**")
         if contract["anchor_time"] and contract["slope"] is not None:
-            t_star = datetime.combine(forecast_date, nh_time)
+            t_star = datetime.combine(forecast_date, next_30_time)
             blk = spx_blocks_between(contract["anchor_time"], t_star)
-            c_proj = round_to_tick(project(contract["anchor_price"], contract["slope"], blk))
-            delta = abs(c_proj - key_0786); pct = (delta / key_0786 * 100.0) if key_0786 else float('inf')
-            badge = "Strong" if pct < 0.5 else ("Moderate" if pct <= 1.0 else "Weak")
-            st.info(f"Fib 0.786: ${key_0786:.2f} · Contract @ {nh_time.strftime('%H:%M')}: ${c_proj:.2f} · Δ=${delta:.2f} ({pct:.2f}%) → {badge}")
+            c_proj = round_to_tick(contract["anchor_price"] + contract["slope"] * blk)
+            delta = abs(c_proj - key_0786)
+            pct = (delta / key_0786 * 100.0) if key_0786 else float("inf")
+            grade = "Strong" if pct < 0.50 else ("Moderate" if pct <= 1.00 else "Weak")
+
+            st.markdown(
+                f"""
+                <div class="card" style="padding:12px 16px;">
+                  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;">
+                    <div style="font-weight:700;">Fib 0.786</div>
+                    <div>Entry ${key_0786:.2f}</div>
+                    <div class="subtle">•</div>
+                    <div>Contract @ {next_30_time.strftime('%H:%M')} → <b>${c_proj:.2f}</b></div>
+                    <div class="subtle">•</div>
+                    <div>Δ ${delta:.2f} ({pct:.2f}%)</div>
+                    <div class="subtle">•</div>
+                    <div><b>{grade}</b></div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
         else:
             st.warning("Configure the Contract Line to enable confluence check.")
 
+        # Simple R:R helper
         entry = key_0786
         stop  = round_to_tick(fib_low - TICK)
         tp1   = round_to_tick(fib_high)
@@ -527,22 +523,25 @@ with st.container():
     else:
         st.info("Enter bounce low < bounce high to compute levels.")
 
+# ---------- Exports ----------
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Exports</div><div class="hline"></div>', unsafe_allow_html=True)
     exportables={}
     if st.session_state.get("forecasts_generated", False):
-        exportables["SPX_High_Fan.csv"]  = locals().get("df_high", pd.DataFrame()).round(2).to_csv(index=False).encode()
-        exportables["SPX_Close_Fan.csv"] = locals().get("df_close", pd.DataFrame()).round(2).to_csv(index=False).encode()
-        exportables["SPX_Low_Fan.csv"]   = locals().get("df_low", pd.DataFrame()).round(2).to_csv(index=False).encode()
+        exportables["SPX_High_Fan.csv"]  = locals().get("df_high", pd.DataFrame()).to_csv(index=False).encode()
+        exportables["SPX_Close_Fan.csv"] = locals().get("df_close", pd.DataFrame()).to_csv(index=False).encode()
+        exportables["SPX_Low_Fan.csv"]   = locals().get("df_low", pd.DataFrame()).to_csv(index=False).encode()
     if st.session_state.contract["anchor_time"] and st.session_state.contract["slope"] is not None:
-        exportables["Contract_Line.csv"] = locals().get("df_contract", pd.DataFrame()).round(2).to_csv(index=False).encode()
+        exportables["Contract_Line.csv"] = locals().get("df_contract", pd.DataFrame()).to_csv(index=False).encode() if "df_contract" in locals() else b""
     if 'df_fib' in locals(): exportables["Fib_Levels.csv"] = df_fib.to_csv(index=False).encode()
     if exportables:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED) as zf:
-            for fn,data in exportables.items(): zf.writestr(fn,data)
+            for fn,data in exportables.items():
+                if data: zf.writestr(fn,data)
         st.download_button("Download all CSVs (.zip)", data=buf.getvalue(), file_name="marketlens_exports.zip", mime="application/zip", use_container_width=True)
 
+# ---------- Footer ----------
 st.markdown(
     f"""
     <div class="card" style="text-align:center">
@@ -551,4 +550,3 @@ st.markdown(
     </div>
     """, unsafe_allow_html=True
 )
-
