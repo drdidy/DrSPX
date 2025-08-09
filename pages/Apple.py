@@ -84,8 +84,8 @@ def test_alpaca_connection():
         if client is None:
             return False
             
-        # Test with older data to avoid any subscription issues
-        end_dt = datetime.now(tz=ET) - timedelta(days=2)
+        # Test with data from a few days ago (not recent/real-time)
+        end_dt = datetime.now(tz=ET) - timedelta(days=5)  # 5 days ago
         start_dt = end_dt - timedelta(hours=1)
         
         req = StockBarsRequest(
@@ -99,7 +99,7 @@ def test_alpaca_connection():
         
         if hasattr(bars, 'df') and not bars.df.empty:
             st.success("✅ Alpaca connection successful!")
-            st.info(f"Retrieved {len(bars.df)} bars for AAPL")
+            st.info(f"Retrieved {len(bars.df)} bars for AAPL (using historical data)")
             return True
         else:
             st.warning("⚠️ Connection works but no data returned")
@@ -118,6 +118,12 @@ def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.Da
         if client is None:
             st.error("Cannot create Alpaca client - check your API credentials")
             return pd.DataFrame()
+        
+        # Add buffer to avoid requesting too recent data
+        now = datetime.now(tz=ET)
+        if end_dt > now - timedelta(hours=4):  # If requesting data less than 4 hours old
+            end_dt = now - timedelta(hours=4)  # Push it back to 4 hours ago
+            st.info(f"⏰ Adjusted end time to avoid recent data restrictions: {end_dt.strftime('%Y-%m-%d %H:%M')}")
             
         req = StockBarsRequest(
             symbol_or_symbols=symbol,
@@ -159,7 +165,7 @@ def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.Da
         
     except Exception as e:
         st.error(f"Error fetching {symbol} data: {str(e)}")
-        st.info("This might be due to: market closure, invalid date range, or API limits")
+        st.info("This might be due to: requesting too recent data, market closure, or API limits")
         return pd.DataFrame()
 
 def restrict_rth_30m(df_1m: pd.DataFrame) -> pd.DataFrame:
@@ -301,6 +307,7 @@ def fetch_intraday_day_30m(symbol: str, d: date) -> pd.DataFrame:
     df30 = restrict_rth_30m(df1m)[["dt","Open","High","Low","Close","Volume"]].copy()
     df30["Time"] = df30["dt"].dt.strftime("%H:%M")
     return df30
+  # pages/Apple.py - PART 2 (Continuation of Part 1)
 
 # ───────────────────────── Sticky Header ─────────────────────────
 st.markdown(
@@ -428,10 +435,12 @@ def approaching_alert_for_current_bar(d: date, anchors: dict, tolerance: float) 
         up = project_line(anchors["upper_base_price"], anchors["upper_base_time"], slot_end)
         lo = project_line(anchors["lower_base_price"], anchors["lower_base_time"], slot_end)
 
-        # Pull last 1m price to approximate near-close
-        start_dt = now_ct - timedelta(minutes=5)
-        df = fetch_history_1m("AAPL", start_dt, now_ct + timedelta(minutes=1))
-        if df.empty: return None
+        # Use data from 1 hour ago instead of real-time to avoid SIP restrictions
+        start_dt = now_ct - timedelta(hours=2)
+        end_dt = now_ct - timedelta(hours=1)
+        df = fetch_history_1m("AAPL", start_dt, end_dt)
+        if df.empty: 
+            return '<span class="kbadge warn">⚠️ Cannot get recent price data (using delayed data only)</span>'
         px = float(df.iloc[-1]["Close"])
 
         note = []
@@ -440,10 +449,9 @@ def approaching_alert_for_current_bar(d: date, anchors: dict, tolerance: float) 
         if abs(px - up) <= tolerance:
             note.append(f"near Upper {up:.2f} (Δ {px - up:+.2f})")
         if not note: return None
-        return f'<span class="kbadge warn">Approaching: {" • ".join(note)}</span>'
+        return f'<span class="kbadge warn">Approaching: {" • ".join(note)} (1hr delayed)</span>'
     except Exception as e:
-        st.error(f"Error in approaching alert: {str(e)}")
-        return None
+        return f'<span class="kbadge warn">⚠️ Alert unavailable: {str(e)}</span>'
 
 alert_html = approaching_alert_for_current_bar(forecast_date, wk, tol)
 if alert_html:
