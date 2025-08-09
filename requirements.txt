@@ -4,6 +4,7 @@ numpy>=1.26
 
 # Data Sources
 alpaca-py>=0.16     # Official Alpaca API
+yfinance
 
 # Plotting (used by SPX app)
 plotly>=5.22
