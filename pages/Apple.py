@@ -71,8 +71,7 @@ def _alpaca_client():
         return StockHistoricalDataClient(
             api_key=st.secrets["alpaca"]["key"],
             secret_key=st.secrets["alpaca"]["secret"],
-            # Add sandbox=True if using paper trading credentials
-            # sandbox=True  # Uncomment this line if you're using paper trading
+            sandbox=True  # Enable this for paper trading or if you get SIP data errors
         )
     except Exception as e:
         st.error(f"Failed to create Alpaca client: {str(e)}")
@@ -85,8 +84,8 @@ def test_alpaca_connection():
         if client is None:
             return False
             
-        # Test with a simple recent data request
-        end_dt = datetime.now(tz=ET)
+        # Test with older data to avoid SIP subscription issues
+        end_dt = datetime.now(tz=ET) - timedelta(days=3)
         start_dt = end_dt - timedelta(hours=2)
         
         req = StockBarsRequest(
@@ -100,14 +99,14 @@ def test_alpaca_connection():
         
         if hasattr(bars, 'df') and not bars.df.empty:
             st.success("✅ Alpaca connection successful!")
-            st.info(f"Retrieved {len(bars.df)} test bars for AAPL")
+            st.info(f"Retrieved {len(bars.df)} test bars for AAPL (using historical data)")
             return True
         else:
             st.warning("⚠️ Connection works but no data returned (market may be closed)")
             return True
     except Exception as e:
         st.error(f"❌ Alpaca connection failed: {str(e)}")
-        st.info("💡 Try: 1) Check your API keys, 2) Regenerate keys if shared publicly, 3) Toggle sandbox mode")
+        st.info("💡 Try: 1) Check your API keys, 2) Enable sandbox mode, 3) Upgrade data subscription")
         return False
 
 @st.cache_data(ttl=300)
