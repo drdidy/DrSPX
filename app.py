@@ -1436,61 +1436,53 @@ def render_live_price_strip():
     
     if market_data["status"] == "success":
         # Determine price direction styling
-        change_class = "positive" if market_data["change"] >= 0 else "negative"
         change_color = COLORS["success"] if market_data["change"] >= 0 else COLORS["error"]
         change_symbol = "+" if market_data["change"] >= 0 else ""
         
         # Market status
         market_status = "🟢 OPEN" if market_data["is_market_open"] else "🔴 CLOSED"
         
-        st.markdown(
-            f"""
-            <div class="live-price-container animate-slide-up">
-                <div class="live-indicator">
-                    <div class="live-dot"></div>
-                    <span>SPX LIVE</span>
-                </div>
-                
-                <div class="price-main">
-                    ${market_data['price']:,.2f}
-                </div>
-                
-                <div class="price-change" style="color: {change_color};">
-                    {change_symbol}{market_data['change']:,.2f} ({change_symbol}{market_data['change_percent']:.2f}%)
-                </div>
-                
-                <div class="price-meta">
-                    H: ${market_data['today_high']:,.2f} • L: ${market_data['today_low']:,.2f}
-                </div>
-                
-                <div class="price-meta">
-                    {market_status} • Vol: {market_data['volume']:,}
-                </div>
-                
-                <div class="price-meta">
-                    Updated: {market_data['last_update'].strftime('%H:%M:%S')} • 
-                    Fetch: {market_data['fetch_time']}s
-                </div>
+        # Create the HTML content
+        live_price_html = f"""
+        <div class="live-price-container animate-slide-up">
+            <div class="live-indicator">
+                <div class="live-dot"></div>
+                <span>SPX LIVE</span>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
+            <div class="price-main">
+                ${market_data['price']:,.2f}
+            </div>
+            <div class="price-change" style="color: {change_color};">
+                {change_symbol}{market_data['change']:,.2f} ({change_symbol}{market_data['change_percent']:.2f}%)
+            </div>
+            <div class="price-meta">
+                H: ${market_data['today_high']:,.2f} • L: ${market_data['today_low']:,.2f}
+            </div>
+            <div class="price-meta">
+                {market_status} • Vol: {market_data['volume']:,}
+            </div>
+            <div class="price-meta">
+                Updated: {market_data['last_update'].strftime('%H:%M:%S')} • Fetch: {market_data['fetch_time']}s
+            </div>
+        </div>
+        """
+        
+        st.markdown(live_price_html, unsafe_allow_html=True)
     else:
-        st.markdown(
-            f"""
-            <div class="live-price-container">
-                <div class="live-indicator">
-                    <div style="width: 8px; height: 8px; background: #666; border-radius: 50%;"></div>
-                    <span>SPX DATA</span>
-                </div>
-                
-                <div style="color: #999; font-size: var(--text-lg);">
-                    ⚠️ {market_data.get('message', 'Data unavailable')}
-                </div>
+        # Error state HTML
+        error_html = f"""
+        <div class="live-price-container">
+            <div class="live-indicator">
+                <div style="width: 8px; height: 8px; background: #666; border-radius: 50%;"></div>
+                <span>SPX DATA</span>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
+            <div style="color: #999; font-size: var(--text-lg);">
+                ⚠️ {market_data.get('message', 'Data unavailable')}
+            </div>
+        </div>
+        """
+        
+        st.markdown(error_html, unsafe_allow_html=True)
 
 def render_metrics_dashboard(forecast_date: date):
     """Render enhanced metrics dashboard with previous day anchors."""
@@ -1670,5 +1662,3 @@ forecast_date, tolerance, rule_requirement = render_enhanced_sidebar()
 
 # Render metrics dashboard with anchors
 previous_anchors = render_metrics_dashboard(forecast_date)
-
-
