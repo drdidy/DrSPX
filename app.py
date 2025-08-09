@@ -6,26 +6,20 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
-import altair as alt
-
-# Optional plotly (toggle in the UI). Safe to import if in requirements.
-try:
-    import plotly.graph_objects as go
-    PLOTLY_AVAILABLE = True
-except Exception:
-    PLOTLY_AVAILABLE = False
+import plotly.graph_objects as go
 
 APP_NAME = "MarketLens"
-VERSION = "3.3.0"
+VERSION = "3.4.0"
 
-# ----- Strategy constants (fixed per 30-min block; hidden in UI)
+# ----- Strategy constants (per 30-min block; fixed, not user-editable)
 SPX_SLOPES_DOWN = {"HIGH": -0.2792, "CLOSE": -0.2792, "LOW": -0.2792}
 SPX_SLOPES_UP   = {"HIGH": +0.3171, "CLOSE": +0.3171, "LOW": +0.3171}
 TICK = 0.25
+BASELINE_DATE_STR = "2000-01-01"  # for plotting time-only x-axes
 
-ICON_HIGH, ICON_CLOSE, ICON_LOW = "▲", "■", "▼"  # up triangle, square, down triangle
+ICON_HIGH, ICON_CLOSE, ICON_LOW = "▲", "■", "▼"  # high, close, low
 
-# ----- Verbatim content you asked to keep
+# ----- Verbatim content to keep
 SPX_GOLDEN_RULES = [
     "Exit levels are exits - never entries",
     "Anchors are magnets, not timing signals - let price come to you",
@@ -147,23 +141,28 @@ html,body,.stApp{font-family:Inter,-apple-system,system-ui,Segoe UI,Roboto,Helve
 .subtle{color:var(--muted); font-size:.92rem}
 .bad{color:var(--bad)} .good{color:var(--good)}
 
-.icon-chip{
-  display:inline-flex; align-items:center; gap:.5rem; padding:.28rem .6rem;
-  border:1px solid var(--border); border-radius:999px; background:#F5F7FB;
-  font-weight:600; color:#0F172A;
+/* H/C/L ribbon */
+.ribbon{
+  display:grid; grid-template-columns: 1fr 1fr 1fr; gap:14px;
 }
+.ribbon .tile{
+  border:1px solid var(--border); border-radius:18px; padding:16px 18px;
+  background:linear-gradient(180deg,#FFFFFF, #F7F8FA); box-shadow:var(--shadow);
+}
+body.dark .ribbon .tile{
+  background:linear-gradient(180deg,#0E141C, #0F141B);
+}
+.tile .label{font-size:.9rem; color:var(--muted); display:flex; gap:.5rem; align-items:center}
+.tile .value{font-size:2.2rem; font-weight:800; letter-spacing:-.01em; display:flex; gap:.4rem; align-items:baseline}
+.tile .sub{color:var(--muted); font-size:.9rem}
+
 .icon{
-  display:inline-flex; width:22px; height:22px; align-items:center; justify-content:center;
-  border:1px solid var(--border); border-radius:6px; background:#FFF; font-size:.85rem
+  display:inline-flex; width:26px; height:26px; align-items:center; justify-content:center;
+  border-radius:8px; border:1px solid var(--border); background:#FFF; font-weight:800
 }
-.i-high{color:#16A34A}.i-close{color:#2A6CFB}.i-low{color:#DC2626}
+.ic-high{color:#16A34A} .ic-close{color:#2A6CFB} .ic-low{color:#DC2626}
 
-/* DataFrames */
-.table-wrap{border-radius:var(--radius); overflow:hidden; border:1px solid var(--border)}
-.dataframe th{background:#F5F7FB!important; font-weight:600!important; color:#0F172A!important;}
-.dataframe td, .dataframe th{font-size:0.95rem!important}
-
-/* Primary buttons */
+/* Buttons */
 .stButton > button, .stDownloadButton > button {
   color:#fff !important; background:var(--accent) !important; border:1px solid var(--accent) !important;
   border-radius:12px !important; padding:12px 14px !important; font-weight:700 !important;
@@ -171,21 +170,10 @@ html,body,.stApp{font-family:Inter,-apple-system,system-ui,Segoe UI,Roboto,Helve
 }
 .stButton > button:hover, .stDownloadButton > button:hover { filter:brightness(0.96); }
 
-/* Inputs in light mode */
-body:not(.dark) .stNumberInput input, 
-body:not(.dark) .stTimeInput input, 
-body:not(.dark) .stSelectbox div[data-baseweb="select"] {
-  background:#fff !important; color:#0F172A !important; border-color:var(--border) !important;
-}
-
-/* Dark theme override */
+/* Dark theme */
 body.dark{
   --bg:#0B0F14; --surface:#0F141B; --card:#0E141C; --border:#1E2633;
   --text:#E9EEF6; --muted:#9BA7B6; --accent:#4D7CFF; --shadow:0 10px 28px rgba(0,0,0,.28);
-}
-body.dark .stButton > button, body.dark .stDownloadButton > button{
-  background:#2A3443 !important; border-color:#334155 !important; color:#E9EEF6 !important;
-  box-shadow:0 8px 24px rgba(0,0,0,.35) !important;
 }
 </style>
 """
@@ -250,42 +238,50 @@ st.set_page_config(page_title=f"{APP_NAME} — SPX Console", page_icon="📈", l
 st.markdown(CSS_BASE, unsafe_allow_html=True)
 st.markdown(INJECT_DARK_TOGGLE, unsafe_allow_html=True)
 
-# ===== Live price (Yahoo) =====
+# ===== Live price + daily (prev day H/C/L) =====
 @st.cache_data(ttl=60)
 def fetch_spx_summary():
     try:
         t = yf.Ticker("^GSPC")
         intraday = t.history(period="1d", interval="1m")
-        daily = t.history(period="5d", interval="1d")
-        if intraday is None or intraday.empty or daily is None or daily.empty:
+        daily = t.history(period="6d", interval="1d")
+        if intraday is None or intraday.empty or daily is None or daily.empty or len(daily) < 2:
             return {"ok": False}
         last = intraday.iloc[-1]
         price = float(last["Close"])
-        prev_close = float(daily["Close"].iloc[-2]) if len(daily) >= 2 else price
+        prev = daily.iloc[-2]
+        prev_close = float(prev["Close"])
+        prev_high = float(prev["High"])
+        prev_low  = float(prev["Low"])
         chg = price - prev_close
         pct = (chg / prev_close * 100) if prev_close else 0.0
-        today_high = float(daily["High"].iloc[-1])
-        today_low  = float(daily["Low"].iloc[-1])
-        return {"ok": True, "price": price, "chg": chg, "pct": pct, "high": today_high, "low": today_low}
+        today_high = float(daily.iloc[-1]["High"])
+        today_low  = float(daily.iloc[-1]["Low"])
+        return {
+            "ok": True, "price": price, "chg": chg, "pct": pct,
+            "today_high": today_high, "today_low": today_low,
+            "prev_close": prev_close, "prev_high": prev_high, "prev_low": prev_low
+        }
     except Exception:
         return {"ok": False}
 
 @st.cache_data(ttl=120)
 def fetch_spx_intraday_df():
-    """RTH-only intraday (today), 1-min bars for overlay against anchor fans."""
     try:
         t = yf.Ticker("^GSPC")
         df = t.history(period="1d", interval="1m")
         if df is None or df.empty:
             return pd.DataFrame()
         df = df.reset_index()
-        df.rename(columns={"Datetime":"dt"}, inplace=True)
-        if "dt" not in df.columns:
-            df.rename(columns={df.columns[0]:"dt"}, inplace=True)  # yfinance returns first col as Datetime
+        if "Datetime" in df.columns:
+            df.rename(columns={"Datetime": "dt"}, inplace=True)
+        else:
+            df.rename(columns={df.columns[0]: "dt"}, inplace=True)
         df["Time"] = df["dt"].dt.tz_localize(None).dt.strftime("%H:%M")
-        # Filter to RTH window
         df = df[(df["Time"] >= "08:30") & (df["Time"] <= "15:30")]
-        return df[["Time","Close"]].copy()
+        df = df[["Time","Close"]].copy()
+        df["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df["Time"])
+        return df
     except Exception:
         return pd.DataFrame()
 
@@ -298,17 +294,42 @@ st.markdown(
     </div>
     """, unsafe_allow_html=True
 )
+
 sumy = fetch_spx_summary()
 if sumy.get("ok"):
     color = "good" if sumy["chg"]>=0 else "bad"
+    # Live strip
     st.markdown(
         f"""
-        <div class="card" style="padding:12px 16px;">
-          <div style="display:flex;align-items:center;gap:16px;">
-            <div class="icon-chip"><span class="icon i-close">{ICON_CLOSE}</span><span>SPX</span></div>
-            <div style="font-weight:700">{sumy['price']:.2f}</div>
+        <div class="card" style="padding:14px 18px;">
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <div class="subtle">SPX live</div>
+            <div style="font-weight:800;font-size:1.2rem;">{sumy['price']:.2f}</div>
             <div class="{color}">{sumy['chg']:+.2f} ({sumy['pct']:+.2f}%)</div>
-            <div style="margin-left:auto" class="subtle">H:{sumy['high']:.2f} · L:{sumy['low']:.2f}</div>
+            <div style="margin-left:auto" class="subtle">Today H:{sumy['today_high']:.2f} · L:{sumy['today_low']:.2f}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    # Previous-day H/C/L ribbon (large, stylized)
+    st.markdown(
+        f"""
+        <div class="ribbon">
+          <div class="tile">
+            <div class="label"><span class="icon ic-high">{ICON_HIGH}</span> Previous Day High</div>
+            <div class="value" style="color:#16A34A">{sumy['prev_high']:.2f}</div>
+            <div class="sub">Reference anchor</div>
+          </div>
+          <div class="tile">
+            <div class="label"><span class="icon ic-close">{ICON_CLOSE}</span> Previous Day Close</div>
+            <div class="value" style="color:#2A6CFB">{sumy['prev_close']:.2f}</div>
+            <div class="sub">Benchmark for gap/Δ</div>
+          </div>
+          <div class="tile">
+            <div class="label"><span class="icon ic-low">{ICON_LOW}</span> Previous Day Low</div>
+            <div class="value" style="color:#DC2626">{sumy['prev_low']:.2f}</div>
+            <div class="sub">Support anchor</div>
           </div>
         </div>
         """,
@@ -329,13 +350,10 @@ with st.sidebar:
     st.subheader("Appearance")
     st.session_state.theme = st.radio("Theme", ["Light","Dark"], index=0 if st.session_state.theme=="Light" else 1, horizontal=True)
     st.markdown(f"<script>setMode('{st.session_state.theme}')</script>", unsafe_allow_html=True)
+
     st.session_state.print_mode = st.toggle("Print-friendly", value=st.session_state.print_mode)
     if st.session_state.print_mode:
         st.markdown('<style>.stApp{background:#fff!important;color:#111!important}.card{background:#fff!important;border-color:#ddd!important;box-shadow:none!important}</style>', unsafe_allow_html=True)
-
-    st.divider()
-    st.subheader("Chart engine")
-    use_plotly = st.toggle("Use Plotly instead of Altair", value=False, help="Altair is lighter with native pan/zoom. Plotly optional.")
 
     st.divider()
     st.subheader("Forecast Date")
@@ -344,7 +362,7 @@ with st.sidebar:
     st.info(f"{days[forecast_date.weekday()]} session • anchors reference the previous day.")
 
     st.divider()
-    st.subheader("Documentation")
+    st.subheader("Docs")
     with st.expander("Golden Rules", expanded=False):
         for r in SPX_GOLDEN_RULES: st.markdown(f"- {r}")
     with st.expander("Anchor Trading Rules", expanded=False):
@@ -370,13 +388,13 @@ with st.container():
     st.markdown('<div class="card"><div class="section-title">SPX Anchors (previous day)</div><div class="hline"></div>', unsafe_allow_html=True)
     col_high, col_close, col_low = st.columns(3)
     with col_high:
-        st.markdown(f'<div class="icon-chip"><span class="icon i-high">{ICON_HIGH}</span><span>High</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="subtle">High</div>', unsafe_allow_html=True)
         high_price, high_time = anchor_inputs("High", 6185.80, time(11,30))
     with col_close:
-        st.markdown(f'<div class="icon-chip"><span class="icon i-close">{ICON_CLOSE}</span><span>Close</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="subtle">Close</div>', unsafe_allow_html=True)
         close_price, close_time = anchor_inputs("Close", 6170.20, time(15,0))
     with col_low:
-        st.markdown(f'<div class="icon-chip"><span class="icon i-low">{ICON_LOW}</span><span>Low</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="subtle">Low</div>', unsafe_allow_html=True)
         low_price, low_time = anchor_inputs("Low", 6130.40, time(13,30))
 
     colA, colB = st.columns([1,1])
@@ -391,7 +409,7 @@ with st.container():
         generate = st.button("Generate forecast", use_container_width=True, type="primary")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ===== Forecast dataframes (for tables & charts) =====
+# ===== Build fan data (with TS column for plotting)
 def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> pd.DataFrame:
     rows=[]; anchor_dt = datetime.combine(forecast_date - timedelta(days=1), anchor_time)
     for slot in SPX_SLOTS:
@@ -400,38 +418,43 @@ def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> p
         entry = project(anchor_price, SPX_SLOPES_DOWN[anchor_label], blocks)
         exit_ = project(anchor_price, SPX_SLOPES_UP[anchor_label],   blocks)
         rows.append({"Time":slot, "Entry":round(entry,2), "Exit":round(exit_,2), "Blocks":blocks})
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    df["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df["Time"])
+    return df
 
 intraday_df = fetch_spx_intraday_df()
 
-def altair_fan_chart(df_fan: pd.DataFrame, title: str, intraday: pd.DataFrame | None):
-    base = alt.Chart(df_fan).transform_fold(
-        ["Entry","Exit"], as_=["Series","Price"]
-    ).mark_line(strokeWidth=2).encode(
-        x=alt.X('Time:T', title=None),
-        y=alt.Y('Price:Q', title='Price'),
-        color=alt.Color('Series:N', scale=alt.Scale(range=["#EF4444", "#16A34A"]))  # red=Entry(down), green=Exit(up)
-    )
-    overlays = []
-    if intraday is not None and not intraday.empty:
-        price_line = alt.Chart(intraday).mark_line(strokeWidth=1.5, opacity=0.8).encode(
-            x='Time:T', y=alt.Y('Close:Q', title='Price'), color=alt.value('#2563EB')  # blue actual
-        )
-        overlays.append(price_line)
-    chart = (base + sum(overlays, alt.Chart())).properties(width='container', height=300, title=title).interactive()
-    return chart
-
 def plotly_fan_chart(df_fan: pd.DataFrame, title: str, intraday: pd.DataFrame | None):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_fan["Time"], y=df_fan["Entry"], name="Entry", line=dict(width=2, color="#EF4444")))
-    fig.add_trace(go.Scatter(x=df_fan["Time"], y=df_fan["Exit"],  name="Exit",  line=dict(width=2, color="#16A34A"), fill='tonexty', fillcolor='rgba(22,163,74,0.12)'))
+    # Fan band
+    fig.add_trace(go.Scatter(
+        x=df_fan["TS"], y=df_fan["Exit"],
+        name="Exit (ascending)", line=dict(width=2, color="#16A34A"),
+        hovertemplate="Time=%{x|%H:%M}<br>Exit=%{y:.2f}<extra></extra>"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_fan["TS"], y=df_fan["Entry"],
+        name="Entry (descending)", line=dict(width=2, color="#EF4444"),
+        fill='tonexty', fillcolor='rgba(22,163,74,0.10)',
+        hovertemplate="Time=%{x|%H:%M}<br>Entry=%{y:.2f}<extra></extra>"
+    ))
+    # Intraday overlay
     if intraday is not None and not intraday.empty:
-        fig.add_trace(go.Scatter(x=intraday["Time"], y=intraday["Close"], name="SPX", line=dict(width=2, color="#2563EB")))
-    fig.update_layout(title=title, height=340, margin=dict(l=10,r=10,t=40,b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
+        fig.add_trace(go.Scatter(
+            x=intraday["TS"], y=intraday["Close"],
+            name="SPX", line=dict(width=2, color="#2563EB"),
+            hovertemplate="Time=%{x|%H:%M}<br>SPX=%{y:.2f}<extra></extra>"
+        ))
+    fig.update_layout(
+        title=title, height=360, margin=dict(l=10,r=10,t=50,b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        dragmode="pan"
+    )
     fig.update_xaxes(rangeslider_visible=True, showgrid=False)
     fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
     return fig
 
+# ===== Forecast section
 if generate or st.session_state.get("forecasts_generated", False):
     st.session_state.forecasts_generated = True
     with st.container():
@@ -441,25 +464,16 @@ if generate or st.session_state.get("forecasts_generated", False):
         df_close = build_fan_df("CLOSE", close_price, close_time)
         df_low   = build_fan_df("LOW",   low_price,   low_time)
 
-        # Tables
-        st.markdown("**High anchor fan**")
-        st.dataframe(df_high, use_container_width=True, hide_index=True)
-        st.markdown("**Close anchor fan**")
-        st.dataframe(df_close, use_container_width=True, hide_index=True)
-        st.markdown("**Low anchor fan**")
-        st.dataframe(df_low, use_container_width=True, hide_index=True)
+        # Data tables
+        st.markdown("**High anchor fan**");  st.dataframe(df_high,  use_container_width=True, hide_index=True)
+        st.markdown("**Close anchor fan**"); st.dataframe(df_close, use_container_width=True, hide_index=True)
+        st.markdown("**Low anchor fan**");   st.dataframe(df_low,   use_container_width=True, hide_index=True)
 
-        # Charts (Altair default, Plotly optional)
         st.markdown("<div class='hline'></div>", unsafe_allow_html=True)
-        st.markdown("**Visuals (zoom/pan)**")
-        if use_plotly and PLOTLY_AVAILABLE:
-            st.plotly_chart(plotly_fan_chart(df_high,  "High Anchor — Fan vs SPX", intraday_df), use_container_width=True)
-            st.plotly_chart(plotly_fan_chart(df_close, "Close Anchor — Fan vs SPX", intraday_df), use_container_width=True)
-            st.plotly_chart(plotly_fan_chart(df_low,   "Low Anchor — Fan vs SPX", intraday_df), use_container_width=True)
-        else:
-            st.altair_chart(altair_fan_chart(df_high,  "High Anchor — Fan vs SPX", intraday_df), use_container_width=True)
-            st.altair_chart(altair_fan_chart(df_close, "Close Anchor — Fan vs SPX", intraday_df), use_container_width=True)
-            st.altair_chart(altair_fan_chart(df_low,   "Low Anchor — Fan vs SPX", intraday_df), use_container_width=True)
+        st.markdown("**Visuals (zoom/range-slider)**")
+        st.plotly_chart(plotly_fan_chart(df_high,  "High Anchor — Fan vs SPX", intraday_df), use_container_width=True)
+        st.plotly_chart(plotly_fan_chart(df_close, "Close Anchor — Fan vs SPX", intraday_df), use_container_width=True)
+        st.plotly_chart(plotly_fan_chart(df_low,   "Low Anchor — Fan vs SPX", intraday_df), use_container_width=True)
 
 # ===== Contract Line =====
 with st.container():
@@ -505,21 +519,18 @@ with st.container():
             proj= project(contract["anchor_price"], contract["slope"], blk)
             rows.append({"Time":slot,"Projected":round_to_tick(proj),"Blocks":blk})
         df_contract = pd.DataFrame(rows)
+        df_contract["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df_contract["Time"])
         st.dataframe(df_contract, use_container_width=True, hide_index=True)
 
         # Contract chart
-        if use_plotly and PLOTLY_AVAILABLE:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df_contract["Time"], y=df_contract["Projected"], name="Contract", line=dict(width=2, color="#7C3AED")))
-            fig.update_layout(title="Contract Projection", height=320, margin=dict(l=10,r=10,t=40,b=20))
-            fig.update_xaxes(rangeslider_visible=True, showgrid=False)
-            fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            ch = alt.Chart(df_contract).mark_line(strokeWidth=2, color="#7C3AED").encode(
-                x=alt.X('Time:T', title=None), y=alt.Y('Projected:Q', title='Projected')
-            ).properties(height=300).interactive()
-            st.altair_chart(ch, use_container_width=True)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_contract["TS"], y=df_contract["Projected"], name="Contract", line=dict(width=2, color="#7C3AED"),
+                                 hovertemplate="Time=%{x|%H:%M}<br>Proj=%{y:.2f}<extra></extra>"))
+        fig.update_layout(title="Contract Projection", height=320, margin=dict(l=10,r=10,t=40,b=10), dragmode="pan",
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
+        fig.update_xaxes(rangeslider_visible=True, showgrid=False)
+        fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+        st.plotly_chart(fig, use_container_width=True)
 
         # Real-time lookup
         lk1, lk2 = st.columns([1,2])
@@ -551,23 +562,16 @@ with st.container():
         df_fib = pd.DataFrame(rows)
         st.dataframe(df_fib, use_container_width=True, hide_index=True)
 
-        # Simple visual: levels vs price
+        # Simple visual
         level_df = pd.DataFrame({
             "Level": ["0.236","0.382","0.500","0.618","0.786","1.000"] + (["1.272","1.618"] if show_targets else []),
             "Price": [lv["0.236"],lv["0.382"],lv["0.500"],lv["0.618"],lv["0.786"],lv["1.000"]] + ([lv["1.272"],lv["1.618"]] if show_targets else [])
         })
-        if use_plotly and PLOTLY_AVAILABLE:
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=level_df["Level"], y=level_df["Price"], marker=dict(color="#10B981")))
-            fig.update_layout(title="Fibonacci Levels", height=320, margin=dict(l=10,r=10,t=40,b=20))
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            ch = alt.Chart(level_df).mark_bar().encode(
-                x=alt.X("Level:N", title=None),
-                y=alt.Y("Price:Q", title="Price"),
-                color=alt.value("#10B981")
-            ).properties(height=300).interactive()
-            st.altair_chart(ch, use_container_width=True)
+        fig_levels = go.Figure()
+        fig_levels.add_trace(go.Bar(x=level_df["Level"], y=level_df["Price"], marker=dict(color="#10B981"),
+                                    hovertemplate="Level=%{x}<br>Price=%{y:.2f}<extra></extra>"))
+        fig_levels.update_layout(title="Fibonacci Levels", height=320, margin=dict(l=10,r=10,t=40,b=10))
+        st.plotly_chart(fig_levels, use_container_width=True)
 
         # Next-30-minute confluence vs Contract Line
         next_30_time = (datetime.combine(forecast_date, fib_low_time) + timedelta(minutes=30)).time()
