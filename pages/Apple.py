@@ -4,24 +4,23 @@ from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 import io, zipfile, math, textwrap
-import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
-import plotly.graph_objects as go
 from math import log, sqrt, erf
 
-
-# ── CONFIG ───────────────────────────────────────────────────────────
+# ── APP META / CONFIG ────────────────────────────────────────────────
 APP_NAME = "MarketLens"
 PAGE_NAME = "Apple"
+
 CT = ZoneInfo("America/Chicago")
 ET = ZoneInfo("America/New_York")
-SLOPE_PER_BLOCK = 0.03545            # fixed ascending slope per 30-min block
-RTH_START, RTH_END = time(8,30), time(14,30)  # CT
-BASELINE_DATE_STR = "2000-01-01"     # neutral x-axis date for intraday plots
 
-# ── LIGHT UI (compact CSS) ───────────────────────────────────────────
+SLOPE_PER_BLOCK = 0.03545                 # fixed ascending slope per 30-min
+RTH_START, RTH_END = time(8,30), time(14,30)  # CT
+BASELINE_DATE_STR = "2000-01-01"          # neutral x-axis date for any time columns
+
+# ── LIGHT UI (compact) ───────────────────────────────────────────────
 st.markdown("""
 <style>
 :root{--surface:#F7F8FA;--card:#FFFFFF;--border:#E6E9EF;--text:#0F172A;--muted:#62708A;
@@ -29,14 +28,15 @@ st.markdown("""
 html,body,.stApp{font-family:Inter,-apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
 .stApp{background:var(--surface);color:var(--text);}#MainMenu,footer,.stDeployButton{display:none!important;}
 .hero{ text-align:center; padding:18px 12px; border:1px solid var(--border); border-radius:18px;
-background:var(--card); box-shadow:var(--shadow); margin-bottom:12px;}
-.brand{font-weight:800; font-size:1.75rem;} .tag{color:var(--muted);} .meta{color:var(--muted);font-size:.9rem}
+       background:var(--card); box-shadow:var(--shadow); margin-bottom:12px;}
+.brand{font-weight:800; font-size:1.8rem;}
+.tag{color:var(--muted);} .meta{color:var(--muted); font-size:.9rem}
 .card{ background:var(--card); border:1px solid var(--border); border-radius:14px;
-box-shadow:var(--shadow); padding:14px; margin:12px 0;}
+       box-shadow:var(--shadow); padding:14px; margin:12px 0;}
 .hline{height:1px; background:#EEF1F6; margin:8px 0 12px 0}
 .section{font-weight:700}
 .chip{display:inline-flex;align-items:center;gap:.5rem;border:1px solid var(--border);border-radius:999px;
-padding:.35rem .7rem;background:#fff;font-weight:600;font-size:.9rem}
+      padding:.35rem .7rem;background:#fff;font-weight:600;font-size:.9rem}
 .chip.warn{border-color:#F59E0B33;background:#FFFBEB}
 .chip.bad{border-color:#DC262633;background:#FEF2F2}
 .tilegrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
@@ -69,9 +69,6 @@ def blocks_between(t1: datetime, t2: datetime) -> int:
 def project_line(base_price: float, base_dt: datetime, target_dt: datetime) -> float:
     return base_price + SLOPE_PER_BLOCK * blocks_between(base_dt, target_dt)
 
-def fib_level(low: float, high: float, ratio: float) -> float:
-    return high - ratio * (high - low)
-
 # ── DATA (cached) ────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
@@ -97,17 +94,20 @@ def restrict_rth_30m(df_1m: pd.DataFrame) -> pd.DataFrame:
     ohlc = ohlc[(ohlc["Time"] >= "08:30") & (ohlc["Time"] <= "14:30")].copy()
     return ohlc
 
-def week_monday_tuesday_for(forecast: date) -> tuple[date, date]:
+def week_monday_tuesday_for(forecast: date) -> tuple[date, date, date]:
+    """Return (Mon, Tue, Fri) for the week containing `forecast`,
+       ensuring Mon/Tue are strictly before `forecast` (CT)."""
     week_mon = forecast - timedelta(days=forecast.weekday())
     week_tue = week_mon + timedelta(days=1)
-    if week_tue >= forecast:  # ensure Mon/Tue are strictly before forecast date
-        week_mon -= timedelta(days=7)
-        week_tue -= timedelta(days=7)
-    return week_mon, week_tue
+    week_fri = week_mon + timedelta(days=4)
+    if week_tue >= forecast:
+        week_mon -= timedelta(days=7); week_tue -= timedelta(days=7); week_fri -= timedelta(days=7)
+    return week_mon, week_tue, week_fri
 
 @st.cache_data(ttl=600)
 def compute_week_anchors_aapl(forecast: date):
-    mon_date, tue_date = week_monday_tuesday_for(forecast)
+    # Only this week’s Mon/Tue (strictly before forecast)
+    mon_date, tue_date, _ = week_monday_tuesday_for(forecast)
     start_dt = datetime.combine(mon_date, time(7,0), tzinfo=CT)
     end_dt   = datetime.combine(tue_date + timedelta(days=1), time(7,0), tzinfo=CT)
     raw = fetch_history_1m("AAPL", start_dt, end_dt)
@@ -118,16 +118,16 @@ def compute_week_anchors_aapl(forecast: date):
     tue_df = restrict_rth_30m(raw[raw["D"] == tue_date])
     if mon_df.empty or tue_df.empty: return None
 
-    # Mon extremes
+    # extremes
     MonHigh_i = mon_df["High"].idxmax(); MonLow_i = mon_df["Low"].idxmin()
-    MonHigh = float(mon_df.loc[MonHigh_i,"High"]); MonHigh_t = mon_df.loc[MonHigh_i,"dt"].to_pydatetime()
-    MonLow  = float(mon_df.loc[MonLow_i,"Low"]);   MonLow_t  = mon_df.loc[MonLow_i, "dt"].to_pydatetime()
-    # Tue extremes
     TueHigh_i = tue_df["High"].idxmax(); TueLow_i = tue_df["Low"].idxmin()
-    TueHigh = float(tue_df.loc[TueHigh_i,"High"]); TueHigh_t = tue_df.loc[TueHigh_i,"dt"].to_pydatetime()
-    TueLow  = float(tue_df.loc[TueLow_i,"Low"]);   TueLow_t  = tue_df.loc[TueLow_i, "dt"].to_pydatetime()
 
-    # Rule: if Tue High >= Mon High → lower from Mon Low, upper from Tue High; else lower from Tue Low, upper from Mon High
+    MonHigh = float(mon_df.loc[MonHigh_i,"High"]); MonHigh_t = mon_df.loc[MonHigh_i,"dt"].to_pydatetime()
+    MonLow  = float(mon_df.loc[MonLow_i,"Low"]);   MonLow_t  = mon_df.loc[MonLow_i,"dt"].to_pydatetime()
+    TueHigh = float(tue_df.loc[TueHigh_i,"High"]); TueHigh_t = tue_df.loc[TueHigh_i,"dt"].to_pydatetime()
+    TueLow  = float(tue_df.loc[TueLow_i,"Low"]);   TueLow_t  = tue_df.loc[TueLow_i,"dt"].to_pydatetime()
+
+    # Rule for two ascending lines
     up_driven = TueHigh >= MonHigh
     if up_driven:
         lower_base_price, lower_base_time = MonLow,  MonLow_t
@@ -171,7 +171,6 @@ def fetch_intraday_day_30m(symbol: str, d: date) -> pd.DataFrame:
     df1m = fetch_history_1m(symbol, start_dt, end_dt)
     if df1m.empty: return pd.DataFrame()
     df30 = restrict_rth_30m(df1m)[["dt","Open","High","Low","Close","Volume"]].copy()
-    df30["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df30["dt"].dt.strftime("%H:%M"))
     df30["Time"] = df30["dt"].dt.strftime("%H:%M")
     return df30
 
@@ -179,7 +178,7 @@ def fetch_intraday_day_30m(symbol: str, d: date) -> pd.DataFrame:
 st.markdown(f"""
 <div class="hero">
   <div class="brand">{APP_NAME} — {PAGE_NAME}</div>
-  <div class="tag">AAPL Weekly Channel • Uniform Ascending Slope (+0.03545 / 30m)</div>
+  <div class="tag">AAPL Weekly Ascending Channel • Fixed slope +0.03545 per 30-min</div>
   <div class="meta">{date.today().strftime('%Y-%m-%d')}</div>
 </div>
 """, unsafe_allow_html=True)
@@ -188,16 +187,15 @@ st.markdown(f"""
 with st.sidebar:
     st.subheader("Session")
     forecast_date = st.date_input("Target session", value=date.today() + timedelta(days=1))
-    st.caption("Mon/Tue of the same week strictly before this date define the channel (CT).")
+    st.caption("This week’s Mon/Tue (strictly before date) define the channel (CT).")
     st.subheader("Detection")
     tolerance = st.slider("Entry tolerance (Δ vs line, $)", 0.01, 0.50, 0.05, 0.01)
     st.subheader("Options")
     if "risk_free_rate" not in st.session_state: st.session_state.risk_free_rate = 0.04
-    r_default = st.number_input("Risk-free rate (annual)", value=float(st.session_state.risk_free_rate),
-                                step=0.005, min_value=0.0, max_value=0.25)
-    st.session_state.risk_free_rate = r_default
+    st.session_state.risk_free_rate = st.number_input("Risk-free rate (annual)", value=float(st.session_state.risk_free_rate),
+                                                      step=0.005, min_value=0.0, max_value=0.25)
 
-# ── WEEK SETUP & MEMORY ──────────────────────────────────────────────
+# ── WEEK SETUP & IV MEMORY ───────────────────────────────────────────
 wk = compute_week_anchors_aapl(forecast_date)
 if not wk:
     st.warning("Unable to compute AAPL Mon/Tue anchors. Try another date.")
@@ -232,13 +230,11 @@ def channel_for_day(day: date, wkinfo: dict) -> pd.DataFrame:
             "LowerLine": round(project_line(wkinfo["lower_base_price"], wkinfo["lower_base_time"], tdt), 2),
             "UpperLine": round(project_line(wkinfo["upper_base_price"], wkinfo["upper_base_time"], tdt), 2)
         })
-    df = pd.DataFrame(rows)
-    df["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df["Time"])
-    return df
+    return pd.DataFrame(rows)
 
 channel_df = channel_for_day(forecast_date, wk)
 
-# ── OPEN SIGNAL + 0.786 FIB ─────────────────────────────────────────
+# ── OPEN SIGNAL ──────────────────────────────────────────────────────
 open_px = fetch_day_open("AAPL", forecast_date)
 signal_html = '<span class="chip">Open unavailable</span>'
 if open_px is not None:
@@ -251,54 +247,12 @@ if open_px is not None:
     else:
         signal_html = '<span class="chip">Inside channel at open → watch first tag</span>'
 
-fib0786 = round(fib_level(wk["swing_low"], wk["swing_high"], 0.786), 2)
-if open_px is not None:
-    diff = min(abs(fib0786 - lower0830), abs(fib0786 - upper0830))
-    pct = (diff / fib0786 * 100.0) if fib0786 else float("inf")
-    grade = "Strong" if pct <= 0.30 else ("Moderate" if pct <= 1.00 else "Weak")
-    fib_html = f"Fib 0.786 = <b>${fib0786:.2f}</b> • Δ to nearest line: ${diff:.2f} ({pct:.2f}%) • <b>{grade}</b>"
-else:
-    fib_html = "Fib 0.786 = —"
-
 st.markdown(f"""
 <div class="card">
   <div class="section">Open Signal (08:30 CT)</div><div class="hline"></div>
   {signal_html}
 </div>
-<div class="card">
-  <div class="section">0.786 Confluence at Open</div><div class="hline"></div>
-  <div>{fib_html}</div>
-</div>
 """, unsafe_allow_html=True)
-
-# ── PLOTLY CHART (Channel + Intraday) ───────────────────────────────
-intraday30 = fetch_intraday_day_30m("AAPL", forecast_date)
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=channel_df["TS"], y=channel_df["UpperLine"], name="Upper line (+0.03545/30m)",
-                         line=dict(width=2, color="#16A34A"),
-                         hovertemplate="Time=%{x|%H:%M}<br>Upper=%{y:.2f}<extra></extra>"))
-fig.add_trace(go.Scatter(x=channel_df["TS"], y=channel_df["LowerLine"], name="Lower line (+0.03545/30m)",
-                         line=dict(width=2, color="#EF4444"),
-                         hovertemplate="Time=%{x|%H:%M}<br>Lower=%{y:.2f}<extra></extra>"))
-if not intraday30.empty:
-    fig.add_trace(go.Scatter(x=intraday30["TS"], y=intraday30["Close"], name="AAPL",
-                             line=dict(width=2, color="#2563EB"),
-                             hovertemplate="Time=%{x|%H:%M}<br>AAPL=%{y:.2f}<extra></extra>"))
-fig.update_layout(title="AAPL — Weekly Channel vs Intraday", height=390,
-                  margin=dict(l=10,r=10,t=50,b=10),
-                  legend=dict(orientation="h", y=1.02, x=0), dragmode="pan")
-fig.update_xaxes(rangeslider_visible=True, showgrid=False)
-fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
-st.plotly_chart(fig, use_container_width=True)
-
-# PNG export (optional, works if kaleido is available)
-try:
-    png = fig.to_image(format="png", width=1200, height=500, scale=2)
-    st.download_button("Download Chart (PNG)", data=png,
-                       file_name=f"AAPL_Channel_{forecast_date}.png",
-                       mime="image/png", use_container_width=True)
-except Exception:
-    pass
 
 # ── ENTRY DETECTION (Wed–Fri) ───────────────────────────────────────
 def first_tag_entries_for_days(anchor_day: date, wkinfo: dict, tol: float) -> pd.DataFrame:
@@ -353,6 +307,7 @@ st.dataframe(channel_df[["Time","LowerLine","UpperLine"]], use_container_width=T
 zipbuf = io.BytesIO()
 with zipfile.ZipFile(zipbuf, "w", zipfile.ZIP_DEFLATED) as zf:
     zf.writestr(f"AAPL_Channel_{forecast_date}.csv", channel_df.to_csv(index=False))
+    intraday30 = fetch_intraday_day_30m("AAPL", forecast_date)
     if not intraday30.empty:
         zf.writestr(f"AAPL_Intraday30_{forecast_date}.csv", intraday30.to_csv(index=False))
     zf.writestr(f"AAPL_Entries_{wk['mon_date']}_{wk['tue_date']}.csv", entries_df.to_csv(index=False))
@@ -361,11 +316,14 @@ st.download_button("Download CSV Bundle (.zip)", data=zipbuf.getvalue(),
                    use_container_width=True)
 
 # ── BLACK–SCHOLES / IV ───────────────────────────────────────────────
-def norm_cdf(x: float) -> float: return 0.5*(1.0 + erf(x / sqrt(2.0)))
+def norm_cdf(x: float) -> float:
+    return 0.5*(1.0 + erf(x / sqrt(2.0)))
 
 def bs_price_greeks(S: float, K: float, T: float, r: float, sigma: float, is_call: bool):
+    # Guard: invalid inputs → NaNs
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
-        return *(float("nan"),)*6
+        return (float("nan"), float("nan"), float("nan"),
+                float("nan"), float("nan"), float("nan"))
     d1 = (log(S/K) + (r + 0.5*sigma*sigma)*T) / (sigma*sqrt(T))
     d2 = d1 - sigma*sqrt(T)
     Nd1, Nd2 = norm_cdf(d1), norm_cdf(d2)
@@ -374,8 +332,9 @@ def bs_price_greeks(S: float, K: float, T: float, r: float, sigma: float, is_cal
         price = S*Nd1 - K*math.exp(-r*T)*Nd2; delta = Nd1; rho = K*T*math.exp(-r*T)*Nd2/100.0
     else:
         price = K*math.exp(-r*T)*norm_cdf(-d2) - S*norm_cdf(-d1); delta = Nd1 - 1.0; rho = -K*T*math.exp(-r*T)*norm_cdf(-d2)/100.0
-    gamma = n_d1/(S*sigma*sqrt(T)); vega = S*n_d1*sqrt(T)/100.0; theta = (-(S*n_d1*sigma)/(2*sqrt(T)) - (r*K*math.exp(-r*T)*(Nd2 if is_call else norm_cdf(-d2))))/365.0
-    return price, delta, gamma, theta, vega, rho
+    gamma = n_d1/(S*sigma*sqrt(T)); vega = S*n_d1*sqrt(T)/100.0
+    theta = (-(S*n_d1*sigma)/(2*sqrt(T)) - (r*K*math.exp(-r*T)*(Nd2 if is_call else norm_cdf(-d2))))/365.0
+    return (price, delta, gamma, theta, vega, rho)
 
 def year_fraction(t0: datetime, t1: datetime) -> float:
     return max((t1 - t0).total_seconds(), 0.0) / (365.0*24*3600.0)
@@ -398,7 +357,8 @@ def implied_vol(target_price, S, K, T, r, is_call, sigma_lo=1e-4, sigma_hi=5.0, 
     return 0.5*(lo+hi)
 
 def calibrate_iv_single(obs_price, S, K, t_obs: datetime, t_exp: datetime, r, is_call):
-    T = year_fraction(t_obs, t_exp);  return None if T<=0 else implied_vol(obs_price,S,K,T,r,is_call)
+    T = year_fraction(t_obs, t_exp)
+    return None if T<=0 else implied_vol(obs_price,S,K,T,r,is_call)
 
 def calibrate_iv_two_points(obs1: tuple, obs2: tuple, r: float, is_call: bool):
     price1,S1,t1,K1,texp = obs1; price2,S2,t2,K2,_ = obs2
@@ -408,7 +368,11 @@ def calibrate_iv_two_points(obs1: tuple, obs2: tuple, r: float, is_call: bool):
         p1 = bs_price_greeks(S1,K1,T1,r,sig,is_call)[0]
         p2 = bs_price_greeks(S2,K2,T2,r,sig,is_call)[0]
         return (p1-price1)**2 + (p2-price2)**2
-    grid = np.geomspace(0.02, 2.0, 60)
+    # small geometric grid without numpy
+    grid = []
+    low, high, n = 0.02, 2.0, 60
+    for i in range(n):
+        grid.append(low * ((high/low) ** (i/(n-1))))
     best = min(grid, key=sse); lo, hi = max(best*0.5,1e-4), min(best*1.5,5.0)
     for _ in range(60):
         m = 0.5*(lo+hi)
@@ -416,11 +380,11 @@ def calibrate_iv_two_points(obs1: tuple, obs2: tuple, r: float, is_call: bool):
         else: lo = m
     return 0.5*(lo+hi)
 
-# ── OPTION CALCULATOR UI ─────────────────────────────────────────────
+# ── OPTION CALCULATOR ────────────────────────────────────────────────
 st.markdown('<div class="card"><div class="section">AAPL Option Calculator</div><div class="hline"></div>', unsafe_allow_html=True)
-st.caption(f"Active IV (seed): {st.session_state.aapl_default_iv:.4f} • Week: {week_key}")
-colL, colR = st.columns(2)
+st.caption(f"Active IV (seed): {st.session_state.get('aapl_default_iv', 0.30):.4f} • Week: {week_key}")
 
+colL, colR = st.columns(2)
 with colL:
     opt_type = st.selectbox("Type", ["Call","Put"], index=0); is_call = opt_type=="Call"
     strike  = st.number_input("Strike", value=210.0, step=0.5, min_value=0.0)
@@ -435,8 +399,8 @@ with colL:
     upper_px = float(channel_df.loc[channel_df["Time"]==slot,"UpperLine"].iloc[0])
     src = st.radio("Underlying source", ["Upper line","Mid (avg)","Lower line"], index=1, horizontal=True)
     auto_S = upper_px if src=="Upper line" else lower_px if src=="Lower line" else 0.5*(upper_px+lower_px)
-    S_input = st.number_input("Underlying @ time (auto-filled; editable)", value=round(auto_S,2), step=0.01, min_value=0.0)
-    iv_input = st.number_input("IV (annualized)", value=float(st.session_state.aapl_default_iv), step=0.01, min_value=0.01, max_value=5.0)
+    S_input = st.number_input("Underlying @ time (auto; editable)", value=round(auto_S,2), step=0.01, min_value=0.0)
+    iv_input = st.number_input("IV (annualized)", value=float(st.session_state.get('aapl_default_iv', 0.30)), step=0.01, min_value=0.01, max_value=5.0)
 
 with colR:
     t_exp = datetime.combine(exp_date, exp_time, tzinfo=CT)
@@ -459,7 +423,7 @@ with colR:
 
 st.markdown("</div>", unsafe_allow_html=True)
 
-# ── CALIBRATE IV (persist for week) ──────────────────────────────────
+# ── CALIBRATE IV (per week persistence) ─────────────────────────────
 with st.expander("Calibrate IV from observations"):
     cL, cR = st.columns(2)
     with cL:
@@ -520,18 +484,18 @@ def daily_note() -> str:
              f"- Tue High/Low: {wk['TueHigh']:.2f} / {wk['TueLow']:.2f}",
              f"- Swing: {wk['swing_label']}", "", "## Open Signal",
              f"- {textwrap.shorten(signal_html, width=120, placeholder='...')}", "",
-             "## 0.786 Confluence", f"- Fib 0.786: ${fib0786:.2f}", "",
              "## Entries (Wed–Fri)"]
     for _, r in entries_df.iterrows():
         day_txt = r['Day'].strftime('%Y-%m-%d') if isinstance(r['Day'], date) else str(r['Day'])
         lines.append(f"- {day_txt}: {r['Line']} @ {r['Time']} | Px={r['AAPL Price']} Line={r['Line Px']} Δ={r['Δ']} Note={r['Note']}")
     lines += ["","## Option Snapshot",
               f"- Type: {'Call' if opt_type=='Call' else 'Put'}  Strike: {strike}  Exp: {exp_date} {exp_time}  IV: {iv_input:.4f}"]
-    if (price == price):
+    if ('price' in locals()) and (price == price):
         lines.append(f"- Theo ${price:.3f}  Δ {delta:.4f}  Γ {gamma:.6f}  Θ/day {theta:.4f}  Vega/1% {vega:.4f}  Rho/1% {rho:.4f}")
     return "\n".join(lines)
 
-md = daily_note()
-st.download_button("Export Daily Note (.md)", data=md,
+st.download_button("Export Daily Note (.md)",
+                   data=daily_note(),
                    file_name=f"MarketLens_Apple_{forecast_date}.md",
-                   mime="text/markdown", use_container_width=True)
+                   mime="text/markdown",
+                   use_container_width=True)
