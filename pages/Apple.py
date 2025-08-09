@@ -1,5 +1,6 @@
 # pages/Apple.py
 from __future__ import annotations
+
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 import io, zipfile, math, textwrap
@@ -9,6 +10,7 @@ import streamlit as st
 import yfinance as yf
 import plotly.graph_objects as go
 from math import log, sqrt, erf
+
 
 # ── CONFIG ───────────────────────────────────────────────────────────
 APP_NAME = "MarketLens"
