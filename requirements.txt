@@ -1,0 +1,7 @@
+streamlit>=1.36
+pandas>=2.2
+numpy>=1.26
+yfinance>=0.2.40
+altair>=5.3
+plotly>=5.22
+kaleido>=0.2.1   # only if you want to export charts as images
