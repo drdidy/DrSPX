@@ -98,16 +98,14 @@ def test_alpaca_connection():
         bars = client.get_stock_bars(req)
         
         if hasattr(bars, 'df') and not bars.df.empty:
-            st.success("✅ Alpaca connection successful!")
-            st.info(f"Retrieved {len(bars.df)} bars for AAPL (using historical data)")
+            st.success("✅ Market data connection verified")
             return True
         else:
-            st.warning("⚠️ Connection works but no data returned")
+            st.warning("⚠️ Connection established but limited data access")
             return True
             
     except Exception as e:
-        st.error(f"❌ Alpaca connection failed: {str(e)}")
-        st.info("💡 Check your API keys and account permissions")
+        st.error(f"❌ Connection failed: {str(e)}")
         return False
 
 @st.cache_data(ttl=300)
@@ -116,14 +114,12 @@ def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.Da
     try:
         client = _alpaca_client()
         if client is None:
-            st.error("Cannot create Alpaca client - check your API credentials")
             return pd.DataFrame()
         
         # Add buffer to avoid requesting too recent data
         now = datetime.now(tz=ET)
         if end_dt > now - timedelta(hours=4):  # If requesting data less than 4 hours old
             end_dt = now - timedelta(hours=4)  # Push it back to 4 hours ago
-            st.info(f"⏰ Adjusted end time to avoid recent data restrictions: {end_dt.strftime('%Y-%m-%d %H:%M')}")
             
         req = StockBarsRequest(
             symbol_or_symbols=symbol,
@@ -136,13 +132,11 @@ def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.Da
         bars = client.get_stock_bars(req)
         
         if not hasattr(bars, 'df'):
-            st.warning(f"No data structure returned for {symbol}")
             return pd.DataFrame()
             
         df = bars.df.reset_index()
         
         if df.empty:
-            st.warning(f"No data returned for {symbol} between {start_dt.date()} and {end_dt.date()}")
             return pd.DataFrame()
             
         if "symbol" in df.columns:
@@ -160,12 +154,12 @@ def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.Da
         df["dt"] = pd.to_datetime(df["dt"], utc=True).dt.tz_convert(CT)
         result = df[["dt","Open","High","Low","Close","Volume"]].sort_values("dt")
         
-        st.success(f"✅ Fetched {len(result)} bars for {symbol}")
         return result
         
     except Exception as e:
-        st.error(f"Error fetching {symbol} data: {str(e)}")
-        st.info("This might be due to: requesting too recent data, market closure, or API limits")
+        # Only show error if it's a real problem, not just empty data
+        if "no data" not in str(e).lower():
+            st.error(f"Data fetch error: {str(e)}")
         return pd.DataFrame()
 
 def restrict_rth_30m(df_1m: pd.DataFrame) -> pd.DataFrame:
@@ -182,8 +176,7 @@ def restrict_rth_30m(df_1m: pd.DataFrame) -> pd.DataFrame:
         ohlc["Time"] = ohlc["dt"].dt.strftime("%H:%M")
         ohlc = ohlc[(ohlc["Time"] >= "08:30") & (ohlc["Time"] <= "14:30")].copy()
         return ohlc
-    except Exception as e:
-        st.error(f"Error processing 30m data: {str(e)}")
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data(ttl=180)
@@ -206,8 +199,7 @@ def fetch_day_open(symbol: str, d: date) -> float | None:
             return float(bar.iloc[0]["Open"])
         except Exception:
             return None
-    except Exception as e:
-        st.error(f"Error fetching day open for {symbol}: {str(e)}")
+    except Exception:
         return None
 
 # ─────────────────────────── Helpers ───────────────────────────
@@ -284,8 +276,7 @@ def compute_weekly_anchors(forecast: date):
             "upper_base_price": upper_price, "upper_base_time": upper_time,
             "lower_base_price": lower_price, "lower_base_time": lower_time,
         }
-    except Exception as e:
-        st.error(f"Error computing weekly anchors: {str(e)}")
+    except Exception:
         return None
 
 def channel_for_day(day: date, anchors: dict) -> pd.DataFrame:
