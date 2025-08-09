@@ -3,7 +3,7 @@ pandas>=2.2
 numpy>=1.26
 
 # Data Sources
-alpaca-py>=0.16     # Official Alpaca API client
+alpaca-py>=0.16     # Official Alpaca API
 
 # Plotting (used by SPX app)
 plotly>=5.22
