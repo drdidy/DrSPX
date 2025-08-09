@@ -9,7 +9,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 
 APP_NAME = "MarketLens"
-VERSION = "3.4.1"
+VERSION = "3.5.0"
 
 # ----- Strategy constants (per 30-min block; fixed, not user-editable)
 SPX_SLOPES_DOWN = {"HIGH": -0.2792, "CLOSE": -0.2792, "LOW": -0.2792}
@@ -208,7 +208,6 @@ def make_slots(start: time, end: time, step_min:int=30) -> list[str]:
     return out
 
 SPX_SLOTS = make_slots(RTH_START, RTH_END)
-ETH_SLOTS = make_slots(time(7,30), RTH_END)
 
 def round_to_tick(x: float, tick: float = TICK) -> float:
     if tick <= 0: return float(x)
@@ -217,14 +216,6 @@ def round_to_tick(x: float, tick: float = TICK) -> float:
 
 def project(anchor_price: float, slope_per_block: float, blocks: int) -> float:
     return anchor_price + slope_per_block * blocks
-
-def fib_levels(low: float, high: float) -> dict[str, float]:
-    R = high - low
-    return {
-        "0.236": high - R*0.236, "0.382": high - R*0.382, "0.500": high - R*0.500,
-        "0.618": high - R*0.618, "0.786": high - R*0.786, "1.000": low,
-        "1.272": high + R*0.272, "1.618": high + R*0.618,
-    }
 
 # ===== State & page =====
 if "init" not in st.session_state:
@@ -264,7 +255,6 @@ def fetch_spx_summary():
         price = float(last["Close"])
         today_high = float(daily.iloc[-1]["High"])
         today_low  = float(daily.iloc[-1]["Low"])
-        # Fallback prev_close for live strip (if available)
         prev_close = float(daily.iloc[-2]["Close"]) if len(daily) >= 2 else price
         chg = price - prev_close
         pct = (chg / prev_close * 100) if prev_close else 0.0
@@ -276,7 +266,6 @@ def fetch_spx_summary():
 def get_prev_day_anchors_for(fore_date: date):
     """
     Returns (prev_date, prev_high, prev_close, prev_low) for the last trading day strictly before fore_date.
-    Robust for weekends/holidays/timezone.
     """
     df = yf.Ticker("^GSPC").history(period="1mo", interval="1d")
     if df is None or df.empty:
@@ -297,24 +286,39 @@ def get_prev_day_anchors_for(fore_date: date):
     )
 
 @st.cache_data(ttl=120)
-def fetch_spx_intraday_df():
+def fetch_spx_intraday_1m(d: date) -> pd.DataFrame:
+    """Fetch 1m intraday for specific calendar date; returns tz-naive times."""
     try:
         t = yf.Ticker("^GSPC")
-        df = t.history(period="1d", interval="1m")
-        if df is None or df.empty:
-            return pd.DataFrame()
+        # Pull a bit wider window to be safe on timezones
+        start = d - timedelta(days=1)
+        end   = d + timedelta(days=1)
+        df = t.history(start=start, end=end, interval="1m")
+        if df is None or df.empty: return pd.DataFrame()
         df = df.reset_index()
-        if "Datetime" in df.columns:
-            df.rename(columns={"Datetime": "dt"}, inplace=True)
-        else:
-            df.rename(columns={df.columns[0]: "dt"}, inplace=True)
+        col0 = "Datetime" if "Datetime" in df.columns else df.columns[0]
+        df.rename(columns={col0:"dt"}, inplace=True)
+        # Normalize to time-only
         df["Time"] = df["dt"].dt.tz_localize(None).dt.strftime("%H:%M")
-        df = df[(df["Time"] >= "08:30") & (df["Time"] <= "15:30")]
-        df = df[["Time","Close"]].copy()
-        df["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df["Time"])
+        df["Date"] = df["dt"].dt.tz_localize(None).dt.date
+        df = df[df["Date"] == d].copy()
         return df
     except Exception:
         return pd.DataFrame()
+
+def to_30m(df_1m: pd.DataFrame) -> pd.DataFrame:
+    """Right-closed, label-right 30m bars, restricted to RTH 08:30–15:30."""
+    if df_1m.empty: return df_1m
+    df = df_1m.copy()
+    df = df.set_index(pd.to_datetime(df["dt"]).dt.tz_localize(None)).sort_index()
+    ohlc = df[["Open","High","Low","Close","Volume"]].resample("30min", label="right", closed="right").agg({
+        "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
+    }).dropna(subset=["Open","High","Low","Close"])
+    ohlc = ohlc.reset_index()
+    ohlc["Time"] = ohlc["index"].dt.strftime("%H:%M")
+    ohlc = ohlc[(ohlc["Time"] >= "08:30") & (ohlc["Time"] <= "15:30")].copy()
+    ohlc["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + ohlc["Time"])
+    return ohlc[["Time","Open","High","Low","Close","Volume","TS"]]
 
 # ===== Live strip =====
 sumy = fetch_spx_summary()
@@ -337,7 +341,7 @@ else:
     st.markdown(
         """
         <div class="card" style="padding:12px 16px;">
-          <div class="subtle">Live SPX price unavailable (yfinance not installed or no connectivity).</div>
+          <div class="subtle">Live SPX price unavailable.</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -362,6 +366,11 @@ with st.sidebar:
     forecast_date = st.date_input("Target session", value=date.today() + timedelta(days=1))
     days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
     st.info(f"{days[forecast_date.weekday()]} session • anchors reference the previous day.")
+
+    st.divider()
+    st.subheader("Entry Detector")
+    tol = st.slider("Touch tolerance ($ vs line)", 0.00, 5.00, 0.50, 0.05)
+    require_close_rule = st.radio("Rule", ["Close above Exit / below Entry", "Near line (±tol) only"], index=0)
 
     st.divider()
     st.subheader("Docs")
@@ -409,7 +418,7 @@ if anchors:
 else:
     st.warning("Couldn’t determine the previous trading day for the selected forecast date.")
 
-# ===== Anchors inputs (unchanged)
+# ===== Anchors inputs
 def anchor_inputs(prefix: str, default_price: float, default_time: time):
     price = st.number_input(f"{prefix} price", value=float(default_price), step=0.1, min_value=0.0, key=f"{prefix}_price")
     when  = st.time_input(f"{prefix} time",  value=default_time, step=300, key=f"{prefix}_time")
@@ -440,11 +449,11 @@ with st.container():
         generate = st.button("Generate forecast", use_container_width=True, type="primary")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ===== Build fan data (with TS column for plotting)
-def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> pd.DataFrame:
-    rows=[]; anchor_dt = datetime.combine(forecast_date - timedelta(days=1), anchor_time)
+# ===== Fan data builder
+def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time, fore_d: date) -> pd.DataFrame:
+    rows=[]; anchor_dt = datetime.combine(fore_d - timedelta(days=1), anchor_time)
     for slot in SPX_SLOTS:
-        hh, mm = map(int, slot.split(":")); tdt = datetime.combine(forecast_date, time(hh, mm))
+        hh, mm = map(int, slot.split(":")); tdt = datetime.combine(fore_d, time(hh, mm))
         blocks = spx_blocks_between(anchor_dt, tdt)
         entry = project(anchor_price, SPX_SLOPES_DOWN[anchor_label], blocks)
         exit_ = project(anchor_price, SPX_SLOPES_UP[anchor_label],   blocks)
@@ -453,31 +462,12 @@ def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> p
     df["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df["Time"])
     return df
 
-@st.cache_data(ttl=120)
-def fetch_spx_intraday_df():
-    try:
-        t = yf.Ticker("^GSPC")
-        df = t.history(period="1d", interval="1m")
-        if df is None or df.empty:
-            return pd.DataFrame()
-        df = df.reset_index()
-        if "Datetime" in df.columns:
-            df.rename(columns={"Datetime": "dt"}, inplace=True)
-        else:
-            df.rename(columns={df.columns[0]: "dt"}, inplace=True)
-        df["Time"] = df["dt"].dt.tz_localize(None).dt.strftime("%H:%M")
-        df = df[(df["Time"] >= "08:30") & (df["Time"] <= "15:30")]
-        df = df[["Time","Close"]].copy()
-        df["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df["Time"])
-        return df
-    except Exception:
-        return pd.DataFrame()
+# ===== Intraday (1m → 30m) for forecast date
+raw_1m = fetch_spx_intraday_1m(forecast_date)
+intraday_30m = to_30m(raw_1m)
 
-intraday_df = fetch_spx_intraday_df()
-
-def plotly_fan_chart(df_fan: pd.DataFrame, title: str, intraday: pd.DataFrame | None):
+def plotly_fan_chart(df_fan: pd.DataFrame, title: str, intraday_30: pd.DataFrame | None):
     fig = go.Figure()
-    # Fan band
     fig.add_trace(go.Scatter(
         x=df_fan["TS"], y=df_fan["Exit"],
         name="Exit (ascending)", line=dict(width=2, color="#16A34A"),
@@ -489,11 +479,10 @@ def plotly_fan_chart(df_fan: pd.DataFrame, title: str, intraday: pd.DataFrame | 
         fill='tonexty', fillcolor='rgba(22,163,74,0.10)',
         hovertemplate="Time=%{x|%H:%M}<br>Entry=%{y:.2f}<extra></extra>"
     ))
-    # Intraday overlay
-    if intraday is not None and not intraday.empty:
+    if intraday_30 is not None and not intraday_30.empty:
         fig.add_trace(go.Scatter(
-            x=intraday["TS"], y=intraday["Close"],
-            name="SPX", line=dict(width=2, color="#2563EB"),
+            x=intraday_30["TS"], y=intraday_30["Close"],
+            name="SPX (30m close)", line=dict(width=2, color="#2563EB"),
             hovertemplate="Time=%{x|%H:%M}<br>SPX=%{y:.2f}<extra></extra>"
         ))
     fig.update_layout(
@@ -505,28 +494,58 @@ def plotly_fan_chart(df_fan: pd.DataFrame, title: str, intraday: pd.DataFrame | 
     fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
     return fig
 
-# ===== Forecast section (unchanged)
+# ===== Forecast + Visuals
 if generate or st.session_state.get("forecasts_generated", False):
     st.session_state.forecasts_generated = True
     with st.container():
         st.markdown('<div class="card"><div class="section-title">SPX Forecast (08:30–15:30)</div><div class="hline"></div>', unsafe_allow_html=True)
 
-        df_high  = build_fan_df("HIGH",  high_price,  high_time)
-        df_close = build_fan_df("CLOSE", close_price, close_time)
-        df_low   = build_fan_df("LOW",   low_price,   low_time)
+        df_high  = build_fan_df("HIGH",  high_price,  high_time,  forecast_date)
+        df_close = build_fan_df("CLOSE", close_price, close_time, forecast_date)
+        df_low   = build_fan_df("LOW",   low_price,   low_time,   forecast_date)
 
-        # Data tables
         st.markdown("**High anchor fan**");  st.dataframe(df_high,  use_container_width=True, hide_index=True)
         st.markdown("**Close anchor fan**"); st.dataframe(df_close, use_container_width=True, hide_index=True)
         st.markdown("**Low anchor fan**");   st.dataframe(df_low,   use_container_width=True, hide_index=True)
 
         st.markdown("<div class='hline'></div>", unsafe_allow_html=True)
         st.markdown("**Visuals (zoom/range-slider)**")
-        st.plotly_chart(plotly_fan_chart(df_high,  "High Anchor — Fan vs SPX", intraday_df), use_container_width=True)
-        st.plotly_chart(plotly_fan_chart(df_close, "Close Anchor — Fan vs SPX", intraday_df), use_container_width=True)
-        st.plotly_chart(plotly_fan_chart(df_low,   "Low Anchor — Fan vs SPX", intraday_df), use_container_width=True)
+        st.plotly_chart(plotly_fan_chart(df_high,  "High Anchor — Fan vs SPX", intraday_30m), use_container_width=True)
+        st.plotly_chart(plotly_fan_chart(df_close, "Close Anchor — Fan vs SPX", intraday_30m), use_container_width=True)
+        st.plotly_chart(plotly_fan_chart(df_low,   "Low Anchor — Fan vs SPX", intraday_30m), use_container_width=True)
 
-# ===== Contract Line (unchanged)
+        # ===== Entry Detector (forecast day, first qualifying tag per fan)
+        def detect_first_tag(df_fan: pd.DataFrame, df30: pd.DataFrame, label: str) -> dict:
+            if df30 is None or df30.empty: 
+                return {"Fan": label, "Time":"—", "Type":"—", "SPX Close":"—", "Line Px":"—", "Δ":"—", "Note":"No intraday data"}
+            merged = pd.merge(df_fan[["Time","Entry","Exit"]], df30[["Time","Close"]], on="Time", how="inner")
+            for _, r in merged.iterrows():
+                close = float(r["Close"]); ex = float(r["Exit"]); en = float(r["Entry"])
+                # rule set
+                up_ok = (close >= ex and (close - ex) <= tol) if require_close_rule.startswith("Close") else (abs(close - ex) <= tol)
+                dn_ok = (close <= en and (en - close) <= tol) if require_close_rule.startswith("Close") else (abs(close - en) <= tol)
+                # prefer the closer one if both
+                cand=[]
+                if up_ok: cand.append(("Exit↑", r["Time"], close, ex, abs(close-ex)))
+                if dn_ok: cand.append(("Entry↓", r["Time"], close, en, abs(close-en)))
+                if cand:
+                    choice = sorted(cand, key=lambda x: x[4])[0]
+                    kind, tm, px, line_px, delta = choice
+                    note = "Close rule" if require_close_rule.startswith("Close") else "Near-line"
+                    return {"Fan": label, "Time": tm, "Type": kind, "SPX Close": round(px,2), "Line Px": round(line_px,2), "Δ": round(delta,2), "Note": note}
+            return {"Fan": label, "Time":"—", "Type":"—", "SPX Close":"—", "Line Px":"—", "Δ":"—", "Note":"No tag within tolerance"}
+
+        st.markdown("<div class='hline'></div>", unsafe_allow_html=True)
+        st.markdown("**Entry Detector (Forecast Day • first tag per fan)**")
+        det_rows = [
+            detect_first_tag(df_high,  intraday_30m, "High"),
+            detect_first_tag(df_close, intraday_30m, "Close"),
+            detect_first_tag(df_low,   intraday_30m, "Low"),
+        ]
+        det_df = pd.DataFrame(det_rows)
+        st.dataframe(det_df, use_container_width=True, hide_index=True)
+
+# ===== Contract Line
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Contract Line</div><div class="hline"></div>', unsafe_allow_html=True)
     col1,col2,col3 = st.columns([1,1,1])
@@ -542,6 +561,17 @@ with st.container():
         line_label = st.selectbox("Label", ["Manual","Tuesday Play","Thursday Play"], index=0)
         rth_only   = st.toggle("RTH slots only", value=True)
     gen_contract = st.button("Calculate contract line", use_container_width=True, type="primary")
+
+    def make_slots(start: time, end: time, step_min:int=30) -> list[str]:
+        cur = datetime(2025,1,1,start.hour,start.minute)
+        stop= datetime(2025,1,1,end.hour,end.minute)
+        out=[]
+        while cur <= stop:
+            out.append(cur.strftime("%H:%M")); cur += timedelta(minutes=step_min)
+        return out
+    ETH_SLOTS = make_slots(time(7,30), RTH_END)
+    def project_line(base_price: float, slope: float, blocks: int) -> float:
+        return base_price + slope * blocks
 
     if gen_contract:
         t1 = datetime.combine(forecast_date, low1_time)
@@ -567,7 +597,7 @@ with st.container():
             hh,mm = map(int, slot.split(":"))
             tdt = datetime.combine(forecast_date, time(hh,mm))
             blk = spx_blocks_between(contract["anchor_time"], tdt)
-            proj= project(contract["anchor_price"], contract["slope"], blk)
+            proj= project_line(contract["anchor_price"], contract["slope"], blk)
             rows.append({"Time":slot,"Projected":round_to_tick(proj),"Blocks":blk})
         df_contract = pd.DataFrame(rows)
         df_contract["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df_contract["Time"])
@@ -590,10 +620,10 @@ with st.container():
         with lk2:
             tdt = datetime.combine(forecast_date, lookup_time)
             blk = spx_blocks_between(contract["anchor_time"], tdt)
-            proj = project(contract["anchor_price"], contract["slope"], blk)
+            proj = project_line(contract["anchor_price"], contract["slope"], blk)
             st.success(f"Projected @ {lookup_time.strftime('%H:%M')} → ${round_to_tick(proj):.2f} · {blk} blocks")
 
-# ===== Fibonacci (up-bounce only) (unchanged)
+# ===== Fibonacci (up-bounce only)
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Fibonacci Bounce (up-bounce only)</div><div class="hline"></div>', unsafe_allow_html=True)
     fb1,fb2,fb3,fb4 = st.columns([1,1,1,1])
@@ -601,6 +631,14 @@ with st.container():
     with fb2: fib_high = st.number_input("Bounce high (contract)", value=0.00, step=TICK, min_value=0.0)
     with fb3: fib_low_time = st.time_input("Bounce low time", value=time(9,30), step=300)
     with fb4: show_targets = st.toggle("Show 1.272 / 1.618 targets", value=True)
+
+    def fib_levels(low: float, high: float) -> dict[str, float]:
+        R = high - low
+        return {
+            "0.236": high - R*0.236, "0.382": high - R*0.382, "0.500": high - R*0.500,
+            "0.618": high - R*0.618, "0.786": high - R*0.786, "1.000": low,
+            "1.272": high + R*0.272, "1.618": high + R*0.618,
+        }
 
     if fib_high > fib_low > 0:
         lv = fib_levels(fib_low, fib_high)
@@ -612,17 +650,6 @@ with st.container():
                 rows.append({"Level":k, "Price": f"${round_to_tick(lv[k]):.2f}", "Note":"Target"})
         df_fib = pd.DataFrame(rows)
         st.dataframe(df_fib, use_container_width=True, hide_index=True)
-
-        # Simple visual
-        level_df = pd.DataFrame({
-            "Level": ["0.236","0.382","0.500","0.618","0.786","1.000"] + (["1.272","1.618"] if show_targets else []),
-            "Price": [lv["0.236"],lv["0.382"],lv["0.500"],lv["0.618"],lv["0.786"],lv["1.000"]] + ([lv["1.272"],lv["1.618"]] if show_targets else [])
-        })
-        fig_levels = go.Figure()
-        fig_levels.add_trace(go.Bar(x=level_df["Level"], y=level_df["Price"], marker=dict(color="#10B981"),
-                                    hovertemplate="Level=%{x}<br>Price=%{y:.2f}<extra></extra>"))
-        fig_levels.update_layout(title="Fibonacci Levels", height=320, margin=dict(l=10,r=10,t=40,b=10))
-        st.plotly_chart(fig_levels, use_container_width=True)
 
         # Next-30-minute confluence vs Contract Line
         next_30_time = (datetime.combine(forecast_date, fib_low_time) + timedelta(minutes=30)).time()
@@ -655,29 +682,10 @@ with st.container():
             )
         else:
             st.warning("Configure the Contract Line to enable confluence check.")
-
-        # Simple R:R helper
-        entry = key_0786
-        stop  = round_to_tick(fib_low - TICK)
-        tp1   = round_to_tick(fib_high)
-        tp2   = round_to_tick(lv["1.272"]) if show_targets else None
-        tp3   = round_to_tick(lv["1.618"]) if show_targets else None
-
-        risk_col, rr_col = st.columns([1,3])
-        with risk_col:
-            risk_val = st.number_input("Assumed $ risk (per contract)", value=0.50, step=0.25, min_value=0.25)
-        with rr_col:
-            stop_dist = max(entry - stop, 0.0001)
-            def rr(tp): return (tp - entry) / stop_dist if tp else None
-            st.write(f"- Entry: ${entry:.2f} · Stop: ${stop:.2f} (one tick below low) · Risk/contract: ${risk_val:.2f}")
-            st.write(f"- TP1 (back to high): ${tp1:.2f} → R:R {rr(tp1):.2f}")
-            if show_targets:
-                st.write(f"- TP2 (1.272): ${tp2:.2f} → R:R {rr(tp2):.2f}")
-                st.write(f"- TP3 (1.618): ${tp3:.2f} → R:R {rr(tp3):.2f}")
     else:
         st.info("Enter bounce low < bounce high to compute levels.")
 
-# ===== Exports (unchanged)
+# ===== Exports
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Exports</div><div class="hline"></div>', unsafe_allow_html=True)
     exportables={}
@@ -685,6 +693,7 @@ with st.container():
         exportables["SPX_High_Fan.csv"]  = locals().get("df_high", pd.DataFrame()).to_csv(index=False).encode()
         exportables["SPX_Close_Fan.csv"] = locals().get("df_close", pd.DataFrame()).to_csv(index=False).encode()
         exportables["SPX_Low_Fan.csv"]   = locals().get("df_low", pd.DataFrame()).to_csv(index=False).encode()
+        exportables["SPX_Entry_Detector.csv"] = locals().get("det_df", pd.DataFrame()).to_csv(index=False).encode()
     if 'df_contract' in locals():
         exportables["Contract_Line.csv"] = df_contract.to_csv(index=False).encode()
     if 'df_fib' in locals():
@@ -697,7 +706,7 @@ with st.container():
                 if data: zf.writestr(fn,data)
         st.download_button("Download all CSVs (.zip)", data=buf.getvalue(), file_name="marketlens_exports.zip", mime="application/zip", type="primary", use_container_width=True)
 
-# ===== Footer (unchanged)
+# ===== Footer
 st.markdown(
     f"""
     <div class="card" style="text-align:center">
