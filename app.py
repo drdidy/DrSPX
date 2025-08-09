@@ -1,9 +1,9 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🕶️ MarketLens — SPX Forecast Console (One-File, Premium UI)
-# Spec: SPX-only • Fixed slopes • Auto-zoom charts • Deep navy→charcoal theme
+# 🕶️ MarketLens — SPX Forecast Console (One-File, Premium UI, Altair Charts)
+# Spec: SPX-only • Fixed slopes • Auto-zoom charts (Altair) • Deep navy→charcoal
 #       Upgraded Fibonacci & Contract tools • 12 visual UX enhancements
 #       Optional Yahoo Finance summary (15m delay) with graceful fallback
-#       No Plotly; uses Streamlit + pandas + matplotlib only
+#       No Plotly, No Matplotlib (Altair is built into Streamlit)
 # Timezone note: America/Chicago (display text only; datetimes naive in code)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -13,20 +13,19 @@ import json
 import math
 import textwrap
 import zipfile
-from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta
 
 import pandas as pd
 import numpy as np
 import streamlit as st
-import matplotlib.pyplot as plt
+import altair as alt  # ← Altair for interactive charts (no extra install needed)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # APP METADATA / BRAND
 # ──────────────────────────────────────────────────────────────────────────────
 APP_NAME = "MarketLens"
 PAGE_ICON = "🕶️"
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # FIXED SLOPES (LOCKED)
@@ -494,7 +493,7 @@ with st.container():
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FORECAST (Auto-zoom charts with matplotlib)
+# FORECAST (Auto-zoom charts with Altair)
 # ──────────────────────────────────────────────────────────────────────────────
 def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> pd.DataFrame:
     rows=[]
@@ -509,19 +508,43 @@ def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> p
     return pd.DataFrame(rows)
 
 def plot_fan(df: pd.DataFrame, title: str, color_main: str):
+    # Auto-zoom (pad 5%)
     y_vals = pd.concat([df["Entry"], df["Exit"]])
     ymin, ymax = float(y_vals.min()), float(y_vals.max())
     pad = max(1.0, (ymax - ymin) * 0.05)
-    fig, ax = plt.subplots(figsize=(7.5, 2.8))
-    ax.plot(df["Time"], df["Entry"], linewidth=2.0, linestyle="-",  label="Entry (↓)", color=COLOR_ENTRY)
-    ax.plot(df["Time"], df["Exit"],  linewidth=2.0, linestyle="--", label="Exit (↑)",  color=COLOR_EXIT)
-    ax.set_ylim(ymin - pad, ymax + pad)
-    ax.set_xticks(range(0, len(df["Time"]), max(1, len(df["Time"])//8)))
-    ax.set_title(title, fontsize=11, color=color_main)
-    ax.grid(True, alpha=0.15)
-    ax.legend(loc="upper left")
-    plt.xticks(rotation=45, ha="right")
-    st.pyplot(fig, clear_figure=True)
+    y_domain = [ymin - pad, ymax + pad]
+
+    # Long-form for Altair
+    df_long = pd.melt(
+        df[["Time", "Entry", "Exit"]],
+        id_vars=["Time"],
+        value_vars=["Entry", "Exit"],
+        var_name="Series",
+        value_name="Value"
+    )
+    time_sort = list(df["Time"])
+    chart = (
+        alt.Chart(df_long)
+        .mark_line(point=False)
+        .encode(
+            x=alt.X("Time:N", sort=time_sort, axis=alt.Axis(labelAngle=45)),
+            y=alt.Y("Value:Q", scale=alt.Scale(domain=y_domain)),
+            color=alt.Color(
+                "Series:N",
+                scale=alt.Scale(domain=["Entry", "Exit"], range=[COLOR_ENTRY, COLOR_EXIT]),
+                legend=alt.Legend(title=None)
+            ),
+            strokeDash=alt.StrokeDash(
+                "Series:N",
+                scale=alt.Scale(domain=["Entry", "Exit"], range=[[1, 0], [6, 3]])
+            ),
+            tooltip=["Time:N", "Series:N", alt.Tooltip("Value:Q", format=".2f")],
+        )
+        .properties(title=title, height=220)
+        .configure_title(color=color_main, fontSize=12)
+        .configure_axis(grid=True, gridOpacity=0.15)
+    )
+    st.altair_chart(chart, use_container_width=True)
 
 if generate or st.session_state.get("forecasts_generated", False):
     st.session_state.forecasts_generated = True
@@ -591,18 +614,32 @@ with st.container():
             rows.append({"Time":slot,"Projected":round_to_tick(proj),"Blocks":blk,"Δ from Anchor": round(proj - contract["anchor_price"],2)})
         df_contract = pd.DataFrame(rows)
 
-        # Chart
+        # Altair chart (auto-zoom)
         if st.session_state.show_charts:
             y = df_contract["Projected"]
-            ymin, ymax = float(y.min()), float(y.max()); pad = max(TICK, (ymax-ymin)*0.05)
-            fig, ax = plt.subplots(figsize=(7.5,2.6))
-            ax.plot(df_contract["Time"], y, linewidth=2.0, color=COLOR_CLOSE)
-            ax.set_ylim(ymin - pad, ymax + pad)
-            ax.set_xticks(range(0, len(df_contract["Time"]), max(1, len(df_contract["Time"])//8)))
-            ax.set_title("Contract Projection", fontsize=11)
-            ax.grid(True, alpha=0.15)
-            plt.xticks(rotation=45, ha="right")
-            st.pyplot(fig, clear_figure=True)
+            ymin, ymax = float(y.min()), float(y.max())
+            pad = max(TICK, (ymax - ymin) * 0.05)
+            y_domain = [ymin - pad, ymax + pad]
+
+            time_sort = list(df_contract["Time"])
+            chart = (
+                alt.Chart(df_contract)
+                .mark_line()
+                .encode(
+                    x=alt.X("Time:N", sort=time_sort, axis=alt.Axis(labelAngle=45)),
+                    y=alt.Y("Projected:Q", scale=alt.Scale(domain=y_domain)),
+                    color=alt.value(COLOR_CLOSE),
+                    tooltip=[
+                        "Time:N",
+                        alt.Tooltip("Projected:Q", format=".2f"),
+                        "Blocks:Q",
+                        alt.Tooltip("Δ from Anchor:Q", format=".2f"),
+                    ],
+                )
+                .properties(title="Contract Projection", height=220)
+                .configure_axis(grid=True, gridOpacity=0.15)
+            )
+            st.altair_chart(chart, use_container_width=True)
 
         st.dataframe(df_contract, use_container_width=True, hide_index=True)
 
@@ -659,6 +696,8 @@ with st.container():
         # Entry/Stop/Targets
         entry = key_0786
         stop  = round_to_tick(fib_low - TICK)
+        tp1   = round_to_tick(levels["1.000"] + (levels["1.000"] - fib_low) + (fib_high - fib_low))  # equals back to high
+        # The line above is equivalent to fib_high, but left expanded for clarity. We still set to high directly:
         tp1   = round_to_tick(fib_high)
         tp2   = round_to_tick(levels["1.272"]) if show_targets else None
         tp3   = round_to_tick(levels["1.618"]) if show_targets else None
@@ -693,15 +732,15 @@ with st.container():
                     "low":  {"price": low_price,  "time": low_time.strftime("%H:%M")},
                 },
                 "contract": {
-                    "low1_time": low1_time.strftime("%H:%M"),
-                    "low1_price": low1_price,
-                    "low2_time": low2_time.strftime("%H:%M"),
-                    "low2_price": low2_price,
+                    "low1_time": st.session_state.get("low1_time", time(2,0)).strftime("%H:%M"),
+                    "low1_price": st.session_state.get("low1_price", 10.0),
+                    "low2_time": st.session_state.get("low2_time", time(3,30)).strftime("%H:%M"),
+                    "low2_price": st.session_state.get("low2_price", 12.0),
                     "label": st.session_state.contract.get("label","Manual")
                 },
                 "fib": {
-                    "low": st.session_state.get("fib_low", fib_low) if 'fib_low' in st.session_state else fib_low,
-                    "high": st.session_state.get("fib_high", fib_high) if 'fib_high' in st.session_state else fib_high,
+                    "low": fib_low,
+                    "high": fib_high,
                     "low_time": fib_low_time.strftime("%H:%M"),
                     "show_targets": show_targets
                 }
