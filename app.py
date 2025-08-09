@@ -4,18 +4,19 @@ from datetime import datetime, date, time, timedelta
 
 import pandas as pd
 import streamlit as st
+import yfinance as yf  # live SPX (delayed) quotes
 
 APP_NAME = "MarketLens"
-VERSION = "3.2.1"
+VERSION = "3.2.2"
 
 # --- Hidden strategy constants (per 30-min block)
 SPX_SLOPES_DOWN = {"HIGH": -0.2792, "CLOSE": -0.2792, "LOW": -0.2792}
 SPX_SLOPES_UP   = {"HIGH": +0.3171, "CLOSE": +0.3171, "LOW": +0.3171}
 TICK = 0.25
 
-ICON_HIGH, ICON_CLOSE, ICON_LOW = "▲", "■", "▼"
+ICON_HIGH, ICON_CLOSE, ICON_LOW = "▲", "■", "▼"   # high (green), close (blue square), low (red)
 
-# --- Verbatim content you asked to keep
+# --- Verbatim content to keep
 SPX_GOLDEN_RULES = [
     "Exit levels are exits - never entries",
     "Anchors are magnets, not timing signals - let price come to you",
@@ -107,7 +108,7 @@ RISK_RULES = {
     ],
 }
 
-# ===== Apple-like light-first CSS (with dark toggle) =====
+# ===== Apple-like light-first CSS (dark toggle supported) =====
 CSS_BASE = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -244,7 +245,6 @@ st.markdown(INJECT_DARK_TOGGLE, unsafe_allow_html=True)
 @st.cache_data(ttl=60)
 def fetch_spx_summary():
     try:
-        import yfinance as yf
         t = yf.Ticker("^GSPC")
         intraday = t.history(period="1d", interval="1m")
         daily = t.history(period="5d", interval="1d")
@@ -336,16 +336,19 @@ def anchor_inputs(prefix: str, default_price: float, default_time: time):
 
 with st.container():
     st.markdown('<div class="card"><div class="section-title">SPX Anchors (previous day)</div><div class="hline"></div>', unsafe_allow_html=True)
-    colH, colC, colL = st.columns(3)
-    with colH:
-        st.markdown(f'<div class="icon-chip"><span class="icon i-high">{ICON_HIGH}</span><span>Low</span></div>', unsafe_allow_html=True)
-        low_price, low_time = anchor_inputs("Low", 6130.40, time(13,30))
-    with colC:
-        st.markdown(f'<div class="icon-chip"><span class="icon i-close">{ICON_CLOSE}</span><span>Close</span></div>', unsafe_allow_html=True)
-        close_price, close_time = anchor_inputs("Close", 6170.20, time(15,0))
-    with colH:
+    col_high, col_close, col_low = st.columns(3)
+
+    with col_high:
         st.markdown(f'<div class="icon-chip"><span class="icon i-high">{ICON_HIGH}</span><span>High</span></div>', unsafe_allow_html=True)
         high_price, high_time = anchor_inputs("High", 6185.80, time(11,30))
+
+    with col_close:
+        st.markdown(f'<div class="icon-chip"><span class="icon i-close">{ICON_CLOSE}</span><span>Close</span></div>', unsafe_allow_html=True)
+        close_price, close_time = anchor_inputs("Close", 6170.20, time(15,0))
+
+    with col_low:
+        st.markdown(f'<div class="icon-chip"><span class="icon i-low">{ICON_LOW}</span><span>Low</span></div>', unsafe_allow_html=True)
+        low_price, low_time = anchor_inputs("Low", 6130.40, time(13,30))
 
     colA, colB = st.columns([1,1])
     with colA:
@@ -445,14 +448,6 @@ with st.container():
             st.success(f"Projected @ {lookup_time.strftime('%H:%M')} → ${round_to_tick(proj):.2f} · {blk} blocks · Δ {proj - contract['anchor_price']:+.2f}")
 
 # ===== Fibonacci (up-bounce only) =====
-def fib_levels(low: float, high: float) -> dict[str, float]:
-    R = high - low
-    return {
-        "0.236": high - R*0.236, "0.382": high - R*0.382, "0.500": high - R*0.500,
-        "0.618": high - R*0.618, "0.786": high - R*0.786, "1.000": low,
-        "1.272": high + R*0.272, "1.618": high + R*0.618,
-    }
-
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Fibonacci Bounce (up-bounce only)</div><div class="hline"></div>', unsafe_allow_html=True)
     fb1,fb2,fb3,fb4 = st.columns([1,1,1,1])
