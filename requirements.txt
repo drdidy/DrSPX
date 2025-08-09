@@ -1,10 +1,18 @@
 streamlit>=1.36
 pandas>=2.2
 numpy>=1.26
-yfinance>=0.2.40
+
+# Data Sources
+alpaca-py>=0.16     # Official Alpaca API client
+
+# Plotting (used by SPX app)
 plotly>=5.22
 kaleido>=0.2.1
-python-dotenv>=1.0  # for secrets/config if you add them later
-pydantic>=2.7       # data validation if you expand inputs/API
-tenacity>=8.2       # robust retries for network calls
-orjson>=3.10        # faster JSON (optional)
+
+# Config / Secrets
+python-dotenv>=1.0  # if you add local .env file support
+
+# Utilities
+pydantic>=2.7       # for structured data validation
+tenacity>=8.2       # retry failed API requests
+orjson>=3.10        # fast JSON parser/serializer
