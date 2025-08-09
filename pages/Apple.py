@@ -1,4 +1,4 @@
-# pages/Apple.py
+# pages/Apple.py - PART 1
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
@@ -66,53 +66,142 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 def _alpaca_client():
-    return StockHistoricalDataClient(
-        api_key=st.secrets["alpaca"]["key"],
-        secret_key=st.secrets["alpaca"]["secret"]
-    )
+    """Create Alpaca client with proper error handling and paper trading support"""
+    try:
+        return StockHistoricalDataClient(
+            api_key=st.secrets["alpaca"]["key"],
+            secret_key=st.secrets["alpaca"]["secret"],
+            # Add sandbox=True if using paper trading credentials
+            # sandbox=True  # Uncomment this line if you're using paper trading
+        )
+    except Exception as e:
+        st.error(f"Failed to create Alpaca client: {str(e)}")
+        return None
+
+def test_alpaca_connection():
+    """Test if Alpaca connection is working"""
+    try:
+        client = _alpaca_client()
+        if client is None:
+            return False
+            
+        # Test with a simple recent data request
+        end_dt = datetime.now(tz=ET)
+        start_dt = end_dt - timedelta(hours=2)
+        
+        req = StockBarsRequest(
+            symbol_or_symbols="AAPL",
+            timeframe=TimeFrame.Minute,
+            start=start_dt,
+            end=end_dt,
+            limit=5
+        )
+        bars = client.get_stock_bars(req)
+        
+        if hasattr(bars, 'df') and not bars.df.empty:
+            st.success("✅ Alpaca connection successful!")
+            st.info(f"Retrieved {len(bars.df)} test bars for AAPL")
+            return True
+        else:
+            st.warning("⚠️ Connection works but no data returned (market may be closed)")
+            return True
+    except Exception as e:
+        st.error(f"❌ Alpaca connection failed: {str(e)}")
+        st.info("💡 Try: 1) Check your API keys, 2) Regenerate keys if shared publicly, 3) Toggle sandbox mode")
+        return False
 
 @st.cache_data(ttl=300)
 def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
-    client = _alpaca_client()
-    req = StockBarsRequest(
-        symbol_or_symbols=symbol,
-        timeframe=TimeFrame.Minute,
-        start=start_dt.astimezone(ET),
-        end=end_dt.astimezone(ET),
-        limit=10_000
-    )
-    bars = client.get_stock_bars(req)
-    df = bars.df.reset_index()
-    if df.empty:
+    """Fetch 1-minute historical data with enhanced error handling"""
+    try:
+        client = _alpaca_client()
+        if client is None:
+            st.error("Cannot create Alpaca client - check your API credentials")
+            return pd.DataFrame()
+            
+        req = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=TimeFrame.Minute,
+            start=start_dt.astimezone(ET),
+            end=end_dt.astimezone(ET),
+            limit=10_000
+        )
+        
+        bars = client.get_stock_bars(req)
+        
+        if not hasattr(bars, 'df'):
+            st.warning(f"No data structure returned for {symbol}")
+            return pd.DataFrame()
+            
+        df = bars.df.reset_index()
+        
+        if df.empty:
+            st.warning(f"No data returned for {symbol} between {start_dt.date()} and {end_dt.date()}")
+            return pd.DataFrame()
+            
+        if "symbol" in df.columns:
+            df = df[df["symbol"] == symbol]
+            
+        df.rename(columns={
+            "timestamp":"dt",
+            "open":"Open",
+            "high":"High", 
+            "low":"Low",
+            "close":"Close",
+            "volume":"Volume"
+        }, inplace=True)
+        
+        df["dt"] = pd.to_datetime(df["dt"], utc=True).dt.tz_convert(CT)
+        result = df[["dt","Open","High","Low","Close","Volume"]].sort_values("dt")
+        
+        st.success(f"✅ Fetched {len(result)} bars for {symbol}")
+        return result
+        
+    except Exception as e:
+        st.error(f"Error fetching {symbol} data: {str(e)}")
+        st.info("This might be due to: market closure, invalid date range, or API limits")
         return pd.DataFrame()
-    if "symbol" in df.columns:
-        df = df[df["symbol"] == symbol]
-    df.rename(columns={"timestamp":"dt","open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"}, inplace=True)
-    df["dt"] = pd.to_datetime(df["dt"], utc=True).dt.tz_convert(CT)
-    return df[["dt","Open","High","Low","Close","Volume"]].sort_values("dt")
 
 def restrict_rth_30m(df_1m: pd.DataFrame) -> pd.DataFrame:
-    if df_1m.empty: return df_1m
-    df = df_1m.set_index("dt").sort_index()
-    ohlc = df[["Open","High","Low","Close","Volume"]].resample("30min", label="right", closed="right").agg({
-        "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
-    }).dropna(subset=["Open","High","Low","Close"]).reset_index()
-    ohlc["Time"] = ohlc["dt"].dt.strftime("%H:%M")
-    ohlc = ohlc[(ohlc["Time"] >= "08:30") & (ohlc["Time"] <= "14:30")].copy()
-    return ohlc
+    """Convert 1m data to 30m bars during regular trading hours"""
+    if df_1m.empty: 
+        return df_1m
+        
+    try:
+        df = df_1m.set_index("dt").sort_index()
+        ohlc = df[["Open","High","Low","Close","Volume"]].resample("30min", label="right", closed="right").agg({
+            "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
+        }).dropna(subset=["Open","High","Low","Close"]).reset_index()
+        
+        ohlc["Time"] = ohlc["dt"].dt.strftime("%H:%M")
+        ohlc = ohlc[(ohlc["Time"] >= "08:30") & (ohlc["Time"] <= "14:30")].copy()
+        return ohlc
+    except Exception as e:
+        st.error(f"Error processing 30m data: {str(e)}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=180)
 def fetch_day_open(symbol: str, d: date) -> float | None:
-    start_dt = datetime.combine(d, time(7,0), tzinfo=CT)
-    end_dt   = datetime.combine(d, time(15,0), tzinfo=CT)
-    df = fetch_history_1m(symbol, start_dt, end_dt)
-    if df.empty: return None
-    df = df.set_index("dt").sort_index()
+    """Fetch opening price for a specific day"""
     try:
-        bar = df.loc[df.index.indexer_between_time("08:30","08:30")]
-        if bar.empty: return None
-        return float(bar.iloc[0]["Open"])
-    except Exception:
+        start_dt = datetime.combine(d, time(7,0), tzinfo=CT)
+        end_dt   = datetime.combine(d, time(15,0), tzinfo=CT)
+        df = fetch_history_1m(symbol, start_dt, end_dt)
+        
+        if df.empty: 
+            return None
+            
+        df = df.set_index("dt").sort_index()
+        
+        try:
+            bar = df.loc[df.index.indexer_between_time("08:30","08:30")]
+            if bar.empty: 
+                return None
+            return float(bar.iloc[0]["Open"])
+        except Exception:
+            return None
+    except Exception as e:
+        st.error(f"Error fetching day open for {symbol}: {str(e)}")
         return None
 
 # ─────────────────────────── Helpers ───────────────────────────
@@ -149,40 +238,49 @@ def week_mon_tue_fri_for(forecast: date) -> tuple[date, date, date]:
 @st.cache_data(ttl=600)
 def compute_weekly_anchors(forecast: date):
     """Upper = max(Mon High, Tue High). Lower = min(Mon Low, Tue Low)."""
-    mon, tue, _ = week_mon_tue_fri_for(forecast)
-    start_dt = datetime.combine(mon, time(7,0), tzinfo=CT)
-    end_dt   = datetime.combine(tue + timedelta(days=1), time(7,0), tzinfo=CT)
-    raw = fetch_history_1m("AAPL", start_dt, end_dt)
-    if raw.empty: return None
-    raw["D"] = raw["dt"].dt.date
-    mon_df = restrict_rth_30m(raw[raw["D"] == mon])
-    tue_df = restrict_rth_30m(raw[raw["D"] == tue])
-    if mon_df.empty or tue_df.empty: return None
+    try:
+        mon, tue, _ = week_mon_tue_fri_for(forecast)
+        start_dt = datetime.combine(mon, time(7,0), tzinfo=CT)
+        end_dt   = datetime.combine(tue + timedelta(days=1), time(7,0), tzinfo=CT)
+        raw = fetch_history_1m("AAPL", start_dt, end_dt)
+        
+        if raw.empty: 
+            return None
+            
+        raw["D"] = raw["dt"].dt.date
+        mon_df = restrict_rth_30m(raw[raw["D"] == mon])
+        tue_df = restrict_rth_30m(raw[raw["D"] == tue])
+        
+        if mon_df.empty or tue_df.empty: 
+            return None
 
-    midx_hi = mon_df["High"].idxmax(); midx_lo = mon_df["Low"].idxmin()
-    MonHigh = float(mon_df.loc[midx_hi,"High"]); MonLow = float(mon_df.loc[midx_lo,"Low"])
-    MonHigh_t = mon_df.loc[midx_hi,"dt"].to_pydatetime(); MonLow_t = mon_df.loc[midx_lo,"dt"].to_pydatetime()
+        midx_hi = mon_df["High"].idxmax(); midx_lo = mon_df["Low"].idxmin()
+        MonHigh = float(mon_df.loc[midx_hi,"High"]); MonLow = float(mon_df.loc[midx_lo,"Low"])
+        MonHigh_t = mon_df.loc[midx_hi,"dt"].to_pydatetime(); MonLow_t = mon_df.loc[midx_lo,"dt"].to_pydatetime()
 
-    tidx_hi = tue_df["High"].idxmax(); tidx_lo = tue_df["Low"].idxmin()
-    TueHigh = float(tue_df.loc[tidx_hi,"High"]); TueLow = float(tue_df.loc[tidx_lo,"Low"])
-    TueHigh_t = tue_df.loc[tidx_hi,"dt"].to_pydatetime(); TueLow_t = tue_df.loc[tidx_lo,"dt"].to_pydatetime()
+        tidx_hi = tue_df["High"].idxmax(); tidx_lo = tue_df["Low"].idxmin()
+        TueHigh = float(tue_df.loc[tidx_hi,"High"]); TueLow = float(tue_df.loc[tidx_lo,"Low"])
+        TueHigh_t = tue_df.loc[tidx_hi,"dt"].to_pydatetime(); TueLow_t = tue_df.loc[tidx_lo,"dt"].to_pydatetime()
 
-    if TueHigh >= MonHigh:
-        upper_price, upper_time = TueHigh, TueHigh_t
-    else:
-        upper_price, upper_time = MonHigh, MonHigh_t
+        if TueHigh >= MonHigh:
+            upper_price, upper_time = TueHigh, TueHigh_t
+        else:
+            upper_price, upper_time = MonHigh, MonHigh_t
 
-    if TueLow <= MonLow:
-        lower_price, lower_time = TueLow, TueLow_t
-    else:
-        lower_price, lower_time = MonLow, MonLow_t
+        if TueLow <= MonLow:
+            lower_price, lower_time = TueLow, TueLow_t
+        else:
+            lower_price, lower_time = MonLow, MonLow_t
 
-    return {
-        "mon_date": mon, "tue_date": tue,
-        "MonHigh": MonHigh, "MonLow": MonLow, "TueHigh": TueHigh, "TueLow": TueLow,
-        "upper_base_price": upper_price, "upper_base_time": upper_time,
-        "lower_base_price": lower_price, "lower_base_time": lower_time,
-    }
+        return {
+            "mon_date": mon, "tue_date": tue,
+            "MonHigh": MonHigh, "MonLow": MonLow, "TueHigh": TueHigh, "TueLow": TueLow,
+            "upper_base_price": upper_price, "upper_base_time": upper_time,
+            "lower_base_price": lower_price, "lower_base_time": lower_time,
+        }
+    except Exception as e:
+        st.error(f"Error computing weekly anchors: {str(e)}")
+        return None
 
 def channel_for_day(day: date, anchors: dict) -> pd.DataFrame:
     rows=[]
@@ -203,13 +301,14 @@ def fetch_intraday_day_30m(symbol: str, d: date) -> pd.DataFrame:
     df30 = restrict_rth_30m(df1m)[["dt","Open","High","Low","Close","Volume"]].copy()
     df30["Time"] = df30["dt"].dt.strftime("%H:%M")
     return df30
+  # pages/Apple.py - PART 2 (Continuation of Part 1)
 
 # ───────────────────────── Sticky Header ─────────────────────────
 st.markdown(
     f"""
 <div class="header-wrap">
   <div class="hero">
-    <div class="logo"></div>
+    <div class="logo"></div>
     <div>
       <div class="brand">{APP_NAME} — {PAGE_NAME}</div>
       <div class="tag">Professional AAPL intraday prep</div>
@@ -219,6 +318,13 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+# ───────────────────────── Connection Test ─────────────────────────
+st.subheader("🔌 Connection Status")
+connection_ok = test_alpaca_connection()
+
+if not connection_ok:
+    st.stop()
 
 # ───────────────────────── Sidebar ─────────────────────────
 with st.sidebar:
@@ -238,7 +344,7 @@ with st.sidebar:
 # ─────────────────────── Anchors & Open Status ───────────────────────
 wk = compute_weekly_anchors(forecast_date)
 if not wk:
-    st.warning("Could not compute Monday/Tuesday anchors for AAPL. Try another date.")
+    st.warning("Could not compute Monday/Tuesday anchors for AAPL. Try another date or check if market data is available.")
     st.stop()
 
 st.markdown(
@@ -302,39 +408,43 @@ st.markdown(
 
 # ───────────── Soft pre-close alert: approaching a line (no streaming) ─────────────
 def approaching_alert_for_current_bar(d: date, anchors: dict, tolerance: float) -> str | None:
-    now_ct = datetime.now(tz=CT)
-    if now_ct.date() != d: return None
-    if not (RTH_START <= now_ct.time() <= RTH_END): return None
-    # in last ~3 minutes of the current 30-min bar
-    if now_ct.minute % 30 < 27: return None
+    try:
+        now_ct = datetime.now(tz=CT)
+        if now_ct.date() != d: return None
+        if not (RTH_START <= now_ct.time() <= RTH_END): return None
+        # in last ~3 minutes of the current 30-min bar
+        if now_ct.minute % 30 < 27: return None
 
-    # Determine current slot end (the right-closed bar)
-    minute_bucket = 30 if now_ct.minute >= 30 else 0
-    slot_end = now_ct.replace(minute=30 if minute_bucket==30 else 0, second=0, microsecond=0)
-    # If we're in the last minutes leading to the *next* slot end, preview that slot’s line values
-    if now_ct.minute >= 27:
-        # For preview, use the upcoming slot end (ceil to next :00/:30)
-        add = 30 - (now_ct.minute % 30)
-        slot_end = now_ct + timedelta(minutes=add)
-        slot_end = slot_end.replace(second=0, microsecond=0)
+        # Determine current slot end (the right-closed bar)
+        minute_bucket = 30 if now_ct.minute >= 30 else 0
+        slot_end = now_ct.replace(minute=30 if minute_bucket==30 else 0, second=0, microsecond=0)
+        # If we're in the last minutes leading to the *next* slot end, preview that slot's line values
+        if now_ct.minute >= 27:
+            # For preview, use the upcoming slot end (ceil to next :00/:30)
+            add = 30 - (now_ct.minute % 30)
+            slot_end = now_ct + timedelta(minutes=add)
+            slot_end = slot_end.replace(second=0, microsecond=0)
 
-    # Build line levels for that slot
-    up = project_line(anchors["upper_base_price"], anchors["upper_base_time"], slot_end)
-    lo = project_line(anchors["lower_base_price"], anchors["lower_base_time"], slot_end)
+        # Build line levels for that slot
+        up = project_line(anchors["upper_base_price"], anchors["upper_base_time"], slot_end)
+        lo = project_line(anchors["lower_base_price"], anchors["lower_base_time"], slot_end)
 
-    # Pull last 1m price to approximate near-close
-    start_dt = now_ct - timedelta(minutes=5)
-    df = fetch_history_1m("AAPL", start_dt, now_ct + timedelta(minutes=1))
-    if df.empty: return None
-    px = float(df.iloc[-1]["Close"])
+        # Pull last 1m price to approximate near-close
+        start_dt = now_ct - timedelta(minutes=5)
+        df = fetch_history_1m("AAPL", start_dt, now_ct + timedelta(minutes=1))
+        if df.empty: return None
+        px = float(df.iloc[-1]["Close"])
 
-    note = []
-    if abs(px - lo) <= tolerance:
-        note.append(f"near Lower {lo:.2f} (Δ {px - lo:+.2f})")
-    if abs(px - up) <= tolerance:
-        note.append(f"near Upper {up:.2f} (Δ {px - up:+.2f})")
-    if not note: return None
-    return f'<span class="kbadge warn">Approaching: {" • ".join(note)}</span>'
+        note = []
+        if abs(px - lo) <= tolerance:
+            note.append(f"near Lower {lo:.2f} (Δ {px - lo:+.2f})")
+        if abs(px - up) <= tolerance:
+            note.append(f"near Upper {up:.2f} (Δ {px - up:+.2f})")
+        if not note: return None
+        return f'<span class="kbadge warn">Approaching: {" • ".join(note)}</span>'
+    except Exception as e:
+        st.error(f"Error in approaching alert: {str(e)}")
+        return None
 
 alert_html = approaching_alert_for_current_bar(forecast_date, wk, tol)
 if alert_html:
@@ -430,3 +540,4 @@ st.download_button("Export Daily Note (.md)",
                    file_name=f"MarketLens_Apple_{forecast_date}.md",
                    mime="text/markdown",
                    use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
