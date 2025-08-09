@@ -816,4 +816,403 @@ CSS_COMPONENTS = """
 }
 </style>
 """
+# ===== ADVANCED DARK MODE SYSTEM =====
+DARK_MODE_SCRIPT = """
+<script>
+// Advanced Theme Management System
+class ThemeManager {
+    constructor() {
+        this.theme = localStorage.getItem('marketlens-theme') || 'light';
+        this.init();
+    }
+    
+    init() {
+        this.applyTheme(this.theme);
+        this.setupEventListeners();
+    }
+    
+    applyTheme(theme) {
+        const body = window.parent.document.body;
+        const root = window.parent.document.documentElement;
+        
+        if (theme === 'dark') {
+            body.setAttribute('data-theme', 'dark');
+            root.setAttribute('data-theme', 'dark');
+            body.classList.add('dark-mode');
+        } else {
+            body.setAttribute('data-theme', 'light');
+            root.setAttribute('data-theme', 'light');
+            body.classList.remove('dark-mode');
+        }
+        
+        // Smooth transition effect
+        body.style.transition = 'background-color 0.3s ease, color 0.3s ease';
+        setTimeout(() => {
+            body.style.transition = '';
+        }, 300);
+    }
+    
+    toggleTheme() {
+        this.theme = this.theme === 'light' ? 'dark' : 'light';
+        localStorage.setItem('marketlens-theme', this.theme);
+        this.applyTheme(this.theme);
+        return this.theme;
+    }
+    
+    setTheme(theme) {
+        this.theme = theme;
+        localStorage.setItem('marketlens-theme', theme);
+        this.applyTheme(theme);
+    }
+    
+    setupEventListeners() {
+        // Listen for system theme changes
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        mediaQuery.addListener((e) => {
+            if (!localStorage.getItem('marketlens-theme')) {
+                this.setTheme(e.matches ? 'dark' : 'light');
+            }
+        });
+    }
+}
+
+// Initialize theme manager
+window.themeManager = new ThemeManager();
+
+// Global functions for Streamlit
+window.setMarketLensTheme = (theme) => {
+    window.themeManager.setTheme(theme);
+};
+
+window.toggleMarketLensTheme = () => {
+    return window.themeManager.toggleTheme();
+};
+
+// Auto-detect system preference if no saved preference
+if (!localStorage.getItem('marketlens-theme')) {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    window.themeManager.setTheme(prefersDark ? 'dark' : 'light');
+}
+</script>
+"""
+
+# ===== ENHANCED UTILITY FUNCTIONS =====
+RTH_START, RTH_END = time(8, 30), time(15, 30)
+
+def spx_blocks_between(t1: datetime, t2: datetime) -> int:
+    """
+    Calculate SPX blocks between two datetimes, excluding 16:00-16:59 maintenance window.
+    Enhanced with error handling and validation.
+    """
+    if not isinstance(t1, datetime) or not isinstance(t2, datetime):
+        raise ValueError("Both arguments must be datetime objects")
+    
+    if t2 < t1:
+        t1, t2 = t2, t1
+    
+    blocks = 0
+    current = t1
+    
+    while current < t2:
+        # Skip the 16:00-16:59 maintenance block
+        if current.hour != 16:
+            blocks += 1
+        current += timedelta(minutes=30)
+    
+    return blocks
+
+def make_time_slots(start: time, end: time, step_minutes: int = 30) -> List[str]:
+    """
+    Generate time slots between start and end times.
+    Enhanced with validation and flexible step sizes.
+    """
+    if not isinstance(start, time) or not isinstance(end, time):
+        raise ValueError("Start and end must be time objects")
+    
+    if step_minutes <= 0:
+        raise ValueError("Step minutes must be positive")
+    
+    slots = []
+    current = datetime.combine(date.today(), start)
+    end_dt = datetime.combine(date.today(), end)
+    
+    # Handle next-day scenarios
+    if end_dt < current:
+        end_dt += timedelta(days=1)
+    
+    while current <= end_dt:
+        slots.append(current.strftime("%H:%M"))
+        current += timedelta(minutes=step_minutes)
+    
+    return slots
+
+def round_to_tick(value: float, tick: float = TICK) -> float:
+    """
+    Round value to nearest tick size with enhanced precision handling.
+    """
+    if tick <= 0:
+        return float(value)
+    
+    rounded = round(value / tick) * tick
+    return round(rounded, 4)  # Enhanced precision
+
+def project_price(anchor_price: float, slope_per_block: float, blocks: int) -> float:
+    """
+    Project price based on anchor, slope, and block count.
+    Enhanced with validation and precision handling.
+    """
+    if not isinstance(anchor_price, (int, float)) or anchor_price <= 0:
+        raise ValueError("Anchor price must be a positive number")
+    
+    if not isinstance(blocks, int) or blocks < 0:
+        raise ValueError("Blocks must be a non-negative integer")
+    
+    projected = anchor_price + (slope_per_block * blocks)
+    return round_to_tick(projected)
+
+# ===== ENHANCED TIME UTILITIES =====
+SPX_SLOTS = make_time_slots(RTH_START, RTH_END)
+EXTENDED_SLOTS = make_time_slots(time(7, 30), RTH_END)
+
+def is_trading_hours(dt: datetime) -> bool:
+    """Check if datetime falls within regular trading hours."""
+    time_only = dt.time()
+    return RTH_START <= time_only <= RTH_END
+
+def is_maintenance_hour(dt: datetime) -> bool:
+    """Check if datetime falls within maintenance window."""
+    return dt.hour == 16
+
+def get_next_trading_slot(current_time: time) -> Optional[str]:
+    """Get the next available trading slot after current time."""
+    current_str = current_time.strftime("%H:%M")
+    
+    for slot in SPX_SLOTS:
+        if slot > current_str:
+            return slot
+    
+    return None
+
+def calculate_trading_minutes_remaining(current_time: time) -> int:
+    """Calculate minutes remaining in trading session."""
+    if current_time >= RTH_END:
+        return 0
+    
+    current_dt = datetime.combine(date.today(), current_time)
+    end_dt = datetime.combine(date.today(), RTH_END)
+    
+    return int((end_dt - current_dt).total_seconds() / 60)
+
+# ===== STATE MANAGEMENT SYSTEM =====
+class MarketLensState:
+    """Enhanced state management for MarketLens Pro."""
+    
+    def __init__(self):
+        self.initialize_state()
+    
+    def initialize_state(self):
+        """Initialize all session state variables with defaults."""
+        defaults = {
+            # Core application state
+            'initialized': True,
+            'theme': 'light',
+            'print_mode': False,
+            
+            # Anchor state
+            'anchors_locked': False,
+            'forecasts_generated': False,
+            
+            # Contract state
+            'contract': {
+                'anchor_time': None,
+                'anchor_price': None,
+                'slope': None,
+                'label': 'Manual'
+            },
+            
+            # UI state
+            'sidebar_expanded': True,
+            'auto_refresh': False,
+            'refresh_interval': 60,
+            
+            # Advanced features
+            'risk_alerts_enabled': True,
+            'sound_notifications': False,
+            'advanced_charts': True,
+            
+            # User preferences
+            'default_tolerance': 0.50,
+            'preferred_timeframe': '30min',
+            'chart_theme': 'professional',
+            
+            # Performance tracking
+            'session_start_time': datetime.now(),
+            'page_loads': 0,
+            'last_data_refresh': None,
+        }
+        
+        for key, value in defaults.items():
+            if key not in st.session_state:
+                st.session_state[key] = value
+        
+        # Increment page loads
+        st.session_state.page_loads += 1
+    
+    def reset_forecasts(self):
+        """Reset forecast-related state."""
+        st.session_state.forecasts_generated = False
+        st.session_state.anchors_locked = False
+    
+    def save_user_preferences(self):
+        """Save user preferences to browser storage."""
+        preferences = {
+            'theme': st.session_state.theme,
+            'default_tolerance': st.session_state.default_tolerance,
+            'auto_refresh': st.session_state.auto_refresh,
+            'advanced_charts': st.session_state.advanced_charts,
+        }
+        
+        # This would typically save to a database or local storage
+        # For now, we'll just update session state
+        st.session_state.user_preferences = preferences
+
+# ===== ENHANCED DATA VALIDATION =====
+class DataValidator:
+    """Comprehensive data validation for trading inputs."""
+    
+    @staticmethod
+    def validate_price(price: float, min_price: float = 0.01, max_price: float = 10000.0) -> bool:
+        """Validate price input with reasonable bounds."""
+        try:
+            price = float(price)
+            return min_price <= price <= max_price
+        except (ValueError, TypeError):
+            return False
+    
+    @staticmethod
+    def validate_time_input(time_input: time) -> bool:
+        """Validate time input for trading hours."""
+        if not isinstance(time_input, time):
+            return False
+        
+        # Allow extended hours for flexibility
+        extended_start = time(6, 0)
+        extended_end = time(20, 0)
+        
+        return extended_start <= time_input <= extended_end
+    
+    @staticmethod
+    def validate_date_input(date_input: date) -> Tuple[bool, str]:
+        """Validate date input with helpful error messages."""
+        if not isinstance(date_input, date):
+            return False, "Invalid date format"
+        
+        today = date.today()
+        
+        if date_input < today - timedelta(days=7):
+            return False, "Date cannot be more than 7 days in the past"
+        
+        if date_input > today + timedelta(days=30):
+            return False, "Date cannot be more than 30 days in the future"
+        
+        # Check if it's a weekend
+        if date_input.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            return False, "Selected date falls on a weekend"
+        
+        return True, "Valid date"
+    
+    @staticmethod
+    def validate_slope(slope: float) -> Tuple[bool, str]:
+        """Validate slope values for reasonableness."""
+        try:
+            slope = float(slope)
+            
+            if abs(slope) > 10.0:
+                return False, "Slope too extreme (max ±10.0)"
+            
+            if slope == 0:
+                return False, "Slope cannot be zero"
+            
+            return True, "Valid slope"
+        
+        except (ValueError, TypeError):
+            return False, "Invalid slope format"
+
+# ===== ENHANCED ERROR HANDLING =====
+class MarketLensError(Exception):
+    """Base exception for MarketLens Pro."""
+    pass
+
+class DataFetchError(MarketLensError):
+    """Raised when data fetching fails."""
+    pass
+
+class ValidationError(MarketLensError):
+    """Raised when input validation fails."""
+    pass
+
+class CalculationError(MarketLensError):
+    """Raised when calculations fail."""
+    pass
+
+def safe_execute(func, *args, default=None, error_msg="Operation failed", **kwargs):
+    """
+    Safely execute a function with comprehensive error handling.
+    """
+    try:
+        return func(*args, **kwargs)
+    except Exception as e:
+        logging.error(f"{error_msg}: {str(e)}")
+        if default is not None:
+            return default
+        raise MarketLensError(f"{error_msg}: {str(e)}")
+
+# ===== PERFORMANCE MONITORING =====
+class PerformanceMonitor:
+    """Monitor application performance and user interactions."""
+    
+    def __init__(self):
+        self.start_time = datetime.now()
+        self.operation_times = {}
+    
+    def start_operation(self, operation_name: str):
+        """Start timing an operation."""
+        self.operation_times[operation_name] = datetime.now()
+    
+    def end_operation(self, operation_name: str) -> float:
+        """End timing an operation and return duration."""
+        if operation_name in self.operation_times:
+            duration = (datetime.now() - self.operation_times[operation_name]).total_seconds()
+            del self.operation_times[operation_name]
+            return duration
+        return 0.0
+    
+    def get_session_duration(self) -> float:
+        """Get total session duration in seconds."""
+        return (datetime.now() - self.start_time).total_seconds()
+
+# ===== INITIALIZE SYSTEMS =====
+# Initialize state management
+state_manager = MarketLensState()
+
+# Initialize performance monitoring
+if 'performance_monitor' not in st.session_state:
+    st.session_state.performance_monitor = PerformanceMonitor()
+
+# Initialize data validator
+validator = DataValidator()
+
+# ===== STREAMLIT PAGE CONFIGURATION =====
+st.set_page_config(
+    page_title=f"{APP_NAME} — Enterprise SPX Analytics",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://github.com/your-repo/marketlens-pro',
+        'Report a bug': 'https://github.com/your-repo/marketlens-pro/issues',
+        'About': f"{APP_NAME} v{VERSION} - Professional SPX Forecasting Platform"
+    }
+)
+
 
