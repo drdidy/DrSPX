@@ -68,46 +68,88 @@ from alpaca.data.timeframe import TimeFrame
 def _alpaca_client():
     """Create Alpaca client with proper error handling and paper trading support"""
     try:
-        return StockHistoricalDataClient(
-            api_key=st.secrets["alpaca"]["key"],
-            secret_key=st.secrets["alpaca"]["secret"],
-            sandbox=True  # Enable this for paper trading or if you get SIP data errors
-        )
+        # Use the working config discovered during testing
+        config = globals().get('_working_config', {"sandbox": True})
+        
+        client_kwargs = {
+            "api_key": st.secrets["alpaca"]["key"],
+            "secret_key": st.secrets["alpaca"]["secret"],
+            "sandbox": config["sandbox"]
+        }
+        
+        if "url_override" in config:
+            client_kwargs["url_override"] = config["url_override"]
+        
+        return StockHistoricalDataClient(**client_kwargs)
+        
     except Exception as e:
         st.error(f"Failed to create Alpaca client: {str(e)}")
         return None
 
 def test_alpaca_connection():
     """Test if Alpaca connection is working"""
+    
+    # Debug: Check if secrets are loaded
     try:
-        client = _alpaca_client()
-        if client is None:
-            return False
-            
-        # Test with older data to avoid SIP subscription issues
-        end_dt = datetime.now(tz=ET) - timedelta(days=3)
-        start_dt = end_dt - timedelta(hours=2)
-        
-        req = StockBarsRequest(
-            symbol_or_symbols="AAPL",
-            timeframe=TimeFrame.Minute,
-            start=start_dt,
-            end=end_dt,
-            limit=5
-        )
-        bars = client.get_stock_bars(req)
-        
-        if hasattr(bars, 'df') and not bars.df.empty:
-            st.success("✅ Alpaca connection successful!")
-            st.info(f"Retrieved {len(bars.df)} test bars for AAPL (using historical data)")
-            return True
-        else:
-            st.warning("⚠️ Connection works but no data returned (market may be closed)")
-            return True
+        key_preview = st.secrets["alpaca"]["key"][:8] + "..."
+        secret_preview = st.secrets["alpaca"]["secret"][:8] + "..."
+        st.info(f"🔑 Keys loaded: {key_preview} / {secret_preview}")
     except Exception as e:
-        st.error(f"❌ Alpaca connection failed: {str(e)}")
-        st.info("💡 Try: 1) Check your API keys, 2) Enable sandbox mode, 3) Upgrade data subscription")
+        st.error(f"❌ Cannot load API keys from secrets: {str(e)}")
         return False
+    
+    # Test different configurations for paper trading
+    configs = [
+        {"sandbox": True, "name": "Paper Trading (sandbox=True)"},
+        {"sandbox": False, "name": "Live Mode (sandbox=False)"},
+        {"sandbox": True, "url_override": "https://data.alpaca.markets", "name": "Paper with data.alpaca.markets"},
+    ]
+    
+    for config in configs:
+        st.write(f"Testing {config['name']}...")
+        
+        try:
+            client_kwargs = {
+                "api_key": st.secrets["alpaca"]["key"],
+                "secret_key": st.secrets["alpaca"]["secret"],
+                "sandbox": config["sandbox"]
+            }
+            
+            if "url_override" in config:
+                client_kwargs["url_override"] = config["url_override"]
+            
+            client = StockHistoricalDataClient(**client_kwargs)
+            
+            # Test with older data to avoid SIP subscription issues
+            end_dt = datetime.now(tz=ET) - timedelta(days=3)
+            start_dt = end_dt - timedelta(hours=2)
+            
+            req = StockBarsRequest(
+                symbol_or_symbols="AAPL",
+                timeframe=TimeFrame.Minute,
+                start=start_dt,
+                end=end_dt,
+                limit=5
+            )
+            bars = client.get_stock_bars(req)
+            
+            if hasattr(bars, 'df') and not bars.df.empty:
+                st.success(f"✅ Alpaca connection successful with {config['name']}!")
+                st.info(f"Retrieved {len(bars.df)} test bars for AAPL")
+                
+                # Store working config
+                globals()['_working_config'] = config
+                return True
+            else:
+                st.warning(f"⚠️ {config['name']}: Connection works but no data returned")
+                
+        except Exception as e:
+            st.error(f"❌ {config['name']} failed: {str(e)}")
+            
+    st.error("All configurations failed. This might be a paper trading limitation.")
+    st.info("💡 Paper trading accounts may have limited market data access. Try:")
+    st.info("1) Use a live account with small amounts, 2) Check Alpaca docs for paper data limits, 3) Use different data source")
+    return False
 
 @st.cache_data(ttl=300)
 def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
@@ -300,7 +342,6 @@ def fetch_intraday_day_30m(symbol: str, d: date) -> pd.DataFrame:
     df30 = restrict_rth_30m(df1m)[["dt","Open","High","Low","Close","Volume"]].copy()
     df30["Time"] = df30["dt"].dt.strftime("%H:%M")
     return df30
-  # pages/Apple.py - PART 2 (Continuation of Part 1)
 
 # ───────────────────────── Sticky Header ─────────────────────────
 st.markdown(
