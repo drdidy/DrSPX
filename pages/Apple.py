@@ -84,9 +84,9 @@ def test_alpaca_connection():
         if client is None:
             return False
             
-        # Test with data from a few days ago (not recent/real-time)
-        end_dt = datetime.now(tz=ET) - timedelta(days=5)  # 5 days ago
-        start_dt = end_dt - timedelta(hours=1)
+        # Test with data from 1 hour ago (much more recent)
+        end_dt = datetime.now(tz=ET) - timedelta(hours=1)
+        start_dt = end_dt - timedelta(minutes=30)
         
         req = StockBarsRequest(
             symbol_or_symbols="AAPL",
@@ -116,10 +116,10 @@ def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.Da
         if client is None:
             return pd.DataFrame()
         
-        # Add buffer to avoid requesting too recent data
+        # Much smaller buffer - only avoid data from last 30 minutes
         now = datetime.now(tz=ET)
-        if end_dt > now - timedelta(hours=4):  # If requesting data less than 4 hours old
-            end_dt = now - timedelta(hours=4)  # Push it back to 4 hours ago
+        if end_dt > now - timedelta(minutes=30):  # If requesting data less than 30 minutes old
+            end_dt = now - timedelta(minutes=30)  # Push it back to 30 minutes ago
             
         req = StockBarsRequest(
             symbol_or_symbols=symbol,
@@ -426,12 +426,12 @@ def approaching_alert_for_current_bar(d: date, anchors: dict, tolerance: float) 
         up = project_line(anchors["upper_base_price"], anchors["upper_base_time"], slot_end)
         lo = project_line(anchors["lower_base_price"], anchors["lower_base_time"], slot_end)
 
-        # Use data from 1 hour ago instead of real-time to avoid SIP restrictions
-        start_dt = now_ct - timedelta(hours=2)
-        end_dt = now_ct - timedelta(hours=1)
+        # Use data from 30 minutes ago instead of 1 hour to be more current
+        start_dt = now_ct - timedelta(minutes=45)
+        end_dt = now_ct - timedelta(minutes=30)
         df = fetch_history_1m("AAPL", start_dt, end_dt)
         if df.empty: 
-            return '<span class="kbadge warn">⚠️ Cannot get recent price data (using delayed data only)</span>'
+            return '<span class="kbadge warn">⚠️ Cannot get recent price data</span>'
         px = float(df.iloc[-1]["Close"])
 
         note = []
@@ -440,7 +440,7 @@ def approaching_alert_for_current_bar(d: date, anchors: dict, tolerance: float) 
         if abs(px - up) <= tolerance:
             note.append(f"near Upper {up:.2f} (Δ {px - up:+.2f})")
         if not note: return None
-        return f'<span class="kbadge warn">Approaching: {" • ".join(note)} (1hr delayed)</span>'
+        return f'<span class="kbadge warn">Approaching: {" • ".join(note)} (~30min delay)</span>'
     except Exception as e:
         return f'<span class="kbadge warn">⚠️ Alert unavailable: {str(e)}</span>'
 
