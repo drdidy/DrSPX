@@ -9,7 +9,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 
 APP_NAME = "MarketLens"
-VERSION = "3.4.0"
+VERSION = "3.4.1"
 
 # ----- Strategy constants (per 30-min block; fixed, not user-editable)
 SPX_SLOPES_DOWN = {"HIGH": -0.2792, "CLOSE": -0.2792, "LOW": -0.2792}
@@ -124,13 +124,14 @@ html,body,.stApp{font-family:Inter,-apple-system,system-ui,Segoe UI,Roboto,Helve
 .stApp{background:var(--surface); color:var(--text);}
 #MainMenu, footer, .stDeployButton{display:none!important;}
 
-.header{
-  display:flex; align-items:center; justify-content:space-between; gap:1rem;
-  padding:14px 18px; border:1px solid var(--border); border-radius:var(--radius);
-  background:var(--card); box-shadow:var(--shadow); position:sticky; top:.5rem; z-index:10;
+.hero{
+  text-align:center; padding:22px 10px 16px 10px; 
+  border:1px solid var(--border); border-radius:18px; 
+  background:var(--card); box-shadow:var(--shadow); margin-bottom:12px;
 }
-.brand{font-weight:800; letter-spacing:.2px}
-.meta{color:var(--muted); font-size:.9rem}
+.brand-big{font-weight:800; font-size:1.8rem; letter-spacing:.2px}
+.tagline{color:var(--muted); margin-top:4px}
+.meta{color:var(--muted); font-size:.9rem; margin-top:6px}
 
 .card{
   background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
@@ -238,32 +239,62 @@ st.set_page_config(page_title=f"{APP_NAME} — SPX Console", page_icon="📈", l
 st.markdown(CSS_BASE, unsafe_allow_html=True)
 st.markdown(INJECT_DARK_TOGGLE, unsafe_allow_html=True)
 
-# ===== Live price + daily (prev day H/C/L) =====
+# ===== Hero Header (centered, bold) =====
+st.markdown(
+    f"""
+    <div class="hero">
+      <div class="brand-big">{APP_NAME}</div>
+      <div class="tagline">SPX Forecast Console</div>
+      <div class="meta">v{VERSION}</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# ===== Live price (yfinance) =====
 @st.cache_data(ttl=60)
 def fetch_spx_summary():
     try:
         t = yf.Ticker("^GSPC")
         intraday = t.history(period="1d", interval="1m")
         daily = t.history(period="6d", interval="1d")
-        if intraday is None or intraday.empty or daily is None or daily.empty or len(daily) < 2:
+        if intraday is None or intraday.empty or daily is None or daily.empty or len(daily) < 1:
             return {"ok": False}
         last = intraday.iloc[-1]
         price = float(last["Close"])
-        prev = daily.iloc[-2]
-        prev_close = float(prev["Close"])
-        prev_high = float(prev["High"])
-        prev_low  = float(prev["Low"])
-        chg = price - prev_close
-        pct = (chg / prev_close * 100) if prev_close else 0.0
         today_high = float(daily.iloc[-1]["High"])
         today_low  = float(daily.iloc[-1]["Low"])
-        return {
-            "ok": True, "price": price, "chg": chg, "pct": pct,
-            "today_high": today_high, "today_low": today_low,
-            "prev_close": prev_close, "prev_high": prev_high, "prev_low": prev_low
-        }
+        # Fallback prev_close for live strip (if available)
+        prev_close = float(daily.iloc[-2]["Close"]) if len(daily) >= 2 else price
+        chg = price - prev_close
+        pct = (chg / prev_close * 100) if prev_close else 0.0
+        return {"ok": True, "price": price, "chg": chg, "pct": pct, "today_high": today_high, "today_low": today_low}
     except Exception:
         return {"ok": False}
+
+@st.cache_data(ttl=300)
+def get_prev_day_anchors_for(fore_date: date):
+    """
+    Returns (prev_date, prev_high, prev_close, prev_low) for the last trading day strictly before fore_date.
+    Robust for weekends/holidays/timezone.
+    """
+    df = yf.Ticker("^GSPC").history(period="1mo", interval="1d")
+    if df is None or df.empty:
+        return None
+    daily = df.reset_index()
+    if "Date" not in daily.columns:
+        daily.rename(columns={daily.columns[0]:"Date"}, inplace=True)
+    daily["D"] = daily["Date"].dt.tz_localize(None).dt.date
+    prior = daily.loc[daily["D"] < fore_date]
+    if prior.empty:
+        return None
+    prev_row = prior.iloc[-1]
+    return (
+        prev_row["D"],
+        float(prev_row["High"]),
+        float(prev_row["Close"]),
+        float(prev_row["Low"]),
+    )
 
 @st.cache_data(ttl=120)
 def fetch_spx_intraday_df():
@@ -285,20 +316,10 @@ def fetch_spx_intraday_df():
     except Exception:
         return pd.DataFrame()
 
-# ===== Header =====
-st.markdown(
-    f"""
-    <div class="header">
-      <div class="brand">{APP_NAME}</div>
-      <div class="meta">v{VERSION}</div>
-    </div>
-    """, unsafe_allow_html=True
-)
-
+# ===== Live strip =====
 sumy = fetch_spx_summary()
 if sumy.get("ok"):
     color = "good" if sumy["chg"]>=0 else "bad"
-    # Live strip
     st.markdown(
         f"""
         <div class="card" style="padding:14px 18px;">
@@ -307,29 +328,6 @@ if sumy.get("ok"):
             <div style="font-weight:800;font-size:1.2rem;">{sumy['price']:.2f}</div>
             <div class="{color}">{sumy['chg']:+.2f} ({sumy['pct']:+.2f}%)</div>
             <div style="margin-left:auto" class="subtle">Today H:{sumy['today_high']:.2f} · L:{sumy['today_low']:.2f}</div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    # Previous-day H/C/L ribbon (large, stylized)
-    st.markdown(
-        f"""
-        <div class="ribbon">
-          <div class="tile">
-            <div class="label"><span class="icon ic-high">{ICON_HIGH}</span> Previous Day High</div>
-            <div class="value" style="color:#16A34A">{sumy['prev_high']:.2f}</div>
-            <div class="sub">Reference anchor</div>
-          </div>
-          <div class="tile">
-            <div class="label"><span class="icon ic-close">{ICON_CLOSE}</span> Previous Day Close</div>
-            <div class="value" style="color:#2A6CFB">{sumy['prev_close']:.2f}</div>
-            <div class="sub">Benchmark for gap/Δ</div>
-          </div>
-          <div class="tile">
-            <div class="label"><span class="icon ic-low">{ICON_LOW}</span> Previous Day Low</div>
-            <div class="value" style="color:#DC2626">{sumy['prev_low']:.2f}</div>
-            <div class="sub">Support anchor</div>
           </div>
         </div>
         """,
@@ -348,9 +346,13 @@ else:
 # ===== Sidebar =====
 with st.sidebar:
     st.subheader("Appearance")
+    if "theme" not in st.session_state:
+        st.session_state.theme = "Light"
     st.session_state.theme = st.radio("Theme", ["Light","Dark"], index=0 if st.session_state.theme=="Light" else 1, horizontal=True)
     st.markdown(f"<script>setMode('{st.session_state.theme}')</script>", unsafe_allow_html=True)
 
+    if "print_mode" not in st.session_state:
+        st.session_state.print_mode = False
     st.session_state.print_mode = st.toggle("Print-friendly", value=st.session_state.print_mode)
     if st.session_state.print_mode:
         st.markdown('<style>.stApp{background:#fff!important;color:#111!important}.card{background:#fff!important;border-color:#ddd!important;box-shadow:none!important}</style>', unsafe_allow_html=True)
@@ -378,7 +380,36 @@ with st.sidebar:
         st.markdown("**Volume Patterns**");       [st.markdown(f"- {r}") for r in TIME_RULES["volume_patterns"]]
         st.markdown("**Multi-Timeframe**");       [st.markdown(f"- {r}") for r in TIME_RULES["multi_timeframe"]]
 
-# ===== Anchors =====
+# ===== Previous Day Anchors ribbon (aligned to forecast_date) =====
+anchors = get_prev_day_anchors_for(forecast_date)
+if anchors:
+    prev_date, prev_high, prev_close, prev_low = anchors
+    st.markdown(
+        f"""
+        <div class="ribbon">
+          <div class="tile">
+            <div class="label"><span class="icon ic-high">{ICON_HIGH}</span> Previous Day High</div>
+            <div class="value" style="color:#16A34A">{prev_high:.2f}</div>
+            <div class="sub">Session: {prev_date}</div>
+          </div>
+          <div class="tile">
+            <div class="label"><span class="icon ic-close">{ICON_CLOSE}</span> Previous Day Close</div>
+            <div class="value" style="color:#2A6CFB">{prev_close:.2f}</div>
+            <div class="sub">Session: {prev_date}</div>
+          </div>
+          <div class="tile">
+            <div class="label"><span class="icon ic-low">{ICON_LOW}</span> Previous Day Low</div>
+            <div class="value" style="color:#DC2626">{prev_low:.2f}</div>
+            <div class="sub">Session: {prev_date}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.warning("Couldn’t determine the previous trading day for the selected forecast date.")
+
+# ===== Anchors inputs (unchanged)
 def anchor_inputs(prefix: str, default_price: float, default_time: time):
     price = st.number_input(f"{prefix} price", value=float(default_price), step=0.1, min_value=0.0, key=f"{prefix}_price")
     when  = st.time_input(f"{prefix} time",  value=default_time, step=300, key=f"{prefix}_time")
@@ -422,6 +453,26 @@ def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> p
     df["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df["Time"])
     return df
 
+@st.cache_data(ttl=120)
+def fetch_spx_intraday_df():
+    try:
+        t = yf.Ticker("^GSPC")
+        df = t.history(period="1d", interval="1m")
+        if df is None or df.empty:
+            return pd.DataFrame()
+        df = df.reset_index()
+        if "Datetime" in df.columns:
+            df.rename(columns={"Datetime": "dt"}, inplace=True)
+        else:
+            df.rename(columns={df.columns[0]: "dt"}, inplace=True)
+        df["Time"] = df["dt"].dt.tz_localize(None).dt.strftime("%H:%M")
+        df = df[(df["Time"] >= "08:30") & (df["Time"] <= "15:30")]
+        df = df[["Time","Close"]].copy()
+        df["TS"] = pd.to_datetime(BASELINE_DATE_STR + " " + df["Time"])
+        return df
+    except Exception:
+        return pd.DataFrame()
+
 intraday_df = fetch_spx_intraday_df()
 
 def plotly_fan_chart(df_fan: pd.DataFrame, title: str, intraday: pd.DataFrame | None):
@@ -454,7 +505,7 @@ def plotly_fan_chart(df_fan: pd.DataFrame, title: str, intraday: pd.DataFrame | 
     fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.08)")
     return fig
 
-# ===== Forecast section
+# ===== Forecast section (unchanged)
 if generate or st.session_state.get("forecasts_generated", False):
     st.session_state.forecasts_generated = True
     with st.container():
@@ -475,7 +526,7 @@ if generate or st.session_state.get("forecasts_generated", False):
         st.plotly_chart(plotly_fan_chart(df_close, "Close Anchor — Fan vs SPX", intraday_df), use_container_width=True)
         st.plotly_chart(plotly_fan_chart(df_low,   "Low Anchor — Fan vs SPX", intraday_df), use_container_width=True)
 
-# ===== Contract Line =====
+# ===== Contract Line (unchanged)
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Contract Line</div><div class="hline"></div>', unsafe_allow_html=True)
     col1,col2,col3 = st.columns([1,1,1])
@@ -542,7 +593,7 @@ with st.container():
             proj = project(contract["anchor_price"], contract["slope"], blk)
             st.success(f"Projected @ {lookup_time.strftime('%H:%M')} → ${round_to_tick(proj):.2f} · {blk} blocks")
 
-# ===== Fibonacci (up-bounce only) =====
+# ===== Fibonacci (up-bounce only) (unchanged)
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Fibonacci Bounce (up-bounce only)</div><div class="hline"></div>', unsafe_allow_html=True)
     fb1,fb2,fb3,fb4 = st.columns([1,1,1,1])
@@ -626,7 +677,7 @@ with st.container():
     else:
         st.info("Enter bounce low < bounce high to compute levels.")
 
-# ===== Exports =====
+# ===== Exports (unchanged)
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Exports</div><div class="hline"></div>', unsafe_allow_html=True)
     exportables={}
@@ -646,7 +697,7 @@ with st.container():
                 if data: zf.writestr(fn,data)
         st.download_button("Download all CSVs (.zip)", data=buf.getvalue(), file_name="marketlens_exports.zip", mime="application/zip", type="primary", use_container_width=True)
 
-# ===== Footer =====
+# ===== Footer (unchanged)
 st.markdown(
     f"""
     <div class="card" style="text-align:center">
