@@ -66,90 +66,49 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 def _alpaca_client():
-    """Create Alpaca client with proper error handling and paper trading support"""
+    """Create Alpaca client for live account"""
     try:
-        # Use the working config discovered during testing
-        config = globals().get('_working_config', {"sandbox": True})
-        
-        client_kwargs = {
-            "api_key": st.secrets["alpaca"]["key"],
-            "secret_key": st.secrets["alpaca"]["secret"],
-            "sandbox": config["sandbox"]
-        }
-        
-        if "url_override" in config:
-            client_kwargs["url_override"] = config["url_override"]
-        
-        return StockHistoricalDataClient(**client_kwargs)
-        
+        return StockHistoricalDataClient(
+            api_key=st.secrets["alpaca"]["key"],
+            secret_key=st.secrets["alpaca"]["secret"],
+            sandbox=False  # Live account = sandbox False
+        )
     except Exception as e:
         st.error(f"Failed to create Alpaca client: {str(e)}")
         return None
 
 def test_alpaca_connection():
     """Test if Alpaca connection is working"""
-    
-    # Debug: Check if secrets are loaded
     try:
-        key_preview = st.secrets["alpaca"]["key"][:8] + "..."
-        secret_preview = st.secrets["alpaca"]["secret"][:8] + "..."
-        st.info(f"🔑 Keys loaded: {key_preview} / {secret_preview}")
-    except Exception as e:
-        st.error(f"❌ Cannot load API keys from secrets: {str(e)}")
-        return False
-    
-    # Test different configurations for paper trading
-    configs = [
-        {"sandbox": True, "name": "Paper Trading (sandbox=True)"},
-        {"sandbox": False, "name": "Live Mode (sandbox=False)"},
-        {"sandbox": True, "url_override": "https://data.alpaca.markets", "name": "Paper with data.alpaca.markets"},
-    ]
-    
-    for config in configs:
-        st.write(f"Testing {config['name']}...")
+        client = _alpaca_client()
+        if client is None:
+            return False
+            
+        # Test with older data to avoid any subscription issues
+        end_dt = datetime.now(tz=ET) - timedelta(days=2)
+        start_dt = end_dt - timedelta(hours=1)
         
-        try:
-            client_kwargs = {
-                "api_key": st.secrets["alpaca"]["key"],
-                "secret_key": st.secrets["alpaca"]["secret"],
-                "sandbox": config["sandbox"]
-            }
+        req = StockBarsRequest(
+            symbol_or_symbols="AAPL",
+            timeframe=TimeFrame.Minute,
+            start=start_dt,
+            end=end_dt,
+            limit=5
+        )
+        bars = client.get_stock_bars(req)
+        
+        if hasattr(bars, 'df') and not bars.df.empty:
+            st.success("✅ Alpaca connection successful!")
+            st.info(f"Retrieved {len(bars.df)} bars for AAPL")
+            return True
+        else:
+            st.warning("⚠️ Connection works but no data returned")
+            return True
             
-            if "url_override" in config:
-                client_kwargs["url_override"] = config["url_override"]
-            
-            client = StockHistoricalDataClient(**client_kwargs)
-            
-            # Test with older data to avoid SIP subscription issues
-            end_dt = datetime.now(tz=ET) - timedelta(days=3)
-            start_dt = end_dt - timedelta(hours=2)
-            
-            req = StockBarsRequest(
-                symbol_or_symbols="AAPL",
-                timeframe=TimeFrame.Minute,
-                start=start_dt,
-                end=end_dt,
-                limit=5
-            )
-            bars = client.get_stock_bars(req)
-            
-            if hasattr(bars, 'df') and not bars.df.empty:
-                st.success(f"✅ Alpaca connection successful with {config['name']}!")
-                st.info(f"Retrieved {len(bars.df)} test bars for AAPL")
-                
-                # Store working config
-                globals()['_working_config'] = config
-                return True
-            else:
-                st.warning(f"⚠️ {config['name']}: Connection works but no data returned")
-                
-        except Exception as e:
-            st.error(f"❌ {config['name']} failed: {str(e)}")
-            
-    st.error("All configurations failed. This might be a paper trading limitation.")
-    st.info("💡 Paper trading accounts may have limited market data access. Try:")
-    st.info("1) Use a live account with small amounts, 2) Check Alpaca docs for paper data limits, 3) Use different data source")
-    return False
+    except Exception as e:
+        st.error(f"❌ Alpaca connection failed: {str(e)}")
+        st.info("💡 Check your API keys and account permissions")
+        return False
 
 @st.cache_data(ttl=300)
 def fetch_history_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
