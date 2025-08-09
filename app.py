@@ -1675,15 +1675,12 @@ forecast_date, tolerance, rule_requirement = render_enhanced_sidebar()
 
 # Render metrics dashboard with anchors
 previous_anchors = render_metrics_dashboard(forecast_date)
-# ===== PART 5A: BASIC ANCHOR INPUT INTERFACE =====
-# Enhanced anchor inputs with validation (1 of 5)
+# ===== PART 5A - ENHANCED ANCHOR INPUTS (1 of 5) =====
+# Add this section to your app.py after Part 4
 
 def create_single_anchor_input(anchor_type: str, default_price: float, default_time: time, 
                               icon: str, color: str, description: str):
-    """
-    Create a single anchor input with professional styling.
-    Fixed session state key conflicts.
-    """
+    """Create a single anchor input with professional styling."""
     
     st.markdown(
         f"""
@@ -1702,7 +1699,6 @@ def create_single_anchor_input(anchor_type: str, default_price: float, default_t
     col1, col2 = st.columns([3, 2])
     
     with col1:
-        # Price input - no session state conflicts
         price = st.number_input(
             f"Price ($)",
             value=default_price,
@@ -1726,7 +1722,6 @@ def create_single_anchor_input(anchor_type: str, default_price: float, default_t
             st.warning("⚠️ Price seems low for SPX - please verify")
     
     with col2:
-        # Time input
         anchor_time = st.time_input(
             f"Time",
             value=default_time,
@@ -1872,13 +1867,8 @@ def render_basic_anchor_inputs(defaults: dict):
         'low_valid': low_valid,
         'all_valid': high_valid and close_valid and low_valid
     }
-
-# ===== INTEGRATION POINT =====
-# Usage in main flow:
-# 1. defaults = render_anchor_header(forecast_date, previous_anchors)
-# 2. anchor_inputs = render_basic_anchor_inputs(defaults)
-# ===== PART 5B: LOCK/UNLOCK SYSTEM & STATUS =====
-# Professional anchor management with state control (2 of 5)
+    # ===== PART 5B - LOCK/UNLOCK SYSTEM (2 of 5) =====
+# Add this section right below Part 5A
 
 def render_validation_status(anchor_data: dict):
     """Render the overall validation status with professional styling."""
@@ -2039,8 +2029,8 @@ def render_locked_anchor_summary():
     
     return locked_data
 
-def render_anchor_control_section(anchor_data: dict):
-    """Main function to render the complete anchor control section."""
+def handle_anchor_management(anchor_data: dict):
+    """Complete anchor management workflow integration."""
     
     # Add spacing before control section
     st.markdown('<div style="margin: var(--space-8) 0;"></div>', unsafe_allow_html=True)
@@ -2092,51 +2082,8 @@ def get_anchor_configuration():
             'is_locked': False,
             'error': 'Anchors must be locked before generating forecasts'
         }
-
-def display_anchor_workflow_help():
-    """Display helpful workflow guidance for users."""
-    
-    if not st.session_state.get('anchors_locked', False):
-        st.markdown(
-            """
-            <div class="glass-card" style="background: rgba(0, 122, 255, 0.05); border-color: #007AFF;">
-                <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3);">
-                    <span style="font-size: 1.2rem;">💡</span>
-                    <span style="font-weight: 600; color: #007AFF;">Workflow Guide</span>
-                </div>
-                <div style="color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.6;">
-                    <strong>Step 1:</strong> Configure all three anchor prices and times<br>
-                    <strong>Step 2:</strong> Ensure all validation checks pass<br>
-                    <strong>Step 3:</strong> Lock the anchors to protect configuration<br>
-                    <strong>Step 4:</strong> Generate forecasts using locked anchor data
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-# ===== INTEGRATION FUNCTIONS =====
-def handle_anchor_management(anchor_data: dict):
-    """Complete anchor management workflow integration."""
-    
-    # Render control section
-    control_status = render_anchor_control_section(anchor_data)
-    
-    # Show workflow help if needed
-    if not control_status['is_locked']:
-        display_anchor_workflow_help()
-    
-    # Return status for main application flow
-    return control_status
-
-# ===== USAGE EXAMPLE =====
-# In main flow after Part 5A:
-# control_status = handle_anchor_management(anchor_inputs)
-# if control_status['can_generate']:
-#     # Proceed to forecast generation
-#     anchor_config = get_anchor_configuration()
-# ===== PART 5C: FAN DATA GENERATION =====
-# Enhanced fan chart data generation preserving original SPX logic (3 of 5)
+        # ===== PART 5C - FAN DATA GENERATION (3 of 5) =====
+# Add this section right below Part 5B
 
 def build_enhanced_fan_dataframe(anchor_type: str, anchor_price: float, anchor_time: time, forecast_date: date) -> pd.DataFrame:
     """
@@ -2144,10 +2091,6 @@ def build_enhanced_fan_dataframe(anchor_type: str, anchor_price: float, anchor_t
     Enhanced with better error handling and performance optimization.
     """
     try:
-        # Performance monitoring
-        if 'performance_monitor' in st.session_state:
-            st.session_state.performance_monitor.start_operation(f'build_fan_{anchor_type}')
-        
         # Create anchor datetime (preserving original logic)
         anchor_datetime = datetime.combine(forecast_date - timedelta(days=1), anchor_time)
         
@@ -2165,12 +2108,12 @@ def build_enhanced_fan_dataframe(anchor_type: str, anchor_price: float, anchor_t
                 blocks = spx_blocks_between(anchor_datetime, target_datetime)
                 
                 # Project prices using ORIGINAL slopes (preserving exact logic)
-                entry_price = project_price(
+                entry_price = project(
                     anchor_price, 
                     SPX_SLOPES_DOWN[anchor_type], 
                     blocks
                 )
-                exit_price = project_price(
+                exit_price = project(
                     anchor_price, 
                     SPX_SLOPES_UP[anchor_type], 
                     blocks
@@ -2204,11 +2147,6 @@ def build_enhanced_fan_dataframe(anchor_type: str, anchor_price: float, anchor_t
             fan_df.attrs['anchor_time'] = anchor_time
             fan_df.attrs['forecast_date'] = forecast_date
             fan_df.attrs['generated_at'] = datetime.now()
-        
-        # End performance monitoring
-        if 'performance_monitor' in st.session_state:
-            generation_time = st.session_state.performance_monitor.end_operation(f'build_fan_{anchor_type}')
-            fan_df.attrs['generation_time'] = generation_time
         
         return fan_df
         
@@ -2449,41 +2387,8 @@ def display_fan_data_tables(fan_datasets: dict):
         else:
             st.error("❌ LOW fan data not available")
 
-def get_cached_fan_data(forecast_date: date) -> dict:
-    """Retrieve cached fan data if available and valid."""
-    
-    if ('fan_data' in st.session_state and 
-        'fan_forecast_date' in st.session_state and
-        st.session_state.fan_forecast_date == forecast_date):
-        
-        cache_age = datetime.now() - st.session_state.fan_data_generated_at
-        
-        # Cache valid for 1 hour
-        if cache_age < timedelta(hours=1):
-            return st.session_state.fan_data
-    
-    return {}
-
-# ===== INTEGRATION FUNCTION =====
-def handle_fan_generation(anchor_config: dict, forecast_date: date, force_regenerate: bool = False):
+def handle_fan_generation(anchor_config: dict, forecast_date: date):
     """Main function to handle fan data generation workflow."""
-    
-    # Check for cached data first
-    if not force_regenerate:
-        cached_data = get_cached_fan_data(forecast_date)
-        if cached_data:
-            st.markdown(
-                """
-                <div class="glass-card" style="background: rgba(0, 122, 255, 0.05);">
-                    <div style="display: flex; align-items: center; gap: var(--space-3);">
-                        <span style="font-size: 1.2rem;">⚡</span>
-                        <span style="font-weight: 600;">Using cached forecast data</span>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-            return cached_data
     
     # Generate new fan data
     fan_datasets = generate_all_fan_data(anchor_config, forecast_date)
@@ -2493,22 +2398,16 @@ def handle_fan_generation(anchor_config: dict, forecast_date: date, force_regene
         display_fan_data_tables(fan_datasets)
     
     return fan_datasets
-
-# ===== USAGE EXAMPLE =====
-# In main flow after anchor locking:
-# if control_status['can_generate']:
-#     anchor_config = get_anchor_configuration()
-#     fan_data = handle_fan_generation(anchor_config, forecast_date)
-# ===== PART 5D: PREMIUM CHART STYLING =====
-# Apple-Tesla inspired chart designs with interactive controls (4 of 5)
+    # ===== PART 5D - PREMIUM CHART STYLING (4 of 5) =====
+# Add this section right below Part 5C
 
 def create_premium_plotly_theme():
     """Create a premium Apple-Tesla inspired Plotly theme."""
     
     # Determine current theme
-    current_theme = st.session_state.get('theme', 'light')
+    current_theme = st.session_state.get('theme', 'Light')
     
-    if current_theme == 'dark':
+    if current_theme == 'Dark':
         # Dark theme colors
         theme_config = {
             'bg_color': '#0F141B',
@@ -2690,17 +2589,6 @@ def create_enhanced_fan_chart(fan_df: pd.DataFrame, chart_title: str, intraday_d
             bgcolor=theme['paper_color'],
             bordercolor=theme['grid_color'],
             borderwidth=1
-        ),
-        rangeselector=dict(
-            buttons=list([
-                dict(count=1, label='1H', step='hour', stepmode='backward'),
-                dict(count=3, label='3H', step='hour', stepmode='backward'),
-                dict(step='all', label='All')
-            ]),
-            bgcolor=theme['paper_color'],
-            bordercolor=theme['grid_color'],
-            borderwidth=1,
-            font=dict(color=theme['text_color'])
         )
     )
     
@@ -2720,56 +2608,7 @@ def create_enhanced_fan_chart(fan_df: pd.DataFrame, chart_title: str, intraday_d
     
     return fig
 
-def render_chart_controls():
-    """Render interactive chart control panel."""
-    
-    st.markdown(
-        """
-        <div class="subsection-header">
-            🎛️ Chart Controls
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        show_intraday = st.checkbox(
-            '📊 Show SPX Data',
-            value=True,
-            help='Display actual SPX price movements'
-        )
-    
-    with col2:
-        smooth_lines = st.checkbox(
-            '🌊 Smooth Lines',
-            value=True,
-            help='Apply smoothing to fan lines'
-        )
-    
-    with col3:
-        show_spread = st.checkbox(
-            '📏 Show Spread',
-            value=False,
-            help='Highlight the spread between entry and exit'
-        )
-    
-    with col4:
-        auto_zoom = st.checkbox(
-            '🔍 Auto-zoom',
-            value=False,
-            help='Automatically zoom to price range'
-        )
-    
-    return {
-        'show_intraday': show_intraday,
-        'smooth_lines': smooth_lines,
-        'show_spread': show_spread,
-        'auto_zoom': auto_zoom
-    }
-
-def create_combined_fan_overview(fan_datasets: dict, intraday_data: pd.DataFrame = None, chart_options: dict = None):
+def create_combined_fan_overview(fan_datasets: dict, intraday_data: pd.DataFrame = None):
     """Create a combined overview chart showing all three fans."""
     
     if not fan_datasets:
@@ -2780,9 +2619,9 @@ def create_combined_fan_overview(fan_datasets: dict, intraday_data: pd.DataFrame
     
     # Color scheme for different anchors
     colors = {
-        'high': {'entry': '#FF6B6B', 'exit': '#34C759', 'fill': 'rgba(52, 199, 89, 0.05)'},
-        'close': {'entry': '#FF9500', 'exit': '#007AFF', 'fill': 'rgba(0, 122, 255, 0.05)'},
-        'low': {'entry': '#FF3B30', 'exit': '#00D4AA', 'fill': 'rgba(0, 212, 170, 0.05)'}
+        'high': {'entry': '#FF6B6B', 'exit': '#34C759'},
+        'close': {'entry': '#FF9500', 'exit': '#007AFF'},
+        'low': {'entry': '#FF3B30', 'exit': '#00D4AA'}
     }
     
     # Add each fan to the chart
@@ -2831,8 +2670,8 @@ def create_combined_fan_overview(fan_datasets: dict, intraday_data: pd.DataFrame
             legendgroup=anchor_name
         ))
     
-    # Add SPX data if requested
-    if chart_options and chart_options.get('show_intraday', True) and intraday_data is not None and not intraday_data.empty:
+    # Add SPX data if available
+    if intraday_data is not None and not intraday_data.empty:
         fig.add_trace(go.Scatter(
             x=intraday_data['TS'],
             y=intraday_data['Close'],
@@ -2912,12 +2751,9 @@ def display_premium_charts(fan_datasets: dict, intraday_data: pd.DataFrame = Non
         unsafe_allow_html=True
     )
     
-    # Chart controls
-    chart_options = render_chart_controls()
-    
     # Overview chart
     st.markdown("### 📊 Combined Overview")
-    overview_chart = create_combined_fan_overview(fan_datasets, intraday_data, chart_options)
+    overview_chart = create_combined_fan_overview(fan_datasets, intraday_data)
     if overview_chart:
         st.plotly_chart(overview_chart, use_container_width=True, config={
             'displayModeBar': True,
@@ -2939,7 +2775,7 @@ def display_premium_charts(fan_datasets: dict, intraday_data: pd.DataFrame = Non
             chart = create_enhanced_fan_chart(
                 fan_datasets['high'], 
                 "HIGH Anchor Fan — Resistance Levels",
-                intraday_data if chart_options['show_intraday'] else None
+                intraday_data
             )
             if chart:
                 st.plotly_chart(chart, use_container_width=True, config={
@@ -2954,7 +2790,7 @@ def display_premium_charts(fan_datasets: dict, intraday_data: pd.DataFrame = Non
             chart = create_enhanced_fan_chart(
                 fan_datasets['close'], 
                 "CLOSE Anchor Fan — Consensus Levels",
-                intraday_data if chart_options['show_intraday'] else None
+                intraday_data
             )
             if chart:
                 st.plotly_chart(chart, use_container_width=True, config={
@@ -2969,7 +2805,7 @@ def display_premium_charts(fan_datasets: dict, intraday_data: pd.DataFrame = Non
             chart = create_enhanced_fan_chart(
                 fan_datasets['low'], 
                 "LOW Anchor Fan — Support Levels",
-                intraday_data if chart_options['show_intraday'] else None
+                intraday_data
             )
             if chart:
                 st.plotly_chart(chart, use_container_width=True, config={
@@ -2979,13 +2815,12 @@ def display_premium_charts(fan_datasets: dict, intraday_data: pd.DataFrame = Non
         else:
             st.error("❌ LOW anchor data not available")
 
-# ===== INTEGRATION FUNCTION =====
 def handle_premium_charting(fan_datasets: dict, forecast_date: date):
     """Main function to handle premium chart display."""
     
     # Fetch intraday data for overlay
-    intraday_1m = fetch_intraday_data(forecast_date)
-    intraday_30m = convert_to_30min_bars(intraday_1m)
+    intraday_1m = fetch_spx_intraday_1m(forecast_date)
+    intraday_30m = to_30m(intraday_1m)
     
     # Display charts
     display_premium_charts(fan_datasets, intraday_30m)
@@ -2995,12 +2830,8 @@ def handle_premium_charting(fan_datasets: dict, forecast_date: date):
         'intraday_available': not intraday_30m.empty,
         'chart_count': len([df for df in fan_datasets.values() if not df.empty])
     }
-
-# ===== USAGE EXAMPLE =====
-# After fan data generation:
-# chart_status = handle_premium_charting(fan_data, forecast_date)
-# ===== PART 5E: ENTRY DETECTION & PROFESSIONAL TABLES =====
-# Enhanced entry detection system with export functionality (5 of 5)
+    # ===== PART 5E - ENTRY DETECTION & EXPORT (5 of 5) =====
+# Add this section right below Part 5D
 
 def detect_enhanced_entry_signals(fan_df: pd.DataFrame, intraday_data: pd.DataFrame, 
                                  tolerance: float, rule_type: str) -> dict:
@@ -3310,14 +3141,14 @@ def create_exportable_datasets(fan_datasets: dict, detection_results: pd.DataFra
     
     return export_data
 
-def display_export_section(fan_datasets: dict, detection_results: pd.DataFrame, 
-                          forecast_date: date, anchor_config: dict):
+def display_enhanced_export_section(fan_datasets: dict, detection_results: pd.DataFrame, 
+                                   forecast_date: date, anchor_config: dict):
     """Display professional export interface."""
     
     st.markdown(
         """
         <div class="section-header">
-            📤 Export & Download
+            📤 Export & Download Center
         </div>
         """,
         unsafe_allow_html=True
@@ -3372,7 +3203,7 @@ def display_export_section(fan_datasets: dict, detection_results: pd.DataFrame,
                     
                     # Download button
                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    zip_filename = f"MarketLens_Export_{timestamp}.zip"
+                    zip_filename = f"MarketLens_Pro_Export_{timestamp}.zip"
                     
                     st.download_button(
                         label="⬇️ Download Export Package",
@@ -3386,14 +3217,13 @@ def display_export_section(fan_datasets: dict, detection_results: pd.DataFrame,
                 else:
                     st.error("❌ No data available for export")
 
-# ===== MAIN INTEGRATION FUNCTION =====
 def handle_entry_detection_and_export(fan_datasets: dict, forecast_date: date, 
                                      tolerance: float, rule_type: str, anchor_config: dict):
     """Complete entry detection and export workflow."""
     
     # Fetch intraday data
-    intraday_1m = fetch_intraday_data(forecast_date)
-    intraday_30m = convert_to_30min_bars(intraday_1m)
+    intraday_1m = fetch_spx_intraday_1m(forecast_date)
+    intraday_30m = to_30m(intraday_1m)
     
     # Run entry detection
     detection_results = run_comprehensive_entry_detection(
@@ -3405,7 +3235,7 @@ def handle_entry_detection_and_export(fan_datasets: dict, forecast_date: date,
     
     # Export section
     st.markdown('<div style="margin: var(--space-8) 0;"></div>', unsafe_allow_html=True)
-    display_export_section(fan_datasets, detection_results, forecast_date, anchor_config)
+    display_enhanced_export_section(fan_datasets, detection_results, forecast_date, anchor_config)
     
     return {
         'detection_completed': True,
@@ -3413,10 +3243,84 @@ def handle_entry_detection_and_export(fan_datasets: dict, forecast_date: date,
         'intraday_available': not intraday_30m.empty,
         'export_ready': bool(fan_datasets or not detection_results.empty)
     }
+# ===== INTEGRATION SECTION - MAIN APP FLOW =====
+# Add this section after Parts 5A-5E to use the enhanced functions
 
-# ===== USAGE EXAMPLE =====
-# Final integration in main flow:
-# if st.session_state.get('forecasts_generated', False):
-#     detection_status = handle_entry_detection_and_export(
-#         fan_data, forecast_date, tolerance, rule_requirement, anchor_config
-#     )
+# Get previous day anchors in enhanced format
+def get_previous_day_anchors_enhanced(forecast_date: date) -> dict:
+    """Get previous day anchors in enhanced format."""
+    anchors = get_prev_day_anchors_for(forecast_date)
+    
+    if anchors:
+        prev_date, prev_high, prev_close, prev_low = anchors
+        return {
+            'date': prev_date,
+            'high': prev_high,
+            'close': prev_close,
+            'low': prev_low
+        }
+    return None
+
+# Get enhanced previous anchors
+previous_anchors_enhanced = get_previous_day_anchors_enhanced(forecast_date)
+
+# ===== ENHANCED ANCHOR INTERFACE =====
+# Step 1: Render anchor header and get defaults
+defaults = render_anchor_header(forecast_date, previous_anchors_enhanced)
+
+# Step 2: Render the enhanced anchor inputs
+anchor_inputs_data = render_basic_anchor_inputs(defaults)
+
+# Step 3: Handle anchor management (lock/unlock/validation)
+control_status = handle_anchor_management(anchor_inputs_data)
+
+# Step 4: Get anchor configuration if ready
+if control_status['can_generate']:
+    anchor_config = get_anchor_configuration()
+else:
+    anchor_config = None
+
+# ===== ENHANCED FORECAST GENERATION =====
+if st.session_state.get("forecasts_generated", False) and anchor_config:
+    
+    # Add spacing before forecast section
+    st.markdown('<div style="margin: var(--space-8) 0;"></div>', unsafe_allow_html=True)
+    
+    # Step 5: Generate fan data using enhanced system
+    fan_data = handle_fan_generation(anchor_config, forecast_date)
+    
+    # Step 6: Display premium charts
+    if fan_data:
+        st.markdown('<div style="margin: var(--space-6) 0;"></div>', unsafe_allow_html=True)
+        chart_status = handle_premium_charting(fan_data, forecast_date)
+    
+    # Step 7: Run entry detection and display results
+    if fan_data:
+        st.markdown('<div style="margin: var(--space-6) 0;"></div>', unsafe_allow_html=True)
+        detection_status = handle_entry_detection_and_export(
+            fan_data, 
+            forecast_date, 
+            tol,  # tolerance from sidebar
+            require_close_rule,  # rule from sidebar  
+            anchor_config
+        )
+
+# ===== BACKWARD COMPATIBILITY VARIABLES =====
+# For any remaining sections that expect these variables
+if anchor_config:
+    # Extract for compatibility
+    high_price = anchor_config['high_price']
+    high_time = anchor_config['high_time']
+    close_price = anchor_config['close_price']
+    close_time = anchor_config['close_time']
+    low_price = anchor_config['low_price']
+    low_time = anchor_config['low_time']
+else:
+    # Set default values if no anchor config
+    high_price = 6185.80
+    high_time = time(11, 30)
+    close_price = 6170.20  
+    close_time = time(15, 0)
+    low_price = 6130.40
+    low_time = time(13, 30)
+    
