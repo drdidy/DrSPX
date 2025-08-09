@@ -1,10 +1,3 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# MarketLens — SPX Forecast Console (Apple/Tesla-style • Altair • SPX-only)
-# Spec: Fixed slopes (hidden) • Auto-zoom charts • Deep charcoal UI
-#       Upgraded Fibonacci & Contract tools • Optional Yahoo summary (fallback)
-#       No Plotly / No Matplotlib (Altair ships with Streamlit)
-# ═══════════════════════════════════════════════════════════════════════════════
-
 from __future__ import annotations
 import io, json, zipfile
 from datetime import datetime, date, time, timedelta
@@ -14,23 +7,18 @@ import numpy as np
 import streamlit as st
 import altair as alt
 
-# ── Brand / Meta ──────────────────────────────────────────────────────────────
 APP_NAME = "MarketLens"
-VERSION = "3.1.1"
+VERSION = "3.1.2"
 
-# ── Hidden Strategy Constants (DO NOT SHOW IN UI) ────────────────────────────
-# per 30-min block
+# Hidden strategy constants (per 30-min block)
 SPX_SLOPES_DOWN = {"HIGH": -0.2792, "CLOSE": -0.2792, "LOW": -0.2792}
 SPX_SLOPES_UP   = {"HIGH": +0.3171, "CLOSE": +0.3171, "LOW": +0.3171}
+TICK = 0.25
 
-TICK = 0.25  # SPX/ES tick for rounding & stops
-
-# Anchor glyphs/colors (used sparingly)
 ICON_HIGH, ICON_CLOSE, ICON_LOW = "▲", "■", "▼"
 COLOR_HIGH, COLOR_CLOSE, COLOR_LOW = "#16A34A", "#2563EB", "#DC2626"
-COLOR_ENTRY, COLOR_EXIT = "#0B1220", "#2A3443"  # subtle neutrals
+COLOR_ENTRY, COLOR_EXIT = "#0B1220", "#2A3443"
 
-# ── Verbatim SPX text (kept) ─────────────────────────────────────────────────
 SPX_GOLDEN_RULES = [
     "Exit levels are exits - never entries",
     "Anchors are magnets, not timing signals - let price come to you",
@@ -122,7 +110,6 @@ RISK_RULES = {
     ],
 }
 
-# ── Theme / CSS (Apple/Tesla minimal) ─────────────────────────────────────────
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -158,7 +145,7 @@ html,body,.stApp{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,Se
 .dataframe th{background:rgba(255,255,255,.04)!important;font-weight:600!important;}
 .dataframe td, .dataframe th{font-size:0.95rem!important}
 
-.bad{color:var(--bad)} .good{color:var(--good)}
+.good{color:var(--good)} .bad{color:var(--bad)}
 
 .icon-chip{
   display:inline-flex;align-items:center;gap:.5rem;
@@ -173,14 +160,13 @@ html,body,.stApp{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,Se
 </style>
 """
 
-# ── Utilities ────────────────────────────────────────────────────────────────
 RTH_START, RTH_END = time(8,30), time(15,30)
 
 def spx_blocks_between(t1: datetime, t2: datetime) -> int:
     if t2 < t1: t1, t2 = t2, t1
     blocks, cur = 0, t1
     while cur < t2:
-        if cur.hour != 16:  # skip 16:00–16:59
+        if cur.hour != 16:
             blocks += 1
         cur += timedelta(minutes=30)
     return blocks
@@ -236,7 +222,6 @@ def us_market_holidays(year:int)->set[date]:
     d=date(year,12,25); hol.add(d if d.weekday()<5 else (d-timedelta(days=1) if d.weekday()==5 else d+timedelta(days=1)))
     return hol
 
-# ── State ────────────────────────────────────────────────────────────────────
 if "init" not in st.session_state:
     st.session_state.init = True
     st.session_state.theme = "Dark"
@@ -246,32 +231,28 @@ if "init" not in st.session_state:
     st.session_state.show_charts = True
     st.session_state.print_mode = False
 
-# ── Page Config / CSS ────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"{APP_NAME} — SPX Console", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 st.markdown(CSS, unsafe_allow_html=True)
 
-# ── Header + optional Yahoo summary (no status pill) ─────────────────────────
-def get_spx_summary():
+@st.cache_data(ttl=60)
+def fetch_spx_summary():
     try:
         import yfinance as yf
-        @st.cache_data(ttl=60)
-        def _fetch():
-            t = yf.Ticker("^GSPC")
-            intraday = t.history(period="1d", interval="1m")
-            daily = t.history(period="5d", interval="1d")
-            return intraday, daily
-        intraday, daily = _fetch()
-        if intraday is not None and len(intraday):
-            last = intraday.iloc[-1]
-            price = float(last["Close"])
-            prev_close = float(daily["Close"].iloc[-2]) if len(daily)>=2 else price
-            chg, pct = price-prev_close, (price-prev_close)/prev_close*100 if prev_close else 0.0
-            high = float(daily["High"].iloc[-1]) if len(daily) else price
-            low  = float(daily["Low"].iloc[-1])  if len(daily) else price
-            return {"ok":True,"price":price,"chg":chg,"pct":pct,"high":high,"low":low}
-        return {"ok":False}
+        t = yf.Ticker("^GSPC")
+        intraday = t.history(period="1d", interval="1m")
+        daily = t.history(period="5d", interval="1d")
+        if intraday is None or intraday.empty or daily is None or daily.empty:
+            return {"ok": False}
+        last = intraday.iloc[-1]
+        price = float(last["Close"])
+        prev_close = float(daily["Close"].iloc[-2]) if len(daily) >= 2 else price
+        chg = price - prev_close
+        pct = (chg / prev_close * 100) if prev_close else 0.0
+        today_high = float(daily["High"].iloc[-1])
+        today_low  = float(daily["Low"].iloc[-1])
+        return {"ok": True, "price": price, "chg": chg, "pct": pct, "high": today_high, "low": today_low}
     except Exception:
-        return {"ok":False}
+        return {"ok": False}
 
 st.markdown(
     f"""
@@ -281,7 +262,8 @@ st.markdown(
     </div>
     """, unsafe_allow_html=True
 )
-sumy = get_spx_summary()
+
+sumy = fetch_spx_summary()
 if sumy.get("ok"):
     color_bg = "rgba(22,163,74,.11)" if sumy["chg"]>=0 else "rgba(220,38,38,.12)"
     chg_txt = f"{sumy['chg']:+.2f} ({sumy['pct']:+.2f}%)"
@@ -297,8 +279,15 @@ if sumy.get("ok"):
         </div>
         """, unsafe_allow_html=True
     )
+else:
+    st.markdown(
+        """
+        <div class="card" style="padding:10px 14px;">
+          <div class="subtle">Live SPX price unavailable (yfinance not installed or no connectivity).</div>
+        </div>
+        """, unsafe_allow_html=True
+    )
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.subheader("Display")
     st.session_state.theme = st.radio("Theme", ["Dark","Light"], index=0 if st.session_state.theme=="Dark" else 1, horizontal=True)
@@ -340,7 +329,6 @@ with st.sidebar:
     st.subheader("Utilities")
     st.session_state.show_charts = st.toggle("Show charts", value=st.session_state.show_charts)
 
-# ── Anchor Inputs (previous day of target date) ──────────────────────────────
 def anchor_inputs(prefix: str, default_price: float, default_time: time):
     price = st.number_input(f"{prefix} price", value=float(default_price), step=0.1, min_value=0.0, key=f"{prefix}_price")
     when  = st.time_input(f"{prefix} time",  value=default_time, step=300, key=f"{prefix}_time")
@@ -369,7 +357,6 @@ with st.container():
         generate = st.button("Generate forecast", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ── Forecast (Altair auto-zoom) ──────────────────────────────────────────────
 def build_fan_df(anchor_label: str, anchor_price: float, anchor_time: time) -> pd.DataFrame:
     rows=[]; anchor_dt = datetime.combine(forecast_date - timedelta(days=1), anchor_time)
     for slot in SPX_SLOTS:
@@ -418,7 +405,6 @@ if generate or st.session_state.get("forecasts_generated", False):
         if st.session_state.show_charts: plot_fan(df_low, f"{ICON_LOW} Low Anchor Fan", COLOR_LOW)
         st.dataframe(df_low.round({"Entry":2,"Exit":2,"Δ from Anchor":2}), use_container_width=True, hide_index=True)
 
-# ── Contract Line ────────────────────────────────────────────────────────────
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Contract Line</div><div class="hline"></div>', unsafe_allow_html=True)
     col1,col2,col3 = st.columns([1,1,1])
@@ -479,7 +465,6 @@ with st.container():
 
         st.dataframe(df_contract, use_container_width=True, hide_index=True)
 
-        # Real-time lookup
         lk1, lk2 = st.columns([1,2])
         with lk1:
             lookup_time = st.time_input("Lookup time", value=time(9,30), step=300, key="lookup_time")
@@ -489,7 +474,6 @@ with st.container():
             proj = project(contract["anchor_price"], contract["slope"], blk)
             st.success(f"Projected @ {lookup_time.strftime('%H:%M')} → ${round_to_tick(proj):.2f} · {blk} blocks · Δ {proj - contract['anchor_price']:+.2f}")
 
-# ── Fibonacci (up-bounce only) ───────────────────────────────────────────────
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Fibonacci Bounce (up-bounce only)</div><div class="hline"></div>', unsafe_allow_html=True)
     fb1,fb2,fb3,fb4 = st.columns([1,1,1,1])
@@ -543,7 +527,6 @@ with st.container():
     else:
         st.info("Enter bounce low < bounce high to compute levels.")
 
-# ── Exports ──────────────────────────────────────────────────────────────────
 with st.container():
     st.markdown('<div class="card"><div class="section-title">Exports</div><div class="hline"></div>', unsafe_allow_html=True)
     exportables={}
@@ -560,7 +543,6 @@ with st.container():
             for fn,data in exportables.items(): zf.writestr(fn,data)
         st.download_button("Download all CSVs (.zip)", data=buf.getvalue(), file_name="marketlens_exports.zip", mime="application/zip", use_container_width=True)
 
-# ── Footer ───────────────────────────────────────────────────────────────────
 st.markdown(
     f"""
     <div class="card" style="text-align:center">
