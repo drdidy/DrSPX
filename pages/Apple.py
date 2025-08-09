@@ -3,11 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
-import io, zipfile, math, textwrap
+import io, zipfile, textwrap
 import pandas as pd
 import streamlit as st
 import yfinance as yf
-from math import log, sqrt, erf
 
 # ── APP META / CONFIG ────────────────────────────────────────────────
 APP_NAME = "MarketLens"
@@ -18,7 +17,6 @@ ET = ZoneInfo("America/New_York")
 
 SLOPE_PER_BLOCK = 0.03545                 # fixed ascending slope per 30-min
 RTH_START, RTH_END = time(8,30), time(14,30)  # CT
-BASELINE_DATE_STR = "2000-01-01"          # neutral x-axis date for any time columns
 
 # ── LIGHT UI (compact) ───────────────────────────────────────────────
 st.markdown("""
@@ -106,7 +104,6 @@ def week_monday_tuesday_for(forecast: date) -> tuple[date, date, date]:
 
 @st.cache_data(ttl=600)
 def compute_week_anchors_aapl(forecast: date):
-    # Only this week’s Mon/Tue (strictly before forecast)
     mon_date, tue_date, _ = week_monday_tuesday_for(forecast)
     start_dt = datetime.combine(mon_date, time(7,0), tzinfo=CT)
     end_dt   = datetime.combine(tue_date + timedelta(days=1), time(7,0), tzinfo=CT)
@@ -122,12 +119,12 @@ def compute_week_anchors_aapl(forecast: date):
     MonHigh_i = mon_df["High"].idxmax(); MonLow_i = mon_df["Low"].idxmin()
     TueHigh_i = tue_df["High"].idxmax(); TueLow_i = tue_df["Low"].idxmin()
 
-    MonHigh = float(mon_df.loc[MonHigh_i,"High"]); MonHigh_t = mon_df.loc[MonHigh_i,"dt"].to_pydatetime()
-    MonLow  = float(mon_df.loc[MonLow_i,"Low"]);   MonLow_t  = mon_df.loc[MonLow_i,"dt"].to_pydatetime()
-    TueHigh = float(tue_df.loc[TueHigh_i,"High"]); TueHigh_t = tue_df.loc[TueHigh_i,"dt"].to_pydatetime()
-    TueLow  = float(tue_df.loc[TueLow_i,"Low"]);   TueLow_t  = tue_df.loc[TueLow_i,"dt"].to_pydatetime()
+    MonHigh = float(mon_df.loc[MonHigh_i,"High"]); MonLow = float(mon_df.loc[MonLow_i,"Low"])
+    TueHigh = float(tue_df.loc[TueHigh_i,"High"]); TueLow = float(tue_df.loc[TueLow_i,"Low"])
+    MonHigh_t = mon_df.loc[MonHigh_i,"dt"].to_pydatetime(); MonLow_t = mon_df.loc[MonLow_i,"dt"].to_pydatetime()
+    TueHigh_t = tue_df.loc[TueHigh_i,"dt"].to_pydatetime(); TueLow_t = tue_df.loc[TueLow_i,"dt"].to_pydatetime()
 
-    # Rule for two ascending lines
+    # Two ascending lines rule
     up_driven = TueHigh >= MonHigh
     if up_driven:
         lower_base_price, lower_base_time = MonLow,  MonLow_t
@@ -190,22 +187,12 @@ with st.sidebar:
     st.caption("This week’s Mon/Tue (strictly before date) define the channel (CT).")
     st.subheader("Detection")
     tolerance = st.slider("Entry tolerance (Δ vs line, $)", 0.01, 0.50, 0.05, 0.01)
-    st.subheader("Options")
-    if "risk_free_rate" not in st.session_state: st.session_state.risk_free_rate = 0.04
-    st.session_state.risk_free_rate = st.number_input("Risk-free rate (annual)", value=float(st.session_state.risk_free_rate),
-                                                      step=0.005, min_value=0.0, max_value=0.25)
 
-# ── WEEK SETUP & IV MEMORY ───────────────────────────────────────────
+# ── WEEK SETUP ───────────────────────────────────────────────────────
 wk = compute_week_anchors_aapl(forecast_date)
 if not wk:
     st.warning("Unable to compute AAPL Mon/Tue anchors. Try another date.")
     st.stop()
-
-if "aapl_iv_by_week" not in st.session_state: st.session_state.aapl_iv_by_week = {}
-if "aapl_default_iv" not in st.session_state: st.session_state.aapl_default_iv = 0.30
-week_key = f"{wk['mon_date']}_{wk['tue_date']}"
-if week_key in st.session_state.aapl_iv_by_week:
-    st.session_state.aapl_default_iv = float(st.session_state.aapl_iv_by_week[week_key])
 
 # ── SUMMARY TILES ────────────────────────────────────────────────────
 st.markdown(f"""
@@ -315,171 +302,10 @@ st.download_button("Download CSV Bundle (.zip)", data=zipbuf.getvalue(),
                    file_name=f"AAPL_{forecast_date}_exports.zip", mime="application/zip",
                    use_container_width=True)
 
-# ── BLACK–SCHOLES / IV ───────────────────────────────────────────────
-def norm_cdf(x: float) -> float:
-    return 0.5*(1.0 + erf(x / sqrt(2.0)))
-
-def bs_price_greeks(S: float, K: float, T: float, r: float, sigma: float, is_call: bool):
-    # Guard: invalid inputs → NaNs
-    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
-        return (float("nan"), float("nan"), float("nan"),
-                float("nan"), float("nan"), float("nan"))
-    d1 = (log(S/K) + (r + 0.5*sigma*sigma)*T) / (sigma*sqrt(T))
-    d2 = d1 - sigma*sqrt(T)
-    Nd1, Nd2 = norm_cdf(d1), norm_cdf(d2)
-    n_d1 = (1.0/sqrt(2.0*math.pi)) * math.exp(-0.5*d1*d1)
-    if is_call:
-        price = S*Nd1 - K*math.exp(-r*T)*Nd2; delta = Nd1; rho = K*T*math.exp(-r*T)*Nd2/100.0
-    else:
-        price = K*math.exp(-r*T)*norm_cdf(-d2) - S*norm_cdf(-d1); delta = Nd1 - 1.0; rho = -K*T*math.exp(-r*T)*norm_cdf(-d2)/100.0
-    gamma = n_d1/(S*sigma*sqrt(T)); vega = S*n_d1*sqrt(T)/100.0
-    theta = (-(S*n_d1*sigma)/(2*sqrt(T)) - (r*K*math.exp(-r*T)*(Nd2 if is_call else norm_cdf(-d2))))/365.0
-    return (price, delta, gamma, theta, vega, rho)
-
-def year_fraction(t0: datetime, t1: datetime) -> float:
-    return max((t1 - t0).total_seconds(), 0.0) / (365.0*24*3600.0)
-
-def implied_vol(target_price, S, K, T, r, is_call, sigma_lo=1e-4, sigma_hi=5.0, tol=1e-6, max_iter=120):
-    def p(sig): return bs_price_greeks(S,K,T,r,sig,is_call)[0]
-    lo, hi = sigma_lo, sigma_hi
-    p_lo, p_hi = p(lo), p(hi)
-    if math.isnan(p_lo) or math.isnan(p_hi): return None
-    for _ in range(40):
-        if p_lo > target_price: lo *= 0.5; p_lo = p(lo)
-        if p_hi < target_price: hi *= 2.0; p_hi = p(hi)
-        if p_lo <= target_price <= p_hi: break
-    if not (p_lo <= target_price <= p_hi): return None
-    for _ in range(max_iter):
-        mid = 0.5*(lo+hi); pm = p(mid)
-        if abs(pm - target_price) < tol: return mid
-        if pm < target_price: lo = mid
-        else: hi = mid
-    return 0.5*(lo+hi)
-
-def calibrate_iv_single(obs_price, S, K, t_obs: datetime, t_exp: datetime, r, is_call):
-    T = year_fraction(t_obs, t_exp)
-    return None if T<=0 else implied_vol(obs_price,S,K,T,r,is_call)
-
-def calibrate_iv_two_points(obs1: tuple, obs2: tuple, r: float, is_call: bool):
-    price1,S1,t1,K1,texp = obs1; price2,S2,t2,K2,_ = obs2
-    def sse(sig):
-        T1, T2 = year_fraction(t1, texp), year_fraction(t2, texp)
-        if T1<=0 or T2<=0: return float("inf")
-        p1 = bs_price_greeks(S1,K1,T1,r,sig,is_call)[0]
-        p2 = bs_price_greeks(S2,K2,T2,r,sig,is_call)[0]
-        return (p1-price1)**2 + (p2-price2)**2
-    # small geometric grid without numpy
-    grid = []
-    low, high, n = 0.02, 2.0, 60
-    for i in range(n):
-        grid.append(low * ((high/low) ** (i/(n-1))))
-    best = min(grid, key=sse); lo, hi = max(best*0.5,1e-4), min(best*1.5,5.0)
-    for _ in range(60):
-        m = 0.5*(lo+hi)
-        if sse(lo) < sse(hi): hi = m
-        else: lo = m
-    return 0.5*(lo+hi)
-
-# ── OPTION CALCULATOR ────────────────────────────────────────────────
-st.markdown('<div class="card"><div class="section">AAPL Option Calculator</div><div class="hline"></div>', unsafe_allow_html=True)
-st.caption(f"Active IV (seed): {st.session_state.get('aapl_default_iv', 0.30):.4f} • Week: {week_key}")
-
-colL, colR = st.columns(2)
-with colL:
-    opt_type = st.selectbox("Type", ["Call","Put"], index=0); is_call = opt_type=="Call"
-    strike  = st.number_input("Strike", value=210.0, step=0.5, min_value=0.0)
-    days_to_fri = (4 - forecast_date.weekday()) % 7
-    exp_date = st.date_input("Expiration date", value=forecast_date + timedelta(days=days_to_fri))
-    exp_time = st.time_input("Expiration time (CT)", value=time(15,0), step=300)
-    r_rate   = float(st.session_state.risk_free_rate)
-
-    slot = st.selectbox("Use channel @ time", SLOTS, index=0)
-    h, m = map(int, slot.split(":")); tdt = datetime.combine(forecast_date, time(h,m), tzinfo=CT)
-    lower_px = float(channel_df.loc[channel_df["Time"]==slot,"LowerLine"].iloc[0])
-    upper_px = float(channel_df.loc[channel_df["Time"]==slot,"UpperLine"].iloc[0])
-    src = st.radio("Underlying source", ["Upper line","Mid (avg)","Lower line"], index=1, horizontal=True)
-    auto_S = upper_px if src=="Upper line" else lower_px if src=="Lower line" else 0.5*(upper_px+lower_px)
-    S_input = st.number_input("Underlying @ time (auto; editable)", value=round(auto_S,2), step=0.01, min_value=0.0)
-    iv_input = st.number_input("IV (annualized)", value=float(st.session_state.get('aapl_default_iv', 0.30)), step=0.01, min_value=0.01, max_value=5.0)
-
-with colR:
-    t_exp = datetime.combine(exp_date, exp_time, tzinfo=CT)
-    T = year_fraction(tdt, t_exp)
-    price, delta, gamma, theta, vega, rho = bs_price_greeks(S_input, strike, T, r_rate, iv_input, is_call)
-    if price == price:
-        st.write(f"**Theo** ${price:.3f}")
-        st.write(f"Δ {delta:.4f} • Γ {gamma:.6f} • Θ/day {theta:.4f} • Vega/1% {vega:.4f} • Rho/1% {rho:.4f}")
-    else:
-        st.write("Theo/Greeks: —")
-
-    opp_val = upper_px if src=="Lower line" else lower_px if src=="Upper line" else upper_px
-    opp_theo, *_ = bs_price_greeks(opp_val, strike, T, r_rate, iv_input, is_call)
-    c1, c2 = st.columns(2)
-    with c1: stop_price = st.number_input("Your stop ($)", value=(round(price*0.6,2) if price==price else 0.50), step=0.05, min_value=0.0)
-    with c2: target_price = st.number_input("Target ($)", value=(round(opp_theo,2) if opp_theo==opp_theo else round(price*1.5,2)), step=0.05, min_value=0.0)
-    if price==price and stop_price>0:
-        rr = (target_price - price) / max(price - stop_price, 1e-9)
-        st.write(f"R:R ≈ **{rr:.2f}**  • Opposite-line theo: {opp_theo:.3f}")
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ── CALIBRATE IV (per week persistence) ─────────────────────────────
-with st.expander("Calibrate IV from observations"):
-    cL, cR = st.columns(2)
-    with cL:
-        obs1_date = st.date_input("Obs #1 date", value=date(2025,7,14))
-        obs1_time = st.time_input("Obs #1 time (CT)", value=time(9,0), step=300)
-        obs1_S    = st.number_input("Obs #1 underlying S", value=207.54, step=0.01)
-        obs1_K    = st.number_input("Obs #1 strike K", value=210.0, step=0.5)
-        obs1_P    = st.number_input("Obs #1 option price", value=1.46, step=0.01)
-    with cR:
-        use2      = st.checkbox("Use second observation", value=True)
-        obs2_date = st.date_input("Obs #2 date", value=date(2025,7,15))
-        obs2_time = st.time_input("Obs #2 time (CT)", value=time(10,30), step=300)
-        obs2_S    = st.number_input("Obs #2 underlying S", value=211.89, step=0.01)
-        obs2_K    = st.number_input("Obs #2 strike K", value=210.0, step=0.5)
-        obs2_P    = st.number_input("Obs #2 option price", value=3.35, step=0.01)
-
-    exp_d_cal = st.date_input("Expiration date (for obs)", value=exp_date)
-    exp_t_cal = st.time_input("Expiration time (CT)", value=exp_time, step=300)
-    typ_cal   = st.selectbox("Type for calibration", ["Call","Put"], index=0) == "Call"
-    r_cal     = st.number_input("Risk-free (calibration)", value=r_rate, step=0.005, min_value=0.0, max_value=0.2)
-
-    if st.button("Calibrate IV", type="primary"):
-        texp = datetime.combine(exp_d_cal, exp_t_cal, tzinfo=CT)
-        iv_est = None
-        try:
-            t1 = datetime.combine(obs1_date, obs1_time, tzinfo=CT)
-            if use2:
-                t2 = datetime.combine(obs2_date, obs2_time, tzinfo=CT)
-                iv_est = calibrate_iv_two_points((obs1_P, obs1_S, t1, obs1_K, texp),
-                                                 (obs2_P, obs2_S, t2, obs2_K, texp),
-                                                 r_cal, typ_cal)
-            else:
-                iv_est = calibrate_iv_single(obs1_P, obs1_S, obs1_K, t1, texp, r_cal, typ_cal)
-        except Exception:
-            iv_est = None
-
-        if iv_est and iv_est == iv_est and iv_est > 0:
-            st.session_state.aapl_default_iv = float(iv_est)
-            st.session_state.aapl_iv_by_week[week_key] = float(iv_est)
-            st.success(f"Calibrated IV = **{iv_est:.4f}** saved for week {week_key}")
-            # show fit error
-            rows=[]
-            def modeled(S,K,t_obs): return bs_price_greeks(S,K,year_fraction(t_obs,texp),r_cal,iv_est,typ_cal)[0]
-            m1 = modeled(obs1_S,obs1_K,t1); err1=(m1-obs1_P); err1p=(err1/obs1_P*100.0) if obs1_P else float("nan")
-            rows.append({"Obs":"#1","S":obs1_S,"K":obs1_K,"Actual":obs1_P,"Model":round(m1,4),"Err":round(err1,4),"Err%":round(err1p,2)})
-            if use2:
-                m2 = modeled(obs2_S,obs2_K,t2); err2=(m2-obs2_P); err2p=(err2/obs2_P*100.0) if obs2_P else float("nan")
-                rows.append({"Obs":"#2","S":obs2_S,"K":obs2_K,"Actual":obs2_P,"Model":round(m2,4),"Err":round(err2,4),"Err%":round(err2p,2)})
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        else:
-            st.error("Could not calibrate IV. Check inputs/expiry.")
-
 # ── DAILY NOTE EXPORT ────────────────────────────────────────────────
 def daily_note() -> str:
     lines = [f"# {APP_NAME} — {PAGE_NAME}  ({forecast_date})","",
-             f"**Week:** {week_key}",
+             f"**Week:** {wk['mon_date']} to {wk['tue_date']}",
              f"- Mon High/Low: {wk['MonHigh']:.2f} / {wk['MonLow']:.2f}",
              f"- Tue High/Low: {wk['TueHigh']:.2f} / {wk['TueLow']:.2f}",
              f"- Swing: {wk['swing_label']}", "", "## Open Signal",
@@ -488,10 +314,6 @@ def daily_note() -> str:
     for _, r in entries_df.iterrows():
         day_txt = r['Day'].strftime('%Y-%m-%d') if isinstance(r['Day'], date) else str(r['Day'])
         lines.append(f"- {day_txt}: {r['Line']} @ {r['Time']} | Px={r['AAPL Price']} Line={r['Line Px']} Δ={r['Δ']} Note={r['Note']}")
-    lines += ["","## Option Snapshot",
-              f"- Type: {'Call' if opt_type=='Call' else 'Put'}  Strike: {strike}  Exp: {exp_date} {exp_time}  IV: {iv_input:.4f}"]
-    if ('price' in locals()) and (price == price):
-        lines.append(f"- Theo ${price:.3f}  Δ {delta:.4f}  Γ {gamma:.6f}  Θ/day {theta:.4f}  Vega/1% {vega:.4f}  Rho/1% {rho:.4f}")
     return "\n".join(lines)
 
 st.download_button("Export Daily Note (.md)",
