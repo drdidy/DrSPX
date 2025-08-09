@@ -1675,3 +1675,331 @@ forecast_date, tolerance, rule_requirement = render_enhanced_sidebar()
 
 # Render metrics dashboard with anchors
 previous_anchors = render_metrics_dashboard(forecast_date)
+# ===== ENHANCED ANCHOR INPUT INTERFACE (PART 5A) =====
+# Premium anchor management system with validation and animations
+
+def create_anchor_input_section(anchor_type: str, default_price: float, default_time: time, 
+                               icon: str, color: str, description: str):
+    """
+    Create a premium anchor input section with validation and professional styling.
+    Preserves original anchor logic while enhancing the interface.
+    """
+    
+    # Create unique keys for this anchor type
+    price_key = f"{anchor_type.lower()}_anchor_price"
+    time_key = f"{anchor_type.lower()}_anchor_time"
+    
+    # Initialize session state if not exists
+    if price_key not in st.session_state:
+        st.session_state[price_key] = default_price
+    if time_key not in st.session_state:
+        st.session_state[time_key] = default_time
+    
+    # Create the premium input container
+    with st.container():
+        st.markdown(
+            f"""
+            <div class="premium-card animate-slide-up">
+                <div class="subsection-header">
+                    <span style="font-size: 1.5rem;">{icon}</span>
+                    <span style="color: {color}; font-weight: 700;">{anchor_type} Anchor</span>
+                </div>
+                <div style="color: var(--text-tertiary); margin-bottom: var(--space-4); font-size: var(--text-sm);">
+                    {description}
+                </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        col1, col2 = st.columns([3, 2])
+        
+        with col1:
+            # Price input with validation
+            price = st.number_input(
+                f"Price ($)",
+                value=float(st.session_state[price_key]),
+                min_value=0.0,
+                max_value=10000.0,
+                step=0.1,
+                format="%.2f",
+                key=price_key,
+                help=f"Enter the {anchor_type.lower()} price from the previous trading day"
+            )
+            
+            # Validate price input
+            is_valid_price, price_msg = validator.validate_price(price)
+            if not is_valid_price:
+                st.error(f"⚠️ {price_msg}")
+        
+        with col2:
+            # Time input with validation
+            anchor_time = st.time_input(
+                f"Time",
+                value=st.session_state[time_key],
+                step=300,  # 5-minute steps
+                key=time_key,
+                help=f"Time when the {anchor_type.lower()} occurred"
+            )
+            
+            # Validate time input
+            is_valid_time = validator.validate_time_input(anchor_time)
+            if not is_valid_time:
+                st.warning("⚠️ Time should be within extended trading hours")
+        
+        # Real-time validation feedback
+        if is_valid_price and is_valid_time:
+            st.markdown(
+                f"""
+                <div style="background: rgba(52, 199, 89, 0.1); color: {COLORS['success']}; 
+                     padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
+                     font-size: var(--text-sm); font-weight: 500; margin-top: var(--space-2);">
+                    ✅ {anchor_type} anchor configured: ${price:.2f} at {anchor_time.strftime('%H:%M')}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    return price, anchor_time, is_valid_price and is_valid_time
+
+def render_enhanced_anchor_interface(forecast_date: date, previous_anchors: dict = None):
+    """
+    Render the complete enhanced anchor input interface.
+    Integrates with previous day data while allowing manual overrides.
+    """
+    
+    st.markdown(
+        """
+        <div class="section-header animate-fade-in">
+            🔧 SPX Anchor Configuration
+        </div>
+        <div style="color: var(--text-secondary); margin-bottom: var(--space-6); font-size: var(--text-lg);">
+            Configure your SPX anchors from the previous trading day. These will be used to generate 
+            precise entry and exit projections for <strong>{}</strong>.
+        </div>
+        """.format(forecast_date.strftime('%A, %B %d, %Y')),
+        unsafe_allow_html=True
+    )
+    
+    # Auto-populate from previous day data if available
+    if previous_anchors:
+        # Pre-fill with previous day data
+        high_default = previous_anchors.get('high', 6185.80)
+        close_default = previous_anchors.get('close', 6170.20)
+        low_default = previous_anchors.get('low', 6130.40)
+        
+        # Show data source
+        prev_date = previous_anchors.get('date', 'Unknown')
+        st.markdown(
+            f"""
+            <div class="glass-card">
+                <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3);">
+                    <span style="font-size: 1.2rem;">📅</span>
+                    <span style="font-weight: 600;">Auto-populated from {prev_date}</span>
+                </div>
+                <div style="color: var(--text-tertiary); font-size: var(--text-sm);">
+                    Values below are automatically loaded from the previous trading day. 
+                    You can modify them if needed before locking the anchors.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        # Use default values
+        high_default = 6185.80
+        close_default = 6170.20
+        low_default = 6130.40
+        
+        st.markdown(
+            """
+            <div class="premium-card" style="background: rgba(255, 149, 0, 0.1); border-color: var(--warning);">
+                <div style="display: flex; align-items: center; gap: var(--space-3);">
+                    <span style="font-size: 1.2rem;">⚠️</span>
+                    <span style="color: var(--warning); font-weight: 600;">Manual Input Required</span>
+                </div>
+                <div style="color: var(--text-secondary); margin-top: var(--space-2);">
+                    Previous day data not available. Please enter anchors manually.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    # Create anchor input sections
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        high_price, high_time, high_valid = create_anchor_input_section(
+            "HIGH", 
+            high_default, 
+            time(11, 30),
+            ICONS["high"],
+            COLORS["success"],
+            "Previous day's highest price point - typically your strongest resistance level."
+        )
+    
+    with col2:
+        close_price, close_time, close_valid = create_anchor_input_section(
+            "CLOSE",
+            close_default,
+            time(15, 0), 
+            ICONS["close"],
+            COLORS["primary"],
+            "Previous day's closing price - the market's final consensus value."
+        )
+    
+    with col3:
+        low_price, low_time, low_valid = create_anchor_input_section(
+            "LOW",
+            low_default,
+            time(13, 30),
+            ICONS["low"], 
+            COLORS["error"],
+            "Previous day's lowest price point - typically your strongest support level."
+        )
+    
+    # Overall validation status
+    all_anchors_valid = high_valid and close_valid and low_valid
+    
+    # Lock/Unlock Control Section
+    st.markdown('<div style="margin: var(--space-8) 0;"></div>', unsafe_allow_html=True)
+    
+    col_status, col_action, col_generate = st.columns([2, 1, 1])
+    
+    with col_status:
+        if all_anchors_valid:
+            lock_status_html = f"""
+            <div class="glass-card" style="background: rgba(52, 199, 89, 0.1); border-color: {COLORS['success']};">
+                <div style="display: flex; align-items: center; gap: var(--space-3);">
+                    <span style="font-size: 1.5rem;">✅</span>
+                    <div>
+                        <div style="font-weight: 700; color: {COLORS['success']};">Anchors Valid</div>
+                        <div style="color: var(--text-tertiary); font-size: var(--text-sm);">
+                            All three anchors are properly configured
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """
+        else:
+            lock_status_html = f"""
+            <div class="glass-card" style="background: rgba(255, 149, 0, 0.1); border-color: {COLORS['warning']};">
+                <div style="display: flex; align-items: center; gap: var(--space-3);">
+                    <span style="font-size: 1.5rem;">⚠️</span>
+                    <div>
+                        <div style="font-weight: 700; color: {COLORS['warning']};">Validation Issues</div>
+                        <div style="color: var(--text-tertiary); font-size: var(--text-sm);">
+                            Please fix anchor validation errors above
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """
+        
+        st.markdown(lock_status_html, unsafe_allow_html=True)
+    
+    with col_action:
+        # Lock/Unlock Toggle
+        is_locked = st.session_state.get('anchors_locked', False)
+        
+        if not is_locked and all_anchors_valid:
+            if st.button("🔒 Lock Anchors", use_container_width=True, type="primary"):
+                st.session_state.anchors_locked = True
+                st.session_state.locked_anchor_data = {
+                    'high': {'price': high_price, 'time': high_time},
+                    'close': {'price': close_price, 'time': close_time}, 
+                    'low': {'price': low_price, 'time': low_time},
+                    'locked_at': datetime.now()
+                }
+                st.success("🎯 Anchors locked successfully!")
+                st.rerun()
+        
+        elif is_locked:
+            if st.button("🔓 Unlock Anchors", use_container_width=True):
+                st.session_state.anchors_locked = False
+                st.session_state.locked_anchor_data = None
+                st.info("🔄 Anchors unlocked for editing")
+                st.rerun()
+        
+        else:
+            st.button("🔒 Fix Errors First", use_container_width=True, disabled=True)
+    
+    with col_generate:
+        # Generate Forecast Button
+        can_generate = is_locked and all_anchors_valid
+        
+        if can_generate:
+            if st.button("🚀 Generate Forecast", use_container_width=True, type="primary"):
+                st.session_state.forecasts_generated = True
+                st.success("📊 Forecast generation initiated!")
+                st.rerun()
+        else:
+            st.button("🚀 Lock Anchors First", use_container_width=True, disabled=True)
+    
+    # Show locked anchor summary if locked
+    if is_locked and 'locked_anchor_data' in st.session_state:
+        locked_data = st.session_state.locked_anchor_data
+        locked_time = locked_data['locked_at'].strftime('%H:%M:%S')
+        
+        st.markdown(
+            f"""
+            <div class="premium-card" style="background: rgba(0, 122, 255, 0.05); border-color: {COLORS['primary']};">
+                <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4);">
+                    <span style="font-size: 1.5rem;">🔒</span>
+                    <div>
+                        <div style="font-weight: 700; color: {COLORS['primary']};">Anchors Locked</div>
+                        <div style="color: var(--text-tertiary); font-size: var(--text-sm);">
+                            Locked at {locked_time} • Ready for forecast generation
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4);">
+                    <div style="text-align: center;">
+                        <div style="color: {COLORS['success']}; font-weight: 700;">${locked_data['high']['price']:.2f}</div>
+                        <div style="color: var(--text-tertiary); font-size: var(--text-sm);">High @ {locked_data['high']['time'].strftime('%H:%M')}</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="color: {COLORS['primary']}; font-weight: 700;">${locked_data['close']['price']:.2f}</div>
+                        <div style="color: var(--text-tertiary); font-size: var(--text-sm);">Close @ {locked_data['close']['time'].strftime('%H:%M')}</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="color: {COLORS['error']}; font-weight: 700;">${locked_data['low']['price']:.2f}</div>
+                        <div style="color: var(--text-tertiary); font-size: var(--text-sm);">Low @ {locked_data['low']['time'].strftime('%H:%M')}</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    # Return the anchor values for use in forecast generation
+    if is_locked and 'locked_anchor_data' in st.session_state:
+        locked_data = st.session_state.locked_anchor_data
+        return {
+            'high_price': locked_data['high']['price'],
+            'high_time': locked_data['high']['time'],
+            'close_price': locked_data['close']['price'], 
+            'close_time': locked_data['close']['time'],
+            'low_price': locked_data['low']['price'],
+            'low_time': locked_data['low']['time'],
+            'is_locked': True,
+            'all_valid': True
+        }
+    else:
+        return {
+            'high_price': high_price,
+            'high_time': high_time,
+            'close_price': close_price,
+            'close_time': close_time, 
+            'low_price': low_price,
+            'low_time': low_time,
+            'is_locked': False,
+            'all_valid': all_anchors_valid
+        }
+
+# ===== INTEGRATE WITH MAIN FLOW =====
+# Replace the original anchor input section with this enhanced version
+anchor_config = render_enhanced_anchor_interface(forecast_date, previous_anchors)
