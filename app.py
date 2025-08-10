@@ -4227,8 +4227,18 @@ if 'detection_results' in locals() and detection_results.get('detection_results'
     # Render Contract Section
     contract_results = render_contract_section(forecast_date)
     
-    # Render Fibonacci Section
+    # Render Fibonacci Section  
     fibonacci_results = render_fibonacci_section(forecast_date)
+
+# ===== BACKWARD COMPATIBILITY =====
+# Ensure variables are available for the rest of the application
+if 'contract_results' in locals() and contract_results:
+    # Store contract data for export
+    st.session_state.contract_data = contract_results
+
+# Make fibonacci data available
+if 'fibonacci_results' in locals():
+    st.session_state.fibonacci_data = fibonacci_results
 
 # ===== COMPREHENSIVE EXPORT SYSTEM =====
 
@@ -4700,6 +4710,7 @@ render_export_and_documentation(
     forecast_date,
     available_anchor_config
 )
+
 # ===== FINAL INTEGRATION & POLISH =====
 
 # ===== PERFORMANCE OPTIMIZATIONS =====
