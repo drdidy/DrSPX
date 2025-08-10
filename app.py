@@ -2555,27 +2555,46 @@ def display_trading_analytics(fan_datasets: dict):
         f"""
         <div class="glass-card" style="margin-top:var(--space-6);">
             <div style="font-weight:700;margin-bottom:var(--space-4);color:var(--primary);">🎯 Trading Recommendations</div>
-            
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:var(--space-4);">
-                <div style="padding:var(--space-3);background:rgba(255,149,0,0.1);border-radius:var(--radius-lg);">
-                    <div style="font-weight:600;color:{COLORS['warning']};">Best for Quick TP1</div>
-                    <div style="color:var(--text-secondary);">{best_tp1_anchor} anchor offers the best TP1 distances</div>
-                </div>
-                
-                <div style="padding:var(--space-3);background:rgba(52,199,89,0.1);border-radius:var(--radius-lg);">
-                    <div style="font-weight:600;color:{COLORS['success']};">Best for Full TP2</div>
-                    <div style="color:var(--text-secondary);">{best_tp2_anchor} anchor offers the best TP2 distances</div>
-                </div>
-                
-                <div style="padding:var(--space-3);background:rgba(0,122,255,0.1);border-radius:var(--radius-lg);">
-                    <div style="font-weight:600;color:{COLORS['primary']};">Most Consistent</div>
-                    <div style="color:var(--text-secondary);">{most_consistent} anchor has the most consistent spreads</div>
-                </div>
-            </div>
         </div>
         """,
         unsafe_allow_html=True
     )
+    
+    # Create recommendations using Streamlit columns
+    col_rec1, col_rec2, col_rec3 = st.columns(3)
+    
+    with col_rec1:
+        st.markdown(
+            f"""
+            <div style="padding:var(--space-3);background:rgba(255,149,0,0.1);border-radius:var(--radius-lg);">
+                <div style="font-weight:600;color:{COLORS['warning']};">Best for Quick TP1</div>
+                <div style="color:var(--text-secondary);">{best_tp1_anchor} anchor offers the best TP1 distances</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    with col_rec2:
+        st.markdown(
+            f"""
+            <div style="padding:var(--space-3);background:rgba(52,199,89,0.1);border-radius:var(--radius-lg);">
+                <div style="font-weight:600;color:{COLORS['success']};">Best for Full TP2</div>
+                <div style="color:var(--text-secondary);">{best_tp2_anchor} anchor offers the best TP2 distances</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    with col_rec3:
+        st.markdown(
+            f"""
+            <div style="padding:var(--space-3);background:rgba(0,122,255,0.1);border-radius:var(--radius-lg);">
+                <div style="font-weight:600;color:{COLORS['primary']};">Most Consistent</div>
+                <div style="color:var(--text-secondary);">{most_consistent} anchor has the most consistent spreads</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # ===== MAIN INTEGRATION FUNCTION =====
 
@@ -2616,3 +2635,4 @@ if st.session_state.get("forecasts_generated", False) and anchor_section_results
         anchor_section_results['anchor_config'], 
         forecast_date
     )
+
