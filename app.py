@@ -1687,7 +1687,7 @@ def create_single_anchor_input(anchor_type: str, default_price: float, default_t
         <div class="premium-card animate-slide-up">
             <div class="subsection-header">
                 <span style="font-size: 1.5rem;">{icon}</span>
-                <span style="color: {color}; font-weight: 700;">{anchor_type} Anchor</span>
+                <span style="color: {color}; font-weight: 700; font-size: var(--text-2xl);">{anchor_type} Anchor</span>
             </div>
             <div style="color: var(--text-tertiary); margin-bottom: var(--space-4); font-size: var(--text-sm);">
                 {description}
