@@ -5192,10 +5192,23 @@ finalize_application()
 if st.session_state.get('show_success_message', True):
     st.session_state.show_success_message = False
     
-    # Show welcome message for first-time users
+    # Show professional welcome message for first-time users
     if st.session_state.get('page_loads', 0) == 1:
-        st.balloons()
-        st.success("🎉 Welcome to MarketLens Pro! Your professional SPX forecasting platform is ready.")
+        st.markdown(
+            f"""
+            <div style="background:linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+                 color:white;padding:var(--space-4);border-radius:var(--radius-xl);margin:var(--space-4) 0;
+                 text-align:center;box-shadow:var(--shadow-lg);">
+                <div style="font-size:var(--text-xl);font-weight:700;margin-bottom:var(--space-2);">
+                    🎯 MarketLens Pro Initialized
+                </div>
+                <div style="opacity:0.9;">
+                    Professional SPX forecasting platform ready for analysis
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # ===== FINAL PERFORMANCE METRICS =====
 if 'performance_monitor' in st.session_state:
