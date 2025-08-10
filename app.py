@@ -1981,46 +1981,65 @@ def render_locked_anchor_summary():
     locked_data = st.session_state.locked_anchor_data
     locked_time = locked_data['locked_at'].strftime('%H:%M:%S')
     
-    st.markdown(
-        f"""
-        <div class="premium-card" style="background: rgba(0, 122, 255, 0.05); border-color: #007AFF;">
-            <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4);">
-                <span style="font-size: 1.5rem;">🔒</span>
-                <div>
-                    <div style="font-weight: 700; color: #007AFF;">Anchors Locked & Ready</div>
-                    <div style="color: var(--text-tertiary); font-size: var(--text-sm);">
-                        Locked at {locked_time} • Configuration protected from changes
-                    </div>
+ st.markdown(
+    f"""
+    <div class="premium-card" style="background: rgba(0, 122, 255, 0.05); border-color: #007AFF;">
+        <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4);">
+            <span style="font-size: 1.5rem;">🔒</span>
+            <div>
+                <div style="font-weight: 700; color: #007AFF;">Anchors Locked & Ready</div>
+                <div style="color: var(--text-tertiary); font-size: var(--text-sm);">
+                    Locked at {locked_time} • Configuration protected from changes
                 </div>
             </div>
-            
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4);">
-                <div style="text-align: center; padding: var(--space-3); background: rgba(52, 199, 89, 0.05); border-radius: var(--radius-md);">
-                    <div style="color: #34C759; font-weight: 700; font-size: var(--text-xl);">
-                        ${locked_data['high']['price']:.2f}
-                    </div>
-                    <div style="color: var(--text-tertiary); font-size: var(--text-sm); margin-top: var(--space-1);">
-                        HIGH @ {locked_data['high']['time'].strftime('%H:%M')}
-                    </div>
-                </div>
-                
-                <div style="text-align: center; padding: var(--space-3); background: rgba(0, 122, 255, 0.05); border-radius: var(--radius-md);">
-                    <div style="color: #007AFF; font-weight: 700; font-size: var(--text-xl);">
-                        ${locked_data['close']['price']:.2f}
-                    </div>
-                    <div style="color: var(--text-tertiary); font-size: var(--text-sm); margin-top: var(--space-1);">
-                        CLOSE @ {locked_data['close']['time'].strftime('%H:%M')}
-                    </div>
-                </div>
-                
-                <div style="text-align: center; padding: var(--space-3); background: rgba(255, 59, 48, 0.05); border-radius: var(--radius-md);">
-                    <div style="color: #FF3B30; font-weight: 700; font-size: var(--text-xl);">
-                        ${locked_data['low']['price']:.2f}
-                    </div>
-                    <div style="color: var(--text-tertiary); font-size: var(--text-sm); margin-top: var(--space-1);">
-                        LOW @ {locked_data['low']['time'].strftime('%H:%M')}
-                    </div>
-                </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# Display anchor values using Streamlit columns instead of HTML grid
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown(
+        f"""
+        <div style="text-align: center; padding: var(--space-3); background: rgba(52, 199, 89, 0.05); border-radius: var(--radius-md);">
+            <div style="color: #34C759; font-weight: 700; font-size: var(--text-xl);">
+                ${locked_data['high']['price']:.2f}
+            </div>
+            <div style="color: var(--text-tertiary); font-size: var(--text-sm); margin-top: var(--space-1);">
+                HIGH @ {locked_data['high']['time'].strftime('%H:%M')}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+with col2:
+    st.markdown(
+        f"""
+        <div style="text-align: center; padding: var(--space-3); background: rgba(0, 122, 255, 0.05); border-radius: var(--radius-md);">
+            <div style="color: #007AFF; font-weight: 700; font-size: var(--text-xl);">
+                ${locked_data['close']['price']:.2f}
+            </div>
+            <div style="color: var(--text-tertiary); font-size: var(--text-sm); margin-top: var(--space-1);">
+                CLOSE @ {locked_data['close']['time'].strftime('%H:%M')}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+with col3:
+    st.markdown(
+        f"""
+        <div style="text-align: center; padding: var(--space-3); background: rgba(255, 59, 48, 0.05); border-radius: var(--radius-md);">
+            <div style="color: #FF3B30; font-weight: 700; font-size: var(--text-xl);">
+                ${locked_data['low']['price']:.2f}
+            </div>
+            <div style="color: var(--text-tertiary); font-size: var(--text-sm); margin-top: var(--space-1);">
+                LOW @ {locked_data['low']['time'].strftime('%H:%M')}
             </div>
         </div>
         """,
