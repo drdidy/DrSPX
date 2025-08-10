@@ -2722,3 +2722,528 @@ if st.session_state.get("forecasts_generated", False) and anchor_section_results
         anchor_section_results['anchor_config'], 
         forecast_date
     )
+
+# ===== ENTRY DETECTION SYSTEM =====
+
+def detect_entry_signals(fan_df: pd.DataFrame, intraday_data: pd.DataFrame, tolerance: float, rule_type: str) -> dict:
+    """
+    Detect entry signals for a specific fan with premium analytics.
+    Preserves original detection logic with enhanced reporting.
+    """
+    if fan_df.empty or intraday_data.empty:
+        return {
+            'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+            'signal_time': '—',
+            'signal_type': '—',
+            'spx_price': '—',
+            'line_price': '—',
+            'delta': '—',
+            'status': 'No Data',
+            'note': 'No intraday data available for detection',
+            'confidence': 0
+        }
+    
+    try:
+        # Merge fan projections with intraday data (preserving original logic)
+        merged = pd.merge(
+            fan_df[['Time', 'Entry', 'Exit']], 
+            intraday_data[['Time', 'Close']], 
+            on='Time', 
+            how='inner'
+        )
+        
+        if merged.empty:
+            return {
+                'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+                'signal_time': '—',
+                'signal_type': '—',
+                'spx_price': '—',
+                'line_price': '—',
+                'delta': '—',
+                'status': 'No Match',
+                'note': 'No time alignment between projections and market data',
+                'confidence': 0
+            }
+        
+        # Detection logic (preserving original algorithm)
+        for _, row in merged.iterrows():
+            spx_close = float(row['Close'])
+            exit_level = float(row['Exit'])
+            entry_level = float(row['Entry'])
+            
+            candidates = []
+            
+            # Exit signal detection
+            if rule_type.startswith("Close"):
+                exit_valid = (spx_close >= exit_level and (spx_close - exit_level) <= tolerance)
+            else:
+                exit_valid = abs(spx_close - exit_level) <= tolerance
+            
+            if exit_valid:
+                delta = abs(spx_close - exit_level)
+                confidence = max(0, 100 - (delta / tolerance * 100))
+                candidates.append({
+                    'type': 'Exit↑',
+                    'line_price': exit_level,
+                    'delta': delta,
+                    'confidence': confidence
+                })
+            
+            # Entry signal detection
+            if rule_type.startswith("Close"):
+                entry_valid = (spx_close <= entry_level and (entry_level - spx_close) <= tolerance)
+            else:
+                entry_valid = abs(spx_close - entry_level) <= tolerance
+            
+            if entry_valid:
+                delta = abs(spx_close - entry_level)
+                confidence = max(0, 100 - (delta / tolerance * 100))
+                candidates.append({
+                    'type': 'Entry↓',
+                    'line_price': entry_level,
+                    'delta': delta,
+                    'confidence': confidence
+                })
+            
+            # Return first (earliest) signal found
+            if candidates:
+                best = min(candidates, key=lambda x: x['delta'])
+                return {
+                    'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+                    'signal_time': row['Time'],
+                    'signal_type': best['type'],
+                    'spx_price': round(spx_close, 2),
+                    'line_price': round(best['line_price'], 2),
+                    'delta': round(best['delta'], 2),
+                    'status': 'Signal Detected',
+                    'note': f"Rule: {rule_type[:15]}...",
+                    'confidence': round(best['confidence'], 1)
+                }
+        
+        # No signals found
+        return {
+            'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+            'signal_time': '—',
+            'signal_type': '—',
+            'spx_price': '—',
+            'line_price': '—',
+            'delta': '—',
+            'status': 'No Signal',
+            'note': f'No touches within ${tolerance:.2f} tolerance',
+            'confidence': 0
+        }
+        
+    except Exception as e:
+        return {
+            'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+            'signal_time': '—',
+            'signal_type': '—',
+            'spx_price': '—',
+            'line_price': '—',
+            'delta': '—',
+            'status': 'Error',
+            'note': f'Detection error: {str(e)[:50]}...',
+            'confidence': 0
+        }
+
+def run_detection_analysis(fan_datasets: dict, intraday_data: pd.DataFrame, tolerance: float, rule_type: str) -> pd.DataFrame:
+    """
+    Run comprehensive entry detection analysis across all fans.
+    """
+    results = []
+    
+    for _, fan_df in fan_datasets.items():
+        if fan_df is None or fan_df.empty:
+            continue
+        
+        result = detect_entry_signals(fan_df, intraday_data, tolerance, rule_type)
+        results.append(result)
+    
+    if results:
+        results_df = pd.DataFrame(results)
+        
+        # Add metadata for tracking
+        results_df.attrs.update({
+            'detection_timestamp': datetime.now(),
+            'tolerance_used': tolerance,
+            'rule_type_used': rule_type,
+            'total_fans_analyzed': len(results)
+        })
+        
+        return results_df
+    
+    return pd.DataFrame()
+
+# ===== DETECTION RESULTS DISPLAY =====
+
+def render_detection_header(tolerance: float, rule_type: str):
+    """Render premium detection results header."""
+    st.markdown(
+        """
+        <div class="section-header">🎯 Entry Detection Analysis</div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    st.markdown(
+        f"""
+        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);line-height:1.6;">
+            Real-time analysis of fan projections against actual SPX price action. 
+            Identifies optimal entry and exit points based on your configured parameters.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_detection_configuration(results_df: pd.DataFrame, tolerance: float, rule_type: str):
+    """Render detection configuration summary."""
+    if results_df.empty:
+        return
+    
+    detection_time = results_df.attrs.get('detection_timestamp', datetime.now())
+    
+    st.markdown(
+        f"""
+        <div class="glass-card animate-slide-up">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--space-4);">
+                <div>
+                    <div style="font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-1);">Detection Rule</div>
+                    <div style="font-family:'JetBrains Mono',monospace;color:var(--primary);">{rule_type}</div>
+                </div>
+                <div>
+                    <div style="font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-1);">Tolerance</div>
+                    <div style="font-family:'JetBrains Mono',monospace;color:var(--warning);">${tolerance:.2f}</div>
+                </div>
+                <div>
+                    <div style="font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-1);">Analysis Time</div>
+                    <div style="font-family:'JetBrains Mono',monospace;">{detection_time.strftime('%H:%M:%S')}</div>
+                </div>
+                <div>
+                    <div style="font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-1);">Fans Analyzed</div>
+                    <div style="font-family:'JetBrains Mono',monospace;color:var(--success);">{len(results_df)}</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def create_status_indicator(status: str) -> str:
+    """Create visual status indicator for detection results."""
+    status_map = {
+        'Signal Detected': '🎯',
+        'No Signal': '⭕',
+        'No Data': '📊',
+        'No Match': '🔍',
+        'Error': '⚠️'
+    }
+    
+    icon = status_map.get(status, '❓')
+    return f"{icon} {status}"
+
+def render_detection_results_table(results_df: pd.DataFrame):
+    """Render premium detection results table."""
+    if results_df.empty:
+        st.markdown(
+            """
+            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+                <div style="font-size:2rem;margin-bottom:var(--space-4);">🎯</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">No Detection Results</div>
+                <div style="color:var(--text-tertiary);">Generate fan data first to run entry detection</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        return
+    
+    # Prepare display data
+    display_df = results_df.copy()
+    display_df['Status_Display'] = display_df['status'].apply(create_status_indicator)
+    
+    # Enhanced dataframe display
+    st.dataframe(
+        display_df[[
+            'fan_type', 'signal_time', 'signal_type', 'spx_price', 
+            'line_price', 'delta', 'confidence', 'Status_Display', 'note'
+        ]],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            'fan_type': st.column_config.TextColumn('Anchor', width='small'),
+            'signal_time': st.column_config.TextColumn('Time', width='small'),
+            'signal_type': st.column_config.TextColumn('Signal', width='small'),
+            'spx_price': st.column_config.NumberColumn('SPX Price', format='$%.2f'),
+            'line_price': st.column_config.NumberColumn('Line Price', format='$%.2f'),
+            'delta': st.column_config.NumberColumn('Delta', format='$%.2f'),
+            'confidence': st.column_config.ProgressColumn('Confidence', min_value=0, max_value=100, format='%.1f%%'),
+            'Status_Display': st.column_config.TextColumn('Status'),
+            'note': st.column_config.TextColumn('Note')
+        }
+    )
+
+def render_detection_analytics(results_df: pd.DataFrame, tolerance: float):
+    """Render advanced analytics for detection results."""
+    if results_df.empty:
+        return
+    
+    # Calculate analytics
+    signals_detected = len(results_df[results_df['status'] == 'Signal Detected'])
+    total_fans = len(results_df)
+    detection_rate = (signals_detected / total_fans * 100) if total_fans > 0 else 0
+    
+    # Average confidence for detected signals
+    detected_signals = results_df[results_df['status'] == 'Signal Detected']
+    avg_confidence = detected_signals['confidence'].mean() if not detected_signals.empty else 0
+    
+    # Average delta for detected signals
+    avg_delta = detected_signals['delta'].mean() if not detected_signals.empty else 0
+    
+    # First signal time
+    first_signal_time = '—'
+    if not detected_signals.empty:
+        first_signal_time = detected_signals.iloc[0]['signal_time']
+    
+    # Signal type distribution
+    signal_types = detected_signals['signal_type'].value_counts() if not detected_signals.empty else {}
+    
+    st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
+    
+    # Analytics grid
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        delta_color = "success" if detection_rate >= 50 else ("warning" if detection_rate >= 25 else "error")
+        st.metric(
+            "🎯 Detection Rate",
+            f"{detection_rate:.1f}%",
+            delta=f"{signals_detected}/{total_fans} fans"
+        )
+    
+    with col2:
+        if avg_confidence > 0:
+            confidence_color = "success" if avg_confidence >= 70 else ("warning" if avg_confidence >= 40 else "error")
+            st.metric(
+                "📊 Avg Confidence",
+                f"{avg_confidence:.1f}%",
+                delta="Signal quality"
+            )
+        else:
+            st.metric("📊 Avg Confidence", "—")
+    
+    with col3:
+        if avg_delta > 0:
+            st.metric(
+                "📏 Avg Delta",
+                f"${avg_delta:.2f}",
+                delta=f"±${tolerance:.2f} tolerance"
+            )
+        else:
+            st.metric("📏 Avg Delta", "—")
+    
+    with col4:
+        st.metric("⏰ First Signal", first_signal_time)
+    
+    # Signal breakdown if we have signals
+    if not detected_signals.empty:
+        st.markdown('<div style="margin:var(--space-4) 0;"></div>', unsafe_allow_html=True)
+        
+        st.markdown(
+            """
+            <div class="premium-card">
+                <div style="font-weight:700;margin-bottom:var(--space-3);color:var(--primary);">
+                    📈 Signal Breakdown
+                </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        col_breakdown1, col_breakdown2 = st.columns(2)
+        
+        with col_breakdown1:
+            # Signal type distribution
+            entry_signals = len(detected_signals[detected_signals['signal_type'] == 'Entry↓'])
+            exit_signals = len(detected_signals[detected_signals['signal_type'] == 'Exit↑'])
+            
+            st.markdown(
+                f"""
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);">
+                    <div style="text-align:center;padding:var(--space-3);background:rgba(255,59,48,0.1);border-radius:var(--radius-lg);">
+                        <div style="font-size:var(--text-2xl);font-weight:700;color:#FF3B30;">{entry_signals}</div>
+                        <div style="font-size:var(--text-sm);color:var(--text-tertiary);">Entry Signals</div>
+                    </div>
+                    <div style="text-align:center;padding:var(--space-3);background:rgba(52,199,89,0.1);border-radius:var(--radius-lg);">
+                        <div style="font-size:var(--text-2xl);font-weight:700;color:#34C759;">{exit_signals}</div>
+                        <div style="font-size:var(--text-sm);color:var(--text-tertiary);">Exit Signals</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        
+        with col_breakdown2:
+            # Confidence distribution
+            high_conf = len(detected_signals[detected_signals['confidence'] >= 70])
+            med_conf = len(detected_signals[(detected_signals['confidence'] >= 40) & (detected_signals['confidence'] < 70)])
+            low_conf = len(detected_signals[detected_signals['confidence'] < 40])
+            
+            st.markdown(
+                f"""
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-2);">
+                    <div style="text-align:center;padding:var(--space-2);background:rgba(52,199,89,0.1);border-radius:var(--radius-md);">
+                        <div style="font-weight:700;color:#34C759;">{high_conf}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">High</div>
+                    </div>
+                    <div style="text-align:center;padding:var(--space-2);background:rgba(255,149,0,0.1);border-radius:var(--radius-md);">
+                        <div style="font-weight:700;color:#FF9500;">{med_conf}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">Med</div>
+                    </div>
+                    <div style="text-align:center;padding:var(--space-2);background:rgba(255,59,48,0.1);border-radius:var(--radius-md);">
+                        <div style="font-weight:700;color:#FF3B30;">{low_conf}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">Low</div>
+                    </div>
+                </div>
+                <div style="text-align:center;margin-top:var(--space-2);font-size:var(--text-sm);color:var(--text-tertiary);">
+                    Confidence Distribution
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ===== REAL-TIME MONITORING SYSTEM =====
+
+def create_live_monitoring_panel(fan_datasets: dict, tolerance: float, rule_type: str):
+    """Create live monitoring panel for continuous detection."""
+    if not fan_datasets:
+        return
+    
+    st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
+    
+    st.markdown(
+        """
+        <div class="section-header">📡 Live Monitoring</div>
+        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);">
+            Real-time monitoring of entry signals as market data updates. 
+            Automatically refreshes every 60 seconds during market hours.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Auto-refresh control
+    col_refresh, col_status = st.columns([1, 2])
+    
+    with col_refresh:
+        auto_refresh = st.toggle(
+            "🔄 Auto-refresh",
+            value=st.session_state.get('auto_refresh_monitoring', False),
+            help="Automatically refresh detection every 60 seconds"
+        )
+        st.session_state.auto_refresh_monitoring = auto_refresh
+        
+        if st.button("🔄 Refresh Now", use_container_width=True):
+            st.rerun()
+    
+    with col_status:
+        current_time = datetime.now()
+        market_open = RTH_START <= current_time.time() <= RTH_END
+        market_status = "🟢 MARKET OPEN" if market_open else "🔴 MARKET CLOSED"
+        
+        last_refresh = st.session_state.get('last_detection_refresh', current_time)
+        time_since = (current_time - last_refresh).total_seconds()
+        
+        st.markdown(
+            f"""
+            <div style="background:var(--surface);padding:var(--space-3);border-radius:var(--radius-lg);border:1px solid var(--border);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <div style="font-weight:600;">{market_status}</div>
+                        <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
+                            Last update: {time_since:.0f}s ago
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-family:'JetBrains Mono',monospace;">{current_time.strftime('%H:%M:%S')}</div>
+                        <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Current time</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    # Auto-refresh logic
+    if auto_refresh and market_open:
+        time.sleep(1)  # Brief pause for UI
+        st.rerun()
+
+# ===== MAIN DETECTION INTEGRATION =====
+
+def handle_detection_analysis(fan_datasets: dict, forecast_date: date, tolerance: float, rule_type: str):
+    """Main function to handle complete detection analysis."""
+    if not fan_datasets:
+        st.markdown(
+            """
+            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+                <div style="font-size:2rem;margin-bottom:var(--space-4);">🎯</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">Detection Analysis Unavailable</div>
+                <div style="color:var(--text-tertiary);">Generate fan data first to run entry detection</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        return {}
+    
+    # Fetch latest intraday data
+    intraday_1m = fetch_spx_intraday_1m(forecast_date)
+    intraday_30m = to_30m(intraday_1m)
+    
+    if intraday_30m.empty:
+        st.warning("⚠️ No intraday data available for detection analysis")
+        return {}
+    
+    # Render detection header
+    render_detection_header(tolerance, rule_type)
+    
+    # Run detection analysis
+    results = run_detection_analysis(fan_datasets, intraday_30m, tolerance, rule_type)
+    
+    # Display configuration
+    render_detection_configuration(results, tolerance, rule_type)
+    
+    st.markdown('<div style="margin:var(--space-4) 0;"></div>', unsafe_allow_html=True)
+    
+    # Display results table
+    render_detection_results_table(results)
+    
+    # Display analytics
+    render_detection_analytics(results, tolerance)
+    
+    # Live monitoring panel
+    create_live_monitoring_panel(fan_datasets, tolerance, rule_type)
+    
+    # Update session state
+    st.session_state.last_detection_refresh = datetime.now()
+    st.session_state.latest_detection_results = results
+    
+    return {
+        'detection_results': results,
+        'signals_found': len(results[results['status'] == 'Signal Detected']) if not results.empty else 0,
+        'intraday_available': True,
+        'analysis_completed': True
+    }
+
+# ===== INTEGRATION INTO MAIN FLOW =====
+# Add this after the fan generation section
+
+if fan_results.get('fan_data'):
+    st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
+    
+    # Handle detection analysis
+    detection_results = handle_detection_analysis(
+        fan_results['fan_data'],
+        forecast_date,
+        tolerance,
+        rule_requirement
+    )
