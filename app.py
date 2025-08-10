@@ -2139,3 +2139,586 @@ def render_complete_anchor_section(forecast_date: date, previous_anchors: dict =
 
 # Render the complete enhanced anchor section
 anchor_section_results = render_complete_anchor_section(forecast_date, previous_anchors)
+
+# ===== FAN DATA GENERATION SYSTEM =====
+
+def build_fan_dataframe(anchor_type: str, anchor_price: float, anchor_time: time, forecast_date: date) -> pd.DataFrame:
+    """
+    Build fan forecast dataframe for a specific anchor type.
+    Preserves original calculation logic with premium error handling.
+    """
+    try:
+        # Create anchor datetime (preserving original logic)
+        anchor_datetime = datetime.combine(forecast_date - timedelta(days=1), anchor_time)
+        
+        rows = []
+        for time_slot in SPX_SLOTS:
+            try:
+                hour, minute = map(int, time_slot.split(":"))
+                target_datetime = datetime.combine(forecast_date, time(hour, minute))
+                
+                # Calculate SPX blocks (preserving original logic)
+                blocks = spx_blocks_between(anchor_datetime, target_datetime)
+                
+                # Project prices using original slopes
+                entry_price = project_price(anchor_price, SPX_SLOPES_DOWN[anchor_type], blocks)
+                exit_price = project_price(anchor_price, SPX_SLOPES_UP[anchor_type], blocks)
+                
+                rows.append({
+                    'Time': time_slot,
+                    'Entry': round(entry_price, 2),
+                    'Exit': round(exit_price, 2),
+                    'Blocks': blocks,
+                    'Anchor_Price': anchor_price,
+                    'Anchor_Type': anchor_type,
+                    'Spread': round(exit_price - entry_price, 2)
+                })
+            except Exception:
+                # Skip invalid time slots
+                continue
+        
+        if not rows:
+            raise CalculationError(f"No valid fan data generated for {anchor_type}")
+        
+        # Create DataFrame with metadata (preserving original structure)
+        fan_df = pd.DataFrame(rows)
+        fan_df['TS'] = pd.to_datetime(BASELINE_DATE_STR + " " + fan_df['Time'])
+        
+        # Add rich metadata for tracking
+        fan_df.attrs.update({
+            'anchor_type': anchor_type,
+            'anchor_price': anchor_price,
+            'anchor_time': anchor_time,
+            'forecast_date': forecast_date,
+            'generated_at': datetime.now(),
+            'slopes_down': SPX_SLOPES_DOWN[anchor_type],
+            'slopes_up': SPX_SLOPES_UP[anchor_type]
+        })
+        
+        return fan_df
+        
+    except Exception as e:
+        st.error(f"⚠️ Error generating {anchor_type} fan data: {str(e)}")
+        return pd.DataFrame()
+
+def generate_all_fans(anchor_config: dict, forecast_date: date) -> dict:
+    """
+    Generate all three fan datasets with progress tracking.
+    """
+    if not anchor_config.get('is_locked', False):
+        st.error("🔒 Anchors must be locked before generating fan data")
+        return {}
+    
+    # Progress tracking
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    fan_datasets = {}
+    
+    # Generate HIGH fan
+    status_text.text("🔄 Generating HIGH anchor fan...")
+    progress_bar.progress(10)
+    fan_datasets['high'] = build_fan_dataframe(
+        'HIGH', 
+        anchor_config['high_price'], 
+        anchor_config['high_time'], 
+        forecast_date
+    )
+    progress_bar.progress(35)
+    
+    # Generate CLOSE fan
+    status_text.text("🔄 Generating CLOSE anchor fan...")
+    progress_bar.progress(40)
+    fan_datasets['close'] = build_fan_dataframe(
+        'CLOSE', 
+        anchor_config['close_price'], 
+        anchor_config['close_time'], 
+        forecast_date
+    )
+    progress_bar.progress(70)
+    
+    # Generate LOW fan
+    status_text.text("🔄 Generating LOW anchor fan...")
+    progress_bar.progress(75)
+    fan_datasets['low'] = build_fan_dataframe(
+        'LOW', 
+        anchor_config['low_price'], 
+        anchor_config['low_time'], 
+        forecast_date
+    )
+    progress_bar.progress(100)
+    
+    # Calculate summary statistics
+    total_rows = sum(len(df) for df in fan_datasets.values() if isinstance(df, pd.DataFrame) and not df.empty)
+    
+    if total_rows > 0:
+        status_text.markdown(
+            f"""
+            <div style="color:#34C759;font-weight:600;">
+                ✅ Generated {total_rows} forecast data points across all anchors
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        # Store in session state for persistence
+        st.session_state.fan_data = fan_datasets
+        st.session_state.fan_data_generated_at = datetime.now()
+        st.session_state.fan_forecast_date = forecast_date
+    else:
+        status_text.markdown(
+            """
+            <div style="color:#FF3B30;font-weight:600;">
+                ❌ Failed to generate fan data - please check anchor configuration
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    return fan_datasets
+
+# ===== FAN DATA DISPLAY SYSTEM =====
+
+def display_fan_data_tables(fan_datasets: dict):
+    """Display fan data in premium tabbed interface."""
+    if not fan_datasets:
+        st.markdown(
+            """
+            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+                <div style="font-size:2rem;margin-bottom:var(--space-4);">📊</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">No Fan Data Available</div>
+                <div style="color:var(--text-tertiary);">Generate forecasts first to view data tables</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        return
+    
+    st.markdown(
+        """
+        <div class="section-header">📋 Fan Forecast Tables</div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Create premium tabs
+    tab_high, tab_close, tab_low = st.tabs(["📈 HIGH Fan", "⚡ CLOSE Fan", "📉 LOW Fan"])
+    
+    def render_fan_tab(df: pd.DataFrame, color_name: str, label: str, icon: str):
+        """Render individual fan data tab with premium styling."""
+        if df is None or df.empty:
+            st.markdown(
+                f"""
+                <div style="text-align:center;padding:var(--space-6);color:var(--error);">
+                    <div style="font-size:2rem;margin-bottom:var(--space-2);">❌</div>
+                    <div>{label} fan data not available</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            return
+        
+        # Fan summary card
+        anchor_price = df.attrs.get('anchor_price', 0)
+        anchor_time = df.attrs.get('anchor_time', time())
+        generated_at = df.attrs.get('generated_at', datetime.now())
+        min_entry = df['Entry'].min()
+        max_exit = df['Exit'].max()
+        avg_spread = df['Spread'].mean()
+        
+        st.markdown(
+            f"""
+            <div class="premium-card" style="margin-bottom:var(--space-4);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2);">
+                            <span style="font-size:1.5rem;">{icon}</span>
+                            <span style="font-weight:700;color:{COLORS[color_name]};font-size:var(--text-xl);">{label} Anchor Fan</span>
+                        </div>
+                        <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
+                            Anchor: ${anchor_price:.2f} @ {anchor_time.strftime('%H:%M')}
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-weight:600;font-size:var(--text-lg);">{len(df)} time slots</div>
+                        <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
+                            Generated: {generated_at.strftime('%H:%M:%S')}
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:var(--space-4);
+                     margin-top:var(--space-4);padding:var(--space-3);background:var(--bg-secondary);border-radius:var(--radius-lg);">
+                    <div style="text-align:center;">
+                        <div style="font-weight:700;color:{COLORS['error']};">${min_entry:.2f}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">MIN ENTRY</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-weight:700;color:{COLORS['success']};">${max_exit:.2f}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">MAX EXIT</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-weight:700;color:{COLORS['neutral']};">${avg_spread:.2f}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">AVG SPREAD</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        # Data table with custom column config
+        display_columns = ['Time', 'Entry', 'Exit', 'Blocks', 'Spread']
+        st.dataframe(
+            df[display_columns],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                'Time': st.column_config.TextColumn('Time', width='small'),
+                'Entry': st.column_config.NumberColumn('Entry ($)', format='$%.2f'),
+                'Exit': st.column_config.NumberColumn('Exit ($)', format='$%.2f'),
+                'Blocks': st.column_config.NumberColumn('Blocks', width='small'),
+                'Spread': st.column_config.NumberColumn('Spread ($)', format='$%.2f')
+            }
+        )
+    
+    # Render each tab
+    with tab_high:
+        render_fan_tab(fan_datasets.get('high'), 'success', 'HIGH', '📈')
+    
+    with tab_close:
+        render_fan_tab(fan_datasets.get('close'), 'primary', 'CLOSE', '⚡')
+    
+    with tab_low:
+        render_fan_tab(fan_datasets.get('low'), 'error', 'LOW', '📉')
+
+# ===== PREMIUM CHARTING SYSTEM =====
+
+def create_plotly_theme():
+    """Create consistent Plotly theme based on current app theme."""
+    current_theme = st.session_state.get('theme', 'light')
+    
+    if current_theme == 'dark':
+        return {
+            'bg_color': '#0F141B',
+            'paper_color': '#1C1C1E',
+            'text_color': '#FFFFFF',
+            'grid_color': 'rgba(255,255,255,0.1)',
+            'zero_line_color': 'rgba(255,255,255,0.2)',
+            'font_family': 'SF Pro Display, Inter, -apple-system, sans-serif'
+        }
+    else:
+        return {
+            'bg_color': '#F2F2F7',
+            'paper_color': '#FFFFFF',
+            'text_color': '#000000',
+            'grid_color': 'rgba(0,0,0,0.1)',
+            'zero_line_color': 'rgba(0,0,0,0.2)',
+            'font_family': 'SF Pro Display, Inter, -apple-system, sans-serif'
+        }
+
+def create_fan_chart(fan_df: pd.DataFrame, chart_title: str, intraday_data: pd.DataFrame = None):
+    """Create premium fan chart with SPX overlay."""
+    if fan_df.empty:
+        return None
+    
+    theme = create_plotly_theme()
+    fig = go.Figure()
+    
+    # Determine colors based on anchor type
+    anchor_type = fan_df.attrs.get('anchor_type', 'UNKNOWN')
+    
+    if anchor_type == 'HIGH':
+        entry_color = COLORS['bear']
+        exit_color = COLORS['success']
+        fill_color = 'rgba(52,199,89,0.08)'
+    elif anchor_type == 'CLOSE':
+        entry_color = COLORS['warning']
+        exit_color = COLORS['primary']
+        fill_color = 'rgba(0,122,255,0.08)'
+    else:  # LOW
+        entry_color = COLORS['error']
+        exit_color = COLORS['bull']
+        fill_color = 'rgba(0,212,170,0.08)'
+    
+    # Add Exit line (top)
+    fig.add_trace(go.Scatter(
+        x=fan_df['TS'],
+        y=fan_df['Exit'],
+        name='Exit Line (↗️)',
+        line=dict(width=3, color=exit_color, shape='spline', smoothing=0.3),
+        hovertemplate='<b>Exit Signal</b><br>Time: %{x|%H:%M}<br>Price: $%{y:,.2f}<br><extra></extra>'
+    ))
+    
+    # Add Entry line (bottom) with fill
+    fig.add_trace(go.Scatter(
+        x=fan_df['TS'],
+        y=fan_df['Entry'],
+        name='Entry Line (↘️)',
+        line=dict(width=3, color=entry_color, shape='spline', smoothing=0.3),
+        fill='tonexty',
+        fillcolor=fill_color,
+        hovertemplate='<b>Entry Signal</b><br>Time: %{x|%H:%M}<br>Price: $%{y:,.2f}<br><extra></extra>'
+    ))
+    
+    # Add SPX overlay if available
+    if intraday_data is not None and not intraday_data.empty:
+        fig.add_trace(go.Scatter(
+            x=intraday_data['TS'],
+            y=intraday_data['Close'],
+            name='SPX (30m close)',
+            line=dict(width=2, color=COLORS['neutral']),
+            hovertemplate='<b>SPX Price</b><br>Time: %{x|%H:%M}<br>Price: $%{y:,.2f}<br><extra></extra>'
+        ))
+    
+    # Apply premium styling
+    fig.update_layout(
+        title=dict(
+            text=f'<b>{chart_title}</b>',
+            font=dict(family=theme['font_family'], size=24, color=theme['text_color']),
+            x=0.02
+        ),
+        height=450,
+        margin=dict(l=20, r=20, t=60, b=20),
+        plot_bgcolor=theme['bg_color'],
+        paper_bgcolor=theme['paper_color'],
+        font=dict(family=theme['font_family'], color=theme['text_color'], size=12),
+        legend=dict(
+            orientation='h',
+            yanchor='bottom',
+            y=1.02,
+            xanchor='left',
+            x=0,
+            bgcolor='rgba(0,0,0,0)'
+        ),
+        dragmode='pan',
+        autosize=True
+    )
+    
+    # Style axes
+    fig.update_xaxes(
+        title='<b>Trading Hours (RTH)</b>',
+        showgrid=True,
+        gridwidth=1,
+        gridcolor=theme['grid_color'],
+        zeroline=True,
+        zerolinewidth=1,
+        zerolinecolor=theme['zero_line_color'],
+        tickformat='%H:%M',
+        rangeslider=dict(visible=True, bgcolor=theme['paper_color'])
+    )
+    
+    fig.update_yaxes(
+        title='<b>SPX Price ($)</b>',
+        showgrid=True,
+        gridwidth=1,
+        gridcolor=theme['grid_color'],
+        zeroline=False,
+        tickformat='$,.0f',
+        side='left'
+    )
+    
+    return fig
+
+def create_combined_overview_chart(fan_datasets: dict, intraday_data: pd.DataFrame = None):
+    """Create combined overview chart showing all fans."""
+    if not fan_datasets:
+        return None
+    
+    theme = create_plotly_theme()
+    fig = go.Figure()
+    
+    # Color mapping for different anchor types
+    colors = {
+        'high': {'entry': COLORS['bear'], 'exit': COLORS['success']},
+        'close': {'entry': COLORS['warning'], 'exit': COLORS['primary']},
+        'low': {'entry': COLORS['error'], 'exit': COLORS['bull']}
+    }
+    
+    # Add all fan lines
+    for anchor_name, fan_df in fan_datasets.items():
+        if fan_df is None or fan_df.empty:
+            continue
+        
+        color_set = colors.get(anchor_name, colors['close'])
+        anchor_type = fan_df.attrs.get('anchor_type', anchor_name.upper())
+        
+        # Exit lines
+        fig.add_trace(go.Scatter(
+            x=fan_df['TS'],
+            y=fan_df['Exit'],
+            name=f'{anchor_type} Exit',
+            line=dict(width=2, color=color_set['exit']),
+            hovertemplate=f'<b>{anchor_type} Exit</b><br>Time: %{{x|%H:%M}}<br>Price: $%{{y:,.2f}}<br><extra></extra>'
+        ))
+        
+        # Entry lines
+        fig.add_trace(go.Scatter(
+            x=fan_df['TS'],
+            y=fan_df['Entry'],
+            name=f'{anchor_type} Entry',
+            line=dict(width=2, color=color_set['entry'], dash='dot'),
+            hovertemplate=f'<b>{anchor_type} Entry</b><br>Time: %{{x|%H:%M}}<br>Price: $%{{y:,.2f}}<br><extra></extra>'
+        ))
+    
+    # Add SPX overlay
+    if intraday_data is not None and not intraday_data.empty:
+        fig.add_trace(go.Scatter(
+            x=intraday_data['TS'],
+            y=intraday_data['Close'],
+            name='SPX (30m)',
+            line=dict(width=3, color=COLORS['neutral']),
+            hovertemplate='<b>SPX Price</b><br>Time: %{x|%H:%M}<br>Price: $%{y:,.2f}<br><extra></extra>'
+        ))
+    
+    # Apply styling
+    fig.update_layout(
+        title=dict(
+            text='<b>📊 All Anchor Fans Overview</b>',
+            font=dict(family=theme['font_family'], size=24, color=theme['text_color']),
+            x=0.02
+        ),
+        height=500,
+        margin=dict(l=20, r=20, t=60, b=20),
+        plot_bgcolor=theme['bg_color'],
+        paper_bgcolor=theme['paper_color'],
+        font=dict(family=theme['font_family'], color=theme['text_color']),
+        legend=dict(
+            orientation='v',
+            yanchor='top',
+            y=0.98,
+            xanchor='left',
+            x=1.02,
+            bgcolor='rgba(0,0,0,0)'
+        ),
+        dragmode='pan'
+    )
+    
+    fig.update_xaxes(
+        title='<b>Trading Hours</b>',
+        showgrid=True,
+        gridcolor=theme['grid_color'],
+        rangeslider=dict(visible=True)
+    )
+    
+    fig.update_yaxes(
+        title='<b>SPX Price ($)</b>',
+        showgrid=True,
+        gridcolor=theme['grid_color'],
+        tickformat='$,.0f'
+    )
+    
+    return fig
+
+def display_premium_charts(fan_datasets: dict, intraday_data: pd.DataFrame = None):
+    """Display all charts with premium styling."""
+    if not fan_datasets:
+        st.markdown(
+            """
+            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+                <div style="font-size:2rem;margin-bottom:var(--space-4);">📈</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">No Chart Data Available</div>
+                <div style="color:var(--text-tertiary);">Generate forecasts first to view charts</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        return
+    
+    st.markdown(
+        """
+        <div class="section-header">📈 Fan Charts</div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Combined overview chart
+    st.markdown("### 📊 Combined Overview")
+    overview_chart = create_combined_overview_chart(fan_datasets, intraday_data)
+    if overview_chart:
+        st.plotly_chart(
+            overview_chart,
+            use_container_width=True,
+            config={
+                'displayModeBar': True,
+                'displaylogo': False,
+                'modeBarButtonsToRemove': ['select2d', 'lasso2d']
+            }
+        )
+    
+    # Individual charts in tabs
+    st.markdown("### 📋 Individual Anchor Charts")
+    tab_high, tab_close, tab_low = st.tabs(["📈 HIGH Anchor", "⚡ CLOSE Anchor", "📉 LOW Anchor"])
+    
+    with tab_high:
+        df = fan_datasets.get('high')
+        if df is not None and not df.empty:
+            fig = create_fan_chart(df, "HIGH Anchor Fan — Resistance Levels", intraday_data)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
+        else:
+            st.error("❌ HIGH anchor data not available")
+    
+    with tab_close:
+        df = fan_datasets.get('close')
+        if df is not None and not df.empty:
+            fig = create_fan_chart(df, "CLOSE Anchor Fan — Consensus Levels", intraday_data)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
+        else:
+            st.error("❌ CLOSE anchor data not available")
+    
+    with tab_low:
+        df = fan_datasets.get('low')
+        if df is not None and not df.empty:
+            fig = create_fan_chart(df, "LOW Anchor Fan — Support Levels", intraday_data)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
+        else:
+            st.error("❌ LOW anchor data not available")
+
+# ===== MAIN INTEGRATION FUNCTION =====
+
+def handle_fan_generation_and_display(anchor_config: dict, forecast_date: date):
+    """Main function to handle fan generation and display."""
+    if not anchor_config or not anchor_config.get('is_locked', False):
+        return {}
+    
+    # Generate fan data
+    fan_data = generate_all_fans(anchor_config, forecast_date)
+    
+    if fan_data:
+        st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
+        
+        # Display data tables
+        display_fan_data_tables(fan_data)
+        
+        st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
+        
+        # Fetch intraday data for charts
+        intraday_1m = fetch_spx_intraday_1m(forecast_date)
+        intraday_30m = to_30m(intraday_1m)
+        
+        # Display charts
+        display_premium_charts(fan_data, intraday_30m)
+        
+        return {
+            'fan_data': fan_data,
+            'intraday_30m': intraday_30m,
+            'charts_displayed': True,
+            'intraday_available': not intraday_30m.empty
+        }
+    
+    return {}
+
+# ===== INTEGRATION INTO MAIN FLOW =====
+# Add this after the anchor section when forecasts are generated
+
+if st.session_state.get("forecasts_generated", False) and anchor_section_results.get('ready_for_forecast', False):
+    st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
+    
+    # Handle fan generation and display
+    fan_results = handle_fan_generation_and_display(
+        anchor_section_results['anchor_config'], 
+        forecast_date
+    )
