@@ -2147,8 +2147,8 @@ anchor_section_results = render_complete_anchor_section(forecast_date, previous_
 
 def build_fan_dataframe(anchor_type: str, anchor_price: float, anchor_time: time, forecast_date: date) -> pd.DataFrame:
     """
-    Build fan forecast dataframe for a specific anchor type.
-    Preserves original calculation logic with premium error handling.
+    Build fan forecast dataframe for a specific anchor type with TP1/TP2 system.
+    Preserves original calculation logic with enhanced profit target calculations.
     """
     try:
         # Create anchor datetime (preserving original logic)
@@ -2167,14 +2167,22 @@ def build_fan_dataframe(anchor_type: str, anchor_price: float, anchor_time: time
                 entry_price = project_price(anchor_price, SPX_SLOPES_DOWN[anchor_type], blocks)
                 exit_price = project_price(anchor_price, SPX_SLOPES_UP[anchor_type], blocks)
                 
+                # Calculate TP1/TP2 system
+                total_spread = exit_price - entry_price
+                tp1_price = entry_price + (total_spread * 0.5)  # 50% profit target
+                tp2_price = exit_price  # Full profit target
+                
                 rows.append({
                     'Time': time_slot,
                     'Entry': round(entry_price, 2),
-                    'Exit': round(exit_price, 2),
+                    'TP1': round(tp1_price, 2),
+                    'TP2': round(tp2_price, 2),
                     'Blocks': blocks,
                     'Anchor_Price': anchor_price,
                     'Anchor_Type': anchor_type,
-                    'Spread': round(exit_price - entry_price, 2)
+                    'Total_Spread': round(total_spread, 2),
+                    'TP1_Distance': round(tp1_price - entry_price, 2),
+                    'TP2_Distance': round(tp2_price - entry_price, 2)
                 })
             except Exception:
                 # Skip invalid time slots
@@ -2195,7 +2203,8 @@ def build_fan_dataframe(anchor_type: str, anchor_price: float, anchor_time: time
             'forecast_date': forecast_date,
             'generated_at': datetime.now(),
             'slopes_down': SPX_SLOPES_DOWN[anchor_type],
-            'slopes_up': SPX_SLOPES_UP[anchor_type]
+            'slopes_up': SPX_SLOPES_UP[anchor_type],
+            'tp_system': 'TP1_50_TP2_100'
         })
         
         return fan_df
@@ -2258,7 +2267,7 @@ def generate_all_fans(anchor_config: dict, forecast_date: date) -> dict:
         status_text.markdown(
             f"""
             <div style="color:#34C759;font-weight:600;">
-                ✅ Generated {total_rows} forecast data points across all anchors
+                ✅ Generated {total_rows} forecast data points with TP1/TP2 targets
             </div>
             """,
             unsafe_allow_html=True
@@ -2280,17 +2289,17 @@ def generate_all_fans(anchor_config: dict, forecast_date: date) -> dict:
     
     return fan_datasets
 
-# ===== FAN DATA DISPLAY SYSTEM =====
+# ===== TRADING-FOCUSED DATA DISPLAY =====
 
-def display_fan_data_tables(fan_datasets: dict):
-    """Display fan data in premium tabbed interface."""
+def display_trading_tables(fan_datasets: dict):
+    """Display fan data in trading-focused tables with TP1/TP2."""
     if not fan_datasets:
         st.markdown(
             """
             <div class="premium-card" style="text-align:center;padding:var(--space-8);">
                 <div style="font-size:2rem;margin-bottom:var(--space-4);">📊</div>
-                <div style="font-weight:600;margin-bottom:var(--space-2);">No Fan Data Available</div>
-                <div style="color:var(--text-tertiary);">Generate forecasts first to view data tables</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">No Trading Data Available</div>
+                <div style="color:var(--text-tertiary);">Generate forecasts first to view trading tables</div>
             </div>
             """,
             unsafe_allow_html=True
@@ -2299,35 +2308,41 @@ def display_fan_data_tables(fan_datasets: dict):
     
     st.markdown(
         """
-        <div class="section-header">📋 Fan Forecast Tables</div>
+        <div class="section-header">📋 Trading Tables (Entry → TP1 → TP2)</div>
+        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);">
+            Professional trading tables with dual profit targets for optimal position scaling.
+        </div>
         """,
         unsafe_allow_html=True
     )
     
     # Create premium tabs
-    tab_high, tab_close, tab_low = st.tabs(["📈 HIGH Fan", "⚡ CLOSE Fan", "📉 LOW Fan"])
+    tab_high, tab_close, tab_low = st.tabs(["📈 HIGH Anchor", "⚡ CLOSE Anchor", "📉 LOW Anchor"])
     
-    def render_fan_tab(df: pd.DataFrame, color_name: str, label: str, icon: str):
-        """Render individual fan data tab with premium styling."""
+    def render_trading_tab(df: pd.DataFrame, color_name: str, label: str, icon: str):
+        """Render individual trading table with TP1/TP2 system."""
         if df is None or df.empty:
             st.markdown(
                 f"""
                 <div style="text-align:center;padding:var(--space-6);color:var(--error);">
                     <div style="font-size:2rem;margin-bottom:var(--space-2);">❌</div>
-                    <div>{label} fan data not available</div>
+                    <div>{label} trading data not available</div>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
             return
         
-        # Fan summary card
+        # Trading summary card
         anchor_price = df.attrs.get('anchor_price', 0)
         anchor_time = df.attrs.get('anchor_time', time())
         generated_at = df.attrs.get('generated_at', datetime.now())
+        
+        # Calculate key metrics
         min_entry = df['Entry'].min()
-        max_exit = df['Exit'].max()
-        avg_spread = df['Spread'].mean()
+        max_tp2 = df['TP2'].max()
+        avg_tp1_distance = df['TP1_Distance'].mean()
+        avg_tp2_distance = df['TP2_Distance'].mean()
         
         st.markdown(
             f"""
@@ -2336,16 +2351,16 @@ def display_fan_data_tables(fan_datasets: dict):
                     <div>
                         <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2);">
                             <span style="font-size:1.5rem;">{icon}</span>
-                            <span style="font-weight:700;color:{COLORS[color_name]};font-size:var(--text-xl);">{label} Anchor Fan</span>
+                            <span style="font-weight:700;color:{COLORS[color_name]};font-size:var(--text-xl);">{label} Trading Levels</span>
                         </div>
                         <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
-                            Anchor: ${anchor_price:.2f} @ {anchor_time.strftime('%H:%M')}
+                            Anchor: ${anchor_price:.2f} @ {anchor_time.strftime('%H:%M')} • Generated: {generated_at.strftime('%H:%M:%S')}
                         </div>
                     </div>
                     <div style="text-align:right;">
                         <div style="font-weight:600;font-size:var(--text-lg);">{len(df)} time slots</div>
                         <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
-                            Generated: {generated_at.strftime('%H:%M:%S')}
+                            Range: ${min_entry:.2f} - ${max_tp2:.2f}
                         </div>
                     </div>
                 </div>
@@ -2354,8 +2369,8 @@ def display_fan_data_tables(fan_datasets: dict):
             unsafe_allow_html=True
         )
         
-        # Create metrics using Streamlit columns instead of CSS grid
-        col_met1, col_met2, col_met3 = st.columns(3)
+        # Trading metrics using Streamlit columns
+        col_met1, col_met2, col_met3, col_met4 = st.columns(4)
         
         with col_met1:
             st.markdown(
@@ -2372,8 +2387,8 @@ def display_fan_data_tables(fan_datasets: dict):
             st.markdown(
                 f"""
                 <div style="text-align:center;padding:var(--space-3);background:var(--bg-secondary);border-radius:var(--radius-lg);">
-                    <div style="font-weight:700;color:{COLORS['success']};font-size:var(--text-lg);">${max_exit:.2f}</div>
-                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">MAX EXIT</div>
+                    <div style="font-weight:700;color:{COLORS['warning']};font-size:var(--text-lg);">${avg_tp1_distance:.2f}</div>
+                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">AVG TP1 DIST</div>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -2383,15 +2398,28 @@ def display_fan_data_tables(fan_datasets: dict):
             st.markdown(
                 f"""
                 <div style="text-align:center;padding:var(--space-3);background:var(--bg-secondary);border-radius:var(--radius-lg);">
-                    <div style="font-weight:700;color:{COLORS['neutral']};font-size:var(--text-lg);">${avg_spread:.2f}</div>
-                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">AVG SPREAD</div>
+                    <div style="font-weight:700;color:{COLORS['success']};font-size:var(--text-lg);">${avg_tp2_distance:.2f}</div>
+                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">AVG TP2 DIST</div>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
         
-        # Data table with custom column config
-        display_columns = ['Time', 'Entry', 'Exit', 'Blocks', 'Spread']
+        with col_met4:
+            st.markdown(
+                f"""
+                <div style="text-align:center;padding:var(--space-3);background:var(--bg-secondary);border-radius:var(--radius-lg);">
+                    <div style="font-weight:700;color:{COLORS['success']};font-size:var(--text-lg);">${max_tp2:.2f}</div>
+                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">MAX TP2</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        
+        # Trading table with TP1/TP2 columns
+        st.markdown("### 📊 Trading Levels")
+        
+        display_columns = ['Time', 'Entry', 'TP1', 'TP2', 'Blocks', 'Total_Spread']
         st.dataframe(
             df[display_columns],
             use_container_width=True,
@@ -2399,337 +2427,180 @@ def display_fan_data_tables(fan_datasets: dict):
             column_config={
                 'Time': st.column_config.TextColumn('Time', width='small'),
                 'Entry': st.column_config.NumberColumn('Entry ($)', format='$%.2f'),
-                'Exit': st.column_config.NumberColumn('Exit ($)', format='$%.2f'),
+                'TP1': st.column_config.NumberColumn('TP1 ($)', format='$%.2f', help='50% profit target'),
+                'TP2': st.column_config.NumberColumn('TP2 ($)', format='$%.2f', help='Full profit target'),
                 'Blocks': st.column_config.NumberColumn('Blocks', width='small'),
-                'Spread': st.column_config.NumberColumn('Spread ($)', format='$%.2f')
+                'Total_Spread': st.column_config.NumberColumn('Total Spread ($)', format='$%.2f')
             }
         )
-    
-    # Render each tab
-    with tab_high:
-        render_fan_tab(fan_datasets.get('high'), 'success', 'HIGH', '📈')
-    
-    with tab_close:
-        render_fan_tab(fan_datasets.get('close'), 'primary', 'CLOSE', '⚡')
-    
-    with tab_low:
-        render_fan_tab(fan_datasets.get('low'), 'error', 'LOW', '📉')
-
-# ===== PREMIUM CHARTING SYSTEM =====
-
-def create_plotly_theme():
-    """Create consistent Plotly theme based on current app theme."""
-    current_theme = st.session_state.get('theme', 'light')
-    
-    if current_theme == 'dark':
-        return {
-            'bg_color': '#0F141B',
-            'paper_color': '#1C1C1E',
-            'text_color': '#FFFFFF',
-            'grid_color': 'rgba(255,255,255,0.1)',
-            'zero_line_color': 'rgba(255,255,255,0.2)',
-            'font_family': 'SF Pro Display, Inter, -apple-system, sans-serif'
-        }
-    else:
-        return {
-            'bg_color': '#F2F2F7',
-            'paper_color': '#FFFFFF',
-            'text_color': '#000000',
-            'grid_color': 'rgba(0,0,0,0.1)',
-            'zero_line_color': 'rgba(0,0,0,0.2)',
-            'font_family': 'SF Pro Display, Inter, -apple-system, sans-serif'
-        }
-
-def create_fan_chart(fan_df: pd.DataFrame, chart_title: str, intraday_data: pd.DataFrame = None):
-    """Create premium fan chart with SPX overlay."""
-    if fan_df.empty:
-        return None
-    
-    theme = create_plotly_theme()
-    fig = go.Figure()
-    
-    # Determine colors based on anchor type
-    anchor_type = fan_df.attrs.get('anchor_type', 'UNKNOWN')
-    
-    if anchor_type == 'HIGH':
-        entry_color = COLORS['bear']
-        exit_color = COLORS['success']
-        fill_color = 'rgba(52,199,89,0.08)'
-    elif anchor_type == 'CLOSE':
-        entry_color = COLORS['warning']
-        exit_color = COLORS['primary']
-        fill_color = 'rgba(0,122,255,0.08)'
-    else:  # LOW
-        entry_color = COLORS['error']
-        exit_color = COLORS['bull']
-        fill_color = 'rgba(0,212,170,0.08)'
-    
-    # Add Exit line (top)
-    fig.add_trace(go.Scatter(
-        x=fan_df['TS'],
-        y=fan_df['Exit'],
-        name='Exit Line (↗️)',
-        line=dict(width=3, color=exit_color, shape='spline', smoothing=0.3),
-        hovertemplate='<b>Exit Signal</b><br>Time: %{x|%H:%M}<br>Price: $%{y:,.2f}<br><extra></extra>'
-    ))
-    
-    # Add Entry line (bottom) with fill
-    fig.add_trace(go.Scatter(
-        x=fan_df['TS'],
-        y=fan_df['Entry'],
-        name='Entry Line (↘️)',
-        line=dict(width=3, color=entry_color, shape='spline', smoothing=0.3),
-        fill='tonexty',
-        fillcolor=fill_color,
-        hovertemplate='<b>Entry Signal</b><br>Time: %{x|%H:%M}<br>Price: $%{y:,.2f}<br><extra></extra>'
-    ))
-    
-    # Add SPX overlay if available
-    if intraday_data is not None and not intraday_data.empty:
-        fig.add_trace(go.Scatter(
-            x=intraday_data['TS'],
-            y=intraday_data['Close'],
-            name='SPX (30m close)',
-            line=dict(width=2, color=COLORS['neutral']),
-            hovertemplate='<b>SPX Price</b><br>Time: %{x|%H:%M}<br>Price: $%{y:,.2f}<br><extra></extra>'
-        ))
-    
-    # Apply premium styling
-    fig.update_layout(
-        title=dict(
-            text=f'<b>{chart_title}</b>',
-            font=dict(family=theme['font_family'], size=24, color=theme['text_color']),
-            x=0.02
-        ),
-        height=450,
-        margin=dict(l=20, r=20, t=60, b=20),
-        plot_bgcolor=theme['bg_color'],
-        paper_bgcolor=theme['paper_color'],
-        font=dict(family=theme['font_family'], color=theme['text_color'], size=12),
-        legend=dict(
-            orientation='h',
-            yanchor='bottom',
-            y=1.02,
-            xanchor='left',
-            x=0,
-            bgcolor='rgba(0,0,0,0)'
-        ),
-        dragmode='pan',
-        autosize=True
-    )
-    
-    # Style axes
-    fig.update_xaxes(
-        title='<b>Trading Hours (RTH)</b>',
-        showgrid=True,
-        gridwidth=1,
-        gridcolor=theme['grid_color'],
-        zeroline=True,
-        zerolinewidth=1,
-        zerolinecolor=theme['zero_line_color'],
-        tickformat='%H:%M',
-        rangeslider=dict(visible=True, bgcolor=theme['paper_color'])
-    )
-    
-    fig.update_yaxes(
-        title='<b>SPX Price ($)</b>',
-        showgrid=True,
-        gridwidth=1,
-        gridcolor=theme['grid_color'],
-        zeroline=False,
-        tickformat='$,.0f',
-        side='left'
-    )
-    
-    return fig
-
-def create_combined_overview_chart(fan_datasets: dict, intraday_data: pd.DataFrame = None):
-    """Create combined overview chart showing all fans."""
-    if not fan_datasets:
-        return None
-    
-    theme = create_plotly_theme()
-    fig = go.Figure()
-    
-    # Color mapping for different anchor types
-    colors = {
-        'high': {'entry': COLORS['bear'], 'exit': COLORS['success']},
-        'close': {'entry': COLORS['warning'], 'exit': COLORS['primary']},
-        'low': {'entry': COLORS['error'], 'exit': COLORS['bull']}
-    }
-    
-    # Add all fan lines
-    for anchor_name, fan_df in fan_datasets.items():
-        if fan_df is None or fan_df.empty:
-            continue
         
-        color_set = colors.get(anchor_name, colors['close'])
-        anchor_type = fan_df.attrs.get('anchor_type', anchor_name.upper())
-        
-        # Exit lines
-        fig.add_trace(go.Scatter(
-            x=fan_df['TS'],
-            y=fan_df['Exit'],
-            name=f'{anchor_type} Exit',
-            line=dict(width=2, color=color_set['exit']),
-            hovertemplate=f'<b>{anchor_type} Exit</b><br>Time: %{{x|%H:%M}}<br>Price: $%{{y:,.2f}}<br><extra></extra>'
-        ))
-        
-        # Entry lines
-        fig.add_trace(go.Scatter(
-            x=fan_df['TS'],
-            y=fan_df['Entry'],
-            name=f'{anchor_type} Entry',
-            line=dict(width=2, color=color_set['entry'], dash='dot'),
-            hovertemplate=f'<b>{anchor_type} Entry</b><br>Time: %{{x|%H:%M}}<br>Price: $%{{y:,.2f}}<br><extra></extra>'
-        ))
-    
-    # Add SPX overlay
-    if intraday_data is not None and not intraday_data.empty:
-        fig.add_trace(go.Scatter(
-            x=intraday_data['TS'],
-            y=intraday_data['Close'],
-            name='SPX (30m)',
-            line=dict(width=3, color=COLORS['neutral']),
-            hovertemplate='<b>SPX Price</b><br>Time: %{x|%H:%M}<br>Price: $%{y:,.2f}<br><extra></extra>'
-        ))
-    
-    # Apply styling
-    fig.update_layout(
-        title=dict(
-            text='<b>📊 All Anchor Fans Overview</b>',
-            font=dict(family=theme['font_family'], size=24, color=theme['text_color']),
-            x=0.02
-        ),
-        height=500,
-        margin=dict(l=20, r=20, t=60, b=20),
-        plot_bgcolor=theme['bg_color'],
-        paper_bgcolor=theme['paper_color'],
-        font=dict(family=theme['font_family'], color=theme['text_color']),
-        legend=dict(
-            orientation='v',
-            yanchor='top',
-            y=0.98,
-            xanchor='left',
-            x=1.02,
-            bgcolor='rgba(0,0,0,0)'
-        ),
-        dragmode='pan'
-    )
-    
-    fig.update_xaxes(
-        title='<b>Trading Hours</b>',
-        showgrid=True,
-        gridcolor=theme['grid_color'],
-        rangeslider=dict(visible=True)
-    )
-    
-    fig.update_yaxes(
-        title='<b>SPX Price ($)</b>',
-        showgrid=True,
-        gridcolor=theme['grid_color'],
-        tickformat='$,.0f'
-    )
-    
-    return fig
-
-def display_premium_charts(fan_datasets: dict, intraday_data: pd.DataFrame = None):
-    """Display all charts with premium styling."""
-    if not fan_datasets:
+        # Trading strategy note
         st.markdown(
-            """
-            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
-                <div style="font-size:2rem;margin-bottom:var(--space-4);">📈</div>
-                <div style="font-weight:600;margin-bottom:var(--space-2);">No Chart Data Available</div>
-                <div style="color:var(--text-tertiary);">Generate forecasts first to view charts</div>
+            f"""
+            <div style="background:rgba(0,122,255,0.1);padding:var(--space-3);border-radius:var(--radius-lg);margin-top:var(--space-3);">
+                <div style="font-weight:600;color:{COLORS['primary']};margin-bottom:var(--space-2);">💡 Trading Strategy</div>
+                <div style="color:var(--text-secondary);font-size:var(--text-sm);line-height:1.5;">
+                    <strong>Entry:</strong> Wait for price to reach Entry level<br>
+                    <strong>TP1:</strong> Take 50% profit at TP1 (50% of total move)<br>
+                    <strong>TP2:</strong> Take remaining 50% profit at TP2 (full move)<br>
+                    <strong>Risk Management:</strong> Use appropriate position sizing and stop losses
+                </div>
             </div>
             """,
             unsafe_allow_html=True
         )
+    
+    # Render each trading tab
+    with tab_high:
+        render_trading_tab(fan_datasets.get('high'), 'success', 'HIGH', '📈')
+    
+    with tab_close:
+        render_trading_tab(fan_datasets.get('close'), 'primary', 'CLOSE', '⚡')
+    
+    with tab_low:
+        render_trading_tab(fan_datasets.get('low'), 'error', 'LOW', '📉')
+
+# ===== TRADING ANALYTICS SYSTEM =====
+
+def display_trading_analytics(fan_datasets: dict):
+    """Display comprehensive trading analytics across all fans."""
+    if not fan_datasets:
         return
+    
+    st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
     
     st.markdown(
         """
-        <div class="section-header">📈 Fan Charts</div>
+        <div class="section-header">📈 Trading Analytics</div>
+        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);">
+            Cross-anchor analysis and optimal timing insights for trading decisions.
+        </div>
         """,
         unsafe_allow_html=True
     )
     
-    # Combined overview chart
-    st.markdown("### 📊 Combined Overview")
-    overview_chart = create_combined_overview_chart(fan_datasets, intraday_data)
-    if overview_chart:
-        st.plotly_chart(
-            overview_chart,
-            use_container_width=True,
-            config={
-                'displayModeBar': True,
-                'displaylogo': False,
-                'modeBarButtonsToRemove': ['select2d', 'lasso2d']
-            }
-        )
-    
-    # Individual charts in tabs
-    st.markdown("### 📋 Individual Anchor Charts")
-    tab_high, tab_close, tab_low = st.tabs(["📈 HIGH Anchor", "⚡ CLOSE Anchor", "📉 LOW Anchor"])
-    
-    with tab_high:
-        df = fan_datasets.get('high')
+    # Collect analytics from all fans
+    all_data = []
+    for anchor_name, df in fan_datasets.items():
         if df is not None and not df.empty:
-            fig = create_fan_chart(df, "HIGH Anchor Fan — Resistance Levels", intraday_data)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
-        else:
-            st.error("❌ HIGH anchor data not available")
+            anchor_type = df.attrs.get('anchor_type', anchor_name.upper())
+            all_data.append({
+                'anchor': anchor_type,
+                'min_entry': df['Entry'].min(),
+                'max_tp2': df['TP2'].max(),
+                'avg_tp1_dist': df['TP1_Distance'].mean(),
+                'avg_tp2_dist': df['TP2_Distance'].mean(),
+                'best_spread': df['Total_Spread'].max(),
+                'worst_spread': df['Total_Spread'].min(),
+                'time_slots': len(df)
+            })
     
-    with tab_close:
-        df = fan_datasets.get('close')
-        if df is not None and not df.empty:
-            fig = create_fan_chart(df, "CLOSE Anchor Fan — Consensus Levels", intraday_data)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
-        else:
-            st.error("❌ CLOSE anchor data not available")
+    if not all_data:
+        st.warning("No data available for analytics")
+        return
     
-    with tab_low:
-        df = fan_datasets.get('low')
-        if df is not None and not df.empty:
-            fig = create_fan_chart(df, "LOW Anchor Fan — Support Levels", intraday_data)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': True, 'displaylogo': False})
-        else:
-            st.error("❌ LOW anchor data not available")
+    analytics_df = pd.DataFrame(all_data)
+    
+    # Key metrics grid
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_setups = analytics_df['time_slots'].sum()
+        st.metric("📊 Total Setups", f"{total_setups}", "Across all anchors")
+    
+    with col2:
+        best_spread = analytics_df['best_spread'].max()
+        best_anchor = analytics_df.loc[analytics_df['best_spread'].idxmax(), 'anchor']
+        st.metric("🎯 Best Spread", f"${best_spread:.2f}", f"{best_anchor} anchor")
+    
+    with col3:
+        avg_tp1_overall = analytics_df['avg_tp1_dist'].mean()
+        st.metric("📈 Avg TP1 Distance", f"${avg_tp1_overall:.2f}", "50% target")
+    
+    with col4:
+        avg_tp2_overall = analytics_df['avg_tp2_dist'].mean()
+        st.metric("🏆 Avg TP2 Distance", f"${avg_tp2_overall:.2f}", "Full target")
+    
+    # Anchor comparison table
+    st.markdown("### 📋 Anchor Comparison")
+    
+    comparison_df = analytics_df.copy()
+    comparison_df.columns = [
+        'Anchor', 'Min Entry ($)', 'Max TP2 ($)', 'Avg TP1 Dist ($)', 
+        'Avg TP2 Dist ($)', 'Best Spread ($)', 'Worst Spread ($)', 'Time Slots'
+    ]
+    
+    st.dataframe(
+        comparison_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            'Anchor': st.column_config.TextColumn('Anchor', width='small'),
+            'Min Entry ($)': st.column_config.NumberColumn('Min Entry', format='$%.2f'),
+            'Max TP2 ($)': st.column_config.NumberColumn('Max TP2', format='$%.2f'),
+            'Avg TP1 Dist ($)': st.column_config.NumberColumn('Avg TP1 Dist', format='$%.2f'),
+            'Avg TP2 Dist ($)': st.column_config.NumberColumn('Avg TP2 Dist', format='$%.2f'),
+            'Best Spread ($)': st.column_config.NumberColumn('Best Spread', format='$%.2f'),
+            'Worst Spread ($)': st.column_config.NumberColumn('Worst Spread', format='$%.2f'),
+            'Time Slots': st.column_config.NumberColumn('Setups', width='small')
+        }
+    )
+    
+    # Trading recommendations
+    best_tp1_anchor = analytics_df.loc[analytics_df['avg_tp1_dist'].idxmax(), 'anchor']
+    best_tp2_anchor = analytics_df.loc[analytics_df['avg_tp2_dist'].idxmax(), 'anchor']
+    most_consistent = analytics_df.loc[(analytics_df['best_spread'] - analytics_df['worst_spread']).idxmin(), 'anchor']
+    
+    st.markdown(
+        f"""
+        <div class="glass-card" style="margin-top:var(--space-6);">
+            <div style="font-weight:700;margin-bottom:var(--space-4);color:var(--primary);">🎯 Trading Recommendations</div>
+            
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:var(--space-4);">
+                <div style="padding:var(--space-3);background:rgba(255,149,0,0.1);border-radius:var(--radius-lg);">
+                    <div style="font-weight:600;color:{COLORS['warning']};">Best for Quick TP1</div>
+                    <div style="color:var(--text-secondary);">{best_tp1_anchor} anchor offers the best TP1 distances</div>
+                </div>
+                
+                <div style="padding:var(--space-3);background:rgba(52,199,89,0.1);border-radius:var(--radius-lg);">
+                    <div style="font-weight:600;color:{COLORS['success']};">Best for Full TP2</div>
+                    <div style="color:var(--text-secondary);">{best_tp2_anchor} anchor offers the best TP2 distances</div>
+                </div>
+                
+                <div style="padding:var(--space-3);background:rgba(0,122,255,0.1);border-radius:var(--radius-lg);">
+                    <div style="font-weight:600;color:{COLORS['primary']};">Most Consistent</div>
+                    <div style="color:var(--text-secondary);">{most_consistent} anchor has the most consistent spreads</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 # ===== MAIN INTEGRATION FUNCTION =====
 
-def handle_fan_generation_and_display(anchor_config: dict, forecast_date: date):
-    """Main function to handle fan generation and display."""
+def handle_trading_data_generation(anchor_config: dict, forecast_date: date):
+    """Main function to handle trading-focused fan generation and display."""
     if not anchor_config or not anchor_config.get('is_locked', False):
         return {}
     
-    # Generate fan data
+    # Generate fan data with TP1/TP2
     fan_data = generate_all_fans(anchor_config, forecast_date)
     
     if fan_data:
         st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
         
-        # Display data tables
-        display_fan_data_tables(fan_data)
+        # Display trading tables
+        display_trading_tables(fan_data)
         
-        st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
-        
-        # Fetch intraday data for charts
-        intraday_1m = fetch_intraday_data(forecast_date)
-        intraday_30m = convert_to_30min_bars(intraday_1m)
-        
-        # Display charts
-        display_premium_charts(fan_data, intraday_30m)
+        # Display trading analytics
+        display_trading_analytics(fan_data)
         
         return {
             'fan_data': fan_data,
-            'intraday_30m': intraday_30m,
-            'charts_displayed': True,
-            'intraday_available': not intraday_30m.empty
+            'trading_tables_displayed': True,
+            'analytics_displayed': True,
+            'tp_system_enabled': True
         }
     
     return {}
@@ -2740,9 +2611,8 @@ def handle_fan_generation_and_display(anchor_config: dict, forecast_date: date):
 if st.session_state.get("forecasts_generated", False) and anchor_section_results.get('ready_for_forecast', False):
     st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
     
-    # Handle fan generation and display
-    fan_results = handle_fan_generation_and_display(
+    # Handle trading data generation and display
+    trading_results = handle_trading_data_generation(
         anchor_section_results['anchor_config'], 
         forecast_date
     )
-
