@@ -3249,6 +3249,7 @@ def handle_entry_detection_and_export(fan_datasets: dict, forecast_date: date,
 # Get previous day anchors in enhanced format
 def get_previous_day_anchors_enhanced(forecast_date: date) -> dict:
     """Get previous day anchors in enhanced format."""
+    # Use the existing function from your original code
     anchors = get_prev_day_anchors_for(forecast_date)
     
     if anchors:
@@ -3261,7 +3262,7 @@ def get_previous_day_anchors_enhanced(forecast_date: date) -> dict:
         }
     return None
 
-# Get enhanced previous anchors
+# Get enhanced previous anchors (placed after the anchors variable from original code)
 previous_anchors_enhanced = get_previous_day_anchors_enhanced(forecast_date)
 
 # ===== ENHANCED ANCHOR INTERFACE =====
@@ -3323,4 +3324,3 @@ else:
     close_time = time(15, 0)
     low_price = 6130.40
     low_time = time(13, 30)
-    
