@@ -1667,3 +1667,566 @@ forecast_date, tolerance, rule_requirement = render_enhanced_sidebar()
 # Render metrics dashboard with anchors
 previous_anchors = render_metrics_dashboard(forecast_date)
 
+# ===== CONTRACT LINE SYSTEM =====
+
+def render_contract_line_header():
+    """Render premium header for contract line section."""
+    st.markdown(
+        """
+        <div class="section-header animate-fade-in">📋 Contract Line Generator</div>
+        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);line-height:1.6;">
+            Generate precise contract projections using two low points. This system calculates 
+            the optimal slope for <strong>Tuesday</strong> and <strong>Thursday</strong> plays with 
+            institutional-grade precision.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def create_enhanced_contract_inputs():
+    """Create premium contract input components with real-time validation."""
+    st.markdown(
+        """
+        <div class="premium-card animate-slide-up">
+            <div class="subsection-header">
+                <span style="font-size:1.5rem;">📊</span>
+                <span style="color:var(--primary);font-weight:700;font-size:var(--text-2xl);">Contract Anchor Points</span>
+            </div>
+            <div style="color:var(--text-tertiary);margin-bottom:var(--space-4);font-size:var(--text-sm);">
+                Configure two overnight option low points that typically rise $400-$500. 
+                These points will establish your contract slope for precise projections.
+            </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Enhanced input layout with validation
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        st.markdown(
+            """
+            <div style="background:rgba(0,122,255,0.05);padding:var(--space-3);border-radius:var(--radius-lg);margin-bottom:var(--space-3);">
+                <div style="font-weight:600;color:var(--primary);margin-bottom:var(--space-2);">📍 Low Point #1</div>
+                <div style="color:var(--text-tertiary);font-size:var(--text-sm);">First reference point</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        low1_time = st.time_input(
+            "Time",
+            value=time(2, 0),
+            step=300,
+            key="contract_low1_time",
+            help="Time of first low point (typically early morning)"
+        )
+        
+        low1_price = st.number_input(
+            "Price ($)",
+            value=10.00,
+            step=TICK,
+            min_value=0.01,
+            max_value=1000.0,
+            format="%.2f",
+            key="contract_low1_price",
+            help="Contract price at first low point"
+        )
+        
+        # Real-time validation for Low Point 1
+        low1_valid = True
+        if low1_price <= 0:
+            st.error("⚠️ Price must be positive")
+            low1_valid = False
+        elif low1_price > 500:
+            st.warning("💡 Price seems high for options - verify")
+        elif low1_price < 0.50:
+            st.warning("💡 Price seems low - verify")
+            
+        if low1_valid:
+            st.markdown(
+                f"""
+                <div style="background:rgba(52,199,89,0.1);color:#34C759;padding:var(--space-2);
+                     border-radius:var(--radius-md);font-size:var(--text-sm);margin-top:var(--space-2);">
+                    ✅ Low #1: ${low1_price:.2f} @ {low1_time.strftime('%H:%M')}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    with col2:
+        st.markdown(
+            """
+            <div style="background:rgba(52,199,89,0.05);padding:var(--space-3);border-radius:var(--radius-lg);margin-bottom:var(--space-3);">
+                <div style="font-weight:600;color:var(--success);margin-bottom:var(--space-2);">📍 Low Point #2</div>
+                <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Second reference point</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        low2_time = st.time_input(
+            "Time ",
+            value=time(3, 30),
+            step=300,
+            key="contract_low2_time",
+            help="Time of second low point (must be after first)"
+        )
+        
+        low2_price = st.number_input(
+            "Price ($) ",
+            value=12.00,
+            step=TICK,
+            min_value=0.01,
+            max_value=1000.0,
+            format="%.2f",
+            key="contract_low2_price",
+            help="Contract price at second low point"
+        )
+        
+        # Real-time validation for Low Point 2
+        low2_valid = True
+        if low2_price <= 0:
+            st.error("⚠️ Price must be positive")
+            low2_valid = False
+        elif low2_price > 500:
+            st.warning("💡 Price seems high for options - verify")
+        elif low2_price < 0.50:
+            st.warning("💡 Price seems low - verify")
+            
+        # Time sequence validation
+        if low2_time <= low1_time:
+            st.error("⚠️ Low #2 time must be after Low #1")
+            low2_valid = False
+            
+        if low2_valid and low1_valid:
+            st.markdown(
+                f"""
+                <div style="background:rgba(52,199,89,0.1);color:#34C759;padding:var(--space-2);
+                     border-radius:var(--radius-md);font-size:var(--text-sm);margin-top:var(--space-2);">
+                    ✅ Low #2: ${low2_price:.2f} @ {low2_time.strftime('%H:%M')}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    with col3:
+        st.markdown(
+            """
+            <div style="background:rgba(139,92,246,0.05);padding:var(--space-3);border-radius:var(--radius-lg);margin-bottom:var(--space-3);">
+                <div style="font-weight:600;color:var(--neutral);margin-bottom:var(--space-2);">⚙️ Configuration</div>
+                <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Strategy & display options</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        strategy_label = st.selectbox(
+            "Strategy Type",
+            options=["Manual", "Tuesday Play", "Thursday Play"],
+            index=0,
+            help="Select the trading strategy for this contract line"
+        )
+        
+        include_extended = st.toggle(
+            "Include Extended Hours",
+            value=False,
+            help="Include pre-market hours (07:30-08:30) in projections"
+        )
+        
+        rth_only = not include_extended
+        
+        # Strategy info display
+        if strategy_label == "Tuesday Play":
+            st.markdown(
+                """
+                <div style="background:rgba(139,92,246,0.1);padding:var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);">
+                    📈 Best mid-week momentum setups
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        elif strategy_label == "Thursday Play":
+            st.markdown(
+                """
+                <div style="background:rgba(139,92,246,0.1);padding:var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);">
+                    📊 Wednesday pricing insights
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    return {
+        'low1_time': low1_time,
+        'low1_price': low1_price,
+        'low1_valid': low1_valid,
+        'low2_time': low2_time,
+        'low2_price': low2_price,
+        'low2_valid': low2_valid,
+        'strategy_label': strategy_label,
+        'rth_only': rth_only,
+        'all_valid': low1_valid and low2_valid
+    }
+
+def render_contract_validation_and_generation(contract_inputs: dict, forecast_date: date):
+    """Render validation status and generation controls for contract line."""
+    all_valid = contract_inputs['all_valid']
+    
+    # Validation Status Card
+    if all_valid:
+        # Calculate preview metrics
+        t1 = datetime.combine(forecast_date, contract_inputs['low1_time'])
+        t2 = datetime.combine(forecast_date, contract_inputs['low2_time'])
+        blocks = spx_blocks_between(t1, t2)
+        
+        if blocks > 0:
+            slope = (contract_inputs['low2_price'] - contract_inputs['low1_price']) / blocks
+            price_change = contract_inputs['low2_price'] - contract_inputs['low1_price']
+            time_span = (t2 - t1).total_seconds() / 3600  # hours
+            
+            st.markdown(
+                f"""
+                <div class="glass-card" style="background:rgba(52,199,89,0.1);border-color:#34C759;">
+                    <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4);">
+                        <span style="font-size:1.5rem;">✅</span>
+                        <div>
+                            <div style="font-weight:700;color:#34C759;">Contract Line Ready</div>
+                            <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
+                                All inputs validated • Ready to generate projections
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--space-4);">
+                        <div>
+                            <div style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;">Slope/Block</div>
+                            <div style="font-weight:700;font-family:'JetBrains Mono',monospace;">{slope:+.4f}</div>
+                        </div>
+                        <div>
+                            <div style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;">Price Change</div>
+                            <div style="font-weight:700;font-family:'JetBrains Mono',monospace;">${price_change:+.2f}</div>
+                        </div>
+                        <div>
+                            <div style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;">Time Span</div>
+                            <div style="font-weight:700;font-family:'JetBrains Mono',monospace;">{time_span:.1f}h</div>
+                        </div>
+                        <div>
+                            <div style="font-size:var(--text-xs);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;">SPX Blocks</div>
+                            <div style="font-weight:700;font-family:'JetBrains Mono',monospace;">{blocks}</div>
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        else:
+            st.error("⚠️ Invalid time span - Low #2 must be significantly after Low #1")
+            all_valid = False
+    else:
+        issues = []
+        if not contract_inputs['low1_valid']:
+            issues.append("Low Point #1")
+        if not contract_inputs['low2_valid']:
+            issues.append("Low Point #2")
+            
+        st.markdown(
+            f"""
+            <div class="glass-card" style="background:rgba(255,149,0,0.1);border-color:#FF9500;">
+                <div style="display:flex;align-items:center;gap:var(--space-3);">
+                    <span style="font-size:1.5rem;">⚠️</span>
+                    <div>
+                        <div style="font-weight:700;color:#FF9500;">Validation Issues</div>
+                        <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
+                            Fix issues with: {', '.join(issues)}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    # Generation Controls
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        if all_valid:
+            if st.button("🚀 Generate Contract Line", use_container_width=True, type="primary"):
+                return 'generate'
+        else:
+            st.button("🚀 Fix Issues First", use_container_width=True, disabled=True)
+    
+    with col2:
+        if 'contract_data' in st.session_state:
+            if st.button("🗑️ Clear Contract", use_container_width=True):
+                del st.session_state.contract_data
+                st.rerun()
+        else:
+            st.button("🗑️ No Contract Data", use_container_width=True, disabled=True)
+    
+    return 'wait' if all_valid else 'invalid'
+
+def generate_enhanced_contract_line(contract_inputs: dict, forecast_date: date):
+    """Generate enhanced contract line with comprehensive data."""
+    try:
+        # Calculate base parameters
+        t1 = datetime.combine(forecast_date, contract_inputs['low1_time'])
+        t2 = datetime.combine(forecast_date, contract_inputs['low2_time'])
+        blocks = spx_blocks_between(t1, t2)
+        
+        if blocks <= 0:
+            raise CalculationError("Invalid time span between contract points")
+        
+        slope = (contract_inputs['low2_price'] - contract_inputs['low1_price']) / blocks
+        
+        # Generate time slots based on RTH preference
+        time_slots = SPX_SLOTS if contract_inputs['rth_only'] else EXTENDED_SLOTS
+        
+        # Build contract data
+        contract_rows = []
+        for time_slot in time_slots:
+            try:
+                hour, minute = map(int, time_slot.split(":"))
+                target_datetime = datetime.combine(forecast_date, time(hour, minute))
+                slot_blocks = spx_blocks_between(t1, target_datetime)
+                
+                projected_price = contract_inputs['low1_price'] + (slope * slot_blocks)
+                tick_rounded = round_to_tick(projected_price)
+                
+                contract_rows.append({
+                    'Time': time_slot,
+                    'Projected': tick_rounded,
+                    'Blocks': slot_blocks,
+                    'Slope_Applied': slope * slot_blocks,
+                    'Base_Price': contract_inputs['low1_price']
+                })
+            except Exception:
+                continue
+        
+        if not contract_rows:
+            raise CalculationError("No valid contract projections generated")
+        
+        # Create enhanced DataFrame
+        contract_df = pd.DataFrame(contract_rows)
+        contract_df['TS'] = pd.to_datetime(BASELINE_DATE_STR + " " + contract_df['Time'])
+        
+        # Add metadata
+        contract_df.attrs.update({
+            'anchor_time': t1,
+            'anchor_price': contract_inputs['low1_price'],
+            'slope_per_block': slope,
+            'strategy_label': contract_inputs['strategy_label'],
+            'forecast_date': forecast_date,
+            'generated_at': datetime.now(),
+            'rth_only': contract_inputs['rth_only'],
+            'low1_time': contract_inputs['low1_time'],
+            'low1_price': contract_inputs['low1_price'],
+            'low2_time': contract_inputs['low2_time'],
+            'low2_price': contract_inputs['low2_price']
+        })
+        
+        # Store in session state
+        st.session_state.contract_data = {
+            'dataframe': contract_df,
+            'config': contract_inputs,
+            'metadata': {
+                'slope': slope,
+                'blocks_span': blocks,
+                'price_change': contract_inputs['low2_price'] - contract_inputs['low1_price'],
+                'time_span_hours': (t2 - t1).total_seconds() / 3600
+            }
+        }
+        
+        return contract_df
+        
+    except Exception as e:
+        st.error(f"⚠️ Contract generation failed: {str(e)}")
+        return pd.DataFrame()
+
+def display_contract_line_results():
+    """Display contract line results with premium styling."""
+    if 'contract_data' not in st.session_state:
+        return
+    
+    contract_data = st.session_state.contract_data
+    contract_df = contract_data['dataframe']
+    metadata = contract_data['metadata']
+    config = contract_data['config']
+    
+    st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
+    
+    # Results Header
+    st.markdown(
+        f"""
+        <div class="premium-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);">
+                <div>
+                    <div style="font-weight:700;font-size:var(--text-2xl);color:var(--primary);">
+                        📋 Contract Line Generated
+                    </div>
+                    <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
+                        Strategy: {config['strategy_label']} • 
+                        {len(contract_df)} projections • 
+                        Generated: {contract_df.attrs['generated_at'].strftime('%H:%M:%S')}
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:var(--text-lg);font-weight:600;">${contract_df['Projected'].min():.2f} - ${contract_df['Projected'].max():.2f}</div>
+                    <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Price Range</div>
+                </div>
+            </div>
+            
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:var(--space-4);
+                 background:var(--bg-secondary);padding:var(--space-4);border-radius:var(--radius-lg);">
+                <div style="text-align:center;">
+                    <div style="font-size:var(--text-xl);font-weight:700;font-family:'JetBrains Mono',monospace;">
+                        {metadata['slope']:+.4f}
+                    </div>
+                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">SLOPE/BLOCK</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:var(--text-xl);font-weight:700;font-family:'JetBrains Mono',monospace;">
+                        ${metadata['price_change']:+.2f}
+                    </div>
+                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">PRICE CHANGE</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:var(--text-xl);font-weight:700;font-family:'JetBrains Mono',monospace;">
+                        {metadata['time_span_hours']:.1f}h
+                    </div>
+                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">TIME SPAN</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:var(--text-xl);font-weight:700;font-family:'JetBrains Mono',monospace;">
+                        {metadata['blocks_span']}
+                    </div>
+                    <div style="font-size:var(--text-xs);color:var(--text-tertiary);">SPX BLOCKS</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Contract Data Table
+    st.markdown("### 📊 Contract Projections")
+    
+    display_columns = ['Time', 'Projected', 'Blocks']
+    st.dataframe(
+        contract_df[display_columns],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            'Time': st.column_config.TextColumn('Time', width='small'),
+            'Projected': st.column_config.NumberColumn('Projected ($)', format='$%.2f'),
+            'Blocks': st.column_config.NumberColumn('Blocks', width='small')
+        }
+    )
+
+def create_contract_lookup_tool():
+    """Create real-time contract lookup tool."""
+    if 'contract_data' not in st.session_state:
+        return
+    
+    contract_data = st.session_state.contract_data
+    contract_df = contract_data['dataframe']
+    
+    st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
+    
+    st.markdown(
+        """
+        <div class="glass-card">
+            <div style="font-weight:700;margin-bottom:var(--space-3);color:var(--primary);">
+                🔍 Real-time Contract Lookup
+            </div>
+            <div style="color:var(--text-tertiary);font-size:var(--text-sm);margin-bottom:var(--space-4);">
+                Enter any time to get the projected contract price for that moment
+            </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        lookup_time = st.time_input(
+            "Lookup Time",
+            value=time(9, 30),
+            step=300,
+            key="contract_lookup_time",
+            help="Enter time to get contract projection"
+        )
+    
+    with col2:
+        # Calculate projection for lookup time
+        forecast_date = contract_df.attrs.get('forecast_date', date.today())
+        anchor_time = contract_df.attrs.get('anchor_time')
+        slope = contract_df.attrs.get('slope_per_block', 0)
+        base_price = contract_df.attrs.get('anchor_price', 0)
+        
+        lookup_datetime = datetime.combine(forecast_date, lookup_time)
+        lookup_blocks = spx_blocks_between(anchor_time, lookup_datetime)
+        lookup_projection = round_to_tick(base_price + (slope * lookup_blocks))
+        
+        # Display result with premium styling
+        color = COLORS['success'] if slope >= 0 else COLORS['error']
+        trend_icon = "📈" if slope >= 0 else "📉"
+        
+        st.markdown(
+            f"""
+            <div style="background:linear-gradient(135deg, rgba(0,122,255,0.1) 0%, rgba(139,92,246,0.1) 100%);
+                 padding:var(--space-4);border-radius:var(--radius-xl);border:1px solid var(--primary);">
+                <div style="display:flex;align-items:center;gap:var(--space-3);">
+                    <span style="font-size:2rem;">{trend_icon}</span>
+                    <div>
+                        <div style="font-size:var(--text-2xl);font-weight:800;color:{color};font-family:'JetBrains Mono',monospace;">
+                            ${lookup_projection:.2f}
+                        </div>
+                        <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
+                            @ {lookup_time.strftime('%H:%M')} • {lookup_blocks} blocks from anchor
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def render_enhanced_contract_section(forecast_date: date):
+    """Main function to render the complete enhanced contract section."""
+    # Section Header
+    render_contract_line_header()
+    
+    # Input Components
+    contract_inputs = create_enhanced_contract_inputs()
+    
+    # Validation and Generation
+    action = render_contract_validation_and_generation(contract_inputs, forecast_date)
+    
+    # Generate if requested
+    if action == 'generate':
+        with st.spinner("🔄 Generating contract line..."):
+            contract_df = generate_enhanced_contract_line(contract_inputs, forecast_date)
+            if not contract_df.empty:
+                st.success("✅ Contract line generated successfully!")
+                st.rerun()
+    
+    # Display results if available
+    display_contract_line_results()
+    
+    # Real-time lookup tool
+    create_contract_lookup_tool()
+    
+    return st.session_state.get('contract_data', {})
+
+# ===== INTEGRATION INTO MAIN FLOW =====
+# Add this to your main application flow after the fan section
+
+st.markdown('<div style="margin:var(--space-12) 0;"></div>', unsafe_allow_html=True)
+
+# Render the enhanced contract section
+contract_results = render_enhanced_contract_section(forecast_date)
