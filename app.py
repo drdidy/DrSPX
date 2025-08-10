@@ -3246,8 +3246,8 @@ def handle_entry_detection_and_export(fan_datasets: dict, forecast_date: date,
 # ===== INTEGRATION SECTION - MAIN APP FLOW =====
 # Add this section after Parts 5A-5E to use the enhanced functions
 
-# Convert existing anchors to enhanced format
-if anchors:
+# Convert existing anchors to enhanced format  
+if 'anchors' in locals() and anchors:
     previous_anchors_enhanced = {
         'date': anchors[0],
         'high': anchors[1], 
