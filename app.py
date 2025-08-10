@@ -1981,7 +1981,7 @@ def render_locked_anchor_summary():
     locked_data = st.session_state.locked_anchor_data
     locked_time = locked_data['locked_at'].strftime('%H:%M:%S')
     
- st.markdown(
+        st.markdown(
     f"""
     <div class="premium-card" style="background: rgba(0, 122, 255, 0.05); border-color: #007AFF;">
         <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4);">
