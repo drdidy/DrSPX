@@ -621,12 +621,12 @@ st.set_page_config(
 # Apply the premium CSS
 st.markdown(APPLE_CSS, unsafe_allow_html=True)
 
-# ═══════════════════════════ WEEKLY ANCHOR COMPUTATION ═══════════════════════════
-# (Preserving your exact anchor calculation logic)
+# ═══════════════════════════ WEEKLY ANCHORS COMPUTATION ═══════════════════════════
+# (Preserving your exact computation logic)
 
 @st.cache_data(ttl=600)
 def compute_weekly_anchors(forecast: date):
-    """Upper = max(Mon High, Tue High). Lower = min(Mon Low, Tue Low). (preserving your exact logic)"""
+    """Upper = max(Mon High, Tue High). Lower = min(Mon Low, Tue Low). (Preserving your exact logic)"""
     try:
         mon, tue, _ = week_mon_tue_fri_for(forecast)
         start_dt = datetime.combine(mon, time(7, 0), tzinfo=CT)
@@ -699,349 +699,12 @@ def fetch_intraday_day_30m(symbol: str, d: date) -> pd.DataFrame:
     df30["Time"] = df30["dt"].dt.strftime("%H:%M")
     return df30
 
-# ═══════════════════════════ PREMIUM INTERFACE COMPONENTS ═══════════════════════════
-
-def render_hero_header():
-    """Render premium hero header with Apple-Tesla styling"""
-    st.markdown(
-        f"""
-        <div class="hero-header">
-            <div class="hero-content">
-                <div class="brand-title">🍎 {APP_NAME}</div>
-                <div class="brand-subtitle">{PAGE_NAME}</div>
-                <div class="brand-meta">v{VERSION} • Professional AAPL Channel Analysis</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-def render_connection_status():
-    """Render premium connection status with enhanced styling"""
-    st.markdown('<div class="section-header">🔌 Market Data Connection</div>', unsafe_allow_html=True)
-    
-    connection_result = test_alpaca_connection()
-    
-    if connection_result["status"] == "success":
-        st.markdown(
-            f"""
-            <div class="connection-status">
-                <div class="connection-dot"></div>
-                <div>
-                    <div style="font-weight:700;font-size:var(--text-lg);">✅ {connection_result["message"]}</div>
-                    <div style="opacity:0.9;font-size:var(--text-sm);">Live market data • Alpaca API • Real-time processing</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        return True
-    elif connection_result["status"] == "warning":
-        st.markdown(
-            f"""
-            <div class="connection-status" style="background:linear-gradient(90deg, var(--warning) 0%, #F59E0B 100%);">
-                <div class="connection-dot"></div>
-                <div>
-                    <div style="font-weight:700;font-size:var(--text-lg);">⚠️ {connection_result["message"]}</div>
-                    <div style="opacity:0.9;font-size:var(--text-sm);">Limited data access • Some features may be restricted</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        return True
-    else:
-        st.markdown(
-            f"""
-            <div class="connection-status error">
-                <div class="connection-dot"></div>
-                <div>
-                    <div style="font-weight:700;font-size:var(--text-lg);">❌ {connection_result["message"]}</div>
-                    <div style="opacity:0.9;font-size:var(--text-sm);">Check API credentials • Verify network connection</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        return False
-
-def render_premium_sidebar():
-    """Render enhanced sidebar with Apple-Tesla styling"""
-    with st.sidebar:
-        st.markdown(
-            """
-            <div style="text-align:center;padding:var(--space-4);margin-bottom:var(--space-4);
-                 background:linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-                 border-radius:var(--radius-2xl);color:white;">
-                <div style="font-size:var(--text-2xl);font-weight:800;margin-bottom:var(--space-1);">🍎</div>
-                <div style="font-weight:600;">Apple Intelligence</div>
-                <div style="opacity:0.8;font-size:var(--text-sm);">Channel Analysis</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        st.markdown('<div class="section-header" style="font-size:var(--text-lg);">📅 Session Configuration</div>', unsafe_allow_html=True)
-        
-        forecast_date = st.date_input(
-            "Target Trading Session", 
-            value=date.today() + timedelta(days=1),
-            help="Select the date for channel analysis"
-        )
-        
-        # Quick date selection buttons
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📅 Today", use_container_width=True):
-                forecast_date = date.today()
-                st.rerun()
-        with col2:
-            if st.button("➡️ Next Day", use_container_width=True):
-                wd = date.today().weekday()
-                delta = 1 if wd < 4 else (7 - wd)
-                forecast_date = date.today() + timedelta(days=delta)
-                st.rerun()
-        
-        st.markdown('<div style="margin:var(--space-4) 0;"></div>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="section-header" style="font-size:var(--text-lg);">🎯 Detection Parameters</div>', unsafe_allow_html=True)
-        
-        tolerance = st.slider(
-            "Touch Tolerance ($)", 
-            min_value=0.01, 
-            max_value=0.60, 
-            value=0.05, 
-            step=0.01,
-            help="Price tolerance for line touch detection"
-        )
-        
-        st.markdown(
-            f"""
-            <div style="background:rgba(0,122,255,0.1);padding:var(--space-3);border-radius:var(--radius-lg);margin-top:var(--space-3);">
-                <div style="font-weight:600;color:var(--primary);margin-bottom:var(--space-2);">💡 Strategy Notes</div>
-                <div style="color:var(--text-secondary);font-size:var(--text-sm);line-height:1.5;">
-                    • Touch: Low ≤ Line ≤ High ± ${tolerance:.2f}<br>
-                    • Close Above: Close ≥ Line<br>
-                    • Channel Slope: +{SLOPE_PER_BLOCK:.5f}/block
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        return forecast_date, tolerance
-
-def render_weekly_anchors(anchors: dict):
-    """Render premium weekly anchors display"""
-    if not anchors:
-        st.markdown(
-            """
-            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
-                <div style="font-size:2rem;margin-bottom:var(--space-4);">📊</div>
-                <div style="font-weight:600;margin-bottom:var(--space-2);">Anchor Data Unavailable</div>
-                <div style="color:var(--text-tertiary);">Could not compute Monday/Tuesday anchors for AAPL. Try another date or check market data availability.</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        return False
-    
-    st.markdown('<div class="section-header">📊 Weekly Channel Anchors</div>', unsafe_allow_html=True)
-    
-    st.markdown(
-        f"""
-        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);">
-            Channel computation based on Monday/Tuesday extremes with ascending slope projection.
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    # Anchor tiles grid
-    st.markdown('<div class="anchors-grid">', unsafe_allow_html=True)
-    
-    # Monday Anchor Tile
-    st.markdown(
-        f"""
-        <div class="anchor-tile">
-            <div class="anchor-icon">📅</div>
-            <div class="anchor-label">Monday Session</div>
-            <div class="anchor-value" style="color:{COLORS['success']};">${anchors['MonHigh']:.2f}</div>
-            <div class="anchor-meta">High: ${anchors['MonHigh']:.2f} • Low: ${anchors['MonLow']:.2f}</div>
-            <div style="margin-top:var(--space-2);font-size:var(--text-sm);color:var(--text-tertiary);">
-                {anchors['mon_date']}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    # Tuesday Anchor Tile
-    st.markdown(
-        f"""
-        <div class="anchor-tile">
-            <div class="anchor-icon">📈</div>
-            <div class="anchor-label">Tuesday Session</div>
-            <div class="anchor-value" style="color:{COLORS['primary']};">${anchors['TueHigh']:.2f}</div>
-            <div class="anchor-meta">High: ${anchors['TueHigh']:.2f} • Low: ${anchors['TueLow']:.2f}</div>
-            <div style="margin-top:var(--space-2);font-size:var(--text-sm);color:var(--text-tertiary);">
-                {anchors['tue_date']}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Channel configuration summary
-    upper_anchor = "Tuesday" if anchors['TueHigh'] >= anchors['MonHigh'] else "Monday"
-    lower_anchor = "Tuesday" if anchors['TueLow'] <= anchors['MonLow'] else "Monday"
-    
-    st.markdown(
-        f"""
-        <div class="premium-card" style="background:rgba(0,122,255,0.05);border-color:var(--primary);">
-            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-4);">
-                <div>
-                    <div style="font-weight:700;color:var(--primary);margin-bottom:var(--space-2);">📊 Channel Configuration</div>
-                    <div style="color:var(--text-secondary);font-size:var(--text-sm);">
-                        Upper Line: {upper_anchor} High (${anchors['upper_base_price']:.2f})<br>
-                        Lower Line: {lower_anchor} Low (${anchors['lower_base_price']:.2f})
-                    </div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-weight:600;">Slope: +{SLOPE_PER_BLOCK:.5f}</div>
-                    <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Per 30-min block</div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    return True
-
-def render_session_status(forecast_date: date, anchors: dict, channel_df: pd.DataFrame):
-    """Render premium session status with open analysis"""
-    st.markdown('<div class="section-header">📈 Session Status Analysis</div>', unsafe_allow_html=True)
-    
-    # Get opening price
-    open_px = fetch_day_open("AAPL", forecast_date)
-    
-    # Determine session status
-    if open_px is not None and "08:30" in set(channel_df["Time"]):
-        lower0830 = float(channel_df.loc[channel_df["Time"] == "08:30", "LowerLine"].iloc[0])
-        upper0830 = float(channel_df.loc[channel_df["Time"] == "08:30", "UpperLine"].iloc[0])
-        
-        if open_px < lower0830:
-            status_type = "weak"
-            status_text = "Weak Opening"
-            status_desc = "Opened below channel - potential downside bias"
-            status_color = COLORS['error']
-        elif open_px > upper0830:
-            status_type = "strong"
-            status_text = "Strong Opening"
-            status_desc = "Opened above channel - potential upside bias"
-            status_color = COLORS['success']
-        else:
-            status_type = "neutral"
-            status_text = "Neutral Opening"
-            status_desc = "Opened inside channel - range-bound potential"
-            status_color = COLORS['neutral']
-    else:
-        status_type = "neutral"
-        status_text = "Opening Analysis Unavailable"
-        status_desc = "No opening price data available for analysis"
-        status_color = COLORS['neutral']
-        open_px = None
-    
-    # Next slot calculation
-    def get_next_slot():
-        now = datetime.now(tz=CT).strftime("%H:%M")
-        for slot in SLOTS:
-            if slot >= now:
-                return slot
-        return SLOTS[0]
-    
-    next_slot = get_next_slot()
-    next_row = channel_df.loc[channel_df["Time"] == next_slot].iloc[0] if next_slot in set(channel_df["Time"]) else None
-    
-    # Render status display
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.markdown(
-            f"""
-            <div class="premium-card">
-                <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4);">
-                    <div style="width:12px;height:12px;background:{status_color};border-radius:50%;"></div>
-                    <div style="font-weight:700;color:{status_color};font-size:var(--text-xl);">{status_text}</div>
-                </div>
-                <div style="color:var(--text-secondary);margin-bottom:var(--space-3);">{status_desc}</div>
-                {"<div style='font-family:\"JetBrains Mono\",monospace;font-weight:600;'>Open: $" + f"{open_px:.2f}</div>" if open_px else ""}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    
-    with col2:
-        if next_row is not None:
-            st.markdown(
-                f"""
-                <div class="premium-card" style="background:rgba(0,122,255,0.05);">
-                    <div style="font-weight:700;color:var(--primary);margin-bottom:var(--space-3);">🎯 Next Slot: {next_slot}</div>
-                    <div style="display:flex;justify-content:space-between;margin-bottom:var(--space-2);">
-                        <span style="color:var(--text-secondary);">Upper Line:</span>
-                        <span style="font-family:'JetBrains Mono',monospace;font-weight:600;">${next_row["UpperLine"]:.2f}</span>
-                    </div>
-                    <div style="display:flex;justify-content:space-between;">
-                        <span style="color:var(--text-secondary);">Lower Line:</span>
-                        <span style="font-family:'JetBrains Mono',monospace;font-weight:600;">${next_row["LowerLine"]:.2f}</span>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-    
-    return open_px, status_type
-
-# ═══════════════════════════ MAIN INTERFACE RENDERING ═══════════════════════════
-
-# Render hero header
-render_hero_header()
-
-# Test connection and render status
-connection_ok = render_connection_status()
-
-if not connection_ok:
-    st.stop()
-
-# Render premium sidebar
-forecast_date, tolerance = render_premium_sidebar()
-
-# Compute weekly anchors
-weekly_anchors = compute_weekly_anchors(forecast_date)
-
-# Render weekly anchors
-anchors_ok = render_weekly_anchors(weekly_anchors)
-
-if not anchors_ok:
-    st.stop()
-
-# Generate channel data for the forecast date
-channel_df = channel_for_day(forecast_date, weekly_anchors)
-
-# Render session status
-open_price, session_status = render_session_status(forecast_date, weekly_anchors, channel_df)
-
-# ═══════════════════════════ ADVANCED ANALYTICS & SIGNALS ═══════════════════════════
+# ═══════════════════════════ SIGNAL DETECTION LOGIC ═══════════════════════════
+# (Preserving your exact signal detection logic)
 
 def first_touch_close_above(day: date, anchors: dict, tolerance: float):
-    """
-    Return first event where bar touches a line AND closes above it.
-    Touch: Low<=Line<=High ± tol. Close condition: Close>=Line.
-    (Preserving your exact detection logic)
-    """
+    """Return first event where bar touches a line AND closes above it. (Preserving your exact logic)
+       Touch: Low<=Line<=High ± tol. Close condition: Close>=Line."""
     intr = fetch_intraday_day_30m("AAPL", day)
     if intr.empty:
         return {"Day": day, "Time": "—", "Line": "—", "Close": "—", "Line Px": "—", "Δ": "—"}
@@ -1077,107 +740,11 @@ def signals_mon_to_fri(forecast: date, anchors: dict, tolerance: float) -> pd.Da
     df["Day"] = df["Day"].apply(lambda d: d.strftime("%a %Y-%m-%d") if isinstance(d, date) else d)
     return df
 
-def render_signals_analysis(forecast_date: date, anchors: dict, tolerance: float):
-    """Render premium signals analysis section"""
-    st.markdown(
-        """
-        <div class="section-header">🎯 Signal Analysis (Mon–Fri)</div>
-        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);">
-            Professional detection of touch + close above signals across the trading week.
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    with st.spinner("🔄 Analyzing signals across trading week..."):
-        signals_df = signals_mon_to_fri(forecast_date, anchors, tolerance)
-    
-    # Enhanced signals display
-    st.markdown(
-        f"""
-        <div class="premium-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-4);">
-                <div>
-                    <div style="font-weight:700;color:var(--primary);font-size:var(--text-xl);">
-                        📊 Weekly Signal Detection
-                    </div>
-                    <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
-                        Touch tolerance: ${tolerance:.2f} • Close above condition required
-                    </div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-weight:600;">Detection Rule</div>
-                    <div style="color:var(--text-secondary);font-size:var(--text-sm);">Touch + Close Above</div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    # Style the dataframe with professional formatting
-    def style_delta_column(s: pd.Series):
-        styled = []
-        for v in s:
-            if isinstance(v, (int, float)) and v == v:  # not NaN
-                styled.append("color:#34C759;font-weight:600")  # positive = green
-            else:
-                styled.append("color:var(--text-tertiary)")
-        return styled
-    
-    # Apply styling to the signals dataframe
-    styled_signals = signals_df.style.apply(style_delta_column, subset=["Δ"])
-    
-    st.dataframe(
-        styled_signals,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            'Day': st.column_config.TextColumn('Trading Day', width='medium'),
-            'Time': st.column_config.TextColumn('Time', width='small'),
-            'Line': st.column_config.TextColumn('Line Type', width='small'),
-            'Close': st.column_config.NumberColumn('Close Price', format='$%.2f'),
-            'Line Px': st.column_config.NumberColumn('Line Price', format='$%.2f'),
-            'Δ': st.column_config.NumberColumn('Delta', format='$%.2f', help='Close - Line Price')
-        }
-    )
-    
-    # Signal analytics summary
-    valid_signals = signals_df[signals_df['Time'] != '—']
-    total_signals = len(valid_signals)
-    
-    if total_signals > 0:
-        avg_delta = valid_signals['Δ'].mean() if valid_signals['Δ'].notna().any() else 0
-        upper_signals = len(valid_signals[valid_signals['Line'] == 'Upper'])
-        lower_signals = len(valid_signals[valid_signals['Line'] == 'Lower'])
-        
-        # Analytics grid
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("📊 Total Signals", total_signals, delta=f"Out of 5 days")
-        
-        with col2:
-            st.metric("📈 Upper Signals", upper_signals, delta="Breakout signals")
-        
-        with col3:
-            st.metric("📉 Lower Signals", lower_signals, delta="Support signals")
-        
-        with col4:
-            if avg_delta > 0:
-                st.metric("💰 Avg Delta", f"${avg_delta:.2f}", delta="Above line")
-            else:
-                st.metric("💰 Avg Delta", "—")
-    
-    return signals_df
-
-# ═══════════════════════════ APPROACHING ALERTS SYSTEM ═══════════════════════════
+# ═══════════════════════════ APPROACHING ALERT LOGIC ═══════════════════════════
+# (Preserving your exact alert logic)
 
 def approaching_alert_for_current_bar(d: date, anchors: dict, tolerance: float) -> str | None:
-    """
-    Soft pre-close alert: approaching a line (no streaming)
-    (Preserving your exact alert logic)
-    """
+    """Soft pre-close alert: approaching a line (no streaming) (Preserving your exact logic)"""
     try:
         now_ct = datetime.now(tz=CT)
         if now_ct.date() != d: 
@@ -1207,7 +774,7 @@ def approaching_alert_for_current_bar(d: date, anchors: dict, tolerance: float) 
         end_dt = now_ct - timedelta(minutes=30)
         df = fetch_history_1m("AAPL", start_dt, end_dt)
         if df.empty: 
-            return "warn|⚠️ Cannot get recent price data"
+            return "Cannot get recent price data"
         px = float(df.iloc[-1]["Close"])
 
         note = []
@@ -1217,136 +784,383 @@ def approaching_alert_for_current_bar(d: date, anchors: dict, tolerance: float) 
             note.append(f"near Upper {up:.2f} (Δ {px - up:+.2f})")
         if not note: 
             return None
-        return f"approaching|Approaching: {' • '.join(note)} (~30min delay)"
+        return f"Approaching: {' • '.join(note)} (~30min delay)"
     except Exception as e:
-        return f"error|⚠️ Alert unavailable: {str(e)}"
+        return f"Alert unavailable: {str(e)}"
 
-def render_live_alerts(forecast_date: date, anchors: dict, tolerance: float):
-    """Render live approaching alerts with premium styling"""
-    alert_result = approaching_alert_for_current_bar(forecast_date, anchors, tolerance)
-    
-    if alert_result:
-        alert_type, alert_message = alert_result.split("|", 1)
-        
-        if alert_type == "approaching":
-            st.markdown(
-                f"""
-                <div class="alert-card">
-                    <div style="font-size:1.2rem;">⚠️</div>
-                    <div>
-                        <div style="font-weight:700;margin-bottom:var(--space-1);">Price Alert</div>
-                        <div style="font-size:var(--text-sm);">{alert_message}</div>
-                        <div style="font-size:var(--text-xs);opacity:0.8;margin-top:var(--space-1);">
-                            Provisional alert • Confirms on bar close
-                        </div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        elif alert_type in ["warn", "error"]:
-            st.markdown(
-                f"""
-                <div style="background:rgba(255,59,48,0.1);border:1px solid rgba(255,59,48,0.3);
-                     border-radius:var(--radius-lg);padding:var(--space-3);margin:var(--space-4) 0;
-                     color:var(--error);display:flex;align-items:center;gap:var(--space-2);">
-                    <div>{alert_message}</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+# ═══════════════════════════ MAIN APPLICATION INTERFACE ═══════════════════════════
 
-# ═══════════════════════════ DAILY LINE SCHEDULE ═══════════════════════════
+# Hero Header
+st.markdown(
+    f"""
+    <div class="hero-header">
+        <div class="hero-content">
+            <div class="brand-title">{APP_NAME} — {PAGE_NAME}</div>
+            <div class="brand-subtitle">Professional AAPL Intraday Analysis</div>
+            <div class="brand-meta">v{VERSION} • {COMPANY}</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
-def render_daily_schedule(channel_df: pd.DataFrame, forecast_date: date):
-    """Render daily line schedule with premium formatting"""
+# ═══════════════════════════ CONNECTION STATUS ═══════════════════════════
+
+st.markdown('<div class="section-header">🔌 Market Data Connection</div>', unsafe_allow_html=True)
+
+connection_result = test_alpaca_connection()
+if connection_result["status"] == "success":
     st.markdown(
-        """
-        <div class="section-header">📅 Daily Line Schedule</div>
-        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);">
-            Precise upper and lower channel lines for each 30-minute trading slot.
+        f"""
+        <div class="connection-status">
+            <div class="connection-dot"></div>
+            <div>
+                <div style="font-weight:700;font-size:var(--text-lg);">✅ {connection_result['message']}</div>
+                <div style="opacity:0.9;">Alpaca Markets • Live account • Real-time data feed active</div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True
     )
+elif connection_result["status"] == "warning":
+    st.markdown(
+        f"""
+        <div class="connection-status" style="background:linear-gradient(90deg,var(--warning) 0%,#F59E0B 100%);">
+            <div class="connection-dot"></div>
+            <div>
+                <div style="font-weight:700;font-size:var(--text-lg);">⚠️ {connection_result['message']}</div>
+                <div style="opacity:0.9;">Limited data access - functionality may be reduced</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown(
+        f"""
+        <div class="connection-status error">
+            <div class="connection-dot"></div>
+            <div>
+                <div style="font-weight:700;font-size:var(--text-lg);">❌ {connection_result['message']}</div>
+                <div style="opacity:0.9;">Check Alpaca credentials and try again</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.stop()
+
+# ═══════════════════════════ SIDEBAR CONFIGURATION ═══════════════════════════
+
+with st.sidebar:
+    st.markdown('<div class="section-header">📅 Session Configuration</div>', unsafe_allow_html=True)
     
-    # Schedule summary
-    upper_range = f"${channel_df['UpperLine'].min():.2f} - ${channel_df['UpperLine'].max():.2f}"
-    lower_range = f"${channel_df['LowerLine'].min():.2f} - ${channel_df['LowerLine'].max():.2f}"
-    channel_width = channel_df['UpperLine'].iloc[0] - channel_df['LowerLine'].iloc[0]
+    forecast_date = st.date_input(
+        "Target Session", 
+        value=date.today() + timedelta(days=1),
+        help="Select the trading session to analyze"
+    )
+    
+    # Quick date selection
+    col_today, col_next = st.columns(2)
+    with col_today:
+        if st.button("📅 Today", use_container_width=True):
+            forecast_date = date.today()
+            st.rerun()
+    with col_next:
+        if st.button("📈 Next Trading Day", use_container_width=True):
+            wd = date.today().weekday()
+            delta = 1 if wd < 4 else (7 - wd)
+            forecast_date = date.today() + timedelta(days=delta)
+            st.rerun()
+    
+    st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="section-header">🎯 Detection Settings</div>', unsafe_allow_html=True)
+    
+    tolerance = st.slider(
+        "Touch Tolerance ($)", 
+        min_value=0.01, 
+        max_value=0.60, 
+        value=0.05, 
+        step=0.01,
+        help="Price tolerance for line touch detection"
+    )
     
     st.markdown(
         f"""
-        <div class="premium-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-4);">
-                <div>
-                    <div style="font-weight:700;color:var(--primary);font-size:var(--text-xl);">
-                        📊 Channel Analysis
-                    </div>
-                    <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
-                        {len(channel_df)} time slots • {forecast_date}
-                    </div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-weight:600;">Channel Width</div>
-                    <div style="color:var(--success);font-size:var(--text-lg);">${channel_width:.2f}</div>
-                </div>
+        <div style="background:var(--surface);padding:var(--space-3);border-radius:var(--radius-lg);
+             border:1px solid var(--border);margin-top:var(--space-4);">
+            <div style="font-weight:600;margin-bottom:var(--space-2);">📊 Current Settings</div>
+            <div style="color:var(--text-secondary);font-size:var(--text-sm);">
+                Target: {forecast_date.strftime('%A, %B %d, %Y')}<br>
+                Tolerance: ±${tolerance:.2f}<br>
+                Timezone: Chicago (CT)
             </div>
         </div>
         """,
         unsafe_allow_html=True
     )
-    
-    # Enhanced schedule metrics
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown(
-            f"""
-            <div style="text-align:center;padding:var(--space-4);background:var(--bg-secondary);border-radius:var(--radius-lg);">
-                <div style="font-weight:700;color:var(--success);font-size:var(--text-lg);">{upper_range}</div>
-                <div style="font-size:var(--text-xs);color:var(--text-tertiary);">UPPER RANGE</div>
+
+# ═══════════════════════════ WEEKLY ANCHORS DISPLAY ═══════════════════════════
+
+st.markdown('<div class="section-header">⚓ Weekly Anchors (Mon/Tue)</div>', unsafe_allow_html=True)
+
+# Compute weekly anchors
+weekly_anchors = compute_weekly_anchors(forecast_date)
+if not weekly_anchors:
+    st.markdown(
+        """
+        <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+            <div style="font-size:2rem;margin-bottom:var(--space-4);">⚠️</div>
+            <div style="font-weight:600;margin-bottom:var(--space-2);">Could not compute Monday/Tuesday anchors for AAPL</div>
+            <div style="color:var(--text-tertiary);">Try another date or check if market data is available</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.stop()
+
+# Display anchor tiles
+st.markdown(
+    f"""
+    <div class="anchors-grid">
+        <div class="anchor-tile">
+            <div class="anchor-icon" style="color:{COLORS['success']};">📈</div>
+            <div class="anchor-label">Monday Session</div>
+            <div class="anchor-value" style="color:{COLORS['success']};">${weekly_anchors['MonHigh']:.2f}</div>
+            <div class="anchor-meta">
+                High • Low: ${weekly_anchors['MonLow']:.2f}<br>
+                {weekly_anchors['mon_date'].strftime('%B %d, %Y')}
             </div>
-            """,
-            unsafe_allow_html=True
-        )
-    
-    with col2:
-        st.markdown(
-            f"""
-            <div style="text-align:center;padding:var(--space-4);background:var(--bg-secondary);border-radius:var(--radius-lg);">
-                <div style="font-weight:700;color:var(--error);font-size:var(--text-lg);">{lower_range}</div>
-                <div style="font-size:var(--text-xs);color:var(--text-tertiary);">LOWER RANGE</div>
+        </div>
+        
+        <div class="anchor-tile">
+            <div class="anchor-icon" style="color:{COLORS['primary']};">📊</div>
+            <div class="anchor-label">Tuesday Session</div>
+            <div class="anchor-value" style="color:{COLORS['primary']};">${weekly_anchors['TueHigh']:.2f}</div>
+            <div class="anchor-meta">
+                High • Low: ${weekly_anchors['TueLow']:.2f}<br>
+                {weekly_anchors['tue_date'].strftime('%B %d, %Y')}
             </div>
-            """,
-            unsafe_allow_html=True
-        )
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# ═══════════════════════════ SESSION STATUS ═══════════════════════════
+
+st.markdown('<div class="section-header">📊 Session Status</div>', unsafe_allow_html=True)
+
+# Generate channel data
+channel_df = channel_for_day(forecast_date, weekly_anchors)
+
+# Get opening price and determine strength
+open_price = fetch_day_open("AAPL", forecast_date)
+status_info = {"badge_class": "neutral", "status_text": "Open: Neutral", "description": "No opening data available"}
+
+if open_price is not None and "08:30" in set(channel_df["Time"]):
+    lower_0830 = float(channel_df.loc[channel_df["Time"] == "08:30", "LowerLine"].iloc[0])
+    upper_0830 = float(channel_df.loc[channel_df["Time"] == "08:30", "UpperLine"].iloc[0])
     
-    with col3:
-        slope_direction = "Ascending" if SLOPE_PER_BLOCK > 0 else "Descending"
-        st.markdown(
-            f"""
-            <div style="text-align:center;padding:var(--space-4);background:var(--bg-secondary);border-radius:var(--radius-lg);">
-                <div style="font-weight:700;color:var(--primary);font-size:var(--text-lg);">{SLOPE_PER_BLOCK:.5f}</div>
-                <div style="font-size:var(--text-xs);color:var(--text-tertiary);">SLOPE/BLOCK</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    
-    # Enhanced dataframe display
-    st.dataframe(
-        channel_df[["Time", "LowerLine", "UpperLine"]],
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            'Time': st.column_config.TextColumn('Time Slot', width='small'),
-            'LowerLine': st.column_config.NumberColumn('Lower Line', format='$%.2f'),
-            'UpperLine': st.column_config.NumberColumn('Upper Line', format='$%.2f')
+    if open_price < lower_0830:
+        status_info = {
+            "badge_class": "weak", 
+            "status_text": "Open: Weak", 
+            "description": f"${open_price:.2f} opened below channel (${lower_0830:.2f})"
         }
+    elif open_price > upper_0830:
+        status_info = {
+            "badge_class": "strong", 
+            "status_text": "Open: Strong", 
+            "description": f"${open_price:.2f} opened above channel (${upper_0830:.2f})"
+        }
+    else:
+        status_info = {
+            "badge_class": "neutral", 
+            "status_text": "Open: Neutral", 
+            "description": f"${open_price:.2f} opened inside channel (${lower_0830:.2f} - ${upper_0830:.2f})"
+        }
+
+# Next slot prediction
+def next_slot_label() -> str:
+    now = datetime.now(tz=CT).strftime("%H:%M")
+    for s in SLOTS:
+        if s >= now:
+            return s
+    return SLOTS[0]
+
+next_slot = next_slot_label()
+next_slot_info = None
+if next_slot in set(channel_df["Time"]):
+    next_row = channel_df.loc[channel_df["Time"] == next_slot].iloc[0]
+    next_slot_info = {
+        "time": next_slot,
+        "lower": next_row["LowerLine"],
+        "upper": next_row["UpperLine"]
+    }
+
+# Display session status
+st.markdown(
+    f"""
+    <div class="premium-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-4);">
+            <div>
+                <div class="status-badge {status_info['badge_class']}">
+                    {status_info['status_text']}
+                </div>
+                <div style="color:var(--text-secondary);font-size:var(--text-sm);margin-top:var(--space-2);">
+                    {status_info['description']}
+                </div>
+            </div>
+            
+            {f'''
+            <div class="next-slot">
+                Next {next_slot_info['time']} → Lower ${next_slot_info['lower']:.2f} • Upper ${next_slot_info['upper']:.2f}
+            </div>
+            ''' if next_slot_info else ''}
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# ═══════════════════════════ APPROACHING ALERT ═══════════════════════════
+
+alert_message = approaching_alert_for_current_bar(forecast_date, weekly_anchors, tolerance)
+if alert_message and "Cannot get" not in alert_message and "unavailable" not in alert_message:
+    st.markdown(
+        f"""
+        <div class="alert-card">
+            <div style="font-size:1.2rem;">⚠️</div>
+            <div>
+                <div style="font-weight:700;">{alert_message}</div>
+                <div style="font-size:var(--text-sm);opacity:0.8;">Provisional • Confirms on bar close</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-# ═══════════════════════════ PREMIUM EXPORT SYSTEM ═══════════════════════════
+# ═══════════════════════════ SIGNALS TABLE ═══════════════════════════
+
+st.markdown('<div class="section-header">🎯 Signals Analysis (Mon-Fri)</div>', unsafe_allow_html=True)
+
+st.markdown(
+    """
+    <div style="color:var(--text-secondary);margin-bottom:var(--space-4);font-size:var(--text-lg);">
+        Touch + Close Above detection across the trading week. 
+        Shows first qualifying signal per day with precise delta measurements.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# Generate signals data
+signals_df = signals_mon_to_fri(forecast_date, weekly_anchors, tolerance)
+
+# Enhanced signals display
+def style_signals_table(df):
+    """Style the signals table with colors"""
+    def style_delta(s):
+        styled = []
+        for v in s:
+            if isinstance(v, (int, float)) and v == v:  # not NaN
+                styled.append("color:#16A34A;font-weight:600")  # positive = green
+            else:
+                styled.append("color:#6B7280")
+        return styled
+    
+    def style_line(s):
+        styled = []
+        for v in s:
+            if v == "Lower":
+                styled.append("color:#00D4AA;font-weight:600")
+            elif v == "Upper":
+                styled.append("color:#FF6B6B;font-weight:600")
+            else:
+                styled.append("color:#6B7280")
+        return styled
+    
+    return df.style.apply(style_delta, subset=["Δ"]).apply(style_line, subset=["Line"])
+
+# Display signals table
+styled_signals = style_signals_table(signals_df)
+st.dataframe(
+    styled_signals, 
+    use_container_width=True, 
+    hide_index=True,
+    column_config={
+        'Day': st.column_config.TextColumn('Day', width='medium'),
+        'Time': st.column_config.TextColumn('Time', width='small'),
+        'Line': st.column_config.TextColumn('Line', width='small'),
+        'Close': st.column_config.NumberColumn('Close ($)', format='$%.2f'),
+        'Line Px': st.column_config.NumberColumn('Line Price ($)', format='$%.2f'),
+        'Δ': st.column_config.NumberColumn('Delta ($)', format='$%.2f')
+    }
+)
+
+# Signals summary
+signal_count = len(signals_df[signals_df['Time'] != '—'])
+st.markdown(
+    f"""
+    <div style="background:rgba(0,122,255,0.1);padding:var(--space-3);border-radius:var(--radius-lg);
+         margin-top:var(--space-4);border:1px solid rgba(0,122,255,0.2);">
+        <div style="font-weight:600;color:{COLORS['primary']};margin-bottom:var(--space-1);">📊 Analysis Summary</div>
+        <div style="color:var(--text-secondary);font-size:var(--text-sm);">
+            {signal_count} signals detected • Tolerance: ±${tolerance:.2f} • 
+            Strategy: Touch + Close Above
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# ═══════════════════════════ DAILY LINE SCHEDULE ═══════════════════════
+
+st.markdown('<div class="section-header">📋 Daily Line Schedule</div>', unsafe_allow_html=True)
+
+st.markdown(
+    f"""
+    <div style="color:var(--text-secondary);margin-bottom:var(--space-4);font-size:var(--text-lg);">
+        Projected upper and lower channel lines for {forecast_date.strftime('%A, %B %d, %Y')}. 
+        Lines are calculated using your exact slope methodology.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# Display the daily schedule
+st.dataframe(
+    channel_df[["Time", "LowerLine", "UpperLine"]], 
+    use_container_width=True, 
+    hide_index=True,
+    column_config={
+        'Time': st.column_config.TextColumn('Time', width='small'),
+        'LowerLine': st.column_config.NumberColumn('Lower Line ($)', format='$%.2f'),
+        'UpperLine': st.column_config.NumberColumn('Upper Line ($)', format='$%.2f')
+    }
+)
+
+# Schedule summary
+line_range = channel_df['UpperLine'].max() - channel_df['LowerLine'].min()
+st.markdown(
+    f"""
+    <div style="background:rgba(139,92,246,0.1);padding:var(--space-3);border-radius:var(--radius-lg);
+         margin-top:var(--space-4);border:1px solid rgba(139,92,246,0.2);">
+        <div style="font-weight:600;color:{COLORS['neutral']};margin-bottom:var(--space-1);">📏 Channel Metrics</div>
+        <div style="color:var(--text-secondary);font-size:var(--text-sm);">
+            Range: ${line_range:.2f} • 
+            Lower: ${channel_df['LowerLine'].min():.2f} - ${channel_df['LowerLine'].max():.2f} • 
+            Upper: ${channel_df['UpperLine'].min():.2f} - ${channel_df['UpperLine'].max():.2f}
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# ═══════════════════════════ EXPORT SYSTEM ═══════════════════════════
 
 def create_comprehensive_export_package(channel_df: pd.DataFrame, signals_df: pd.DataFrame, 
                                        anchors: dict, forecast_date: date) -> dict:
