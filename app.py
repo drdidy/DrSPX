@@ -3246,24 +3246,16 @@ def handle_entry_detection_and_export(fan_datasets: dict, forecast_date: date,
 # ===== INTEGRATION SECTION - MAIN APP FLOW =====
 # Add this section after Parts 5A-5E to use the enhanced functions
 
-# Get previous day anchors in enhanced format
-def get_previous_day_anchors_enhanced(forecast_date: date) -> dict:
-    """Get previous day anchors in enhanced format."""
-    # Use the existing function from your original code
-    anchors = get_prev_day_anchors_for(forecast_date)
-    
-    if anchors:
-        prev_date, prev_high, prev_close, prev_low = anchors
-        return {
-            'date': prev_date,
-            'high': prev_high,
-            'close': prev_close,
-            'low': prev_low
-        }
-    return None
-
-# Get enhanced previous anchors (placed after the anchors variable from original code)
-previous_anchors_enhanced = get_previous_day_anchors_enhanced(forecast_date)
+# Convert existing anchors to enhanced format
+if anchors:
+    previous_anchors_enhanced = {
+        'date': anchors[0],
+        'high': anchors[1], 
+        'close': anchors[2],
+        'low': anchors[3]
+    }
+else:
+    previous_anchors_enhanced = None
 
 # ===== ENHANCED ANCHOR INTERFACE =====
 # Step 1: Render anchor header and get defaults
