@@ -2036,7 +2036,7 @@ def handle_anchor_management(anchor_data: dict):
     st.markdown('<div style="margin: var(--space-8) 0;"></div>', unsafe_allow_html=True)
     
     # Create layout columns
-    col_status, col_controls = st.columns([2, 2])
+    col_status, col_controls = st.columns([2, 2], vertical_alignment="center")
     
     with col_status:
         # Render validation status
