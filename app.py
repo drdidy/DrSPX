@@ -2044,8 +2044,7 @@ with col3:
         </div>
         """,
         unsafe_allow_html=True
-    )
-    
+    )   
 return locked_data
 
 def handle_anchor_management(anchor_data: dict):
