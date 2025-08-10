@@ -2636,3 +2636,633 @@ if st.session_state.get("forecasts_generated", False) and anchor_section_results
         forecast_date
     )
 
+# ===== ENTRY DETECTION SYSTEM WITH TP1/TP2 =====
+
+def detect_trading_signals(fan_df: pd.DataFrame, intraday_data: pd.DataFrame, tolerance: float, rule_type: str) -> dict:
+    """
+    Detect trading signals for Entry, TP1, and TP2 levels with premium analytics.
+    Preserves original detection logic with enhanced TP1/TP2 reporting.
+    """
+    if fan_df.empty or intraday_data.empty:
+        return {
+            'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+            'signal_time': '—',
+            'signal_type': '—',
+            'spx_price': '—',
+            'target_price': '—',
+            'delta': '—',
+            'status': 'No Data',
+            'note': 'No intraday data available for detection',
+            'confidence': 0,
+            'tp1_available': '—',
+            'tp2_available': '—'
+        }
+    
+    try:
+        # Merge fan projections with intraday data (preserving original logic)
+        merged = pd.merge(
+            fan_df[['Time', 'Entry', 'TP1', 'TP2']], 
+            intraday_data[['Time', 'Close']], 
+            on='Time', 
+            how='inner'
+        )
+        
+        if merged.empty:
+            return {
+                'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+                'signal_time': '—',
+                'signal_type': '—',
+                'spx_price': '—',
+                'target_price': '—',
+                'delta': '—',
+                'status': 'No Match',
+                'note': 'No time alignment between projections and market data',
+                'confidence': 0,
+                'tp1_available': '—',
+                'tp2_available': '—'
+            }
+        
+        # Enhanced detection logic for Entry/TP1/TP2
+        for _, row in merged.iterrows():
+            spx_close = float(row['Close'])
+            entry_level = float(row['Entry'])
+            tp1_level = float(row['TP1'])
+            tp2_level = float(row['TP2'])
+            
+            candidates = []
+            
+            # Entry signal detection (preserving original logic)
+            if rule_type.startswith("Close"):
+                entry_valid = (spx_close <= entry_level and (entry_level - spx_close) <= tolerance)
+            else:
+                entry_valid = abs(spx_close - entry_level) <= tolerance
+            
+            if entry_valid:
+                delta = abs(spx_close - entry_level)
+                confidence = max(0, 100 - (delta / tolerance * 100))
+                candidates.append({
+                    'type': 'Entry ↓',
+                    'target_price': entry_level,
+                    'delta': delta,
+                    'confidence': confidence,
+                    'priority': 1  # Highest priority
+                })
+            
+            # TP1 signal detection
+            if rule_type.startswith("Close"):
+                tp1_valid = (spx_close >= tp1_level and (spx_close - tp1_level) <= tolerance)
+            else:
+                tp1_valid = abs(spx_close - tp1_level) <= tolerance
+            
+            if tp1_valid:
+                delta = abs(spx_close - tp1_level)
+                confidence = max(0, 100 - (delta / tolerance * 100))
+                candidates.append({
+                    'type': 'TP1 ↑',
+                    'target_price': tp1_level,
+                    'delta': delta,
+                    'confidence': confidence,
+                    'priority': 2
+                })
+            
+            # TP2 signal detection
+            if rule_type.startswith("Close"):
+                tp2_valid = (spx_close >= tp2_level and (spx_close - tp2_level) <= tolerance)
+            else:
+                tp2_valid = abs(spx_close - tp2_level) <= tolerance
+            
+            if tp2_valid:
+                delta = abs(spx_close - tp2_level)
+                confidence = max(0, 100 - (delta / tolerance * 100))
+                candidates.append({
+                    'type': 'TP2 ↑',
+                    'target_price': tp2_level,
+                    'delta': delta,
+                    'confidence': confidence,
+                    'priority': 3
+                })
+            
+            # Return first (earliest) signal found, prioritizing Entry
+            if candidates:
+                best = min(candidates, key=lambda x: (x['priority'], x['delta']))
+                
+                # Calculate TP availability
+                tp1_dist = abs(spx_close - tp1_level)
+                tp2_dist = abs(spx_close - tp2_level)
+                tp1_available = "✅" if tp1_dist <= tolerance else f"${tp1_dist:.2f}"
+                tp2_available = "✅" if tp2_dist <= tolerance else f"${tp2_dist:.2f}"
+                
+                return {
+                    'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+                    'signal_time': row['Time'],
+                    'signal_type': best['type'],
+                    'spx_price': round(spx_close, 2),
+                    'target_price': round(best['target_price'], 2),
+                    'delta': round(best['delta'], 2),
+                    'status': 'Signal Detected',
+                    'note': f"Rule: {rule_type[:15]}...",
+                    'confidence': round(best['confidence'], 1),
+                    'tp1_available': tp1_available,
+                    'tp2_available': tp2_available
+                }
+        
+        # No signals found
+        return {
+            'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+            'signal_time': '—',
+            'signal_type': '—',
+            'spx_price': '—',
+            'target_price': '—',
+            'delta': '—',
+            'status': 'No Signal',
+            'note': f'No touches within ${tolerance:.2f} tolerance',
+            'confidence': 0,
+            'tp1_available': '—',
+            'tp2_available': '—'
+        }
+        
+    except Exception as e:
+        return {
+            'fan_type': fan_df.attrs.get('anchor_type', 'UNKNOWN'),
+            'signal_time': '—',
+            'signal_type': '—',
+            'spx_price': '—',
+            'target_price': '—',
+            'delta': '—',
+            'status': 'Error',
+            'note': f'Detection error: {str(e)[:50]}...',
+            'confidence': 0,
+            'tp1_available': '—',
+            'tp2_available': '—'
+        }
+
+def run_trading_detection_analysis(fan_datasets: dict, intraday_data: pd.DataFrame, tolerance: float, rule_type: str) -> pd.DataFrame:
+    """
+    Run comprehensive trading detection analysis across all fans with TP1/TP2.
+    """
+    results = []
+    
+    for _, fan_df in fan_datasets.items():
+        if fan_df is None or fan_df.empty:
+            continue
+        
+        result = detect_trading_signals(fan_df, intraday_data, tolerance, rule_type)
+        results.append(result)
+    
+    if results:
+        results_df = pd.DataFrame(results)
+        
+        # Add metadata for tracking
+        results_df.attrs.update({
+            'detection_timestamp': datetime.now(),
+            'tolerance_used': tolerance,
+            'rule_type_used': rule_type,
+            'total_fans_analyzed': len(results),
+            'tp_system_enabled': True
+        })
+        
+        return results_df
+    
+    return pd.DataFrame()
+
+# ===== TRADING DETECTION DISPLAY =====
+
+def render_trading_detection_header(tolerance: float, rule_type: str):
+    """Render premium trading detection header."""
+    st.markdown(
+        """
+        <div class="section-header">🎯 Trading Signal Detection</div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    st.markdown(
+        f"""
+        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);line-height:1.6;">
+            Real-time detection of Entry, TP1, and TP2 signals based on actual SPX price action. 
+            Optimize your position entry and profit-taking with precision timing.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_trading_configuration(results_df: pd.DataFrame, tolerance: float, rule_type: str):
+    """Render trading detection configuration summary."""
+    if results_df.empty:
+        return
+    
+    detection_time = results_df.attrs.get('detection_timestamp', datetime.now())
+    
+    st.markdown(
+        f"""
+        <div class="glass-card animate-slide-up">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--space-4);">
+                <div>
+                    <div style="font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-1);">Detection Rule</div>
+                    <div style="font-family:'JetBrains Mono',monospace;color:var(--primary);">{rule_type}</div>
+                </div>
+                <div>
+                    <div style="font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-1);">Tolerance</div>
+                    <div style="font-family:'JetBrains Mono',monospace;color:var(--warning);">${tolerance:.2f}</div>
+                </div>
+                <div>
+                    <div style="font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-1);">Analysis Time</div>
+                    <div style="font-family:'JetBrains Mono',monospace;">{detection_time.strftime('%H:%M:%S')}</div>
+                </div>
+                <div>
+                    <div style="font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-1);">TP System</div>
+                    <div style="font-family:'JetBrains Mono',monospace;color:var(--success);">TP1/TP2 Enabled</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def create_trading_status_indicator(status: str) -> str:
+    """Create visual status indicator for trading detection results."""
+    status_map = {
+        'Signal Detected': '🎯',
+        'No Signal': '⭕',
+        'No Data': '📊',
+        'No Match': '🔍',
+        'Error': '⚠️'
+    }
+    
+    icon = status_map.get(status, '❓')
+    return f"{icon} {status}"
+
+def render_trading_results_table(results_df: pd.DataFrame):
+    """Render premium trading detection results table with TP1/TP2."""
+    if results_df.empty:
+        st.markdown(
+            """
+            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+                <div style="font-size:2rem;margin-bottom:var(--space-4);">🎯</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">No Trading Signals</div>
+                <div style="color:var(--text-tertiary);">Generate trading data first to run signal detection</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        return
+    
+    # Prepare display data
+    display_df = results_df.copy()
+    display_df['Status_Display'] = display_df['status'].apply(create_trading_status_indicator)
+    
+    # Enhanced dataframe display with TP1/TP2 columns
+    st.dataframe(
+        display_df[[
+            'fan_type', 'signal_time', 'signal_type', 'spx_price', 
+            'target_price', 'delta', 'confidence', 'tp1_available', 
+            'tp2_available', 'Status_Display', 'note'
+        ]],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            'fan_type': st.column_config.TextColumn('Anchor', width='small'),
+            'signal_time': st.column_config.TextColumn('Time', width='small'),
+            'signal_type': st.column_config.TextColumn('Signal', width='small'),
+            'spx_price': st.column_config.NumberColumn('SPX Price', format='$%.2f'),
+            'target_price': st.column_config.NumberColumn('Target Price', format='$%.2f'),
+            'delta': st.column_config.NumberColumn('Delta', format='$%.2f'),
+            'confidence': st.column_config.ProgressColumn('Confidence', min_value=0, max_value=100, format='%.1f%%'),
+            'tp1_available': st.column_config.TextColumn('TP1 Status', help='TP1 target availability'),
+            'tp2_available': st.column_config.TextColumn('TP2 Status', help='TP2 target availability'),
+            'Status_Display': st.column_config.TextColumn('Status'),
+            'note': st.column_config.TextColumn('Note')
+        }
+    )
+
+def render_trading_analytics(results_df: pd.DataFrame, tolerance: float):
+    """Render advanced trading analytics for detection results."""
+    if results_df.empty:
+        return
+    
+    # Calculate trading analytics
+    signals_detected = len(results_df[results_df['status'] == 'Signal Detected'])
+    total_anchors = len(results_df)
+    detection_rate = (signals_detected / total_anchors * 100) if total_anchors > 0 else 0
+    
+    # Separate by signal type
+    detected_signals = results_df[results_df['status'] == 'Signal Detected']
+    entry_signals = len(detected_signals[detected_signals['signal_type'] == 'Entry ↓'])
+    tp1_signals = len(detected_signals[detected_signals['signal_type'] == 'TP1 ↑'])
+    tp2_signals = len(detected_signals[detected_signals['signal_type'] == 'TP2 ↑'])
+    
+    # Average metrics
+    avg_confidence = detected_signals['confidence'].mean() if not detected_signals.empty else 0
+    avg_delta = detected_signals['delta'].mean() if not detected_signals.empty else 0
+    
+    # First signal
+    first_signal_time = '—'
+    first_signal_type = '—'
+    if not detected_signals.empty:
+        first_signal_time = detected_signals.iloc[0]['signal_time']
+        first_signal_type = detected_signals.iloc[0]['signal_type']
+    
+    st.markdown('<div style="margin:var(--space-6) 0;"></div>', unsafe_allow_html=True)
+    
+    # Analytics grid
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "🎯 Detection Rate",
+            f"{detection_rate:.1f}%",
+            delta=f"{signals_detected}/{total_anchors} anchors"
+        )
+    
+    with col2:
+        if avg_confidence > 0:
+            st.metric(
+                "📊 Avg Confidence",
+                f"{avg_confidence:.1f}%",
+                delta="Signal quality"
+            )
+        else:
+            st.metric("📊 Avg Confidence", "—")
+    
+    with col3:
+        if avg_delta > 0:
+            st.metric(
+                "📏 Avg Delta",
+                f"${avg_delta:.2f}",
+                delta=f"±${tolerance:.2f} tolerance"
+            )
+        else:
+            st.metric("📏 Avg Delta", "—")
+    
+    with col4:
+        st.metric(
+            "⏰ First Signal", 
+            first_signal_time,
+            delta=first_signal_type
+        )
+    
+    # Trading signal breakdown
+    if not detected_signals.empty:
+        st.markdown('<div style="margin:var(--space-4) 0;"></div>', unsafe_allow_html=True)
+        
+        st.markdown(
+            """
+            <div class="premium-card">
+                <div style="font-weight:700;margin-bottom:var(--space-3);color:var(--primary);">
+                    📈 Trading Signal Breakdown
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        col_trading1, col_trading2 = st.columns(2)
+        
+        with col_trading1:
+            # Signal type distribution using columns
+            col_entry, col_tp1, col_tp2 = st.columns(3)
+            
+            with col_entry:
+                st.markdown(
+                    f"""
+                    <div style="text-align:center;padding:var(--space-3);background:rgba(255,59,48,0.1);border-radius:var(--radius-lg);">
+                        <div style="font-size:var(--text-2xl);font-weight:700;color:#FF3B30;">{entry_signals}</div>
+                        <div style="font-size:var(--text-sm);color:var(--text-tertiary);">Entry</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            
+            with col_tp1:
+                st.markdown(
+                    f"""
+                    <div style="text-align:center;padding:var(--space-3);background:rgba(255,149,0,0.1);border-radius:var(--radius-lg);">
+                        <div style="font-size:var(--text-2xl);font-weight:700;color:#FF9500;">{tp1_signals}</div>
+                        <div style="font-size:var(--text-sm);color:var(--text-tertiary);">TP1</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            
+            with col_tp2:
+                st.markdown(
+                    f"""
+                    <div style="text-align:center;padding:var(--space-3);background:rgba(52,199,89,0.1);border-radius:var(--radius-lg);">
+                        <div style="font-size:var(--text-2xl);font-weight:700;color:#34C759;">{tp2_signals}</div>
+                        <div style="font-size:var(--text-sm);color:var(--text-tertiary);">TP2</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+        
+        with col_trading2:
+            # Confidence distribution
+            high_conf = len(detected_signals[detected_signals['confidence'] >= 70])
+            med_conf = len(detected_signals[(detected_signals['confidence'] >= 40) & (detected_signals['confidence'] < 70)])
+            low_conf = len(detected_signals[detected_signals['confidence'] < 40])
+            
+            col_high, col_med, col_low = st.columns(3)
+            
+            with col_high:
+                st.markdown(
+                    f"""
+                    <div style="text-align:center;padding:var(--space-2);background:rgba(52,199,89,0.1);border-radius:var(--radius-md);">
+                        <div style="font-weight:700;color:#34C759;">{high_conf}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">High</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            
+            with col_med:
+                st.markdown(
+                    f"""
+                    <div style="text-align:center;padding:var(--space-2);background:rgba(255,149,0,0.1);border-radius:var(--radius-md);">
+                        <div style="font-weight:700;color:#FF9500;">{med_conf}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">Med</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            
+            with col_low:
+                st.markdown(
+                    f"""
+                    <div style="text-align:center;padding:var(--space-2);background:rgba(255,59,48,0.1);border-radius:var(--radius-md);">
+                        <div style="font-weight:700;color:#FF3B30;">{low_conf}</div>
+                        <div style="font-size:var(--text-xs);color:var(--text-tertiary);">Low</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            
+            st.markdown(
+                """
+                <div style="text-align:center;margin-top:var(--space-2);font-size:var(--text-sm);color:var(--text-tertiary);">
+                    Confidence Distribution
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+# ===== REAL-TIME TRADING MONITORING =====
+
+def create_trading_monitoring_panel(fan_datasets: dict, tolerance: float, rule_type: str):
+    """Create live trading monitoring panel for continuous signal detection."""
+    if not fan_datasets:
+        return
+    
+    st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
+    
+    st.markdown(
+        """
+        <div class="section-header">📡 Live Trading Monitor</div>
+        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);">
+            Real-time monitoring of Entry, TP1, and TP2 signals. 
+            Automatically refreshes during market hours for active trading.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Enhanced monitoring controls
+    col_refresh, col_alerts, col_status = st.columns([1, 1, 2])
+    
+    with col_refresh:
+        auto_refresh = st.toggle(
+            "🔄 Auto-refresh",
+            value=st.session_state.get('auto_refresh_trading', False),
+            help="Automatically refresh trading signals every 60 seconds"
+        )
+        st.session_state.auto_refresh_trading = auto_refresh
+        
+        if st.button("🔄 Refresh Signals", use_container_width=True):
+            st.rerun()
+    
+    with col_alerts:
+        alert_mode = st.selectbox(
+            "🔔 Alert Mode",
+            options=["All Signals", "Entry Only", "TP1/TP2 Only"],
+            index=0,
+            help="Choose which signals to highlight"
+        )
+        
+        sound_alerts = st.toggle(
+            "🔊 Sound Alerts",
+            value=st.session_state.get('sound_alerts', False),
+            help="Enable sound notifications (browser dependent)"
+        )
+        st.session_state.sound_alerts = sound_alerts
+    
+    with col_status:
+        current_time = datetime.now()
+        market_open = RTH_START <= current_time.time() <= RTH_END
+        market_status = "🟢 MARKET OPEN" if market_open else "🔴 MARKET CLOSED"
+        
+        last_refresh = st.session_state.get('last_trading_refresh', current_time)
+        time_since = (current_time - last_refresh).total_seconds()
+        
+        # Next refresh countdown
+        next_refresh_in = 60 - (time_since % 60) if auto_refresh else 0
+        
+        st.markdown(
+            f"""
+            <div style="background:var(--surface);padding:var(--space-3);border-radius:var(--radius-lg);border:1px solid var(--border);">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
+                    <div>
+                        <div style="font-weight:600;">{market_status}</div>
+                        <div style="color:var(--text-tertiary);font-size:var(--text-sm);">
+                            Last update: {time_since:.0f}s ago
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-family:'JetBrains Mono',monospace;">{current_time.strftime('%H:%M:%S')}</div>
+                        <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Current time</div>
+                    </div>
+                </div>
+                {"<div style='text-align:center;font-size:var(--text-sm);color:var(--warning);'>Next refresh in " + str(int(next_refresh_in)) + "s</div>" if auto_refresh and market_open else ""}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    # Auto-refresh logic with market hours check
+    if auto_refresh and market_open:
+        time.sleep(1)  # Brief pause for UI
+        st.rerun()
+
+# ===== MAIN TRADING DETECTION INTEGRATION =====
+
+def handle_trading_detection_analysis(fan_datasets: dict, forecast_date: date, tolerance: float, rule_type: str):
+    """Main function to handle complete trading detection analysis with TP1/TP2."""
+    if not fan_datasets:
+        st.markdown(
+            """
+            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+                <div style="font-size:2rem;margin-bottom:var(--space-4);">🎯</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">Trading Detection Unavailable</div>
+                <div style="color:var(--text-tertiary);">Generate trading data first to run signal detection</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        return {}
+    
+    # Fetch latest intraday data
+    intraday_1m = fetch_intraday_data(forecast_date)
+    intraday_30m = convert_to_30min_bars(intraday_1m)
+    
+    if intraday_30m.empty:
+        st.warning("⚠️ No intraday data available for trading detection")
+        return {}
+    
+    # Render detection header
+    render_trading_detection_header(tolerance, rule_type)
+    
+    # Run trading detection analysis
+    results = run_trading_detection_analysis(fan_datasets, intraday_30m, tolerance, rule_type)
+    
+    # Display configuration
+    render_trading_configuration(results, tolerance, rule_type)
+    
+    st.markdown('<div style="margin:var(--space-4) 0;"></div>', unsafe_allow_html=True)
+    
+    # Display results table
+    render_trading_results_table(results)
+    
+    # Display trading analytics
+    render_trading_analytics(results, tolerance)
+    
+    # Live trading monitoring panel
+    create_trading_monitoring_panel(fan_datasets, tolerance, rule_type)
+    
+    # Update session state
+    st.session_state.last_trading_refresh = datetime.now()
+    st.session_state.latest_trading_results = results
+    
+    return {
+        'detection_results': results,
+        'entry_signals': len(results[results['signal_type'] == 'Entry ↓']) if not results.empty else 0,
+        'tp1_signals': len(results[results['signal_type'] == 'TP1 ↑']) if not results.empty else 0,
+        'tp2_signals': len(results[results['signal_type'] == 'TP2 ↑']) if not results.empty else 0,
+        'total_signals': len(results[results['status'] == 'Signal Detected']) if not results.empty else 0,
+        'intraday_available': True,
+        'trading_analysis_completed': True
+    }
+
+# ===== INTEGRATION INTO MAIN FLOW =====
+# Add this after the trading data generation section
+
+if trading_results.get('fan_data'):
+    st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
+    
+    # Handle trading detection analysis
+    detection_results = handle_trading_detection_analysis(
+        trading_results['fan_data'],
+        forecast_date,
+        tolerance,
+        rule_requirement
+    )
+
+
+
