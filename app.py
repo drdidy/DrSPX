@@ -186,7 +186,7 @@ RISK_RULES = {
     ],
 }
 
-# ===== CSS DESIGN SYSTEM =====
+# ===== REVOLUTIONARY CSS DESIGN SYSTEM =====
 # Apple-Tesla inspired premium interface with glassmorphism and micro-interactions
 
 CSS_DESIGN_SYSTEM = """
@@ -819,7 +819,7 @@ CSS_COMPONENTS = """
 </style>
 """
 
-# ===== DARK MODE SYSTEM =====
+# ===== ADVANCED DARK MODE SYSTEM =====
 DARK_MODE_SCRIPT = """
 <script>
 // Advanced Theme Management System
@@ -1218,12 +1218,12 @@ st.set_page_config(
     }
 )
 
-# ===== DESIGN SYSTEM =====
+# ===== APPLY DESIGN SYSTEM =====
 st.markdown(CSS_DESIGN_SYSTEM, unsafe_allow_html=True)
 st.markdown(CSS_COMPONENTS, unsafe_allow_html=True)
 st.markdown(DARK_MODE_SCRIPT, unsafe_allow_html=True)
 
-# ===== DATA FETCHING SYSTEM =====
+# ===== ENHANCED DATA FETCHING SYSTEM =====
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_spx_live_data():
     """
@@ -1667,7 +1667,7 @@ forecast_date, tolerance, rule_requirement = render_enhanced_sidebar()
 # Render metrics dashboard with anchors
 previous_anchors = render_metrics_dashboard(forecast_date)
 
-# ===== ANCHOR INPUT SYSTEM =====
+# ===== ENHANCED ANCHOR INPUT SYSTEM =====
 
 def render_anchor_input_header(forecast_date: date, previous_anchors: dict = None):
     """Render premium header for anchor configuration section."""
@@ -3253,7 +3253,7 @@ def handle_trading_detection_analysis(fan_datasets: dict, forecast_date: date, t
 # ===== INTEGRATION INTO MAIN FLOW =====
 # Add this after the trading data generation section
 
-if trading_results.get('fan_data'):
+if 'trading_results' in locals() and trading_results.get('fan_data'):
     st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
     
     # Handle trading detection analysis
@@ -4221,7 +4221,7 @@ def render_fibonacci_section(forecast_date: date):
 # ===== INTEGRATION INTO MAIN FLOW =====
 # Add this after the detection results section
 
-if detection_results.get('detection_results') is not None:
+if 'detection_results' in locals() and detection_results.get('detection_results') is not None:
     st.markdown('<div style="margin:var(--space-12) 0;"></div>', unsafe_allow_html=True)
     
     # Render Contract Section
@@ -4230,7 +4230,466 @@ if detection_results.get('detection_results') is not None:
     # Render Fibonacci Section
     fibonacci_results = render_fibonacci_section(forecast_date)
 
+# ===== COMPREHENSIVE EXPORT SYSTEM =====
 
+def create_exportable_datasets(
+    fan_datasets: dict, 
+    detection_results: pd.DataFrame, 
+    contract_data: dict,
+    fibonacci_data: dict,
+    forecast_date: date, 
+    anchor_config: dict
+) -> dict:
+    """
+    Create comprehensive exportable datasets with all trading data.
+    """
+    export_data = {}
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # Fan data exports with TP1/TP2
+    for fan_name, fan_df in fan_datasets.items():
+        if fan_df is not None and not fan_df.empty:
+            export_df = fan_df.copy()
+            
+            # Add metadata columns
+            export_df['Forecast_Date'] = forecast_date
+            export_df['Generated_At'] = datetime.now()
+            export_df['Anchor_Price'] = fan_df.attrs.get('anchor_price', 0)
+            export_df['Anchor_Time'] = fan_df.attrs.get('anchor_time', time()).strftime('%H:%M')
+            export_df['Slopes_Down'] = fan_df.attrs.get('slopes_down', 0)
+            export_df['Slopes_Up'] = fan_df.attrs.get('slopes_up', 0)
+            
+            # Enhanced filename with TP system indicator
+            export_data[f'{fan_name.upper()}_Fan_TP1_TP2_{timestamp}.csv'] = export_df.to_csv(index=False).encode()
+    
+    # Trading detection results export
+    if detection_results is not None and not detection_results.empty:
+        detection_export = detection_results.copy()
+        detection_export['Forecast_Date'] = forecast_date
+        detection_export['Exported_At'] = datetime.now()
+        detection_export['Tolerance_Used'] = detection_results.attrs.get('tolerance_used', 0)
+        detection_export['Rule_Type'] = detection_results.attrs.get('rule_type_used', 'Unknown')
+        
+        export_data[f'Trading_Signals_Detection_{timestamp}.csv'] = detection_export.to_csv(index=False).encode()
+    
+    # Contract line export
+    if contract_data and 'dataframe' in contract_data:
+        contract_df = contract_data['dataframe'].copy()
+        contract_metadata = contract_data.get('metadata', {})
+        
+        # Add comprehensive metadata
+        contract_df['Forecast_Date'] = forecast_date
+        contract_df['Strategy_Label'] = contract_data.get('config', {}).get('strategy_label', 'Manual')
+        contract_df['Low1_Price'] = contract_df.attrs.get('low1_price', 0)
+        contract_df['Low1_Time'] = contract_df.attrs.get('low1_time', time()).strftime('%H:%M')
+        contract_df['Low2_Price'] = contract_df.attrs.get('low2_price', 0)
+        contract_df['Low2_Time'] = contract_df.attrs.get('low2_time', time()).strftime('%H:%M')
+        contract_df['Slope_Per_Block'] = contract_df.attrs.get('slope_per_block', 0)
+        contract_df['Generated_At'] = datetime.now()
+        
+        export_data[f'Contract_Line_{timestamp}.csv'] = contract_df.to_csv(index=False).encode()
+    
+    # Fibonacci levels export
+    if fibonacci_data and fibonacci_data.get('valid', False):
+        fib_levels = calculate_fibonacci_levels(fibonacci_data['fib_low'], fibonacci_data['fib_high'])
+        
+        fib_export_data = []
+        for level, price in fib_levels.items():
+            note = ""
+            if level == "0.786":
+                note = "ALGORITHM_ENTRY_POINT"
+            elif level == "1.000":
+                note = "BOUNCE_LOW"
+            elif float(level) > 1.0:
+                note = "EXTENSION_TARGET"
+            else:
+                note = "RETRACEMENT_LEVEL"
+            
+            fib_export_data.append({
+                'Fibonacci_Level': level,
+                'Price': round_to_tick(price),
+                'Bounce_Low': fibonacci_data['fib_low'],
+                'Bounce_High': fibonacci_data['fib_high'],
+                'Bounce_Range': fibonacci_data['fib_high'] - fibonacci_data['fib_low'],
+                'Note': note,
+                'Forecast_Date': forecast_date,
+                'Generated_At': datetime.now()
+            })
+        
+        fib_df = pd.DataFrame(fib_export_data)
+        export_data[f'Fibonacci_Levels_{timestamp}.csv'] = fib_df.to_csv(index=False).encode()
+    
+    # Comprehensive summary export
+    summary_data = {
+        'Export_Timestamp': [datetime.now()],
+        'Forecast_Date': [forecast_date],
+        'MarketLens_Version': [VERSION],
+        
+        # Anchor configuration
+        'High_Anchor': [f"${anchor_config.get('high_price', 0):.2f} @ {anchor_config.get('high_time', time()).strftime('%H:%M')}"],
+        'Close_Anchor': [f"${anchor_config.get('close_price', 0):.2f} @ {anchor_config.get('close_time', time()).strftime('%H:%M')}"],
+        'Low_Anchor': [f"${anchor_config.get('low_price', 0):.2f} @ {anchor_config.get('low_time', time()).strftime('%H:%M')}"],
+        
+        # Trading data summary
+        'Total_Fans_Generated': [len([df for df in fan_datasets.values() if df is not None and not df.empty])],
+        'Trading_Signals_Detected': [len(detection_results[detection_results['status'] == 'Signal Detected']) if detection_results is not None and not detection_results.empty else 0],
+        'Entry_Signals': [len(detection_results[detection_results['signal_type'] == 'Entry ↓']) if detection_results is not None and not detection_results.empty else 0],
+        'TP1_Signals': [len(detection_results[detection_results['signal_type'] == 'TP1 ↑']) if detection_results is not None and not detection_results.empty else 0],
+        'TP2_Signals': [len(detection_results[detection_results['signal_type'] == 'TP2 ↑']) if detection_results is not None and not detection_results.empty else 0],
+        
+        # Contract data summary
+        'Contract_Generated': [bool(contract_data and 'dataframe' in contract_data)],
+        'Contract_Strategy': [contract_data.get('config', {}).get('strategy_label', 'None') if contract_data else 'None'],
+        'Contract_Slope': [contract_data.get('metadata', {}).get('slope', 0) if contract_data else 0],
+        
+        # Fibonacci summary
+        'Fibonacci_Generated': [bool(fibonacci_data and fibonacci_data.get('valid', False))],
+        'Fibonacci_786_Level': [round_to_tick(calculate_fibonacci_levels(fibonacci_data['fib_low'], fibonacci_data['fib_high'])['0.786']) if fibonacci_data and fibonacci_data.get('valid') else 0],
+        
+        # System information
+        'SPX_Slopes_Down_High': [SPX_SLOPES_DOWN['HIGH']],
+        'SPX_Slopes_Up_High': [SPX_SLOPES_UP['HIGH']],
+        'Tick_Size': [TICK],
+        'RTH_Start': [RTH_START.strftime('%H:%M')],
+        'RTH_End': [RTH_END.strftime('%H:%M')]
+    }
+    
+    summary_df = pd.DataFrame(summary_data)
+    export_data[f'MarketLens_Pro_Summary_{timestamp}.csv'] = summary_df.to_csv(index=False).encode()
+    
+    return export_data
 
+def display_export_center(
+    fan_datasets: dict, 
+    detection_results: pd.DataFrame, 
+    contract_data: dict,
+    fibonacci_data: dict,
+    forecast_date: date, 
+    anchor_config: dict
+):
+    """Display comprehensive export center with advanced options."""
+    st.markdown('<div style="margin:var(--space-12) 0;"></div>', unsafe_allow_html=True)
+    
+    st.markdown(
+        """
+        <div class="section-header">📤 Export & Download Center</div>
+        <div style="color:var(--text-secondary);margin-bottom:var(--space-6);font-size:var(--text-lg);line-height:1.6;">
+            Export all trading data, analysis results, and configurations for external use. 
+            Professional CSV formats compatible with Excel, Python, and other trading platforms.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Check what data is available for export
+    has_fan_data = bool(fan_datasets and any(df is not None and not df.empty for df in fan_datasets.values()))
+    has_detection_data = bool(detection_results is not None and not detection_results.empty)
+    has_contract_data = bool(contract_data and 'dataframe' in contract_data)
+    has_fibonacci_data = bool(fibonacci_data and fibonacci_data.get('valid', False))
+    
+    if not any([has_fan_data, has_detection_data, has_contract_data, has_fibonacci_data]):
+        st.markdown(
+            """
+            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+                <div style="font-size:2rem;margin-bottom:var(--space-4);">📊</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">No Data Available for Export</div>
+                <div style="color:var(--text-tertiary);">Generate trading data first to enable exports</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        return
+    
+    # Export options overview
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown(
+            """
+            <div class="glass-card">
+                <div style="font-weight:700;margin-bottom:var(--space-3);color:var(--primary);">📋 Available Exports</div>
+                <div style="color:var(--text-secondary);font-size:var(--text-sm);line-height:1.8;">
+            """,
+            unsafe_allow_html=True
+        )
+        
+        export_items = []
+        if has_fan_data:
+            export_items.append("• **Fan Forecast Data** with TP1/TP2 profit targets")
+        if has_detection_data:
+            export_items.append("• **Trading Signal Detection** results with confidence scores")
+        if has_contract_data:
+            export_items.append("• **Contract Line Projections** with strategy metadata")
+        if has_fibonacci_data:
+            export_items.append("• **Fibonacci Levels** with algorithm entry points")
+        
+        export_items.extend([
+            "• **Comprehensive Summary** with all configurations",
+            "• **Audit Trail** with timestamps and parameters",
+            "• **Professional Formatting** ready for external platforms"
+        ])
+        
+        for item in export_items:
+            st.markdown(f"<div>{item}</div>", unsafe_allow_html=True)
+        
+        st.markdown(
+            """
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    
+    with col2:
+        # Export statistics
+        total_datasets = sum([has_fan_data, has_detection_data, has_contract_data, has_fibonacci_data])
+        fan_count = len([df for df in (fan_datasets.values() if fan_datasets else []) if df is not None and not df.empty])
+        
+        st.markdown(
+            f"""
+            <div style="background:var(--surface);padding:var(--space-4);border-radius:var(--radius-lg);border:1px solid var(--border);">
+                <div style="text-align:center;">
+                    <div style="font-size:var(--text-3xl);font-weight:800;color:var(--primary);">{total_datasets + 1}</div>
+                    <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Total Files</div>
+                </div>
+                <div style="margin:var(--space-3) 0;">
+                    <div style="font-size:var(--text-lg);font-weight:600;">{fan_count}</div>
+                    <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Fan Datasets</div>
+                </div>
+                <div>
+                    <div style="font-size:var(--text-lg);font-weight:600;">{forecast_date.strftime('%Y-%m-%d')}</div>
+                    <div style="color:var(--text-tertiary);font-size:var(--text-sm);">Forecast Date</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        # Export button
+        st.markdown('<div style="margin:var(--space-4) 0;"></div>', unsafe_allow_html=True)
+        
+        if st.button("📦 Create Export Package", use_container_width=True, type="primary"):
+            with st.spinner("🔄 Preparing comprehensive export package..."):
+                export_datasets = create_exportable_datasets(
+                    fan_datasets, 
+                    detection_results, 
+                    contract_data,
+                    fibonacci_data,
+                    forecast_date, 
+                    anchor_config
+                )
+                
+                if export_datasets:
+                    # Create ZIP package
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        for filename, data in export_datasets.items():
+                            zip_file.writestr(filename, data)
+                    
+                    # Generate download
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    zip_filename = f"MarketLens_Pro_Complete_Export_{timestamp}.zip"
+                    
+                    st.download_button(
+                        "⬇️ Download Complete Package",
+                        data=zip_buffer.getvalue(),
+                        file_name=zip_filename,
+                        mime="application/zip",
+                        use_container_width=True
+                    )
+                    
+                    st.success(f"✅ Export package ready: {len(export_datasets)} files")
+                    
+                    # Display export summary
+                    st.markdown('<div style="margin:var(--space-4) 0;"></div>', unsafe_allow_html=True)
+                    
+                    st.markdown(
+                        f"""
+                        <div style="background:rgba(52,199,89,0.1);padding:var(--space-3);border-radius:var(--radius-lg);">
+                            <div style="font-weight:600;color:#34C759;margin-bottom:var(--space-2);">📦 Export Complete</div>
+                            <div style="color:var(--text-secondary);font-size:var(--text-sm);">
+                                Package: <strong>{zip_filename}</strong><br>
+                                Files: <strong>{len(export_datasets)} CSV files</strong><br>
+                                Generated: <strong>{datetime.now().strftime('%H:%M:%S')}</strong>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.error("❌ No data available for export")
 
+# ===== ADVANCED DOCUMENTATION SYSTEM =====
 
+def render_documentation_sidebar():
+    """Render comprehensive documentation in sidebar."""
+    with st.sidebar:
+        st.markdown('<div style="margin:var(--space-8) 0;"></div>', unsafe_allow_html=True)
+        
+        st.markdown(
+            """
+            <div style="font-weight:700;color:var(--primary);margin-bottom:var(--space-4);">
+                📚 Trading Documentation
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        # Golden Rules
+        with st.expander("🎯 Golden Rules", expanded=False):
+            for rule in SPX_GOLDEN_RULES:
+                st.markdown(f"- {rule}")
+        
+        # Anchor Trading Rules
+        with st.expander("⚓ Anchor Rules", expanded=False):
+            st.markdown("**RTH Anchor Breaks**")
+            for rule in SPX_ANCHOR_RULES["rth_breaks"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Extended Hours**")
+            for rule in SPX_ANCHOR_RULES["extended_hours"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Mon/Wed/Fri Rules**")
+            for rule in SPX_ANCHOR_RULES["mon_wed_fri"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Fibonacci Bounce**")
+            for rule in SPX_ANCHOR_RULES["fibonacci_bounce"]:
+                st.markdown(f"- {rule}")
+        
+        # Contract Strategies
+        with st.expander("📋 Contract Strategies", expanded=False):
+            st.markdown("**Tuesday Play**")
+            for rule in CONTRACT_STRATEGIES["tuesday_play"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Thursday Play**")
+            for rule in CONTRACT_STRATEGIES["thursday_play"]:
+                st.markdown(f"- {rule}")
+        
+        # Time & Volume Rules
+        with st.expander("⏰ Time & Volume", expanded=False):
+            st.markdown("**Market Sessions**")
+            for rule in TIME_RULES["market_sessions"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Volume Patterns**")
+            for rule in TIME_RULES["volume_patterns"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Multi-Timeframe**")
+            for rule in TIME_RULES["multi_timeframe"]:
+                st.markdown(f"- {rule}")
+        
+        # Risk Management
+        with st.expander("🛡️ Risk Management", expanded=False):
+            st.markdown("**Position Sizing**")
+            for rule in RISK_RULES["position_sizing"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Stop Strategy**")
+            for rule in RISK_RULES["stop_strategy"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Market Context**")
+            for rule in RISK_RULES["market_context"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Psychology**")
+            for rule in RISK_RULES["psychological"]:
+                st.markdown(f"- {rule}")
+            
+            st.markdown("**Performance Targets**")
+            for rule in RISK_RULES["performance_targets"]:
+                st.markdown(f"- {rule}")
+        
+        # Technical Information
+        with st.expander("⚙️ Technical Info", expanded=False):
+            st.markdown(f"**Version:** {VERSION}")
+            st.markdown(f"**Tick Size:** ${TICK}")
+            st.markdown(f"**RTH:** {RTH_START.strftime('%H:%M')} - {RTH_END.strftime('%H:%M')}")
+            st.markdown(f"**Slopes Down:** {SPX_SLOPES_DOWN['HIGH']}")
+            st.markdown(f"**Slopes Up:** {SPX_SLOPES_UP['HIGH']}")
+            st.markdown(f"**Data Source:** Yahoo Finance")
+            st.markdown(f"**Time Blocks:** 30-minute intervals")
+
+def render_footer():
+    """Render professional footer with branding and disclaimer."""
+    st.markdown('<div style="margin:var(--space-16) 0;"></div>', unsafe_allow_html=True)
+    
+    st.markdown(
+        f"""
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-xl);
+             padding:var(--space-6);text-align:center;margin-top:var(--space-8);">
+            <div style="font-weight:700;font-size:var(--text-2xl);color:var(--primary);margin-bottom:var(--space-2);">
+                {APP_NAME}
+            </div>
+            <div style="color:var(--text-secondary);margin-bottom:var(--space-3);">
+                {TAGLINE}
+            </div>
+            <div style="color:var(--text-tertiary);font-size:var(--text-sm);line-height:1.6;">
+                <strong>Version {VERSION}</strong> • {COMPANY}<br>
+                Professional SPX forecasting and analytics platform<br>
+                <em>For educational and analysis purposes only</em>
+            </div>
+            
+            <div style="margin-top:var(--space-4);padding-top:var(--space-4);border-top:1px solid var(--border);">
+                <div style="color:var(--text-tertiary);font-size:var(--text-xs);line-height:1.5;">
+                    <strong>Risk Disclaimer:</strong> Trading involves substantial risk of loss. 
+                    Past performance does not guarantee future results. 
+                    This software is for educational purposes only and should not be considered as investment advice.
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# ===== MAIN INTEGRATION FUNCTION =====
+
+def render_export_and_documentation(
+    fan_datasets: dict, 
+    detection_results: pd.DataFrame, 
+    contract_data: dict,
+    fibonacci_data: dict,
+    forecast_date: date, 
+    anchor_config: dict
+):
+    """Main function to render export center and documentation."""
+    
+    # Export Center
+    display_export_center(
+        fan_datasets, 
+        detection_results, 
+        contract_data,
+        fibonacci_data,
+        forecast_date, 
+        anchor_config
+    )
+    
+    # Documentation in Sidebar
+    render_documentation_sidebar()
+    
+    # Professional Footer
+    render_footer()
+
+# ===== INTEGRATION INTO MAIN FLOW =====
+# Add this at the end of your main application
+
+# Collect all available data for export
+available_fan_data = locals().get('trading_results', {}).get('fan_data', {})
+available_detection_data = locals().get('detection_results', {}).get('detection_results', pd.DataFrame())
+available_contract_data = locals().get('contract_results', {})
+available_fibonacci_data = locals().get('fibonacci_results', {})
+available_anchor_config = anchor_section_results.get('anchor_config', {})
+
+# Render export center and documentation
+render_export_and_documentation(
+    available_fan_data,
+    available_detection_data, 
+    available_contract_data,
+    available_fibonacci_data,
+    forecast_date,
+    available_anchor_config
+)
