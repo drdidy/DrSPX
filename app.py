@@ -2032,20 +2032,26 @@ with col2:
     )
 
 with col3:
+    low_info = (locked_data or {}).get("low", {})
+    price = low_info.get("price")
+    tval = low_info.get("time")
+
+    price_str = f"{price:.2f}" if isinstance(price, (int, float)) else "--"
+    time_str = tval.strftime("%H:%M") if hasattr(tval, "strftime") else (str(tval) if tval else "--")
+
     st.markdown(
         f"""
-        <div style="text-align: center; padding: var(--space-3); background: rgba(255, 59, 48, 0.05); border-radius: var(--radius-md);">
-            <div style="color: #FF3B30; font-weight: 700; font-size: var(--text-xl);">
-                ${locked_data['low']['price']:.2f}
+        <div style="text-align:center; padding: var(--space-3); background: rgba(255,59,48,0.05); border-radius: var(--radius-md);">
+            <div style="color:#FF3B30; font-weight:700; font-size: var(--text-xl);">
+                &#36;{price_str}
             </div>
             <div style="color: var(--text-tertiary); font-size: var(--text-sm); margin-top: var(--space-1);">
-                LOW @ {locked_data['low']['time'].strftime('%H:%M')}
+                LOW @ {time_str}
             </div>
         </div>
         """,
         unsafe_allow_html=True
-    )   
-        return locked_data
+    )
 
 def handle_anchor_management(anchor_data: dict):
     """Complete anchor management workflow integration."""
