@@ -2046,7 +2046,7 @@ with col3:
         unsafe_allow_html=True
     )
     
-    return locked_data
+return locked_data
 
 def handle_anchor_management(anchor_data: dict):
     """Complete anchor management workflow integration."""
