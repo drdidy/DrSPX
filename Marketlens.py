@@ -1,7 +1,9 @@
-# ==============================  PART 1 — CORE SHELL (DAILY YFINANCE)  ==============================
-# Enterprise UI, visible Streamlit header, always-open sidebar, SPX + equities, daily candles,
-# hidden slope engine, manual Overnight inputs (price+time), mobile polish (3D KPI cards).
-# ----------------------------------------------------------------------------------------------------
+# ==============================  PART 1 — CORE SHELL (YOUR YFINANCE APPROACH)  ==============================
+# Streamlit header visible • Always-open sidebar • SPX + equities
+# Live strip via yf.Ticker(...).history(period="1d", interval="1m") with daily fallback
+# Prev-day anchors via yf.Ticker(...).history(period="1mo", interval="1d")
+# Overnight inputs (price+time) in sidebar • Mobile-polished 3D UI
+# -----------------------------------------------------------------------------------------------------------
 
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
@@ -19,33 +21,28 @@ COMPANY    = "Quantum Trading Systems"
 ET = ZoneInfo("America/New_York")
 CT = ZoneInfo("America/Chicago")
 
-# RTH (SPX cash) in ET for reference (logic runs in Daily for Part 1)
-RTH_START_ET, RTH_END_ET = time(9, 30), time(16, 0)
-
-# Slope engine (per 30-min) — works silently in background for later parts
+# Slope engine placeholders (used in later parts; kept here to match your spec)
 SPX_SLOPES = {"prev_high_down": -0.2792, "prev_close_down": -0.2792, "prev_low_down": -0.2792, "tp_mirror_up": +0.2792}
 SPX_OVERNIGHT_SLOPES = {"overnight_low_up": +0.2792, "overnight_high_down": -0.2792}
 
-# Default equities in app (can expand later)
+# App instruments (you can add/remove freely)
 EQUITIES = ["^GSPC", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "NFLX", "TSLA"]
 
 # ───────────────────────────────  PAGE SETUP  ───────────────────────────────
 st.set_page_config(
-    page_title=f"{APP_NAME}",
+    page_title=APP_NAME,
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ───────────────────────────────  PREMIUM CSS (Desktop + Mobile polish)  ───────────────────────────────
+# ───────────────────────────────  PREMIUM CSS (DESKTOP + MOBILE)  ───────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800;900&display=swap');
 html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
 
-.stApp { 
-  background: radial-gradient(1200px 600px at 10% -10%, #f7faff 0%, #ffffff 35%) fixed;
-}
+.stApp { background: radial-gradient(1200px 600px at 10% -10%, #f7faff 0%, #ffffff 35%) fixed; }
 
 /* Hero */
 .hero {
@@ -57,7 +54,7 @@ html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Sego
   box-shadow: 0 16px 36px rgba(99,102,241,.28);
 }
 .hero h1 { margin: 0; font-weight: 900; font-size: 28px; letter-spacing: -0.02em; }
-.hero .sub { opacity: 0.95; font-weight: 600; margin-top: 2px; }
+.hero .sub { opacity: 0.95; font-weight: 700; margin-top: 2px; }
 .hero .meta { opacity: 0.85; font-size: 12px; margin-top: 6px; }
 
 /* KPI strip */
@@ -70,7 +67,7 @@ html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Sego
   border: 1px solid rgba(2,6,23,.08);
   box-shadow: 0 8px 22px rgba(2,6,23,.10), inset 0 1px 0 rgba(255,255,255,.65);
 }
-.kpi .label { color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.kpi .label { color: #64748b; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
 .kpi .value { font-weight: 900; font-size: 22px; color: #0f172a; letter-spacing: -0.02em; }
 
 /* Section card */
@@ -82,8 +79,7 @@ html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Sego
 
 /* Sidebar */
 section[data-testid="stSidebar"] {
-  background: #0b1220 !important;
-  color: #e5e7eb;
+  background: #0b1220 !important; color: #e5e7eb;
   border-right: 1px solid rgba(255,255,255,0.06);
 }
 section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] label { color: #e5e7eb !important; }
@@ -96,15 +92,13 @@ section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, sectio
 /* Chips */
 .chip {
   display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
-  border:1px solid rgba(2,6,23,.08); background:#f8fafc; font-size:12px; font-weight:800; color:#0f172a;
+  border:1px solid rgba(2,6,23,.08); background:#f8fafc; font-size:12px; font-weight:900; color:#0f172a;
 }
 .chip.ok   { background:#ecfdf5; border-color:#10b98133; color:#065f46; }
 .chip.info { background:#eef2ff; border-color:#6366f133; color:#312e81; }
 
 /* Table wrapper */
-.table-wrap {
-  border-radius: 16px; overflow: hidden; border: 1px solid rgba(2,6,23,.08); box-shadow: 0 10px 26px rgba(2,6,23,.08);
-}
+.table-wrap { border-radius: 16px; overflow: hidden; border: 1px solid rgba(2,6,23,.08); box-shadow: 0 10px 26px rgba(2,6,23,.08); }
 
 /* ---------- MOBILE POLISH ---------- */
 @media (max-width: 900px){
@@ -130,7 +124,7 @@ section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, sectio
 </style>
 """, unsafe_allow_html=True)
 
-# ───────────────────────────────  HELPERS: YF (DAILY)  ───────────────────────────────
+# ───────────────────────────────  HELPERS — YOUR YF PATTERN  ───────────────────────────────
 def previous_trading_day(ref_d: date) -> date:
     d = ref_d - timedelta(days=1)
     while d.weekday() >= 5:  # Sat/Sun
@@ -138,54 +132,69 @@ def previous_trading_day(ref_d: date) -> date:
     return d
 
 @st.cache_data(ttl=90, show_spinner=False)
-def fetch_last_quote(symbol: str) -> dict:
+def fetch_live_quote(symbol: str) -> dict:
     """
-    Try intraday(1d,1m) for freshness; fallback to last daily close within 10d.
-    Returns {'px': '1,234.56', 'ts': 'Mon 4:00 PM ET'} or dashes.
+    YOUR pattern: yf.Ticker(...).history(period='1d', interval='1m') for live,
+    fallback to yf.Ticker(...).history(period='10d', interval='1d') for last close.
     """
     try:
         tkr = yf.Ticker(symbol)
-        # Try intraday
-        intr = tkr.history(period="1d", interval="1m")
-        if isinstance(intr, pd.DataFrame) and not intr.empty and "Close" in intr.columns:
-            last = intr.iloc[-1]
+        # Try intraday 1m (today)
+        intraday = tkr.history(period="1d", interval="1m", prepost=True)
+        if isinstance(intraday, pd.DataFrame) and not intraday.empty and "Close" in intraday.columns:
+            last = intraday.iloc[-1]
             px = float(last["Close"])
-            ts = intr.index[-1].tz_localize("UTC").tz_convert(ET)
-            return {"px": f"{px:,.2f}", "ts": ts.strftime("%a %-I:%M %p ET")}
-        # Fallback daily
+            ts_idx = intraday.index[-1]
+            # Ensure tz → ET
+            if getattr(ts_idx, "tz", None) is None:
+                ts = pd.Timestamp(ts_idx).tz_localize("UTC").tz_convert(ET)
+            else:
+                ts = pd.Timestamp(ts_idx).tz_convert(ET)
+            return {"px": f"{px:,.2f}", "ts": ts.strftime("%a %-I:%M %p ET"), "source": "Yahoo 1m"}
+        # Fallback to last daily close
         daily = tkr.history(period="10d", interval="1d")
         if isinstance(daily, pd.DataFrame) and not daily.empty and "Close" in daily.columns:
             last = daily.iloc[-1]
             px = float(last["Close"])
-            ts = daily.index[-1].tz_localize("UTC").tz_convert(ET)
-            return {"px": f"{px:,.2f}", "ts": ts.strftime("%a 4:00 PM ET")}
+            ts_idx = daily.index[-1]
+            if getattr(ts_idx, "tz", None) is None:
+                ts = pd.Timestamp(ts_idx).tz_localize("UTC").tz_convert(ET)
+            else:
+                ts = pd.Timestamp(ts_idx).tz_convert(ET)
+            return {"px": f"{px:,.2f}", "ts": ts.strftime("%a 4:00 PM ET"), "source": "Yahoo 1d"}
     except Exception:
         pass
-    return {"px": "—", "ts": "—"}
+    return {"px": "—", "ts": "—", "source": "—"}
 
 @st.cache_data(ttl=300, show_spinner=False)
-def prev_day_anchors_daily(symbol: str, forecast_d: date) -> dict | None:
+def get_previous_day_anchors(symbol: str, forecast_d: date) -> dict | None:
     """
-    Previous trading day H/L/C from daily candles.
+    YOUR pattern: prev-day HIGH/CLOSE/LOW from daily candles.
+    df = yf.Ticker(symbol).history(period='1mo', interval='1d')
     """
     try:
         prev_d = previous_trading_day(forecast_d)
-        df = yf.Ticker(symbol).history(period="60d", interval="1d")
-        if df is None or df.empty: 
+        df = yf.Ticker(symbol).history(period="1mo", interval="1d")
+        if df is None or df.empty:
             return None
-        # normalize index to ET date
-        idx = df.index.tz_localize("UTC").tz_convert(ET).date
-        df = df.assign(_d=list(idx))
-        prev_row = df[df["_d"] == prev_d]
-        if prev_row.empty: 
-            # if daily index dates already ET-local, try plain date match
-            prev_row = df.iloc[[-2]] if len(df) >= 2 else df.iloc[[-1]]
-        row = prev_row.iloc[-1]
+        # Align index to ET date for matching
+        idx = pd.Index(df.index)
+        if getattr(idx[0], "tz", None) is None:
+            dates_et = pd.to_datetime(idx).tz_localize("UTC").tz_convert(ET).date
+        else:
+            dates_et = pd.to_datetime(idx).tz_convert(ET).date
+        df = df.assign(_d=list(dates_et))
+        row = df[df["_d"] == prev_d]
+        if row.empty:
+            # conservative fallback to prior row
+            row = df.iloc[[-2]] if len(df) >= 2 else df.iloc[[-1]]
+            prev_d = row["_d"].iloc[-1]
+        r = row.iloc[-1]
         return {
             "prev_day": prev_d,
-            "high": float(row["High"]),
-            "low": float(row["Low"]),
-            "close": float(row["Close"]),
+            "high": float(r["High"]),
+            "low": float(r["Low"]),
+            "close": float(r["Close"]),
         }
     except Exception:
         return None
@@ -229,8 +238,11 @@ with st.sidebar:
     st.caption("These will power the Overnight Entries table in later parts.")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ───────────────────────────────  HERO + LIVE BANNER  ───────────────────────────────
-last = fetch_last_quote(asset)
+# ───────────────────────────────  HERO + LIVE STRIP (YOUR FETCH)  ───────────────────────────────
+# Friendly labels
+label = "SPX" if asset == "^GSPC" else asset
+last = fetch_live_quote(asset)
+
 st.markdown(f"""
 <div class="hero">
   <h1>{APP_NAME}</h1>
@@ -239,7 +251,7 @@ st.markdown(f"""
 
   <div class="kpi">
     <div class="card">
-      <div class="label">{asset} — Last</div>
+      <div class="label">{label} — Last</div>
       <div class="value">{last['px']}</div>
     </div>
     <div class="card">
@@ -252,18 +264,18 @@ st.markdown(f"""
     </div>
     <div class="card">
       <div class="label">Engine</div>
-      <div class="value"><span class="chip ok">Yahoo Finance • Daily</span></div>
+      <div class="value"><span class="chip ok">{last['source']}</span></div>
     </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ───────────────────────────────  OVERVIEW (CLEAN, READY STATE)  ───────────────────────────────
+# ───────────────────────────────  OVERVIEW  ───────────────────────────────
 if page == "Overview":
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown("<h3>Readiness</h3>", unsafe_allow_html=True)
 
-    anchors = prev_day_anchors_daily(asset, forecast_date)
+    anchors = get_previous_day_anchors(asset, forecast_date)
     ready_chip = '<span class="chip ok">Prev-Day Anchors Ready</span>' if anchors else '<span class="chip info">Fetching daily data…</span>'
 
     st.markdown(
@@ -282,32 +294,29 @@ if page == "Anchors":
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown("<h3>Previous Day Anchors</h3>", unsafe_allow_html=True)
 
-    anchors = prev_day_anchors_daily(asset, forecast_date)
+    anchors = get_previous_day_anchors(asset, forecast_date)
     if not anchors:
         st.info("Could not compute anchors yet. Try a recent weekday (Yahoo daily availability can vary).")
     else:
         col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Prev Day High", f"{anchors['high']:.2f}")
-        with col2:
-            st.metric("Prev Day Close", f"{anchors['close']:.2f}")
-        with col3:
-            st.metric("Prev Day Low", f"{anchors['low']:.2f}")
+        with col1: st.metric("Prev Day High", f"{anchors['high']:.2f}")
+        with col2: st.metric("Prev Day Close", f"{anchors['close']:.2f}")
+        with col3: st.metric("Prev Day Low",  f"{anchors['low']:.2f}")
 
         st.markdown(
             """
             <div class="table-wrap" style="margin-top:12px;">
-            <div style="padding:12px 14px; color:#64748b; font-size:12px;">
-              These anchors power your projections internally (descending lines from H/C/L with mirrored TP lines). 
-              Nothing to configure here—fully automatic.
-            </div>
+              <div style="padding:12px 14px; color:#64748b; font-size:12px;">
+                These anchors power your projections internally (descending lines from H/C/L with mirrored TP lines). 
+                Nothing to configure here—fully automatic.
+              </div>
             </div>
             """,
             unsafe_allow_html=True
         )
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ───────────────────────────────  PLACEHOLDERS (WILL LIGHT UP IN PARTS 2+)  ───────────────────────────────
+# ───────────────────────────────  PLACEHOLDERS (LIGHT UP IN PARTS 2+)  ───────────────────────────────
 if page in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Settings"}:
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
