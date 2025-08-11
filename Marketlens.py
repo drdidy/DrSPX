@@ -1,141 +1,102 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# PART 1/3 — APP SHELL, THEME, NAVIGATION (ES-based SPX dashboard)
-# ─────────────────────────────────────────────────────────────────────────────
-from __future__ import annotations
+# ================================
+# === PART 1 — CORE & HELPERS ===
+# ================================
+# MarketLens Pro (ES→SPX scaffolding)
+# - Uses ES=F for the 5:00 PM CT anchor bar (17:00–17:29, bar end at ~17:30)
+# - Projects simple up/down lines from that bar's High/Low
+# - No volume, minimal deps, robust yfinance handling
 
-import os
+import warnings
+warnings.filterwarnings("ignore")
+
+import textwrap
 from datetime import datetime, date, time, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 import pandas as pd
-import numpy as np
-import streamlit as st
 import yfinance as yf
+import streamlit as st
 
-# --- App identity ---
+# ---------- App constants ----------
 APP_NAME = "MarketLens Pro"
 COMPANY = "Quantum Trading Systems"
-VERSION = "4.2.0"
+VERSION = "5.0.0"
 
-# --- Timezones ---
-CT = ZoneInfo("America/Chicago")
-ET = ZoneInfo("America/New_York")
+# Time zones
+CT = timezone(timedelta(hours=-6))   # America/Chicago (fixed offset; fine for intraday scaffolding)
+ET = timezone(timedelta(hours=-5))   # America/New_York (fixed offset)
 
-# --- Trading clock (RTH for SPX cash display) ---
-RTH_START, RTH_END = time(8, 30), time(15, 0)  # CT (08:30–15:00) shown on forecast table
+# RTH window for display (CT)
+RTH_START, RTH_END = time(8, 30), time(14, 30)
 
-# --- Futures anchor bar (daily Globex reopen) ---
-ANCHOR_CT = time(17, 0)  # 5:00 PM CT (resumption)
-ANCHOR_WINDOW_MIN = 30   # use the 30-minute bar starting at 17:00 CT
+# Default slopes (user-tweakable in UI later)
+DEFAULT_SLOPE_UP = 0.3171   # per 30m block from 5pm High
+DEFAULT_SLOPE_DN = -0.3171  # per 30m block from 5pm Low
 
-# --- Slopes (per 30-minute block) ---
-SLOPE_UP_PER_BLOCK = +0.3171   # from 5pm high
-SLOPE_DOWN_PER_BLOCK = -0.3171 # from 5pm low
-
-# --- UI: minimal professional CSS ---
+# ---------- Premium minimal CSS (no banners, no volume) ----------
 BASE_CSS = """
 <style>
-/* Minimal pro theme */
-html, body, .stApp { background: #0B0D11; color: #E6E8EB; }
-:root {
-  --primary:#4DA3FF; --secondary:#7BD1FF; --success:#34C759; --warn:#FFB020; --error:#FF5A5F;
-  --surface:#12161C; --card:#0F1318; --border:rgba(255,255,255,0.08);
-  --r:14px; --pad:16px;
+#MainMenu, footer, header[data-testid="stHeader"]{display:none!important;}
+:root{
+  --primary:#007AFF; --secondary:#5AC8FA;
+  --success:#34C759; --warning:#FF9500; --error:#FF3B30;
+  --bg:#FFFFFF; --panel:#FFFFFF; --border:rgba(0,0,0,0.08);
+  --text:#0B0B0C; --muted:#60636B;
+  --radius:16px; --shadow:0 10px 20px rgba(0,0,0,0.06);
 }
-#MainMenu, header[data-testid="stHeader"], footer { display:none; }
-.block-container { padding-top: 1.2rem; }
-.h-hero {
-  background: linear-gradient(90deg, #0F1318, #12161C);
-  border:1px solid var(--border); border-radius:18px; padding:28px 20px; margin-bottom:20px;
-}
-.h-title { font-weight:800; font-size:1.4rem; color:#fff; letter-spacing:-0.01em; }
-.h-sub { color:#A7B0BB; font-size:0.95rem; margin-top:4px; }
-.card {
-  background:var(--card); border:1px solid var(--border); border-radius:16px; padding:18px; margin:10px 0;
-}
-.kpi { display:flex; gap:8px; align-items:baseline; }
-.kpi .v { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-          font-size:1.15rem; font-weight:700; color:#fff; }
-.kpi .l { color:#9AA4AE; font-size:0.85rem; }
-.badge { display:inline-block; padding:6px 10px; border-radius:24px; font-weight:600; font-size:0.85rem; }
-.badge.ok { background:rgba(52,199,89,0.1); color:#34C759; border:1px solid rgba(52,199,89,0.25); }
-.badge.neu { background:rgba(125,138,150,0.12); color:#B4BEC9; border:1px solid rgba(180,190,201,0.18); }
-.grid { display:grid; gap:12px; }
-@media (min-width: 980px) { .grid.cols-2 { grid-template-columns: 1fr 1fr; } .grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; } }
-.table-note { color:#9AA4AE; font-size:0.85rem; margin-top:8px; }
+.stApp{background:linear-gradient(135deg,#fff 0%, #F2F2F7 100%);}
+.card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+      padding:18px; box-shadow:var(--shadow);}
+.kpi{display:grid;gap:4px;}
+.kpi .v{font:700 28px/1.1 ui-sans-serif,system-ui;letter-spacing:-0.02em}
+.kpi .l{color:var(--muted);font-size:12px;text-transform:uppercase;}
+.section{font:700 20px/1.2 ui-sans-serif,system-ui;margin:8px 0 12px;border-bottom:2px solid var(--primary);padding-bottom:6px;}
+.hero{border-radius:24px;padding:26px;text-align:center;background:
+      linear-gradient(135deg,#171A20 0%,#33363B 100%); color:#fff; box-shadow:var(--shadow);}
+.hero .t{font-weight:800;font-size:28px;letter-spacing:-0.02em}
+.hero .s{opacity:.8}
+.badge{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid var(--border);}
 </style>
 """
 
+# ---------- Streamlit page config ----------
 st.set_page_config(
-    page_title=f"{APP_NAME} — SPX",
+    page_title=f"{APP_NAME} — ES Anchors",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 st.markdown(BASE_CSS, unsafe_allow_html=True)
 
-# ---------------- Sidebar: Navigation only ----------------
-with st.sidebar:
-    st.markdown("### Navigation")
-    page = st.radio(
-        " ",
-        ["SPX (via ES futures)", "AAPL", "META", "NVDA", "More (coming soon)"],
-        label_visibility="collapsed",
-        index=0,
-    )
+# ---------- Small time helpers ----------
+def dt_ct(d: date, t: time) -> datetime:
+    return datetime(d.year, d.month, d.day, t.hour, t.minute, tzinfo=CT)
 
-# ---------------- Hero ----------------
-st.markdown(
-    f"""
-<div class="h-hero">
-  <div class="h-title">{APP_NAME}</div>
-  <div class="h-sub">Professional SPX (cash-aligned) using ES futures 5:00 PM CT anchor • v{VERSION}</div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+def blocks_between_30m(a: datetime, b: datetime) -> int:
+    if b < a:
+        a, b = b, a
+    blocks, cur = 0, a
+    while cur < b:
+        blocks += 1
+        cur += timedelta(minutes=30)
+    return blocks
 
-# Router hint — the SPX page renders in Part 3 below.
-# AAPL/META/NVDA are placeholders for now (we’ll wire them in later parts).
-if page != "SPX (via ES futures)":
-    st.info("Stock dashboards will be added after we lock SPX/ES. Use the sidebar to return to SPX.")
-    st.stop()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PART 2/3 — DATA LAYER (yfinance), TIME SLOTS, ANCHOR + SPX ALIGNMENT
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ----- time helpers -----
-def _dt_ct(d: date, t: time) -> datetime:
-    return datetime.combine(d, t).replace(tzinfo=CT)
-
-def make_slots(start: time, end: time, step_min: int = 30) -> list[str]:
-    cur = _dt_ct(date(2025, 1, 1), start)
-    stop = _dt_ct(date(2025, 1, 1), end)
-    out: list[str] = []
+def make_slots(start: time = RTH_START, end: time = RTH_END, step_min: int = 30) -> list[str]:
+    cur = datetime(2025, 1, 1, start.hour, start.minute)
+    stop = datetime(2025, 1, 1, end.hour, end.minute)
+    out = []
     while cur <= stop:
         out.append(cur.strftime("%H:%M"))
         cur += timedelta(minutes=step_min)
     return out
 
-RTH_SLOTS = make_slots(RTH_START, RTH_END)  # for display
+SLOTS_30 = make_slots()
 
-def blocks_between_30m(t1: datetime, t2: datetime) -> int:
-    """Number of 30-min blocks between t1 -> t2, right-open. Times must be tz-aware CT."""
-    if t2 < t1:
-        t1, t2 = t2, t1
-    delta = t2 - t1
-    return int(np.floor(delta.total_seconds() / 1800.0 + 1e-9))
-
-
-# ----- yfinance fetches (ES=F, ^GSPC) -----
+# ---------- Robust yfinance pull (handles MultiIndex) ----------
 @st.cache_data(ttl=180)
 def yf_intraday(symbol: str, start_dt_ct: datetime, end_dt_ct: datetime, interval: str = "1m") -> pd.DataFrame:
     """
-    Minute data from yfinance (last 7 days supported for 1m). Returns CT tz.
+    Returns minute data with columns: Dt(CT tz), Open, High, Low, Close
     """
-    # yfinance expects naive UTC or aware UTC. Convert CT -> UTC-naive for download, then re-tz to CT.
     start_utc = start_dt_ct.astimezone(timezone.utc).replace(tzinfo=None)
     end_utc = end_dt_ct.astimezone(timezone.utc).replace(tzinfo=None)
 
@@ -144,225 +105,226 @@ def yf_intraday(symbol: str, start_dt_ct: datetime, end_dt_ct: datetime, interva
         start=start_utc,
         end=end_utc,
         interval=interval,
-        progress=False,
         auto_adjust=False,
         prepost=True,
+        progress=False,
         threads=True,
     )
     if df is None or df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["Dt", "Open", "High", "Low", "Close"])
 
-    # yfinance index is tz-aware UTC; ensure and convert
+    # Flatten MultiIndex if any
+    if isinstance(df.columns, pd.MultiIndex):
+        # Drop the last level (ticker) – we fetch one ticker per call
+        df = df.droplevel(-1, axis=1)
+
+    # Normalize names
+    df = df.rename(columns={c: c.title() for c in df.columns})
+    need = {"Open", "High", "Low", "Close"}
+    if not need.issubset(set(df.columns)):
+        return pd.DataFrame(columns=["Dt", "Open", "High", "Low", "Close"])
+
     if df.index.tz is None:
         df.index = df.index.tz_localize(timezone.utc)
-
     df.index = df.index.tz_convert(CT)
-    df = df.rename(columns=str.title).reset_index().rename(columns={"Datetime": "Dt"})
-    # Keep only essential OHLC
-    keep = [c for c in ["Dt", "Open", "High", "Low", "Close"] if c in df.columns]
-    return df[keep].sort_values("Dt")
 
+    out = df.reset_index().rename(columns={"Datetime": "Dt"})
+    return out[["Dt", "Open", "High", "Low", "Close"]].sort_values("Dt")
 
 def resample_30m(df_1m: pd.DataFrame) -> pd.DataFrame:
-    if df_1m.empty:
-        return df_1m
-    g = df_1m.set_index("Dt")[["Open", "High", "Low", "Close"]].resample("30min", label="right", closed="right").agg(
-        {"Open": "first", "High": "max", "Low": "min", "Close": "last"}
-    )
+    """
+    Right-closed 30m. Returns Dt(bar end, CT), Time, OHLC.
+    """
+    if df_1m is None or df_1m.empty:
+        return pd.DataFrame(columns=["Dt", "Time", "Open", "High", "Low", "Close"])
+    df = df_1m.copy()
+    df["Dt"] = pd.to_datetime(df["Dt"])
+    df = df.set_index("Dt")
+    if df.index.tz is None:
+        df.index = df.index.tz_localize(CT)
+
+    g = df[["Open", "High", "Low", "Close"]].resample(
+        "30min", label="right", closed="right"
+    ).agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
     g = g.dropna(subset=["Open", "High", "Low", "Close"]).reset_index()
     g["Time"] = g["Dt"].dt.strftime("%H:%M")
     return g
 
-
-@st.cache_data(ttl=60)
-def latest_quotes_es_spx() -> dict:
-    """
-    Get the latest ES and SPX prints to infer a live cash alignment offset (SPX - ES).
-    """
-    now = datetime.now(tz=CT)
-    start = now - timedelta(minutes=90)
-    es = yf_intraday("ES=F", start, now, interval="1m")
-    spx = yf_intraday("^GSPC", start, now, interval="1m")
-    es_last = float(es["Close"].iloc[-1]) if not es.empty else np.nan
-    spx_last = float(spx["Close"].iloc[-1]) if not spx.empty else np.nan
-    spread = spx_last - es_last if (np.isfinite(es_last) and np.isfinite(spx_last)) else 0.0
-    return {"es_last": es_last, "spx_last": spx_last, "spread": spread}
-
-
-# ----- ES 5:00 PM CT anchor bar (17:00–17:29) -----
-@st.cache_data(ttl=180)
+@st.cache_data(ttl=300)
 def es_get_5pm_anchor(forecast: date) -> dict | None:
     """
-    Use the ES=F 30-min bar that STARTS at 17:00 CT of the calendar day BEFORE the forecast session.
-    That bar’s High (anchor_up) and Low (anchor_dn) are used.
+    Pick the bar covering 17:00–17:29 CT on the calendar day before forecast (bar end ~17:30).
+    If exact 17:30 not present, take nearest 17:00–17:45 bar end.
     """
-    # For a forecast session D (cash RTH next morning), we want the 17:00 CT bar on D-1.
     d_prev = forecast - timedelta(days=1)
-    start_ct = _dt_ct(d_prev, time(16, 30))
-    end_ct = _dt_ct(d_prev, time(18, 30))
+    start_ct = dt_ct(d_prev, time(16, 30))
+    end_ct = dt_ct(d_prev, time(18, 30))
 
     raw = yf_intraday("ES=F", start_ct, end_ct, interval="1m")
     if raw.empty:
         return None
-
     bars30 = resample_30m(raw)
-    # pick the bar whose Dt hour/min == 17:30 close, meaning it covers 17:00–17:29 (right-closed at 17:30)
-    # safer: choose row where Dt is between 17:30 exclusive boundary? We check Time == "17:30"
-    bar = bars30[bars30["Time"] == "17:30"]
-    if bar.empty:
-        # fallback: nearest between 17:00–17:45
-        mask = (bars30["Dt"].dt.hour == 17)
-        bar = bars30[mask].iloc[-1:] if mask.any() else pd.DataFrame()
-
-    if bar.empty:
+    if bars30.empty:
         return None
 
-    row = bar.iloc[0]
+    pick = bars30[bars30["Time"] == "17:30"]
+    if pick.empty:
+        subset = bars30[bars30["Dt"].dt.hour == 17].copy()
+        if subset.empty:
+            subset = bars30.copy()
+        subset["_diff"] = (subset["Dt"] - subset["Dt"].dt.normalize() - pd.Timedelta(hours=17, minutes=30)).abs()
+        subset = subset.sort_values("_diff")
+        pick = subset.iloc[:1]
+    row = pick.iloc[0]
     return {
-        "anchor_dt": row["Dt"],      # 17:30 close time of 17:00–17:29 bar
+        "anchor_dt": row["Dt"],          # bar end (~17:30 CT)
         "anchor_high": float(row["High"]),
         "anchor_low": float(row["Low"]),
     }
 
+# Simple projection helpers (no SPX conversion visible; ES drives the geometry)
+def project_from_base(base_price: float, base_dt: datetime, target_dt: datetime, slope_per_30m: float) -> float:
+    blocks = blocks_between_30m(base_dt, target_dt)
+    return base_price + slope_per_30m * blocks
 
-# ----- Project lines in SPX cash-aligned space -----
-def project_spx_lines(forecast: date, slope_up: float, slope_dn: float) -> tuple[pd.DataFrame, dict] | tuple[None, None]:
-    """
-    Build RTH slots for the forecast session; project Upper from 5pm High using +slope_up,
-    and Lower from 5pm Low using slope_dn (negative).
-    Then add a live spread so values are in **SPX cash-aligned** space.
-    """
+def project_day_lines(forecast: date, slope_up: float, slope_dn: float) -> tuple[pd.DataFrame, dict] | tuple[pd.DataFrame, None]:
     anchors = es_get_5pm_anchor(forecast)
     if not anchors:
-        return None, None
-
-    live = latest_quotes_es_spx()
-    spread = live.get("spread", 0.0) or 0.0
-
-    # Anchor base times: the bar closed at ~17:30 for the 17:00–17:29 window; use the bar START time for blocks
-    base_dt = anchors["anchor_dt"] - timedelta(minutes=30)  # 17:00 CT start
+        return pd.DataFrame(), None
 
     rows = []
-    for s in RTH_SLOTS:
+    for s in SLOTS_30:
         hh, mm = map(int, s.split(":"))
-        target_dt = _dt_ct(forecast, time(hh, mm))
-        b = blocks_between_30m(base_dt, target_dt)
+        tdt = dt_ct(forecast, time(hh, mm))
+        up = project_from_base(anchors["anchor_high"], anchors["anchor_dt"], tdt, slope_up)
+        dn = project_from_base(anchors["anchor_low"], anchors["anchor_dt"], tdt, slope_dn)
+        rows.append({"Time": s, "Lower": round(dn, 2), "Upper": round(up, 2)})
 
-        upper = anchors["anchor_high"] + slope_up * b
-        lower = anchors["anchor_low"] + slope_dn * b
-
-        # Cash align silently
-        upper_spx = upper + spread
-        lower_spx = lower + spread
-
-        rows.append({"Time": s, "Lower": round(lower_spx, 2), "Upper": round(upper_spx, 2), "Blocks": b})
-
-    df = pd.DataFrame(rows)
     meta = {
-        "anchor_start": base_dt,
+        "anchor_dt": anchors["anchor_dt"],
         "anchor_high": anchors["anchor_high"],
         "anchor_low": anchors["anchor_low"],
-        "spread_used": spread,
-        "es_last": latest_quotes_es_spx().get("es_last"),
-        "spx_last": latest_quotes_es_spx().get("spx_last"),
+        "slope_up": slope_up,
+        "slope_dn": slope_dn,
     }
-    return df, meta
+    return pd.DataFrame(rows), meta
 
+# ================================
+# === PART 2 — LAYOUT & NAV  ====
+# ================================
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PART 3/3 — SPX (via ES) PAGE: ANCHORS + FORECAST TABLE
-# ─────────────────────────────────────────────────────────────────────────────
+# Sidebar navigation and shared inputs (kept minimal & professional)
 
-st.markdown("#### SPX (cash-aligned) via ES Futures — 5:00 PM CT Anchor")
-
-# Controls (top of page)
-colA, colB, colC = st.columns([1, 1, 1])
-with colA:
-    forecast_date = st.date_input("Target Session (SPX RTH)", value=date.today(), help="Choose the cash session to project.")
-with colB:
-    slope_up = st.number_input("Slope from 5PM High (per 30m)", value=SLOPE_UP_PER_BLOCK, step=0.001, format="%.4f")
-with colC:
-    slope_dn = st.number_input("Slope from 5PM Low (per 30m)", value=SLOPE_DOWN_PER_BLOCK, step=0.001, format="%.4f")
-
-# Build forecast now
-with st.spinner("Computing anchors and projections…"):
-    table, meta = project_spx_lines(forecast_date, slope_up, slope_dn)
-
-if table is None or table.empty:
-    st.warning("Couldn’t build the 5:00 PM CT anchor from ES. Try another date (or verify yfinance is reachable).")
-    st.stop()
-
-# Anchor Tiles
-col1, col2, col3 = st.columns([1, 1, 1])
-with col1:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("**5:00 PM CT Bar**")
-    st.markdown(
-        f"""<div class="kpi"><div class="v">{meta['anchor_start'].strftime('%b %d, %Y • %H:%M CT')}</div>
-             <div class="l">Anchor Start</div></div>""",
-        unsafe_allow_html=True,
+with st.sidebar:
+    st.markdown(f"<div class='section'>Navigation</div>", unsafe_allow_html=True)
+    page = st.radio(
+        " ",
+        options=["Overview", "Anchors", "Forecasts"],
+        index=0,
+        label_visibility="collapsed",
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-with col2:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("**Anchor High / Low (ES)**")
-    st.markdown(
-        f"""<div class="kpi"><div class="v">{meta['anchor_high']:.2f}</div><div class="l">High</div></div>
-            <div class="kpi"><div class="v">{meta['anchor_low']:.2f}</div><div class="l">Low</div></div>""",
-        unsafe_allow_html=True,
+    st.markdown(f"<div class='section'>Session</div>", unsafe_allow_html=True)
+    forecast_date = st.date_input(
+        "Target session (CT)",
+        value=date.today() + timedelta(days=1),
+        help="Pick the RTH day to analyze (08:30–14:30 CT).",
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-with col3:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("**Cash Alignment**")
-    sp = meta.get("spread_used", 0.0)
-    badge = "ok" if abs(sp) < 10 else "neu"
-    st.markdown(
-        f"""<div class="kpi"><div class="v">{sp:+.2f}</div><div class="l">SPX − ES</div></div>
-             <div class="badge {badge}">Applied silently to lines</div>""",
-        unsafe_allow_html=True,
+    st.markdown(f"<div class='section'>Slopes</div>", unsafe_allow_html=True)
+    slope_up = st.number_input(
+        "Slope ↑ per 30m",
+        value=DEFAULT_SLOPE_UP,
+        step=0.001,
+        format="%.4f",
+        help="Applied from the 5:00 PM CT bar HIGH."
     )
-    st.markdown("</div>", unsafe_allow_html=True)
+    slope_dn = st.number_input(
+        "Slope ↓ per 30m",
+        value=DEFAULT_SLOPE_DN,
+        step=0.001,
+        format="%.4f",
+        help="Applied from the 5:00 PM CT bar LOW."
+    )
 
-# Forecast table (SPX cash-aligned)
-st.markdown("### Forecast Lines (SPX cash-aligned)")
-st.dataframe(
-    table[["Time", "Lower", "Upper"]],
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Time": st.column_config.TextColumn("Time"),
-        "Lower": st.column_config.NumberColumn("Lower ($)", format="$%.2f"),
-        "Upper": st.column_config.NumberColumn("Upper ($)", format="$%.2f"),
-    },
-)
+# Hero
 st.markdown(
-    '<div class="table-note">Values are projected from ES 5:00 PM CT bar and offset to current SPX cash.</div>',
+    f"""
+    <div class="hero">
+      <div class="t">{APP_NAME}</div>
+      <div class="s">Professional ES-anchored geometry for SPX workflows • v{VERSION}</div>
+      <div class="s" style="margin-top:6px;opacity:.7">{COMPANY}</div>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 
-# Lightweight RTH open status (optional)
-open_row = table.loc[table["Time"] == "08:30"]
-if not open_row.empty:
-    lo, up = float(open_row["Lower"].iloc[0]), float(open_row["Upper"].iloc[0])
-    colx, coly = st.columns([1, 1])
-    with colx:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("**08:30 CT Opening Channel**")
-        st.markdown(
-            f"""<div class="kpi"><div class="v">${lo:.2f} — ${up:.2f}</div><div class="l">Lower — Upper</div></div>""",
-            unsafe_allow_html=True,
+# Overview page
+if page == "Overview":
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("<div class='card kpi'><div class='v'>ES=F</div><div class='l'>Anchor Source</div></div>", unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"<div class='card kpi'><div class='v'>{forecast_date.strftime('%a %b %d')}</div><div class='l'>Session (CT)</div></div>", unsafe_allow_html=True)
+    with col3:
+        st.markdown(f"<div class='card kpi'><div class='v'>{slope_up:+.4f}</div><div class='l'>Slope ↑ per 30m</div></div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='section'>Notes</div>", unsafe_allow_html=True)
+    st.markdown(
+        textwrap.dedent("""
+        - ES 5:00 PM CT (bar ending ~17:30) acts as the weekly anchor.
+        - We project a simple **Upper** line from the anchor **High** and a **Lower** line from the anchor **Low**.
+        - Slopes are per 30-minute block and user-tweakable.
+        """).strip()
+    )
+
+# Helper to compute once for Anchors / Forecasts
+def _ensure_projection(forecast_date: date, slope_up: float, slope_dn: float):
+    table, meta = project_day_lines(forecast_date, slope_up, slope_dn)
+    return table, meta
+
+# ================================
+# === PART 3 — PAGES (ES)     ===
+# ================================
+
+if page == "Anchors":
+    st.markdown("<div class='section'>5:00 PM CT Anchor (Prior Day)</div>", unsafe_allow_html=True)
+    table, meta = _ensure_projection(forecast_date, slope_up, slope_dn)
+    if not meta:
+        st.warning("Could not retrieve the ES 5:00 PM CT anchor. Try a different session date (or ensure data is recent).")
+    else:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f"<div class='card kpi'><div class='v'>{meta['anchor_dt'].strftime('%Y-%m-%d %H:%M')}</div><div class='l'>Anchor DT (CT)</div></div>", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"<div class='card kpi'><div class='v'>{meta['anchor_high']:.2f}</div><div class='l'>Anchor High</div></div>", unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"<div class='card kpi'><div class='v'>{meta['anchor_low']:.2f}</div><div class='l'>Anchor Low</div></div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='card' style='margin-top:10px;'>The anchor bar is the 30-minute bar ending ~17:30 CT on the calendar day **before** the selected session.</div>", unsafe_allow_html=True)
+
+elif page == "Forecasts":
+    st.markdown("<div class='section'>Projected Lines (RTH 30-min)</div>", unsafe_allow_html=True)
+    table, meta = _ensure_projection(forecast_date, slope_up, slope_dn)
+    if table.empty or not meta:
+        st.info("No projection available. Try a nearby date.")
+    else:
+        st.dataframe(
+            table,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Time": st.column_config.TextColumn("Time", width="small"),
+                "Lower": st.column_config.NumberColumn("Lower (ES-geom)", format="%.2f"),
+                "Upper": st.column_config.NumberColumn("Upper (ES-geom)", format="%.2f"),
+            },
         )
-        st.markdown("</div>", unsafe_allow_html=True)
-    with coly:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("**Blocks to Close**")
-        last_row = table.iloc[-1]
-        blocks_to_close = int(last_row["Blocks"]) - int(open_row["Blocks"].iloc[0])
-        st.markdown(
-            f"""<div class="kpi"><div class="v">{blocks_to_close}</div><div class="l">x 30-min blocks</div></div>""",
-            unsafe_allow_html=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+
+        rng = table["Upper"].max() - table["Lower"].min()
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f"<div class='card kpi'><div class='v'>{rng:.2f}</div><div class='l'>Range</div></div>", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"<div class='card kpi'><div class='v'>{meta['slope_up']:+.4f}</div><div class='l'>Slope ↑ / 30m</div></div>", unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"<div class='card kpi'><div class='v'>{meta['slope_dn']:+.4f}</div><div class='l'>Slope ↓ / 30m</div></div>", unsafe_allow_html=True)
