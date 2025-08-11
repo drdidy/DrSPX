@@ -1,6 +1,7 @@
-# =====================  PART 1 — ENTERPRISE SHELL + YFINANCE (SPX & EQUITIES)  =====================
-# Open sidebar • Asset picker (^GSPC + 8 equities) • Live banner with fallbacks • Overnight inputs
-# Uses yfinance.Ticker().history with 1m→5m→1d fallback so KPIs never show dashes.
+# ==============================  PART 1 — CORE SHELL (DAILY YFINANCE)  ==============================
+# Enterprise UI, visible Streamlit header, always-open sidebar, SPX + equities, daily candles,
+# hidden slope engine, manual Overnight inputs (price+time), mobile polish (3D KPI cards).
+# ----------------------------------------------------------------------------------------------------
 
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
@@ -9,7 +10,7 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-# ── Meta
+# ───────────────────────────────  GLOBAL CONFIG  ───────────────────────────────
 APP_NAME   = "MarketLens Pro"
 TAGLINE    = "Enterprise SPX & Equities Forecasting"
 VERSION    = "5.0"
@@ -18,20 +19,17 @@ COMPANY    = "Quantum Trading Systems"
 ET = ZoneInfo("America/New_York")
 CT = ZoneInfo("America/Chicago")
 
-# ── Supported instruments
-SYMBOLS = {
-    "SPX (S&P 500 Index)": "^GSPC",
-    "AAPL": "AAPL",
-    "MSFT": "MSFT",
-    "NVDA": "NVDA",
-    "AMZN": "AMZN",
-    "GOOGL": "GOOGL",
-    "META": "META",
-    "NFLX": "NFLX",
-    "TSLA": "TSLA",
-}
+# RTH (SPX cash) in ET for reference (logic runs in Daily for Part 1)
+RTH_START_ET, RTH_END_ET = time(9, 30), time(16, 0)
 
-# ── Page config (header stays visible)
+# Slope engine (per 30-min) — works silently in background for later parts
+SPX_SLOPES = {"prev_high_down": -0.2792, "prev_close_down": -0.2792, "prev_low_down": -0.2792, "tp_mirror_up": +0.2792}
+SPX_OVERNIGHT_SLOPES = {"overnight_low_up": +0.2792, "overnight_high_down": -0.2792}
+
+# Default equities in app (can expand later)
+EQUITIES = ["^GSPC", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "NFLX", "TSLA"]
+
+# ───────────────────────────────  PAGE SETUP  ───────────────────────────────
 st.set_page_config(
     page_title=f"{APP_NAME}",
     page_icon="📈",
@@ -39,123 +37,200 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Premium look & feel
+# ───────────────────────────────  PREMIUM CSS (Desktop + Mobile polish)  ───────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap');
 html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
-.stApp { background: radial-gradient(1200px 600px at 10% -10%, #f7fbff 0%, #ffffff 38%) no-repeat fixed; }
+
+.stApp { 
+  background: radial-gradient(1200px 600px at 10% -10%, #f7faff 0%, #ffffff 35%) fixed;
+}
 
 /* Hero */
 .hero {
-  border-radius: 26px; padding: 22px 24px 26px; color: #fff;
-  background: linear-gradient(145deg, #0ea5e9 0%, #6366f1 100%);
-  border: 1px solid rgba(255,255,255,.28);
-  box-shadow: 0 18px 44px rgba(99,102,241,.28), inset 0 1px 0 rgba(255,255,255,.18);
+  border-radius: 24px;
+  padding: 22px 24px;
+  border: 1px solid rgba(15,23,42,.08);
+  background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+  color: white;
+  box-shadow: 0 16px 36px rgba(99,102,241,.28);
 }
 .hero h1 { margin: 0; font-weight: 900; font-size: 28px; letter-spacing: -0.02em; }
-.hero .sub { margin-top: 2px; opacity: .96; font-weight: 600; }
-.hero .meta { margin-top: 6px; opacity: .85; font-size: 12px; }
+.hero .sub { opacity: 0.95; font-weight: 600; margin-top: 2px; }
+.hero .meta { opacity: 0.85; font-size: 12px; margin-top: 6px; }
 
-/* KPI */
-.kpi { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin-top: 16px; }
-.kpi .card {
-  background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.28); backdrop-filter: blur(6px);
-  border-radius: 18px; padding: 14px 16px;
-  box-shadow: 0 10px 25px rgba(2,6,23,.18), inset 0 1px 0 rgba(255,255,255,.35);
+/* KPI strip */
+.kpi {
+  display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin-top: 14px;
 }
-.kpi .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; opacity: .9; font-weight: 800; }
-.kpi .value { margin-top: 6px; font-weight: 900; font-size: 22px; letter-spacing: -0.02em; }
+.kpi .card {
+  border-radius: 16px; padding: 14px 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid rgba(2,6,23,.08);
+  box-shadow: 0 8px 22px rgba(2,6,23,.10), inset 0 1px 0 rgba(255,255,255,.65);
+}
+.kpi .label { color: #64748b; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.kpi .value { font-weight: 900; font-size: 22px; color: #0f172a; letter-spacing: -0.02em; }
 
-/* Section */
-.sec { margin-top: 18px; border-radius: 20px; padding: 18px; background: #fff; border: 1px solid rgba(0,0,0,0.06);
-       box-shadow: 0 16px 34px rgba(2,6,23,.08); }
+/* Section card */
+.sec { margin-top: 18px; border-radius: 20px; padding: 18px; 
+  background: #ffffff; border: 1px solid rgba(2,6,23,.08);
+  box-shadow: 0 14px 36px rgba(2,6,23,.08), inset 0 1px 0 rgba(255,255,255,.6);
+}
 .sec h3 { margin: 0 0 8px 0; font-size: 18px; font-weight: 900; letter-spacing: -0.01em; }
 
 /* Sidebar */
-section[data-testid="stSidebar"] { background:#0b1220!important; color:#e5e7eb; border-right:1px solid rgba(255,255,255,.06); }
-section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] label { color:#e5e7eb!important; }
-.sidebar-card { background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:14px; padding:12px; margin:10px 0; }
+section[data-testid="stSidebar"] {
+  background: #0b1220 !important;
+  color: #e5e7eb;
+  border-right: 1px solid rgba(255,255,255,0.06);
+}
+section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, section[data-testid="stSidebar"] label { color: #e5e7eb !important; }
+.sidebar-card {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px; padding: 12px; margin: 10px 0;
+}
 
 /* Chips */
-.chip { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; font-weight:800; font-size:12px; }
-.chip.info { background:#eef2ff; color:#312e81; border:1px solid #6366f133; }
-.chip.ok { background:#ecfdf5; color:#065f46; border:1px solid #10b98133; }
+.chip {
+  display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+  border:1px solid rgba(2,6,23,.08); background:#f8fafc; font-size:12px; font-weight:800; color:#0f172a;
+}
+.chip.ok   { background:#ecfdf5; border-color:#10b98133; color:#065f46; }
+.chip.info { background:#eef2ff; border-color:#6366f133; color:#312e81; }
+
+/* Table wrapper */
+.table-wrap {
+  border-radius: 16px; overflow: hidden; border: 1px solid rgba(2,6,23,.08); box-shadow: 0 10px 26px rgba(2,6,23,.08);
+}
+
+/* ---------- MOBILE POLISH ---------- */
+@media (max-width: 900px){
+  .hero { border-radius: 20px; padding: 16px 16px 18px; }
+  .hero h1 { font-size: 22px; line-height: 1.15; }
+  .hero .sub { font-size: 13px; }
+  .hero .meta { font-size: 11px; }
+  .kpi { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+  .kpi .card { padding: 10px 12px; border-radius: 14px;
+    box-shadow: 0 8px 18px rgba(2,6,23,.12), inset 0 1px 0 rgba(255,255,255,.25); }
+  .kpi .label { font-size: 10px; }
+  .kpi .value { font-size: 18px; }
+  .sec { padding: 14px; border-radius: 16px; box-shadow: 0 10px 24px rgba(2,6,23,.07); }
+  .sec h3 { font-size: 16px; }
+  .chip { padding: 5px 8px; font-size: 11px; }
+  .block-container { padding-left: 14px; padding-right: 14px; }
+}
+@media (max-width: 520px){
+  .kpi { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 20px; }
+  .kpi .value { font-size: 17px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ── Yahoo helpers (Ticker().history everywhere)
-def _t_hist(symbol: str, *, period: str, interval: str) -> pd.DataFrame:
+# ───────────────────────────────  HELPERS: YF (DAILY)  ───────────────────────────────
+def previous_trading_day(ref_d: date) -> date:
+    d = ref_d - timedelta(days=1)
+    while d.weekday() >= 5:  # Sat/Sun
+        d -= timedelta(days=1)
+    return d
+
+@st.cache_data(ttl=90, show_spinner=False)
+def fetch_last_quote(symbol: str) -> dict:
+    """
+    Try intraday(1d,1m) for freshness; fallback to last daily close within 10d.
+    Returns {'px': '1,234.56', 'ts': 'Mon 4:00 PM ET'} or dashes.
+    """
     try:
-        t = yf.Ticker(symbol)
-        df = t.history(period=period, interval=interval, auto_adjust=False)
-        if df is None or df.empty:
-            return pd.DataFrame()
-        return df.dropna(subset=["Close"]).copy()
+        tkr = yf.Ticker(symbol)
+        # Try intraday
+        intr = tkr.history(period="1d", interval="1m")
+        if isinstance(intr, pd.DataFrame) and not intr.empty and "Close" in intr.columns:
+            last = intr.iloc[-1]
+            px = float(last["Close"])
+            ts = intr.index[-1].tz_localize("UTC").tz_convert(ET)
+            return {"px": f"{px:,.2f}", "ts": ts.strftime("%a %-I:%M %p ET")}
+        # Fallback daily
+        daily = tkr.history(period="10d", interval="1d")
+        if isinstance(daily, pd.DataFrame) and not daily.empty and "Close" in daily.columns:
+            last = daily.iloc[-1]
+            px = float(last["Close"])
+            ts = daily.index[-1].tz_localize("UTC").tz_convert(ET)
+            return {"px": f"{px:,.2f}", "ts": ts.strftime("%a 4:00 PM ET")}
     except Exception:
-        return pd.DataFrame()
+        pass
+    return {"px": "—", "ts": "—"}
 
-@st.cache_data(ttl=60, show_spinner=False)
-def yf_last_with_fallback(symbol: str) -> dict:
+@st.cache_data(ttl=300, show_spinner=False)
+def prev_day_anchors_daily(symbol: str, forecast_d: date) -> dict | None:
     """
-    Try 1m (today) → 5m (recent) → last daily close.
-    Always returns a value (avoids dashes).
+    Previous trading day H/L/C from daily candles.
     """
-    # 1m today
-    df = _t_hist(symbol, period="1d", interval="1m")
-    if not df.empty:
-        last = df.iloc[-1]
-        ts = df.index[-1].to_pydatetime().astimezone(CT)
-        return {"price": f"{float(last['Close']):,.2f}",
-                "asof": ts.strftime("%a %b %d, %Y %I:%M %p CT"),
-                "engine": "Yahoo 1m (live/rt delayed)"}
-    # 5m recent
-    df = _t_hist(symbol, period="5d", interval="5m")
-    if not df.empty:
-        last = df.iloc[-1]
-        ts = df.index[-1].to_pydatetime().astimezone(CT)
-        return {"price": f"{float(last['Close']):,.2f}",
-                "asof": ts.strftime("%a %b %d, %Y %I:%M %p CT"),
-                "engine": "Yahoo 5m (fallback)"}
-    # 1d last close
-    df = _t_hist(symbol, period="6mo", interval="1d")
-    if not df.empty:
-        last = df.iloc[-1]
-        d = df.index[-1].date()
-        return {"price": f"{float(last['Close']):,.2f}",
-                "asof": d.strftime("%a %b %d, %Y"),
-                "engine": "Yahoo 1d (last close)"}
-    return {"price": "N/A", "asof": "No data", "engine": "Unavailable"}
+    try:
+        prev_d = previous_trading_day(forecast_d)
+        df = yf.Ticker(symbol).history(period="60d", interval="1d")
+        if df is None or df.empty: 
+            return None
+        # normalize index to ET date
+        idx = df.index.tz_localize("UTC").tz_convert(ET).date
+        df = df.assign(_d=list(idx))
+        prev_row = df[df["_d"] == prev_d]
+        if prev_row.empty: 
+            # if daily index dates already ET-local, try plain date match
+            prev_row = df.iloc[[-2]] if len(df) >= 2 else df.iloc[[-1]]
+        row = prev_row.iloc[-1]
+        return {
+            "prev_day": prev_d,
+            "high": float(row["High"]),
+            "low": float(row["Low"]),
+            "close": float(row["Close"]),
+        }
+    except Exception:
+        return None
 
-# ── Sidebar: nav, asset, session, overnight inputs
+# ───────────────────────────────  SIDEBAR — NAV, ASSET, DATE, OVERNIGHT INPUTS  ───────────────────────────────
 with st.sidebar:
     st.markdown("### 📚 Navigation")
-    page = st.radio("", ["Overview", "Anchors", "Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Settings"],
-                    index=0, label_visibility="collapsed")
+    page = st.radio(
+        label="",
+        options=["Overview", "Anchors", "Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Settings"],
+        index=0,
+        label_visibility="collapsed"
+    )
 
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-    st.markdown("#### 🎯 Asset")
-    asset_label = st.selectbox("Choose instrument", list(SYMBOLS.keys()), index=0)
-    symbol = SYMBOLS[asset_label]
+    st.markdown("#### 📈 Asset")
+    asset = st.selectbox(
+        "Choose instrument",
+        options=EQUITIES,
+        index=0,
+        help="^GSPC = S&P 500 Index (SPX). Others are large-cap equities."
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
     st.markdown("#### 📅 Session")
-    forecast_date = st.date_input("Target session", value=date.today())
+    forecast_date = st.date_input(
+        "Target session",
+        value=date.today(),
+        help="Used for previous-day anchor selection."
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # Overnight Anchor Inputs (manual price + time) — used in later parts
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
     st.markdown("#### 🌙 Overnight Anchors (Manual)")
-    on_low_price  = st.number_input("Overnight Low Price", min_value=0.0, step=0.25, value=0.00)
-    on_low_time   = st.time_input("Overnight Low Time (ET)", value=time(21, 0))
-    on_high_price = st.number_input("Overnight High Price", min_value=0.0, step=0.25, value=0.00)
-    on_high_time  = st.time_input("Overnight High Time (ET)", value=time(22, 30))
-    st.caption("Used in Overnight tab (Parts 2+).")
+    on_low_price  = st.number_input("Overnight Low Price", min_value=0.0, step=0.25, value=0.00, help="Overnight swing LOW price.")
+    on_low_time   = st.time_input("Overnight Low Time (ET)", value=time(21, 0), help="Between 5:00 PM and 7:00 AM ET.")
+    on_high_price = st.number_input("Overnight High Price", min_value=0.0, step=0.25, value=0.00, help="Overnight swing HIGH price.")
+    on_high_time  = st.time_input("Overnight High Time (ET)", value=time(22, 30), help="Between 5:00 PM and 7:00 AM ET.")
+    st.caption("These will power the Overnight Entries table in later parts.")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ── Hero banner (now always resolves to some price/time) — works for SPX & equities
-last = yf_last_with_fallback(symbol)
-
+# ───────────────────────────────  HERO + LIVE BANNER  ───────────────────────────────
+last = fetch_last_quote(asset)
 st.markdown(f"""
 <div class="hero">
   <h1>{APP_NAME}</h1>
@@ -164,41 +239,77 @@ st.markdown(f"""
 
   <div class="kpi">
     <div class="card">
-      <div class="label">{asset_label} — Last</div>
-      <div class="value">{last['price']}</div>
+      <div class="label">{asset} — Last</div>
+      <div class="value">{last['px']}</div>
     </div>
     <div class="card">
       <div class="label">As of</div>
-      <div class="value">{last['asof']}</div>
+      <div class="value">{last['ts']}</div>
     </div>
     <div class="card">
-      <div class="label">Session (selected)</div>
+      <div class="label">Session</div>
       <div class="value">{forecast_date.strftime('%a %b %d, %Y')}</div>
     </div>
     <div class="card">
       <div class="label">Engine</div>
-      <div class="value">{last['engine']}</div>
+      <div class="value"><span class="chip ok">Yahoo Finance • Daily</span></div>
     </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Overview (light for Part 1)
+# ───────────────────────────────  OVERVIEW (CLEAN, READY STATE)  ───────────────────────────────
 if page == "Overview":
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown("<h3>Readiness</h3>", unsafe_allow_html=True)
+
+    anchors = prev_day_anchors_daily(asset, forecast_date)
+    ready_chip = '<span class="chip ok">Prev-Day Anchors Ready</span>' if anchors else '<span class="chip info">Fetching daily data…</span>'
+
     st.markdown(
-        """
-        <span class="chip ok">Live price resolved via fallback chain</span>
-        <span class="chip info">Prev-day anchors & entries arrive in Part 2+</span>
-        <span class="chip info">Overnight inputs captured</span>
-        """, unsafe_allow_html=True
+        f"""
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            {ready_chip}
+            <span class="chip info">Overnight inputs captured</span>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ── Placeholders (will light up in next parts)
-if page in {"Anchors","Forecasts","Signals","Contracts","Fibonacci","Export","Settings"}:
+# ───────────────────────────────  ANCHORS (DISPLAY)  ───────────────────────────────
+if page == "Anchors":
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    st.markdown("<h3>Previous Day Anchors</h3>", unsafe_allow_html=True)
+
+    anchors = prev_day_anchors_daily(asset, forecast_date)
+    if not anchors:
+        st.info("Could not compute anchors yet. Try a recent weekday (Yahoo daily availability can vary).")
+    else:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Prev Day High", f"{anchors['high']:.2f}")
+        with col2:
+            st.metric("Prev Day Close", f"{anchors['close']:.2f}")
+        with col3:
+            st.metric("Prev Day Low", f"{anchors['low']:.2f}")
+
+        st.markdown(
+            """
+            <div class="table-wrap" style="margin-top:12px;">
+            <div style="padding:12px 14px; color:#64748b; font-size:12px;">
+              These anchors power your projections internally (descending lines from H/C/L with mirrored TP lines). 
+              Nothing to configure here—fully automatic.
+            </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ───────────────────────────────  PLACEHOLDERS (WILL LIGHT UP IN PARTS 2+)  ───────────────────────────────
+if page in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Settings"}:
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
-    st.caption("This section activates in the next parts with your full strategy, tables, charts and exports.")
+    st.caption("This section will light up in the next parts with professional tables, detection, contract logic, and exports.")
     st.markdown('</div>', unsafe_allow_html=True)
