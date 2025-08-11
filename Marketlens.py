@@ -374,3 +374,319 @@ with tabs[3]:
     render_es_signals_week(forecast_date, anchors, tolerance)
 # =============================== END PART 3 =================================================================
 
+# =============================== PART 4 — CONTRACT LINE TOOL (ES) ==========================================
+from dataclasses import dataclass
+
+@dataclass
+class ContractConfig:
+    low1_time: time
+    low1_price: float
+    low2_time: time
+    low2_price: float
+    rth_only: bool = True
+
+def _blocks_between_times(base_day: date, t1: time, t2: time) -> int:
+    return blocks_between(
+        datetime.combine(base_day, t1, tzinfo=CT),
+        datetime.combine(base_day, t2, tzinfo=CT),
+    )
+
+def compute_contract_slope(cfg: ContractConfig, base_day: date) -> float | None:
+    """Slope per 30-min block from two points on same session (price2 - price1) / blocks."""
+    b = _blocks_between_times(base_day, cfg.low1_time, cfg.low2_time)
+    if b <= 0:
+        return None
+    return (cfg.low2_price - cfg.low1_price) / b
+
+def project_contract_series(cfg: ContractConfig, base_day: date) -> pd.DataFrame:
+    """Generate contract projections across SLOTS using computed slope from two points."""
+    slope = compute_contract_slope(cfg, base_day)
+    if slope is None:
+        return pd.DataFrame()
+
+    rows = []
+    base_dt = datetime.combine(base_day, cfg.low1_time, tzinfo=CT)
+    for slot in SLOTS:
+        hh, mm = map(int, slot.split(":"))
+        tdt = datetime.combine(base_day, time(hh, mm), tzinfo=CT)
+        blocks = blocks_between(base_dt, tdt)
+        px = cfg.low1_price + slope * blocks
+        rows.append({"Time": slot, "Projected": round(px, 2), "Blocks": blocks})
+
+    df = pd.DataFrame(rows)
+    return df
+
+def render_contract_tab_es(target_day: date):
+    st.markdown('<div class="card"><div class="h2">📋 Contract Line</div>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        t1 = st.time_input("Low #1 Time", value=time(9, 0), step=300, key="ct_low1")
+        p1 = st.number_input("Low #1 Price", min_value=0.0, value=100.00, step=0.25, key="cp_low1")
+        t2 = st.time_input("Low #2 Time", value=time(10, 0), step=300, key="ct_low2")
+        p2 = st.number_input("Low #2 Price", min_value=0.0, value=102.00, step=0.25, key="cp_low2")
+        rth_only = True  # fixed for simplicity; ES projections already respect RTH by SLOTS
+
+    with col2:
+        cfg = ContractConfig(t1, p1, t2, p2, rth_only=rth_only)
+        slope = compute_contract_slope(cfg, target_day)
+        valid = slope is not None
+        rng_html = ""
+        if valid:
+            proj = project_contract_series(cfg, target_day)
+            if not proj.empty:
+                rng_html = f'<div class="kpi"><div class="v">{proj["Projected"].min():.2f} → {proj["Projected"].max():.2f}</div><div class="l">Projected Range</div></div>'
+
+        st.markdown(
+            f"""
+            <div class="grid2" style="margin-top:.5rem;">
+              <div class="kpi"><div class="v">{slope:+.4f if valid else "—"}</div><div class="l">Slope / 30m</div></div>
+              {rng_html if rng_html else '<div class="kpi"><div class="v">—</div><div class="l">Projected Range</div></div>'}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if not valid:
+        st.markdown(
+            '<div class="card"><div style="color:var(--warning);">Provide two valid points with different times to compute a slope.</div></div>',
+            unsafe_allow_html=True,
+        )
+        return None
+
+    df = project_contract_series(cfg, target_day)
+    if df.empty:
+        st.markdown(
+            '<div class="card"><div style="color:var(--error);">No projections generated.</div></div>',
+            unsafe_allow_html=True,
+        )
+        return None
+
+    st.markdown('<div class="card"><div class="h2">📊 Projections (30-min)</div>', unsafe_allow_html=True)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Time": st.column_config.TextColumn("Time", width="small"),
+            "Projected": st.column_config.NumberColumn("Projected", format="%.2f"),
+            "Blocks": st.column_config.NumberColumn("Blocks"),
+        },
+    )
+    return {"config": cfg, "data": df, "slope": slope}
+
+# Secondary tab group for tools
+st.markdown('<div class="card"><div class="h2">Tools</div></div>', unsafe_allow_html=True)
+tabs_tools = st.tabs(["Contract", "Fibonacci", "Export"])
+
+with tabs_tools[0]:
+    contract_state = render_contract_tab_es(forecast_date)
+# =============================== END PART 4 =================================================================
+
+# =============================== PART 5 — FIBONACCI TOOL (ES) ==============================================
+def fib_levels(low: float, high: float) -> dict:
+    if high <= low:
+        return {}
+    r = high - low
+    return {
+        "0.236": high - 0.236 * r,
+        "0.382": high - 0.382 * r,
+        "0.500": high - 0.500 * r,
+        "0.618": high - 0.618 * r,
+        "0.786": high - 0.786 * r,
+        "1.000": low,
+        "1.272": high + 0.272 * r,
+        "1.618": high + 0.618 * r,
+    }
+
+def render_fibonacci_tab():
+    st.markdown('<div class="card"><div class="h2">🌀 Fibonacci</div>', unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        lo = st.number_input("Bounce Low", min_value=0.0, value=100.00, step=0.25, key="fib_lo")
+        hi = st.number_input("Bounce High", min_value=0.0, value=105.00, step=0.25, key="fib_hi")
+    with c2:
+        show_ext = st.toggle("Show Extensions (1.272 / 1.618)", value=True, key="fib_ext")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if hi <= lo:
+        st.markdown(
+            '<div class="card" style="color:var(--warning);">Enter Low < High to compute levels.</div>',
+            unsafe_allow_html=True,
+        )
+        return None
+
+    lv = fib_levels(lo, hi)
+    order = ["0.236", "0.382", "0.500", "0.618", "0.786", "1.000"]
+    if show_ext:
+        order += ["1.272", "1.618"]
+    rows = [{"Level": L, "Price": round(lv[L], 2)} for L in order]
+
+    st.markdown('<div class="card"><div class="h2">📊 Levels</div>', unsafe_allow_html=True)
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Level": st.column_config.TextColumn("Level", width="small"),
+            "Price": st.column_config.NumberColumn("Price", format="%.2f"),
+        },
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Optional confluence with Contract
+    if "contract_state" in globals() and contract_state and contract_state.get("data") is not None:
+        dfc = contract_state["data"]
+        # compare each level to the nearest contract projection (by absolute difference)
+        comp = []
+        for L in order:
+            price = lv[L]
+            idx = (dfc["Projected"] - price).abs().idxmin()
+            row = dfc.loc[idx]
+            comp.append(
+                {
+                    "Level": L,
+                    "Fib": round(price, 2),
+                    "Nearest Time": row["Time"],
+                    "Contract Px": round(float(row["Projected"]), 2),
+                    "Δ": round(float(row["Projected"] - price), 2),
+                }
+            )
+
+        st.markdown('<div class="card"><div class="h2">🔎 Confluence (vs Contract)</div>', unsafe_allow_html=True)
+        st.dataframe(
+            pd.DataFrame(comp),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Level": st.column_config.TextColumn("Level", width="small"),
+                "Fib": st.column_config.NumberColumn("Fib", format="%.2f"),
+                "Nearest Time": st.column_config.TextColumn("Nearest Time", width="small"),
+                "Contract Px": st.column_config.NumberColumn("Contract Px", format="%.2f"),
+                "Δ": st.column_config.NumberColumn("Δ", format="%.2f"),
+            },
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    return {"low": lo, "high": hi, "levels": lv}
+
+with tabs_tools[1]:
+    fibonacci_state = render_fibonacci_tab()
+# =============================== END PART 5 =================================================================
+
+# =============================== PART 6 — EXPORT CENTER (ES) ===============================================
+import io, zipfile
+
+def build_es_lines_and_signals_for_export(target_day: date, tol: float):
+    # Ensure anchors/lines/signals are computed
+    anchors_local = es_get_5pm_candle(target_day)
+    if not anchors_local:
+        return None
+
+    lines = es_channel_for_day(target_day, anchors_local)
+
+    # Build weekly signals (Mon–Fri) using same logic as Part 3
+    monday = target_day - timedelta(days=target_day.weekday())
+    days = [monday + timedelta(days=i) for i in range(5)]
+    rows = [first_touch_close_above_es(x, anchors_local, tol) for x in days]
+    sig = pd.DataFrame(rows)
+    sig["Day"] = sig["Day"].apply(lambda x: x.strftime("%a %Y-%m-%d") if isinstance(x, date) else x)
+
+    # Intraday 30m of the target day
+    intraday30 = es_intraday_30m_for_day(target_day)
+
+    return anchors_local, lines, sig, intraday30
+
+def export_zip_es(target_day: date, tol: float, contract_state, fibonacci_state):
+    pkt = {}
+    anchors_local, lines, sig, intraday30 = build_es_lines_and_signals_for_export(target_day, tol)
+
+    ts = datetime.now(tz=CT).strftime("%Y%m%d_%H%M%S")
+
+    # Lines
+    if lines is not None and not lines.empty:
+        df = lines.copy()
+        df["Forecast_Date"] = target_day
+        df["Slope_Per_Block"] = SLOPE_PER_BLOCK
+        pkt[f"ES_Lines_{target_day}_{ts}.csv"] = df.to_csv(index=False).encode()
+
+    # Signals
+    if sig is not None and not sig.empty:
+        df = sig.copy()
+        df["Forecast_Date"] = target_day
+        df["Tolerance"] = tol
+        pkt[f"ES_Signals_{target_day}_{ts}.csv"] = df.to_csv(index=False).encode()
+
+    # Intraday 30m (optional)
+    if intraday30 is not None and not intraday30.empty:
+        df = intraday30.copy()
+        df["Forecast_Date"] = target_day
+        pkt[f"ES_Intraday30_{target_day}_{ts}.csv"] = df.to_csv(index=False).encode()
+
+    # Contract (optional)
+    if contract_state and contract_state.get("data") is not None:
+        dfc = contract_state["data"].copy()
+        dfc["Forecast_Date"] = target_day
+        dfc["Slope_Computed"] = contract_state.get("slope", 0.0)
+        pkt[f"Contract_{target_day}_{ts}.csv"] = dfc.to_csv(index=False).encode()
+
+    # Fibonacci (optional)
+    if fibonacci_state and fibonacci_state.get("levels"):
+        lv = fibonacci_state["levels"]
+        rows = [{"Level": k, "Price": round(v, 2)} for k, v in lv.items()]
+        dff = pd.DataFrame(rows)
+        dff["Forecast_Date"] = target_day
+        pkt[f"Fibonacci_{target_day}_{ts}.csv"] = dff.to_csv(index=False).encode()
+
+    # Summary
+    if anchors_local:
+        summary = {
+            "Export_Timestamp": [datetime.now(tz=CT)],
+            "Forecast_Date": [target_day],
+            "Anchor_Date(5pm)": [anchors_local.get("anchor_date")],
+            "5pm_High": [anchors_local.get("base_high")],
+            "5pm_Low": [anchors_local.get("base_low")],
+            "Slope(ES)/30m": [SLOPE_PER_BLOCK],
+            "Tolerance": [tol],
+        }
+        pkt[f"Summary_{target_day}_{ts}.csv"] = pd.DataFrame(summary).to_csv(index=False).encode()
+
+    # Make ZIP
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in pkt.items():
+            zf.writestr(name, data)
+    return buf.getvalue(), len(pkt)
+
+def render_export_tab_es():
+    st.markdown('<div class="card"><div class="h2">📤 Export Center</div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style="color:var(--ter);margin-bottom:.5rem;">
+          Download CSVs as a single ZIP: ES Lines, Weekly Signals, Intraday 30m (optional), Contract (optional), Fibonacci (optional), Summary.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("📦 Create Export Package", use_container_width=True):
+        with st.spinner("Preparing export…"):
+            data, nfiles = export_zip_es(forecast_date, tolerance, contract_state, fibonacci_state)
+            fname = f"MarketLens_ES_Export_{datetime.now(tz=CT).strftime('%Y%m%d_%H%M%S')}.zip"
+            st.download_button(
+                "⬇️ Download ZIP",
+                data=data,
+                file_name=fname,
+                mime="application/zip",
+                use_container_width=True,
+            )
+            st.success(f"Ready • {nfiles} files")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with tabs_tools[2]:
+    render_export_tab_es()
+# =============================== END PART 6 =================================================================
