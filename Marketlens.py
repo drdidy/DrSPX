@@ -3,7 +3,7 @@
 # Live strip via yf.Ticker(...).history(period="1d", interval="1m") with daily fallback
 # Prev-day anchors via yf.Ticker(...).history(period="1mo", interval="1d")
 # Overnight inputs (price+time) in sidebar • Mobile-polished 3D UI
-# ------------------------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------------
 
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
@@ -124,6 +124,17 @@ section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, sectio
 </style>
 """, unsafe_allow_html=True)
 
+# >>> Contrast patch (ONLY change) — makes Anchors & metrics fully visible on white cards
+st.markdown("""
+<style>
+.sec, .sec * { color:#0f172a !important; opacity:1 !important; }
+div[data-testid="stMetricLabel"] { color:#334155 !important; opacity:1 !important; }
+div[data-testid="stMetricValue"] { color:#0f172a !important; opacity:1 !important; }
+h3, .stMarkdown h3 { color:#0f172a !important; }
+</style>
+""", unsafe_allow_html=True)
+# <<< end patch
+
 # ───────────────────────────────  HELPERS — YOUR YF PATTERN  ───────────────────────────────
 def previous_trading_day(ref_d: date) -> date:
     d = ref_d - timedelta(days=1)
@@ -139,19 +150,16 @@ def fetch_live_quote(symbol: str) -> dict:
     """
     try:
         tkr = yf.Ticker(symbol)
-        # Try intraday 1m (today)
         intraday = tkr.history(period="1d", interval="1m", prepost=True)
         if isinstance(intraday, pd.DataFrame) and not intraday.empty and "Close" in intraday.columns:
             last = intraday.iloc[-1]
             px = float(last["Close"])
             ts_idx = intraday.index[-1]
-            # Ensure tz → ET
             if getattr(ts_idx, "tz", None) is None:
                 ts = pd.Timestamp(ts_idx).tz_localize("UTC").tz_convert(ET)
             else:
                 ts = pd.Timestamp(ts_idx).tz_convert(ET)
             return {"px": f"{px:,.2f}", "ts": ts.strftime("%a %-I:%M %p ET"), "source": "Yahoo 1m"}
-        # Fallback to last daily close
         daily = tkr.history(period="10d", interval="1d")
         if isinstance(daily, pd.DataFrame) and not daily.empty and "Close" in daily.columns:
             last = daily.iloc[-1]
@@ -177,7 +185,6 @@ def get_previous_day_anchors(symbol: str, forecast_d: date) -> dict | None:
         df = yf.Ticker(symbol).history(period="1mo", interval="1d")
         if df is None or df.empty:
             return None
-        # Align index to ET date for matching
         idx = pd.Index(df.index)
         if getattr(idx[0], "tz", None) is None:
             dates_et = pd.to_datetime(idx).tz_localize("UTC").tz_convert(ET).date
@@ -186,16 +193,10 @@ def get_previous_day_anchors(symbol: str, forecast_d: date) -> dict | None:
         df = df.assign(_d=list(dates_et))
         row = df[df["_d"] == prev_d]
         if row.empty:
-            # conservative fallback to prior row
             row = df.iloc[[-2]] if len(df) >= 2 else df.iloc[[-1]]
             prev_d = row["_d"].iloc[-1]
         r = row.iloc[-1]
-        return {
-            "prev_day": prev_d,
-            "high": float(r["High"]),
-            "low": float(r["Low"]),
-            "close": float(r["Close"]),
-        }
+        return {"prev_day": prev_d, "high": float(r["High"]), "low": float(r["Low"]), "close": float(r["Close"])}
     except Exception:
         return None
 
@@ -228,7 +229,6 @@ with st.sidebar:
     )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Overnight Anchor Inputs (manual price + time) — used in later parts
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
     st.markdown("#### 🌙 Overnight Anchors (Manual)")
     on_low_price  = st.number_input("Overnight Low Price", min_value=0.0, step=0.25, value=0.00, help="Overnight swing LOW price.")
@@ -239,7 +239,6 @@ with st.sidebar:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ───────────────────────────────  HERO + LIVE STRIP (YOUR FETCH)  ───────────────────────────────
-# Friendly labels
 label = "SPX" if asset == "^GSPC" else asset
 last = fetch_live_quote(asset)
 
@@ -322,184 +321,3 @@ if page in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Setting
     st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
     st.caption("This section will light up in the next parts with professional tables, detection, contract logic, and exports.")
     st.markdown('</div>', unsafe_allow_html=True)
-
-
-
-
-
-
-# ==============================  PART 2 — ANCHORS + FORECAST TABLE (HIGH-CONTRAST)  ==============================
-# Uses Part 1 helpers/vars:
-# - get_previous_day_anchors(symbol, forecast_date)
-# - SPX_SLOPES (prev_*_down = -0.2792, tp_mirror_up = +0.2792)
-# - ET / CT, page, asset, forecast_date already defined in Part 1
-# ---------------------------------------------------------------------------------------------------------------
-
-# ---- Contrast patch (anchors/forecasts only) ----
-st.markdown("""
-<style>
-/* Make section headings and values fully opaque and dark */
-.sec, .sec * { color: #0f172a !important; }
-.anchors-grid .val { color:#0f172a !important; opacity:1 !important; font-weight:900; }
-.anchors-grid .lbl { color:#334155 !important; font-weight:800; letter-spacing:.02em; }
-.anchors-grid .sub { color:#475569 !important; }
-.table-wrap { border-radius: 16px; overflow:hidden; border:1px solid rgba(2,6,23,.08);
-              box-shadow: 0 10px 26px rgba(2,6,23,.08); }
-
-/* Cards for anchors */
-.anchors-grid {
-  display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
-  gap: 14px; margin-top: 10px;
-}
-.anchor-card {
-  background: linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
-  border:1px solid rgba(2,6,23,.08);
-  border-radius:16px; padding:14px 16px;
-  box-shadow: 0 10px 26px rgba(2,6,23,.10), inset 0 1px 0 rgba(255,255,255,.65);
-}
-.anchor-card .val { font-size: 28px; line-height:1; }
-.anchor-card .lbl { font-size: 12px; text-transform:uppercase; }
-
-/* Forecast title & selector */
-.forecast-h { font-size:18px; font-weight:900; letter-spacing:-.01em; margin: 0 0 8px 0; }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ---------- Small helpers (no re-imports) ----------
-def _rth_slots_ct():
-    """CT slots 08:30 → 14:30, every 30 min, as strings HH:MM."""
-    t = datetime.combine(date.today(), time(8,30), tzinfo=CT)
-    end = datetime.combine(date.today(), time(14,30), tzinfo=CT)
-    out = []
-    while t <= end:
-        out.append(t.strftime("%H:%M"))
-        t += timedelta(minutes=30)
-    return out
-
-
-def _blocks_from_prev_close_to(slot_str: str, prev_day: date) -> int:
-    """
-    Blocks from previous day 16:00 ET (base) to forecast slot end (ET).
-    We convert the forecast slot (CT) to ET, same calendar (today),
-    then measure whole 30m buckets (right-closed, simple diff // 30).
-    """
-    h, m = map(int, slot_str.split(":"))
-    # slot in CT on *forecast* date
-    target_ct = datetime.combine(forecast_date, time(h, m), tzinfo=CT)
-    target_et = target_ct.astimezone(ET)
-
-    base_et = datetime.combine(previous_trading_day(forecast_date), time(16, 0), tzinfo=ET)
-    # if forecast_date == prev_day + 1 weekday, this is ~17.5 hours + overnight; diff in minutes is fine.
-    diff_min = (target_et - base_et).total_seconds() / 60.0
-    blocks = int(round(diff_min / 30.0))
-    return max(blocks, 0)
-
-
-def _project_entry_and_targets(base_price: float, blocks: int) -> tuple[float, float, float]:
-    """
-    Entry = base + (-0.2792)*blocks ; TP2 = entry + (0.2792 - (-0.2792))*blocks ; TP1 = halfway.
-    Mirrors your “equal opposite slope” spec.
-    """
-    down = SPX_SLOPES["prev_high_down"]           # -0.2792
-    up   = SPX_SLOPES["tp_mirror_up"]             # +0.2792
-    entry = base_price + down * blocks
-    tp2   = entry + (up - down) * blocks          # = entry + 0.5584*blocks
-    tp1   = entry + 0.5 * (tp2 - entry)           # halfway
-    return round(entry, 2), round(tp1, 2), round(tp2, 2)
-
-
-# =====================================  PAGE: ANCHORS  =====================================
-if page == "Anchors":
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>Previous Day Anchors</h3>", unsafe_allow_html=True)
-
-    anchors = get_previous_day_anchors(asset, forecast_date)
-    if not anchors:
-        st.info("No daily candle found for the selected session. Try a recent weekday.")
-    else:
-        # Cards with strong, readable values
-        st.markdown('<div class="anchors-grid">', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="anchor-card">
-              <div class="lbl">High</div>
-              <div class="val">{anchors['high']:.2f}</div>
-              <div class="sub">Prev session</div>
-            </div>
-            """, unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="anchor-card">
-              <div class="lbl">Close</div>
-              <div class="val">{anchors['close']:.2f}</div>
-              <div class="sub">Prev session</div>
-            </div>
-            """, unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="anchor-card">
-              <div class="lbl">Low</div>
-              <div class="val">{anchors['low']:.2f}</div>
-              <div class="sub">Prev session</div>
-            </div>
-            """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown(
-            """
-            <div class="table-wrap" style="margin-top:12px;">
-              <div style="padding:12px 14px; color:#334155; font-size:12.5px; font-weight:600;">
-                These anchors power your projections internally (descending lines from H/C/L with mirrored TP lines).
-                Fully automatic — nothing to configure.
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-# =====================================  PAGE: FORECASTS  =====================================
-if page == "Forecasts":
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown('<div class="forecast-h">Previous-Day Line Projection — Entries & Targets</div>', unsafe_allow_html=True)
-
-    anchors = get_previous_day_anchors(asset, forecast_date)
-    if not anchors:
-        st.info("No daily candle found for the selected session. Try a recent weekday.")
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        # Choose which anchor to project from (High / Close / Low)
-        colA, colB = st.columns([1, 2])
-        with colA:
-            which = st.selectbox("Anchor source", ["High", "Close", "Low"], index=0)
-        base = anchors["high"] if which == "High" else anchors["close"] if which == "Close" else anchors["low"]
-
-        # Build table for CT slots 08:30→14:30
-        rows = []
-        for s in _rth_slots_ct():
-            blocks = _blocks_from_prev_close_to(s, anchors["prev_day"])
-            entry, tp1, tp2 = _project_entry_and_targets(base, blocks)
-            rows.append({"Time": s, "Entry ($)": entry, "TP1 ($)": tp1, "TP2 ($)": tp2, "Blocks": blocks})
-
-        df = pd.DataFrame(rows)
-
-        with colB:
-            st.caption(f"Using {which} = {base:.2f} • Base time: prev day 4:00 PM ET • Slope: −0.2792/ +0.2792")
-
-        # Render table (high-contrast)
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Time": st.column_config.TextColumn("Time"),
-                "Entry ($)": st.column_config.NumberColumn("Entry ($)", format="$%.2f"),
-                "TP1 ($)": st.column_config.NumberColumn("TP1 ($)", format="$%.2f"),
-                "TP2 ($)": st.column_config.NumberColumn("TP2 ($)", format="$%.2f"),
-                "Blocks": st.column_config.NumberColumn("Blocks"),
-            },
-        )
-
-        st.markdown('</div>', unsafe_allow_html=True)
