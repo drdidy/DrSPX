@@ -328,76 +328,178 @@ if page in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Setting
 
 
 
-# ===============================
-# PART 2 - Anchors & Forecasts
-# ===============================
+# ==============================  PART 2 — ANCHORS + FORECAST TABLE (HIGH-CONTRAST)  ==============================
+# Uses Part 1 helpers/vars:
+# - get_previous_day_anchors(symbol, forecast_date)
+# - SPX_SLOPES (prev_*_down = -0.2792, tp_mirror_up = +0.2792)
+# - ET / CT, page, asset, forecast_date already defined in Part 1
+# ---------------------------------------------------------------------------------------------------------------
 
-# CSS fix for visibility (forces white text for titles, captions, metrics)
+# ---- Contrast patch (anchors/forecasts only) ----
 st.markdown("""
-    <style>
-        .anchor-title, .forecast-title, .forecast-caption {
-            color: #ffffff !important;
-            font-weight: bold !important;
-        }
-        .stMetric label, .stMetricValue {
-            color: #ffffff !important;
-            font-weight: bold !important;
-        }
-        .element-container h3, .element-container h4, .element-container p {
-            color: #ffffff !important;
-        }
-    </style>
+<style>
+/* Make section headings and values fully opaque and dark */
+.sec, .sec * { color: #0f172a !important; }
+.anchors-grid .val { color:#0f172a !important; opacity:1 !important; font-weight:900; }
+.anchors-grid .lbl { color:#334155 !important; font-weight:800; letter-spacing:.02em; }
+.anchors-grid .sub { color:#475569 !important; }
+.table-wrap { border-radius: 16px; overflow:hidden; border:1px solid rgba(2,6,23,.08);
+              box-shadow: 0 10px 26px rgba(2,6,23,.08); }
+
+/* Cards for anchors */
+.anchors-grid {
+  display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+  gap: 14px; margin-top: 10px;
+}
+.anchor-card {
+  background: linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
+  border:1px solid rgba(2,6,23,.08);
+  border-radius:16px; padding:14px 16px;
+  box-shadow: 0 10px 26px rgba(2,6,23,.10), inset 0 1px 0 rgba(255,255,255,.65);
+}
+.anchor-card .val { font-size: 28px; line-height:1; }
+.anchor-card .lbl { font-size: 12px; text-transform:uppercase; }
+
+/* Forecast title & selector */
+.forecast-h { font-size:18px; font-weight:900; letter-spacing:-.01em; margin: 0 0 8px 0; }
+</style>
 """, unsafe_allow_html=True)
 
-# ========== PREVIOUS DAY ANCHORS ========== #
-def display_previous_day_anchors(asset):
-    anchors = get_previous_day_anchors(date.today())
-    if anchors is None or anchors.empty:
-        st.info(f"No anchors available for {asset}")
-        return
 
-    prev_day = anchors.iloc[-1]
-    st.markdown(f"<h3 class='anchor-title'>📌 Previous Day Anchors — {asset}</h3>", unsafe_allow_html=True)
+# ---------- Small helpers (no re-imports) ----------
+def _rth_slots_ct():
+    """CT slots 08:30 → 14:30, every 30 min, as strings HH:MM."""
+    t = datetime.combine(date.today(), time(8,30), tzinfo=CT)
+    end = datetime.combine(date.today(), time(14,30), tzinfo=CT)
+    out = []
+    while t <= end:
+        out.append(t.strftime("%H:%M"))
+        t += timedelta(minutes=30)
+    return out
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("High", f"{prev_day['High']:.2f}")
-    with col2:
-        st.metric("Close", f"{prev_day['Close']:.2f}")
-    with col3:
-        st.metric("Low", f"{prev_day['Low']:.2f}")
 
-# ========== FORECAST PROJECTION ========== #
-def display_forecast(asset):
-    st.markdown(f"<h3 class='forecast-title'>📈 Previous Day's Line Projection — Entries & Targets</h3>", unsafe_allow_html=True)
+def _blocks_from_prev_close_to(slot_str: str, prev_day: date) -> int:
+    """
+    Blocks from previous day 16:00 ET (base) to forecast slot end (ET).
+    We convert the forecast slot (CT) to ET, same calendar (today),
+    then measure whole 30m buckets (right-closed, simple diff // 30).
+    """
+    h, m = map(int, slot_str.split(":"))
+    # slot in CT on *forecast* date
+    target_ct = datetime.combine(forecast_date, time(h, m), tzinfo=CT)
+    target_et = target_ct.astimezone(ET)
 
-    intraday_df = fetch_intraday_data(date.today())
-    if intraday_df is None or intraday_df.empty:
-        st.warning("No intraday data available to generate forecast.")
-        return
+    base_et = datetime.combine(previous_trading_day(forecast_date), time(16, 0), tzinfo=ET)
+    # if forecast_date == prev_day + 1 weekday, this is ~17.5 hours + overnight; diff in minutes is fine.
+    diff_min = (target_et - base_et).total_seconds() / 60.0
+    blocks = int(round(diff_min / 30.0))
+    return max(blocks, 0)
 
-    # Example: Simulated targets
-    latest_price = intraday_df['Close'].iloc[-1]
-    tp1 = latest_price * 1.002  # +0.2%
-    tp2 = latest_price * 1.005  # +0.5%
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Last Price", f"{latest_price:.2f}")
-    with col2:
-        st.metric("TP1", f"{tp1:.2f}")
-    with col3:
-        st.metric("TP2", f"{tp2:.2f}")
+def _project_entry_and_targets(base_price: float, blocks: int) -> tuple[float, float, float]:
+    """
+    Entry = base + (-0.2792)*blocks ; TP2 = entry + (0.2792 - (-0.2792))*blocks ; TP1 = halfway.
+    Mirrors your “equal opposite slope” spec.
+    """
+    down = SPX_SLOPES["prev_high_down"]           # -0.2792
+    up   = SPX_SLOPES["tp_mirror_up"]             # +0.2792
+    entry = base_price + down * blocks
+    tp2   = entry + (up - down) * blocks          # = entry + 0.5584*blocks
+    tp1   = entry + 0.5 * (tp2 - entry)           # halfway
+    return round(entry, 2), round(tp1, 2), round(tp2, 2)
 
-    st.markdown(
-        "<p class='forecast-caption'>These targets are projected based on the slope from the previous day's anchor points.</p>",
-        unsafe_allow_html=True
-    )
 
-# ========== PAGE RENDER ========== #
-def render_anchors_and_forecasts():
-    st.markdown("<h2 class='anchor-title'>🔍 Anchors & Forecasts</h2>", unsafe_allow_html=True)
-    asset = st.session_state.get("selected_asset", "SPX500")
-    display_previous_day_anchors(asset)
-    st.write("---")
-    display_forecast(asset)
+# =====================================  PAGE: ANCHORS  =====================================
+if page == "Anchors":
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    st.markdown("<h3>Previous Day Anchors</h3>", unsafe_allow_html=True)
+
+    anchors = get_previous_day_anchors(asset, forecast_date)
+    if not anchors:
+        st.info("No daily candle found for the selected session. Try a recent weekday.")
+    else:
+        # Cards with strong, readable values
+        st.markdown('<div class="anchors-grid">', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="anchor-card">
+              <div class="lbl">High</div>
+              <div class="val">{anchors['high']:.2f}</div>
+              <div class="sub">Prev session</div>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="anchor-card">
+              <div class="lbl">Close</div>
+              <div class="val">{anchors['close']:.2f}</div>
+              <div class="sub">Prev session</div>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="anchor-card">
+              <div class="lbl">Low</div>
+              <div class="val">{anchors['low']:.2f}</div>
+              <div class="sub">Prev session</div>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown(
+            """
+            <div class="table-wrap" style="margin-top:12px;">
+              <div style="padding:12px 14px; color:#334155; font-size:12.5px; font-weight:600;">
+                These anchors power your projections internally (descending lines from H/C/L with mirrored TP lines).
+                Fully automatic — nothing to configure.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# =====================================  PAGE: FORECASTS  =====================================
+if page == "Forecasts":
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    st.markdown('<div class="forecast-h">Previous-Day Line Projection — Entries & Targets</div>', unsafe_allow_html=True)
+
+    anchors = get_previous_day_anchors(asset, forecast_date)
+    if not anchors:
+        st.info("No daily candle found for the selected session. Try a recent weekday.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        # Choose which anchor to project from (High / Close / Low)
+        colA, colB = st.columns([1, 2])
+        with colA:
+            which = st.selectbox("Anchor source", ["High", "Close", "Low"], index=0)
+        base = anchors["high"] if which == "High" else anchors["close"] if which == "Close" else anchors["low"]
+
+        # Build table for CT slots 08:30→14:30
+        rows = []
+        for s in _rth_slots_ct():
+            blocks = _blocks_from_prev_close_to(s, anchors["prev_day"])
+            entry, tp1, tp2 = _project_entry_and_targets(base, blocks)
+            rows.append({"Time": s, "Entry ($)": entry, "TP1 ($)": tp1, "TP2 ($)": tp2, "Blocks": blocks})
+
+        df = pd.DataFrame(rows)
+
+        with colB:
+            st.caption(f"Using {which} = {base:.2f} • Base time: prev day 4:00 PM ET • Slope: −0.2792/ +0.2792")
+
+        # Render table (high-contrast)
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Time": st.column_config.TextColumn("Time"),
+                "Entry ($)": st.column_config.NumberColumn("Entry ($)", format="$%.2f"),
+                "TP1 ($)": st.column_config.NumberColumn("TP1 ($)", format="$%.2f"),
+                "TP2 ($)": st.column_config.NumberColumn("TP2 ($)", format="$%.2f"),
+                "Blocks": st.column_config.NumberColumn("Blocks"),
+            },
+        )
+
+        st.markdown('</div>', unsafe_allow_html=True)
