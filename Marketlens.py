@@ -218,57 +218,126 @@ elif nav == "Settings / About":
     st.write(f"**App:** {APP_NAME}  \n**Version:** {VERSION}  \n**Company:** {COMPANY}")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ██████  PART 4 — SPX 5:00 CANDLE ANCHOR DETECTION (via SPY)
-# ─────────────────────────────────────────────────────────────────────────────
-# Assumes from Parts 1–3:
-# - CT timezone `CT`
-# - yfinance minute fetch: fetch_1m_yf(ticker: str, start_dt: datetime, end_dt: datetime) -> DataFrame
-# - constants: SPX_LABEL (e.g., "SPX"), SPX_YF = "SPY"
-# - nav (active page), instrument (selected instrument), forecast_date (target session)
+# ===========================================
+# PART 4 — ES FUTURES DATA ENGINE (Yahoo)
+# ===========================================
+from datetime import datetime, date, time, timedelta
+from zoneinfo import ZoneInfo
+import pandas as pd
+import yfinance as yf
+import streamlit as st
 
-def spx_get_5pm_window(session_date: date) -> pd.DataFrame:
+CT = ZoneInfo("America/Chicago")
+ET = ZoneInfo("America/New_York")
+
+ES_SYMBOL = "ES=F"          # CME E-mini S&P 500 continuous
+RTH_START, RTH_END = time(8,30), time(14,30)   # CT session window
+SLOPE_UP_PER_BLOCK   = 0.3171   # 30m blocks slope from 5:00pm HIGH (ascending)
+SLOPE_DOWN_PER_BLOCK = -0.3171  # 30m blocks slope from 5:00pm LOW  (descending)
+
+def _ensure_tz(dt: datetime, tz=CT) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=tz)
+    return dt.astimezone(tz)
+
+def _slots(start: time, end: time, step_min=30) -> list[str]:
+    cur = datetime(2025,1,1,start.hour,start.minute)
+    stop = datetime(2025,1,1,end.hour,end.minute)
+    out = []
+    while cur <= stop:
+        out.append(cur.strftime("%H:%M"))
+        cur += timedelta(minutes=step_min)
+    return out
+
+SPX_SLOTS_30M = _slots(RTH_START, RTH_END)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def es_fetch_1m(start_dt_ct: datetime, end_dt_ct: datetime) -> pd.DataFrame:
+    """1m ES bars via Yahoo. Returns tz-aware CT index column 'Dt' and OHLCV."""
+    start_dt_ct = _ensure_tz(start_dt_ct, CT)
+    end_dt_ct   = _ensure_tz(end_dt_ct, CT)
+    # Yahoo expects UTC; yfinance handles tz internally but returns tz-aware UTC index
+    df = yf.download(
+        tickers=ES_SYMBOL,
+        interval="1m",
+        start=start_dt_ct.astimezone(ET).tz_convert(None),
+        end=end_dt_ct.astimezone(ET).tz_convert(None),
+        prepost=True,
+        auto_adjust=False,
+        progress=False,
+        threads=True
+    )
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.rename(columns=str.title)
+    df = df.reset_index().rename(columns={"Datetime":"Dt"})
+    # Localize to CT
+    df["Dt"] = pd.to_datetime(df["Dt"], utc=True).dt.tz_convert(CT)
+    df = df[["Dt","Open","High","Low","Close","Volume"]].sort_values("Dt")
+    return df
+
+def _resample_30m_ct(df_1m: pd.DataFrame) -> pd.DataFrame:
+    if df_1m.empty: 
+        return pd.DataFrame()
+    x = df_1m.set_index("Dt").sort_index()
+    ohlc = x[["Open","High","Low","Close","Volume"]].resample("30min", label="right", closed="right").agg({
+        "Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"
+    }).dropna(subset=["Open","High","Low","Close"]).reset_index()
+    ohlc["Time"] = ohlc["Dt"].dt.strftime("%H:%M")
+    # RTH clip (still CT)
+    ohlc = ohlc[(ohlc["Time"] >= RTH_START.strftime("%H:%M")) & (ohlc["Time"] <= RTH_END.strftime("%H:%M"))]
+    return ohlc
+
+@st.cache_data(ttl=300, show_spinner=False)
+def es_fetch_day_30m(d: date) -> pd.DataFrame:
+    """RTH 30m bars for target date in CT."""
+    start_ct = datetime.combine(d, time(7,0), tzinfo=CT)
+    end_ct   = datetime.combine(d, time(16,0), tzinfo=CT)
+    df1m = es_fetch_1m(start_ct, end_ct)
+    return _resample_30m_ct(df1m)
+
+def _blocks_between_30m(a: datetime, b: datetime) -> int:
+    """Inclusive 30-min steps count moving forward in time (CT)."""
+    a = _ensure_tz(a, CT); b = _ensure_tz(b, CT)
+    if b < a: a, b = b, a
+    # Count boundary steps, not wall clock minutes
+    blocks, cur = 0, a.replace(second=0, microsecond=0)
+    # Move cur to next :00 or :30 boundary
+    if cur.minute % 30 != 0:
+        add = 30 - (cur.minute % 30)
+        cur = cur + timedelta(minutes=add)
+    while cur <= b:
+        blocks += 1
+        cur += timedelta(minutes=30)
+    return max(blocks-1, 0)
+
+def _project_from_anchor(base_price: float, base_time_ct: datetime, target_time_ct: datetime,
+                         slope_per_block: float) -> float:
+    return base_price + slope_per_block * _blocks_between_30m(base_time_ct, target_time_ct)
+
+@st.cache_data(ttl=600, show_spinner=False)
+def es_get_5pm_anchors(forecast: date) -> dict | None:
     """
-    Pull SPY 1m bars for the session_date 15:00–18:00 CT and
-    return rows strictly in the 17:00–17:29 CT window.
-    Columns: Dt (tz-aware CT), Open, High, Low, Close
+    Find the 17:00–17:29 CT '5pm candle' that opens the evening SESSION for the forecast date.
+    Anchors: use that bar's High (upper anchor) and Low (lower anchor), time set to 17:00 CT.
+    Fallback to the previous calendar day if empty.
     """
-    start_pull = datetime.combine(session_date, time(15, 0), tzinfo=CT)
-    end_pull = datetime.combine(session_date, time(18, 0), tzinfo=CT)
-    df = fetch_1m_yf(SPX_YF, start_pull, end_pull)
-    if df.empty:
-        return pd.DataFrame(columns=["Dt", "Open", "High", "Low", "Close"])
-    mask = (df["Dt"].dt.time >= time(17, 0)) & (df["Dt"].dt.time <= time(17, 29))
-    return df.loc[mask, ["Dt", "Open", "High", "Low", "Close"]].reset_index(drop=True)
+    def _grab(day: date):
+        win_start = datetime.combine(day, time(16,30), tzinfo=CT)
+        win_end   = datetime.combine(day, time(17,30), tzinfo=CT)
+        df = es_fetch_1m(win_start, win_end)
+        if df.empty:
+            return None
+        # Slice rows in the 17:00…17:29 bucket
+        df["HHMM"] = df["Dt"].dt.strftime("%H:%M")
+        bucket = df[(df["HHMM"] >= "17:00") & (df["HHMM"] < "17:30")]
+        if bucket.empty:
+            return None
+        hi, lo = float(bucket["High"].max()), float(bucket["Low"].min())
+        base_t = datetime.combine(day, time(17,0), tzinfo=CT)
+        return {"base_time": base_t, "upper_anchor": hi, "lower_anchor": lo}
 
-def render_spx_anchors_page(session_date: date):
-    st.markdown('<div class="section"><div class="section-title">⚓ SPX 5:00 Candle Anchors (via SPY)</div>', unsafe_allow_html=True)
-
-    win = spx_get_5pm_window(session_date)
-    if win.empty:
-        st.warning("No 5:00–5:29 PM CT SPY data found for this date.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    hi = float(win["High"].max())
-    lo = float(win["Low"].min())
-    hi_t = win.loc[win["High"].idxmax(), "Dt"]
-    lo_t = win.loc[win["Low"].idxmin(), "Dt"]
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("5PM High", f"{hi:.2f}", hi_t.strftime("%H:%M"))
-    with c2:
-        st.metric("5PM Low", f"{lo:.2f}", lo_t.strftime("%H:%M"))
-    with c3:
-        st.metric("Bars", f"{len(win)}", "17:00–17:29 CT")
-
-    st.dataframe(win, use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# Hook
-if nav == "Anchors":
-    if instrument != SPX_LABEL:
-        st.info("Anchors page is only applicable to SPX right now.")
-    else:
-        render_spx_anchors_page(forecast_date)
+    anchors = _grab(forecast)
+    if anchors is None:
+        anchors = _grab(forecast - timedelta(days=1))
+    return anchors
