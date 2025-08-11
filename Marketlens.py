@@ -3,7 +3,7 @@
 # Live strip via yf.Ticker(...).history(period="1d", interval="1m") with daily fallback
 # Prev-day anchors via yf.Ticker(...).history(period="1mo", interval="1d")
 # Overnight inputs (price+time) in sidebar • Mobile-polished 3D UI
-# -----------------------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------------------------------------
 
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
