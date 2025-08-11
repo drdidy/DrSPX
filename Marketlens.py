@@ -299,3 +299,158 @@ if page in {"Anchors", "Forecasts", "Signals", "Contracts", "Fibonacci", "Export
     st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
     st.caption("This section lights up in the next parts with your full strategy, premium tables, and exports.")
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+
+# ==============================  PART 2 — SPX PREV-DAY ANCHORS + ENTRY/TP TABLES  ==============================
+# Uses Part 1's prev_day_hlc_spx() and styling. No header changes; no ES dependency.
+
+# ───────────────────────────────  SLOPES  ───────────────────────────────
+SLOPE_DOWN = -0.2792  # per 30-min block from Prev H/C/L
+SLOPE_UP   = +0.2792  # mirror for TP projections
+
+# ───────────────────────────────  TIME SLOTS (08:30–14:30 CT)  ───────────────────────────────
+def ct_slots_30m(start: time = time(8,30), end: time = time(14,30)) -> list[datetime]:
+    d = forecast_date  # from Part 1 (sidebar)
+    cur = datetime.combine(d, start, tzinfo=CT)
+    stop = datetime.combine(d, end, tzinfo=CT)
+    out = []
+    while cur <= stop:
+        out.append(cur)
+        cur += timedelta(minutes=30)
+    return out
+
+def to_et(dt_ct: datetime) -> datetime:
+    return dt_ct.astimezone(ET)
+
+# ───────────────────────────────  PROJECTION MATH  ───────────────────────────────
+def blocks_between_30m(t0_et: datetime, t1_et: datetime) -> int:
+    """Integer number of 30m steps between t0 and t1 (round toward zero)."""
+    delta = (t1_et - t0_et).total_seconds()
+    return int(delta // 1800)
+
+def project_line(base_price: float, base_time_et: datetime, target_time_et: datetime, slope_per_block: float) -> float:
+    return base_price + slope_per_block * blocks_between_30m(base_time_et, target_time_et)
+
+def mirror_tp(entry_line_px: float, asc_line_px: float) -> tuple[float, float]:
+    """TP2 = asc_line_px; TP1 = midpoint between entry and TP2."""
+    tp2 = asc_line_px
+    tp1 = entry_line_px + (tp2 - entry_line_px) * 0.5
+    return round(tp1, 2), round(tp2, 2)
+
+# ───────────────────────────────  BUILD SPX ENTRY TABLE  ───────────────────────────────
+def build_spx_prevday_entry_table(target_session: date) -> tuple[pd.DataFrame, dict] | tuple[None, None]:
+    """
+    For each 30-min slot in 08:30–14:30 CT:
+      - draw descending lines from Prev High / Close / Low (slope -0.2792)
+      - mirror with ascending +0.2792 for TP targets (same base time/price)
+    """
+    anchors = prev_day_hlc_spx(target_session)
+    if not anchors:
+        return None, None
+
+    # Base points (ET timestamps from prev_day_hlc_spx)
+    base = {
+        "HIGH": (anchors["high"], anchors["high_time_et"]),
+        "CLOSE": (anchors["close"], anchors["close_time_et"]),
+        "LOW": (anchors["low"], anchors["low_time_et"]),
+    }
+
+    rows = []
+    for t_ct in ct_slots_30m():
+        t_et = to_et(t_ct)
+        # For each anchor, compute descending entry & ascending mirror
+        rec = {"Time (CT)": t_ct.strftime("%H:%M")}
+        for key, (px0, t0_et) in base.items():
+            entry = project_line(px0, t0_et, t_et, SLOPE_DOWN)
+            asc   = project_line(px0, t0_et, t_et, SLOPE_UP)
+            tp1, tp2 = mirror_tp(entry, asc)
+            rec[f"{key} Entry"] = round(entry, 2)
+            rec[f"{key} TP1"]   = tp1
+            rec[f"{key} TP2"]   = tp2
+        rows.append(rec)
+
+    df = pd.DataFrame(rows)
+    meta = {
+        "prev_day": anchors["prev_day"],
+        "high": anchors["high"],
+        "low": anchors["low"],
+        "close": anchors["close"],
+        "high_t": anchors["high_time_et"].strftime("%-I:%M %p ET"),
+        "low_t": anchors["low_time_et"].strftime("%-I:%M %p ET"),
+        "close_t": anchors["close_time_et"].strftime("%-I:%M %p ET"),
+        "slopes": {"down": SLOPE_DOWN, "up": SLOPE_UP},
+    }
+    return df, meta
+
+# ───────────────────────────────  ANCHORS PAGE (fills the placeholder)  ───────────────────────────────
+if page == "Anchors":
+    if SYMBOL != "^GSPC":
+        st.markdown('<div class="sec">', unsafe_allow_html=True)
+        st.markdown("<h3>Previous Day Anchors</h3>", unsafe_allow_html=True)
+        st.info("Select **SPX (S&P 500 Index)** in the sidebar to view SPX anchor tiles and projections. "
+                "Equities anchor channels land in upcoming parts.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="sec">', unsafe_allow_html=True)
+        st.markdown("<h3>SPX — Previous Day Anchors</h3>", unsafe_allow_html=True)
+
+        anchors = prev_day_hlc_spx(forecast_date)
+        if not anchors:
+            st.info("Could not compute anchors yet. Try a recent weekday — Yahoo 1-minute RTH can be patchy over long ranges.")
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Prev Day High", f"{anchors['high']:.2f}")
+                st.caption(f"Time: {anchors['high_time_et'].strftime('%-I:%M %p ET')}")
+            with c2:
+                st.metric("Prev Day Close", f"{anchors['close']:.2f}")
+                st.caption(f"Time: {anchors['close_time_et'].strftime('%-I:%M %p ET')}")
+            with c3:
+                st.metric("Prev Day Low", f"{anchors['low']:.2f}")
+                st.caption(f"Time: {anchors['low_time_et'].strftime('%-I:%M %p ET')}")
+
+            st.caption(f"Session used: {anchors['prev_day'].strftime('%a %b %d, %Y')} • Slopes run in background (per 30-min).")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+# ───────────────────────────────  FORECASTS PAGE (SPX entries & TPs table)  ───────────────────────────────
+if page == "Forecasts":
+    if SYMBOL != "^GSPC":
+        st.markdown('<div class="sec">', unsafe_allow_html=True)
+        st.markdown("<h3>SPX Entry Projections</h3>", unsafe_allow_html=True)
+        st.info("Switch to **SPX (S&P 500 Index)** in the sidebar to view the projection table. "
+                "Equities (AAPL, MSFT, NVDA, …) arrive next.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="sec">', unsafe_allow_html=True)
+        st.markdown("<h3>SPX Entry & TP Projections (Prev Day H/C/L)</h3>", unsafe_allow_html=True)
+
+        table, meta = build_spx_prevday_entry_table(forecast_date)
+        if table is None:
+            st.info("Could not compute projections (missing Yahoo RTH 1-minute data). Try another recent weekday.")
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.caption(
+                f"Prev Day: {meta['prev_day'].strftime('%a %b %d, %Y')} • "
+                f"H @ {meta['high_t']}, C @ {meta['close_t']}, L @ {meta['low_t']} • "
+                f"Slopes: ↓ {meta['slopes']['down']:+.4f} / ↑ {meta['slopes']['up']:+.4f} (per 30m)"
+            )
+            st.dataframe(
+                table,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Time (CT)": st.column_config.TextColumn("Time (CT)", width="small"),
+                    "HIGH Entry":  st.column_config.NumberColumn("High Entry",  format="%.2f"),
+                    "HIGH TP1":    st.column_config.NumberColumn("High TP1",    format="%.2f"),
+                    "HIGH TP2":    st.column_config.NumberColumn("High TP2",    format="%.2f"),
+                    "CLOSE Entry": st.column_config.NumberColumn("Close Entry", format="%.2f"),
+                    "CLOSE TP1":   st.column_config.NumberColumn("Close TP1",   format="%.2f"),
+                    "CLOSE TP2":   st.column_config.NumberColumn("Close TP2",   format="%.2f"),
+                    "LOW Entry":   st.column_config.NumberColumn("Low Entry",   format="%.2f"),
+                    "LOW TP1":     st.column_config.NumberColumn("Low TP1",     format="%.2f"),
+                    "LOW TP2":     st.column_config.NumberColumn("Low TP2",     format="%.2f"),
+                },
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
