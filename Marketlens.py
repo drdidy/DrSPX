@@ -454,3 +454,119 @@ if page == "Forecasts":
                 },
             )
             st.markdown('</div>', unsafe_allow_html=True)
+
+
+
+# ==============================  PART 3 — SPX OVERNIGHT (MANUAL) ENTRY TABLE  ==============================
+# Uses the sidebar inputs from Part 1:
+#  - on_low_price, on_low_time  (ET)
+#  - on_high_price, on_high_time (ET)
+# Slopes (per 30m):  Low → +0.2792  |  High → -0.2792
+
+# ───────────────────────────────  UTILITIES  ───────────────────────────────
+OVN_SLOPE_UP  = SPX_OVERNIGHT_SLOPES["overnight_low_up"]     # +0.2792
+OVN_SLOPE_DN  = SPX_OVERNIGHT_SLOPES["overnight_high_down"]  # -0.2792
+
+def ovn_anchor_dt_et(forecast_d: date, t_et: time) -> datetime:
+    """
+    Overnight window is 5:00 PM–7:00 AM ET leading into the target RTH session.
+    If time >= 17:00 → anchor belongs to the PREVIOUS calendar day.
+    Else (before 07:00) → same day.
+    """
+    if t_et >= time(17, 0):
+        base_d = forecast_d - timedelta(days=1)
+    else:
+        base_d = forecast_d
+    return datetime.combine(base_d, t_et, tzinfo=ET)
+
+def project_from_anchor(base_px: float, base_dt_et: datetime, target_dt_et: datetime, slope_per_30m: float) -> float:
+    steps = int((target_dt_et - base_dt_et).total_seconds() // 1800)
+    return base_px + slope_per_30m * steps
+
+def ct_slots_30m_ovn(start: time = time(8,30), end: time = time(14,30)) -> list[datetime]:
+    """Reuse the same slot grid for RTH (08:30–14:30 CT)."""
+    out, cur = [], datetime.combine(forecast_date, start, tzinfo=CT)
+    stop = datetime.combine(forecast_date, end, tzinfo=CT)
+    while cur <= stop:
+        out.append(cur)
+        cur += timedelta(minutes=30)
+    return out
+
+# ───────────────────────────────  BUILD OVERNIGHT TABLE  ───────────────────────────────
+def build_overnight_table_spx(
+    target_session: date,
+    low_px: float, low_t_et: time,
+    high_px: float, high_t_et: time
+) -> tuple[pd.DataFrame, dict] | tuple[None, None]:
+
+    # Basic validation: both anchors should be provided
+    if (low_px or 0) <= 0 or (high_px or 0) <= 0:
+        return None, None
+
+    # Construct ET datetimes for anchors
+    low_dt_et  = ovn_anchor_dt_et(target_session, low_t_et)
+    high_dt_et = ovn_anchor_dt_et(target_session, high_t_et)
+
+    # Build slot rows
+    rows = []
+    for t_ct in ct_slots_30m_ovn():
+        t_et = t_ct.astimezone(ET)
+
+        low_line  = project_from_anchor(low_px,  low_dt_et,  t_et, OVN_SLOPE_UP)
+        high_line = project_from_anchor(high_px, high_dt_et, t_et, OVN_SLOPE_DN)
+        rng = round(high_line - low_line, 2)
+
+        rows.append({
+            "Time (CT)": t_ct.strftime("%H:%M"),
+            "Overnight Low Line (Entry)": round(low_line, 2),
+            "Overnight High Line (Exit)": round(high_line, 2),
+            "Range (Exit − Entry)": rng
+        })
+
+    df = pd.DataFrame(rows)
+    meta = {
+        "low_anchor":  {"px": low_px,  "t": low_dt_et.strftime("%a %b %d • %-I:%M %p ET")},
+        "high_anchor": {"px": high_px, "t": high_dt_et.strftime("%a %b %d • %-I:%M %p ET")},
+        "slopes": {"low_up": OVN_SLOPE_UP, "high_dn": OVN_SLOPE_DN},
+    }
+    return df, meta
+
+# ───────────────────────────────  FORECASTS — OVERNIGHT SECTION  ───────────────────────────────
+if page == "Forecasts" and SYMBOL == "^GSPC":
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    st.markdown("<h3>SPX — Overnight Strategy (Manual Anchors)</h3>", unsafe_allow_html=True)
+
+    # Read sidebar values defined in Part 1
+    low_px  = float(on_low_price or 0.0)
+    low_t   = on_low_time
+    high_px = float(on_high_price or 0.0)
+    high_t  = on_high_time
+
+    # Guidance chip
+    st.caption(
+        "Provide **Overnight Low** and **Overnight High** (price & ET time) in the sidebar. "
+        "We project the low line **up** and the high line **down** at ±0.2792 per 30m, "
+        "and compute the intra-session range for each RTH slot."
+    )
+
+    df_ovn, meta_ovn = build_overnight_table_spx(forecast_date, low_px, low_t, high_px, high_t)
+
+    if df_ovn is None:
+        st.info("Enter both **Overnight Low** and **Overnight High** (price and time) in the sidebar to see the table.")
+    else:
+        st.caption(
+            f"Low Anchor: {meta_ovn['low_anchor']['px']:.2f} @ {meta_ovn['low_anchor']['t']}  •  "
+            f"High Anchor: {meta_ovn['high_anchor']['px']:.2f} @ {meta_ovn['high_anchor']['t']}"
+        )
+        st.dataframe(
+            df_ovn,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Time (CT)": st.column_config.TextColumn("Time (CT)", width="small"),
+                "Overnight Low Line (Entry)":  st.column_config.NumberColumn("Low Line (Entry)",  format="%.2f"),
+                "Overnight High Line (Exit)": st.column_config.NumberColumn("High Line (Exit)",  format="%.2f"),
+                "Range (Exit − Entry)":       st.column_config.NumberColumn("Range",             format="%.2f"),
+            },
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
