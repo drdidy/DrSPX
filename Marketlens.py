@@ -325,173 +325,198 @@ if page in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Setting
 
 
 
+# ==============================  PART 2 — PREV-DAY PROJECTIONS (VISIBLE TEXT FIX + TABLE)  ==============================
+# - Fixes invisible headings/text via small CSS override (safe on white backgrounds)
+# - Computes prev-day H/L/C times from 1m (fallback to 4:00 PM ET)
+# - Projects descending entry lines (−0.2792) and mirrored TP1/TP2 (+0.2792) 08:30–14:30 CT
+# - Works for SPX (^GSPC) and all equities in your selector
 
+# ---------- VISIBILITY FIX (safe override) ----------
+st.markdown("""
+<style>
+div[data-testid="stMarkdownContainer"] h3,
+div[data-testid="stMarkdownContainer"] h4,
+div[data-testid="stMarkdownContainer"] p,
+div[data-testid="stMarkdownContainer"] span {
+  color: #0f172a !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ==============================  PART 2 — FORECAST TABLE (PREV-DAY LINES)  ==============================
-# Builds on Part 1: projects descending lines from Prev Day H/C/L and computes TP1/TP2 (mirrored +slope).
-# No new imports; uses Part 1's asset, forecast_date, get_previous_day_anchors, SPX_SLOPES, CT.
+# ---------- TIME & SLOTS HELPERS ----------
+def _ct(dt):
+    return pd.Timestamp(dt).tz_convert(CT)
 
-# ───────────────────────────────  INTERNAL UTILS (LOCAL TO PART 2)  ───────────────────────────────
-def _ct_slots_30m(start_h=8, start_m=30, end_h=14, end_m=30):
-    """Return list of 'HH:MM' CT time labels from 08:30 → 14:30 inclusive (30-min step)."""
-    base = datetime(2000, 1, 1, start_h, start_m)  # dummy date, CT concept
-    end  = datetime(2000, 1, 1, end_h,   end_m)
-    out = []
-    cur = base
-    while cur <= end:
-        out.append(cur.strftime("%H:%M"))
+def _et(dt):
+    return pd.Timestamp(dt).tz_convert(ET)
+
+def _slots_ct(start=time(8,30), end=time(14,30)):
+    out, cur = [], datetime.combine(date(2025,1,1), start, tzinfo=CT)
+    stop = datetime.combine(date(2025,1,1), end, tzinfo=CT)
+    while cur <= stop:
+        out.append(cur.time().strftime("%H:%M"))
         cur += timedelta(minutes=30)
     return out
 
-def _blocks_between(base_dt_ct: datetime, target_dt_ct: datetime) -> int:
-    """Count 30-min blocks from base_dt_ct → target_dt_ct (floor)."""
-    if target_dt_ct <= base_dt_ct:
-        return 0
-    mins = (target_dt_ct - base_dt_ct).total_seconds() / 60.0
-    return int(mins // 30)
+SLOTS_30M = _slots_ct()
 
-def _project_line(base_price: float, slope_per_block: float, blocks: int) -> float:
-    return base_price + slope_per_block * blocks
+def _blocks_between_30m(t0: datetime, t1: datetime) -> int:
+    """Count 30-min steps between t0->t1 (CT)."""
+    if t1 < t0:
+        t0, t1 = t1, t0
+    delta = int((t1 - t0).total_seconds() // (30*60))
+    return max(delta, 0)
 
-def _prev_day_1600_et_dt(prev_day: date) -> datetime:
-    """Anchor time for prev-day lines = 4:00 PM ET previous day, converted to CT."""
-    base_et = datetime.combine(prev_day, time(16, 0), tzinfo=ET)
-    return base_et.astimezone(CT)
+def _project(price_base: float, t_base: datetime, t_target: datetime, slope_per_30m: float) -> float:
+    return price_base + slope_per_30m * _blocks_between_30m(t_base, t_target)
 
-# ───────────────────────────────  RENDER — FORECASTS PAGE (PREV-DAY LINES)  ───────────────────────────────
+# ---------- PREV-DAY INTRADAY TIMES (1m) ----------
+@st.cache_data(ttl=300, show_spinner=False)
+def _prevday_intraday_times(asset: str, prev_d: date) -> dict:
+    """
+    Try to locate the prev-day H/L time using 1-minute bars (RTH ET window).
+    Fallback: use 4:00 PM ET for close, and 12:00 PM ET for H/L if 1m missing.
+    """
+    try:
+        tkr = yf.Ticker(asset)
+        # Pull 5d to be safe; filter locally to prev_d RTH
+        df = tkr.history(period="5d", interval="1m", prepost=False)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            idx = df.index
+            if getattr(idx[0], "tz", None) is None:
+                df.index = pd.to_datetime(idx).tz_localize("UTC").tz_convert(ET)
+            else:
+                df.index = pd.to_datetime(idx).tz_convert(ET)
+
+            day = df.loc[df.index.date == prev_d]
+            # RTH filter 9:30–16:00 ET
+            day = day.loc[(day.index.time >= time(9,30)) & (day.index.time <= time(16,0))]
+            if not day.empty:
+                hi_idx = day["High"].idxmax()
+                lo_idx = day["Low"].idxmin()
+                t_hi_ct = _ct(hi_idx)
+                t_lo_ct = _ct(lo_idx)
+                t_cl_ct = _ct(day.index[-1])
+                return {"t_hi_ct": t_hi_ct, "t_lo_ct": t_lo_ct, "t_cl_ct": t_cl_ct}
+
+        # Fallback times (RTH close & midday stand-ins)
+        return {
+            "t_hi_ct": _ct(datetime.combine(prev_d, time(12, 0), tzinfo=ET)),
+            "t_lo_ct": _ct(datetime.combine(prev_d, time(12, 0), tzinfo=ET)),
+            "t_cl_ct": _ct(datetime.combine(prev_d, time(16, 0), tzinfo=ET)),
+        }
+    except Exception:
+        return {
+            "t_hi_ct": _ct(datetime.combine(prev_d, time(12, 0), tzinfo=ET)),
+            "t_lo_ct": _ct(datetime.combine(prev_d, time(12, 0), tzinfo=ET)),
+            "t_cl_ct": _ct(datetime.combine(prev_d, time(16, 0), tzinfo=ET)),
+        }
+
+# ---------- PREV-DAY TABLE BUILDER ----------
+@st.cache_data(ttl=240, show_spinner=False)
+def _build_prevday_projection_table(asset: str, forecast_d: date) -> tuple[pd.DataFrame, dict] | tuple[None, None]:
+    anchors = get_previous_day_anchors(asset, forecast_d)
+    if not anchors:
+        return None, None
+
+    prev_d = anchors["prev_day"]
+    times = _prevday_intraday_times(asset, prev_d)
+
+    # Base prices & times (CT)
+    base = {
+        "HIGH": {"px": anchors["high"],  "t": times["t_hi_ct"]},
+        "CLOSE":{"px": anchors["close"], "t": times["t_cl_ct"]},
+        "LOW":  {"px": anchors["low"],   "t": times["t_lo_ct"]},
+    }
+
+    # Slopes
+    s_dn = SPX_SLOPES["prev_high_down"]     # -0.2792 per 30m (same for H/C/L)
+    s_up = SPX_SLOPES["tp_mirror_up"]       # +0.2792 per 30m
+
+    # Build rows 08:30–14:30 CT for forecast date
+    rows = []
+    for hhmm in SLOTS_30M:
+        h, m = map(int, hhmm.split(":"))
+        t_target = datetime.combine(forecast_d, time(h, m), tzinfo=CT)
+
+        # For each anchor: entry = descend from base, TP2 = ascend from base, TP1 = halfway
+        rec = {"Time": hhmm}
+        for key in ("HIGH", "CLOSE", "LOW"):
+            entry = _project(base[key]["px"], base[key]["t"], t_target, s_dn)
+            tp2   = _project(base[key]["px"], base[key]["t"], t_target, s_up)
+            # Directional: if entry < tp2 ⇒ long context; else short context; TP1 halfway
+            tp1 = entry + (tp2 - entry) * 0.5
+            rec[f"{key}_Entry"] = round(entry, 2)
+            rec[f"{key}_TP1"]   = round(tp1, 2)
+            rec[f"{key}_TP2"]   = round(tp2, 2)
+        rows.append(rec)
+
+    df = pd.DataFrame(rows)
+    meta = {
+        "asset": asset,
+        "prev_day": str(prev_d),
+        "bases": {k: {"price": float(v["px"]), "time_ct": v["t"].strftime("%Y-%m-%d %H:%M CT")} for k,v in base.items()},
+        "slopes": {"down_per_30m": s_dn, "up_per_30m": s_up}
+    }
+    return df, meta
+
+# ---------- UI: FORECASTS PAGE ----------
 if page == "Forecasts":
     st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>Prev-Day Line Projections — Entries & Targets</h3>", unsafe_allow_html=True)
+    label = "SPX500" if asset == "^GSPC" else asset
+    st.markdown(f"<h3>{label} — Previous Day Line Projection: Entries & Targets</h3>", unsafe_allow_html=True)
 
-    anchors = get_previous_day_anchors(asset, forecast_date)
-    if not anchors:
-        st.info("Anchors not available yet. Choose a recent weekday or try again.")
-        st.markdown('</div>', unsafe_allow_html=True)
+    table, meta = _build_prevday_projection_table(asset, forecast_date)
+    if table is None:
+        st.info("Anchors not available yet (Yahoo daily/1m may be out for the chosen date). Try a recent weekday.")
     else:
-        # Slope engine (hidden logic): use SPX slopes for now (works for any asset). 
-        slope_dn = float(SPX_SLOPES["prev_high_down"])    # -0.2792 per 30m
-        slope_up = float(SPX_SLOPES["tp_mirror_up"])      # +0.2792 per 30m
-        abs_s    = abs(slope_up)
-
-        # Target horizon selector (how far TP1/TP2 extend from the entry time)
-        colA, colB = st.columns([1, 2])
-        with colA:
-            horizon_blocks = st.slider(
-                "Target horizon (30-min blocks)",
-                min_value=2, max_value=10, value=4, step=1,
-                help="How far TP1/TP2 are projected from the entry time using the mirrored +slope."
-            )
-        with colB:
-            st.caption("TP2 distance = slope × horizon blocks • TP1 = 50% of TP2")
-
-        # Prepare schedule rows
-        slots = _ct_slots_30m()
-        base_dt_ct = _prev_day_1600_et_dt(anchors["prev_day"])
-
-        rows = []
-        for s in slots:
-            hh, mm = map(int, s.split(":"))
-            slot_dt_ct = datetime.combine(forecast_date, time(hh, mm), tzinfo=CT)
-            b = _blocks_between(base_dt_ct, slot_dt_ct)
-
-            # Entry lines (descending) from Prev Day anchors
-            high_entry  = _project_line(anchors["high"],  slope_dn, b)
-            close_entry = _project_line(anchors["close"], slope_dn, b)
-            low_entry   = _project_line(anchors["low"],   slope_dn, b)
-
-            # Targets: mirror (+slope) from the entry moment forward by horizon
-            # Long-from-Low (upward targets)
-            low_tp2  = low_entry  + abs_s * horizon_blocks
-            low_tp1  = low_entry  + abs_s * (horizon_blocks / 2.0)
-
-            # Short-from-High (downward targets)
-            high_tp2 = high_entry - abs_s * horizon_blocks
-            high_tp1 = high_entry - abs_s * (horizon_blocks / 2.0)
-
-            # From Close, show both directions (balanced view)
-            close_tp2_long = close_entry + abs_s * horizon_blocks
-            close_tp1_long = close_entry + abs_s * (horizon_blocks / 2.0)
-            close_tp2_short = close_entry - abs_s * horizon_blocks
-            close_tp1_short = close_entry - abs_s * (horizon_blocks / 2.0)
-
-            rows.append({
-                "Time (CT)": s,
-
-                "High Entry ↓": round(high_entry, 2),
-                "High TP1":     round(high_tp1, 2),
-                "High TP2":     round(high_tp2, 2),
-
-                "Close Entry ↓": round(close_entry, 2),
-                "Close TP1 ↑":   round(close_tp1_long, 2),
-                "Close TP2 ↑":   round(close_tp2_long, 2),
-                "Close TP1 ↓":   round(close_tp1_short, 2),
-                "Close TP2 ↓":   round(close_tp2_short, 2),
-
-                "Low Entry ↓":  round(low_entry, 2),
-                "Low TP1 ↑":    round(low_tp1, 2),
-                "Low TP2 ↑":    round(low_tp2, 2),
-            })
-
-        df = pd.DataFrame(rows)
-
-        # Friendly label for header card
-        label = "SPX500" if asset == "^GSPC" else asset
-
-        # KPI mini-strip
-        st.markdown(
-            f"""
-            <div class="kpi" style="margin-top:8px;">
-              <div class="card">
-                <div class="label">Instrument</div>
-                <div class="value">{label}</div>
-              </div>
-              <div class="card">
-                <div class="label">Prev Day (ET)</div>
-                <div class="value">{anchors['prev_day'].strftime('%a %b %d, %Y')}</div>
-              </div>
-              <div class="card">
-                <div class="label">Slope / 30m</div>
-                <div class="value">−0.2792 ↘︎ / +0.2792 ↗︎</div>
-              </div>
-              <div class="card">
-                <div class="label">Horizon</div>
-                <div class="value">{horizon_blocks} blocks</div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        st.caption(
+            f"Prev Day ({meta['prev_day']}) bases — "
+            f"High {meta['bases']['HIGH']['price']:.2f} at {meta['bases']['HIGH']['time_ct']} • "
+            f"Close {meta['bases']['CLOSE']['price']:.2f} at {meta['bases']['CLOSE']['time_ct']} • "
+            f"Low {meta['bases']['LOW']['price']:.2f} at {meta['bases']['LOW']['time_ct']}"
         )
 
-        # Dataframe (polished)
         st.dataframe(
-            df,
+            table,
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Time (CT)": st.column_config.TextColumn("Time (CT)", width="small"),
-
-                "High Entry ↓": st.column_config.NumberColumn("High Entry ↓", format="%.2f", width="small"),
-                "High TP1":     st.column_config.NumberColumn("High TP1",     format="%.2f", width="small"),
-                "High TP2":     st.column_config.NumberColumn("High TP2",     format="%.2f", width="small"),
-
-                "Close Entry ↓": st.column_config.NumberColumn("Close Entry ↓", format="%.2f", width="small"),
-                "Close TP1 ↑":   st.column_config.NumberColumn("Close TP1 ↑",   format="%.2f", width="small"),
-                "Close TP2 ↑":   st.column_config.NumberColumn("Close TP2 ↑",   format="%.2f", width="small"),
-                "Close TP1 ↓":   st.column_config.NumberColumn("Close TP1 ↓",   format="%.2f", width="small"),
-                "Close TP2 ↓":   st.column_config.NumberColumn("Close TP2 ↓",   format="%.2f", width="small"),
-
-                "Low Entry ↓":  st.column_config.NumberColumn("Low Entry ↓",  format="%.2f", width="small"),
-                "Low TP1 ↑":    st.column_config.NumberColumn("Low TP1 ↑",    format="%.2f", width="small"),
-                "Low TP2 ↑":    st.column_config.NumberColumn("Low TP2 ↑",    format="%.2f", width="small"),
+                "Time": st.column_config.TextColumn("Time", width="small"),
+                "HIGH_Entry": st.column_config.NumberColumn("High Entry ($)", format="$%.2f"),
+                "HIGH_TP1":   st.column_config.NumberColumn("High TP1 ($)",   format="$%.2f"),
+                "HIGH_TP2":   st.column_config.NumberColumn("High TP2 ($)",   format="$%.2f"),
+                "CLOSE_Entry":st.column_config.NumberColumn("Close Entry ($)",format="$%.2f"),
+                "CLOSE_TP1":  st.column_config.NumberColumn("Close TP1 ($)",  format="$%.2f"),
+                "CLOSE_TP2":  st.column_config.NumberColumn("Close TP2 ($)",  format="$%.2f"),
+                "LOW_Entry":  st.column_config.NumberColumn("Low Entry ($)",  format="$%.2f"),
+                "LOW_TP1":    st.column_config.NumberColumn("Low TP1 ($)",    format="$%.2f"),
+                "LOW_TP2":    st.column_config.NumberColumn("Low TP2 ($)",    format="$%.2f"),
             }
         )
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        # Subtle helper note
+# ---------- UI: ANCHORS PAGE (ensure visible labels) ----------
+if page == "Anchors":
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    label = "SPX500" if asset == "^GSPC" else asset
+    st.markdown(f"<h3>{label} — Previous Day Anchors</h3>", unsafe_allow_html=True)
+
+    anchors = get_previous_day_anchors(asset, forecast_date)
+    if not anchors:
+        st.info("Could not compute anchors yet. Try a recent weekday.")
+    else:
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("Prev Day High",  f"{anchors['high']:.2f}")
+        with c2: st.metric("Prev Day Close", f"{anchors['close']:.2f}")
+        with c3: st.metric("Prev Day Low",   f"{anchors['low']:.2f}")
+
+        pd_times = _prevday_intraday_times(asset, anchors["prev_day"])
         st.caption(
-            "Entries are descending lines from previous day High / Close / Low. "
-            "TP1/TP2 are mirrored with equal and half magnitudes using +0.2792 per 30-minute block from the entry time. "
-            "Schedule spans 08:30 → 14:30 CT."
+            f"Anchor times (CT) — High: {pd_times['t_hi_ct'].strftime('%-I:%M %p')} • "
+            f"Close: {pd_times['t_cl_ct'].strftime('%-I:%M %p')} • "
+            f"Low: {pd_times['t_lo_ct'].strftime('%-I:%M %p')}  "
+            "(intraday 1m fallback used if needed)"
         )
 
-        st.markdown('</div>', unsafe_allow_html=True)
-# ==============================  END PART 2  ==============================
+    st.markdown('</div>', unsafe_allow_html=True)
