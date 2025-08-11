@@ -325,6 +325,9 @@ if page in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Setting
 
 
 
+
+
+
 # ==============================  PART 2 — PREV-DAY PROJECTIONS (VISIBLE TEXT FIX + TABLE)  ==============================
 # - Fixes invisible headings/text via small CSS override (safe on white backgrounds)
 # - Computes prev-day H/L/C times from 1m (fallback to 4:00 PM ET)
