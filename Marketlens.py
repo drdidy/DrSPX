@@ -1,388 +1,249 @@
-# =============================== PART 1 — CORE BOOTSTRAP (SPX) + OVERNIGHT INPUTS ===============================
-# MarketLens Pro — Beautiful shell, robust SPX fetch, sidebar nav, and Overnight High/Low input preview
-# ===============================================================================================================
-
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PART 1 — CORE SHELL + POLISHED UI + YF SPX ENGINE + OVERNIGHT INPUTS
+# MarketLens Pro (Streamlit) — Clean professional landing with working data
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
-
 import pandas as pd
+import numpy as np
 import streamlit as st
 import yfinance as yf
 
-# ─────────────────────────────── App Identity ───────────────────────────────
-APP_NAME   = "MarketLens Pro"
-COMPANY    = "Quantum Trading Systems"
-VERSION    = "4.1.0"
-
-# Primary instrument (Yahoo Finance)
-SPX_SYMBOL = "^GSPC"   # S&P 500 Index
-
-# For later equities pages (not used yet in Part 1, just declared)
-EQUITY_SLOPES = {
-    "TSLA": 0.1508, "NVDA": 0.0485, "AAPL": 0.0750,
-    "MSFT": 0.17,   "AMZN": 0.03,   "GOOGL": 0.07,
-    "META": 0.035,  "NFLX": 0.23,
-}
-EQUITY_LIST = list(EQUITY_SLOPES.keys())
-
-# ─────────────────────────────── Time / Sessions ───────────────────────────────
-ET = ZoneInfo("America/New_York")
+APP_NAME = "MarketLens Pro"
+VERSION = "4.1.0"
 CT = ZoneInfo("America/Chicago")
+ET = ZoneInfo("America/New_York")
 
-# RTH we display (CT, for SPX)
+# RTH (CT) for SPX: 8:30 → 15:00. We'll project to 14:30 final slot to match your 30m blocks.
 RTH_START_CT = time(8, 30)
-RTH_END_CT   = time(15, 0)
+RTH_END_CT   = time(14, 30)
 
-# Overnight capture window (ET) — you’ll enter the time/price manually
-ON_START_ET  = time(18, 0)  # 6:00 PM ET (5:00 PM CT)
-ON_END_ET    = time(2, 0)   # 2:00 AM ET
+# Slopes per 30-min block (your latest direction: *descending* for prior-day levels)
+SPX_SLOPE = {
+    "HIGH": -0.2792,
+    "CLOSE": -0.2792,
+    "LOW": -0.2792,
+}
+# Overnight lines will use a *flat* default slope unless you change later
+OVERNIGHT_SLOPE = 0.0
 
-# ─────────────────────────────── Streamlit Page Config ───────────────────────────────
+# ─────────────────────────── Streamlit page config ─────────────────────────
 st.set_page_config(
-    page_title=f"{APP_NAME}",
+    page_title=f"{APP_NAME} — Professional SPX Analytics",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# ─────────────────────────────── Premium CSS (Apple / Tesla) ───────────────────────────────
-APPLE_CSS = """
+# ──────────────────────────────── CSS (polished) ───────────────────────────
+CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&display=swap');
-
 :root{
-  --primary:#007AFF; --primary-dark:#0056CC; --secondary:#5AC8FA;
-  --success:#34C759; --warning:#FF9500; --error:#FF3B30; --neutral:#8B5CF6;
-  --bg:#FFFFFF; --panel:#F2F2F7; --surface:#FFFFFF; --border:rgba(0,0,0,.08);
-  --text:#000; --sub:#3C3C43; --muted:#8E8E93;
-  --r:.8rem; --r2:1.25rem; --pad:1.1rem; --shadow:0 10px 15px rgba(0,0,0,.08),0 4px 6px rgba(0,0,0,.05);
+  --bg:#0f1115; --card:#151823; --card2:#10131b; --muted:#8b93a7;
+  --accent:#5b8cff; --accent2:#8aa6ff; --success:#1fbf75; --warn:#f5a524; --error:#ff6b6b;
+  --radius:18px; --pad:18px; --shadow: 0 10px 30px rgba(0,0,0,.25);
 }
-
-html,body,.stApp{font-family:'Inter',system-ui;background:linear-gradient(135deg,#fff 0%,#f7f7fb 100%);color:var(--text);}
-
-#MainMenu, footer, header[data-testid="stHeader"]{display:none !important;}
-
+.stApp { background: radial-gradient(1200px 600px at 15% -10%, #1b2030 0%, #0f1115 40%); color: #e8ecf1;}
+/* keep Streamlit header visible so the sidebar toggle exists */
+#MainMenu, footer {display:none !important;}
+.block-container {padding-top: 1.2rem !important;}
+.card{
+  background: linear-gradient(180deg, var(--card) 0%, var(--card2) 100%);
+  border:1px solid rgba(255,255,255,.06); border-radius: var(--radius);
+  padding: var(--pad); box-shadow: var(--shadow);
+}
 .hero{
-  background:linear-gradient(135deg,#171A20 0%,#2f343b 100%);
-  color:#fff;border-radius:24px;padding:28px 24px;margin:10px 0 18px;border:1px solid rgba(255,255,255,.08);
-  box-shadow:var(--shadow);position:relative;overflow:hidden;
+  border-radius: 22px; padding: 28px 24px;
+  background: linear-gradient(135deg, #121626 0%, #0d1220 60%),
+              radial-gradient(800px 300px at 10% -20%, #24315c66 0%, transparent 60%);
+  border:1px solid rgba(255,255,255,.06); box-shadow: var(--shadow);
 }
-.hero .t{font-size:26px;font-weight:800;letter-spacing:-.02em;margin-bottom:6px}
-.hero .s{opacity:.85}
+.hero h1{font-size:2rem; margin:0 0 .25rem 0;}
+.kpi{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;}
+.kpi .pill{
+  background:#0c0f18; border:1px solid rgba(255,255,255,.08); border-radius: 14px;
+  padding:14px; text-align:center;
+}
+.kpi .label{color:var(--muted); font-size:.85rem; margin-top:4px}
 .badge{
-  display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.08);
-  padding:8px 12px;border-radius:999px;font-weight:600;margin-top:10px
+  display:inline-flex; gap:8px; align-items:center; padding:8px 12px;
+  border-radius:999px; font-weight:600; font-size:.9rem;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08)
 }
-
-.panel{
-  background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:18px;margin:8px 0;box-shadow:var(--shadow);
-}
-
-.kpi{display:flex;gap:14px;flex-wrap:wrap}
-.kpi-item{padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:#fff;min-width:160px}
-.kpi .v{font:700 20px/1 'JetBrains Mono',monospace}
-.ok{color:var(--success)} .warn{color:var(--warning)} .err{color:var(--error)}
-
-.nav-pill{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 2px;}
-.nav-pill a{
-  text-decoration:none;border:1px solid var(--border);background:#fff;padding:8px 12px;border-radius:12px;
-  font-weight:600;color:#111;transition:.2s;
-}
-.nav-pill a:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
-
-.caption{color:var(--muted);font-size:12px}
-hr{border:none;border-top:1px solid var(--border);margin:18px 0}
-.small{font-size:12px;color:var(--sub)}
-label[data-baseweb="checkbox"] > div{font-size:13px}
+.badge.ok{ background: linear-gradient(90deg, #123f2a, #0e2f20); color:#b7f7d5; border-color:#1c5f3d;}
+.badge.warn{ background: linear-gradient(90deg, #3a2d12, #2b210e); color:#ffe0a6; border-color:#5f4a1c;}
+.badge.err{ background: linear-gradient(90deg, #421d1d, #2a1313); color:#ffc1c1; border-color:#6b2a2a;}
+h3.section{margin:12px 0 6px 0;}
+.small{color:var(--muted); font-size:.9rem}
+.tbl .blank{color:#6d7386}
 </style>
 """
-st.markdown(APPLE_CSS, unsafe_allow_html=True)
+st.markdown(CSS, unsafe_allow_html=True)
 
-# ─────────────────────────────── Helpers ───────────────────────────────
-def _now_et() -> datetime:
-    return datetime.now(tz=ET)
+# ───────────────────────────── Utilities & data ────────────────────────────
+def _to_ct(ts: pd.DatetimeIndex|pd.Series) -> pd.Series:
+    return pd.to_datetime(ts, utc=True).tz_convert(CT)
 
-def et_on(d: date, t: time) -> datetime:
-    return datetime.combine(d, t).replace(tzinfo=ET)
-
-def ct_slots_30m(start_ct: time, end_ct: time) -> list[str]:
-    """RTH slots in CT as HH:MM."""
-    cur = datetime(2025,1,1,start_ct.hour,start_ct.minute)
-    end = datetime(2025,1,1,end_ct.hour,end_ct.minute)
-    out=[]
-    while cur <= end:
-        out.append(cur.strftime("%H:%M"))
-        cur += timedelta(minutes=30)
-    return out
-
-RTH_SLOTS = ct_slots_30m(RTH_START_CT, RTH_END_CT)
-
-# ─────────────────────────────── Robust Yahoo Fetch (SPX) ───────────────────────────────
-@st.cache_data(ttl=180)
-def yf_fetch_intraday_spx(start_et: datetime, end_et: datetime) -> pd.DataFrame:
-    """
-    Robust SPX pull:
-      1) 1m, 7d
-      2) 5m, 30d
-      3) 15m, 60d
-    Returns: Dt(ET), Open, High, Low, Close (sorted)
-    """
-    attempts = [
-        {"interval": "1m",  "period": "7d"},
-        {"interval": "5m",  "period": "30d"},
-        {"interval": "15m", "period": "60d"},
-    ]
-    for a in attempts:
+@st.cache_data(ttl=300)
+def yf_fetch_intraday(symbol: str, start_dt_ct: datetime, end_dt_ct: datetime) -> pd.DataFrame:
+    """Resilient fetch: try 1m → 5m → 15m. Return Dt(Open/High/Low/Close) in CT or empty df."""
+    tz = "America/Chicago"
+    intervals = ["1m", "5m", "15m"]
+    for itv in intervals:
         try:
             df = yf.download(
-                SPX_SYMBOL,
-                period=a["period"],
-                interval=a["interval"],
-                auto_adjust=False,
-                progress=False,
+                symbol,
+                start=start_dt_ct.astimezone(CT).strftime("%Y-%m-%d %H:%M"),
+                end=end_dt_ct.astimezone(CT).strftime("%Y-%m-%d %H:%M"),
+                interval=itv,
+                auto_adjust=False, progress=False, prepost=True, threads=False,
             )
             if df is None or df.empty:
                 continue
-            df = df.rename(columns=str.title)
-            need = ["Open","High","Low","Close"]
-            if not set(need).issubset(df.columns):
+            df = df.reset_index().rename(columns={"Datetime":"Dt","Date":"Dt"})
+            if "Dt" not in df.columns:
+                # yfinance sometimes calls index 'index'
+                if "index" in df.columns:
+                    df = df.rename(columns={"index":"Dt"})
+                else:
+                    # fallback: the first column is the timestamp
+                    df.columns = ["Dt"] + list(df.columns[1:])
+            # Normalize column names
+            cols = {c:c.capitalize() for c in df.columns}
+            df = df.rename(columns=cols)
+            need = {"Dt","Open","High","Low","Close"}
+            if not need.issubset(set(df.columns)):  # not our structure
                 continue
-
-            idx = df.index
-            if idx.tz is None:
-                idx = idx.tz_localize("UTC")
-            dt_et = idx.tz_convert(ET)
-            df = df.copy()
-            df["Dt"] = dt_et
-            df = df.reset_index(drop=True)
-            df = df.dropna(subset=need).sort_values("Dt")
-
-            pad = timedelta(minutes=2)
-            mask = (df["Dt"] >= (start_et - pad)) & (df["Dt"] <= (end_et + pad))
-            clip = df.loc[mask, ["Dt"] + need].copy()
-            if not clip.empty:
-                st.caption(f"🔎 {SPX_SYMBOL} {a['interval']} • period={a['period']} • rows={len(clip)}")
-                return clip
+            df["Dt"] = _to_ct(df["Dt"])
+            df = df.dropna(subset=["Open","High","Low","Close"]).sort_values("Dt")
+            if df.empty:
+                continue
+            return df[["Dt","Open","High","Low","Close"]].copy()
         except Exception:
             continue
-    st.caption(f"🔎 {SPX_SYMBOL} — no rows in the requested window (all fallbacks tried).")
-    return pd.DataFrame()
+    return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
 
-@st.cache_data(ttl=120)
-def latest_snapshot_spx() -> dict:
-    """Tiny snapshot so Overview is never empty."""
-    end_et = _now_et()
-    start_et = end_et - timedelta(hours=6)
-    df = yf_fetch_intraday_spx(start_et, end_et)
-    if df.empty:
-        return {"ok": False}
-    last = df.iloc[-1]
-    return {
-        "ok": True,
-        "dt": last["Dt"],
-        "open": float(last["Open"]),
-        "high": float(last["High"]),
-        "low": float(last["Low"]),
-        "close": float(last["Close"]),
-        "rows": len(df),
-    }
+def rth_slots_30m(d: date) -> list[datetime]:
+    base = datetime.combine(d, RTH_START_CT, tzinfo=CT)
+    end  = datetime.combine(d, RTH_END_CT, tzinfo=CT)
+    out=[]
+    cur=base
+    while cur<=end:
+        out.append(cur)
+        cur += timedelta(minutes=30)
+    return out
 
-# ─────────────────────────────── Sidebar / Navigation ───────────────────────────────
+def friendly_status(df: pd.DataFrame) -> tuple[str,str]:
+    if df is None or df.empty:
+        return ("err","No data for the selected window")
+    return ("ok","Live data available")
+
+# ───────────────────────────── Sidebar (nav + inputs) ──────────────────────
 with st.sidebar:
-    st.markdown(
-        f"""
-        <div class="panel" style="text-align:center">
-            <div style="font-weight:800;font-size:18px;color:#111;">{APP_NAME}</div>
-            <div class="caption">v{VERSION} • {COMPANY}</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown("### Navigation")
+    st.page_link("Marketlens.py", label="Overview", icon="🏠")
+    st.markdown("---")
+    st.markdown("### Session")
+    target_session: date = st.date_input("Trading Session (CT)", value=date.today(), help="RTH projection date")
 
-    # Session date (used throughout tabs)
-    default_session = (date.today() if date.today().weekday() < 5 else date.today() - timedelta(days=(date.today().weekday()-4)))
-    forecast_date = st.date_input("Target Session (CT)", value=default_session, help="Trading session you want to analyze.")
+    st.markdown("### Overnight Levels (manual)")
+    st.caption("Session from **5:00 PM → 2:00 AM CT**")
+    colA, colB = st.columns(2)
+    with colA:
+        on_hi_price = st.number_input("Overnight High ($)", min_value=0.0, value=0.0, step=0.25, format="%.2f")
+    with colB:
+        on_hi_time  = st.time_input("High time", value=time(17, 0))
+    colC, colD = st.columns(2)
+    with colC:
+        on_lo_price = st.number_input("Overnight Low ($)",  min_value=0.0, value=0.0, step=0.25, format="%.2f")
+    with colD:
+        on_lo_time  = st.time_input("Low time", value=time(17, 0))
 
-    st.markdown("<hr/>", unsafe_allow_html=True)
-    st.markdown("#### Navigation")
-    page = st.radio(
-        label="",
-        options=["Overview", "Anchors", "Forecasts", "Signals", "Contract", "Fibonacci", "Export", "Settings / About"],
-        index=0,
-        label_visibility="collapsed",
-    )
-
-# ─────────────────────────────── Hero Header ───────────────────────────────
+# ───────────────────────────── Hero header ─────────────────────────────────
 st.markdown(
     f"""
     <div class="hero">
-      <div class="t">{APP_NAME}</div>
-      <div class="s">Professional SPX analytics (Yahoo Finance • {SPX_SYMBOL})</div>
-      <div class="badge">1m → 5m → 15m fallbacks • Clean, fast, reliable</div>
+      <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div>
+          <h1>{APP_NAME}</h1>
+          <div class="small">Professional S&P 500 analytics powered by Yahoo Finance</div>
+        </div>
+        <div class="badge">v{VERSION}</div>
+      </div>
     </div>
     """,
     unsafe_allow_html=True
 )
 
-# ─────────────────────────────── Overview (live info) ───────────────────────────────
-if page == "Overview":
-    snap = latest_snapshot_spx()
-    status_class = "ok" if snap.get("ok") else "err"
-    status_text  = "Connected" if snap.get("ok") else "No data in window"
+# ───────────────────────────── Market data status card ─────────────────────
+# Fetch a small, recent window around the chosen session to verify connectivity.
+check_start = datetime.combine(target_session - timedelta(days=1), time(7,0), tzinfo=CT)
+check_end   = datetime.combine(target_session, time(16,0), tzinfo=CT)
+df_check = yf_fetch_intraday("^GSPC", check_start, check_end)
+state, msg = friendly_status(df_check)
 
-    st.markdown(
-        f"""
-        <div class="panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
-            <div>
-              <div style="font-weight:800;font-size:18px;">Market Data Connection</div>
-              <div class="caption">Resilient SPX intraday fetch with interval fallbacks</div>
-            </div>
-            <div class="kpi">
-              <div class="kpi-item"><div class="v {status_class}">{status_text}</div><div class="caption">Status</div></div>
-              <div class="kpi-item"><div class="v">{SPX_SYMBOL}</div><div class="caption">Instrument</div></div>
-              <div class="kpi-item"><div class="v">{forecast_date.strftime('%a %b %d')}</div><div class="caption">Session (CT)</div></div>
-            </div>
-          </div>
+st.markdown("### Market Data")
+st.markdown(
+    f"""
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div class="badge {'ok' if state=='ok' else 'err'}">
+          {'🟢 Connected' if state=='ok' else '🔴 Not available'}
         </div>
-        """,
-        unsafe_allow_html=True
-    )
+        <div class="small">{'S&P 500'}</div>
+      </div>
+      <div style="margin-top:10px;color:{'#b7f7d5' if state=='ok' else '#ffc1c1'}">{msg}</div>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
-    if snap.get("ok"):
-        st.markdown(
-            f"""
-            <div class="panel">
-              <div style="display:flex;gap:16px;flex-wrap:wrap;">
-                <div class="kpi-item"><div class="v">{snap['close']:.2f}</div><div class="caption">Last</div></div>
-                <div class="kpi-item"><div class="v">{snap['high']:.2f}</div><div class="caption">High (window)</div></div>
-                <div class="kpi-item"><div class="v">{snap['low']:.2f}</div><div class="caption">Low (window)</div></div>
-                <div class="kpi-item"><div class="v">{snap['rows']}</div><div class="caption">Rows Pulled</div></div>
-              </div>
-              <div class="caption" style="margin-top:8px;">As of {snap['dt'].astimezone(ET).strftime('%Y-%m-%d %H:%M ET')}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            """
-            <div class="panel">
-              <div class="warn" style="font-weight:700">Could not pull rows for the last 6 hours.</div>
-              <div class="caption">Try viewing during market hours or choose today/yesterday. The app still runs; other tabs use the same robust loader.</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+# ───────────────────────────── Overnight projection preview ────────────────
+st.markdown("### Overnight Projections → Today’s RTH")
+# Build a tiny, useful table even if no YF data was returned (so the page looks complete).
+slots = rth_slots_30m(target_session)
+def project_line(base_px: float, base_dt: datetime, t: datetime, slope_per_block: float) -> float:
+    if base_px <= 0 or base_dt is None:
+        return float("nan")
+    # 30-minute block count from base_dt to t
+    step = timedelta(minutes=30)
+    blocks = int(np.floor((t - base_dt) / step))
+    return round(base_px + slope_per_block * blocks, 2)
 
-# ─────────────────────────────── Anchors — Overnight Inputs (time + price) ───────────────────────────────
-if page == "Anchors":
-    st.markdown(
-        """
-        <div class="panel">
-          <div style="font-weight:800;font-size:18px;margin-bottom:6px">⚓ SPX Overnight Anchors (Manual)</div>
-          <div class="caption">Enter your Overnight High/Low (time & price). Overnight window reference: 6:00 PM – 2:00 AM ET.</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+on_hi_dt = datetime.combine(
+    target_session - timedelta(days=1) if on_hi_time >= time(17,0) else target_session,
+    on_hi_time, tzinfo=CT
+)
+on_lo_dt = datetime.combine(
+    target_session - timedelta(days=1) if on_lo_time >= time(17,0) else target_session,
+    on_lo_time, tzinfo=CT
+)
 
-    col_hi, col_lo = st.columns(2)
-
-    with col_hi:
-        st.markdown("**Overnight High**")
-        on_high_time = st.time_input("Time (ET)", value=time(21, 0), key="on_high_time")
-        on_high_price = st.number_input("Price ($)", min_value=0.0, value=5000.00, step=0.25, key="on_high_price", format="%.2f")
-
-    with col_lo:
-        st.markdown("**Overnight Low**")
-        on_low_time = st.time_input("Time  (ET)", value=time(0, 30), key="on_low_time")
-        on_low_price = st.number_input("Price  ($)", min_value=0.0, value=4950.00, step=0.25, key="on_low_price", format="%.2f")
-
-    # Store to session for later parts (entries/detection will be built in Part 2)
-    st.session_state["OVN_INPUTS"] = {
-        "date": forecast_date,
-        "high_time_et": on_high_time, "high_price": float(on_high_price),
-        "low_time_et": on_low_time,   "low_price":  float(on_low_price),
-    }
-
-    # Pretty confirmation strip
-    st.markdown(
-        f"""
-        <div class="panel">
-          <div style="display:flex;gap:14px;flex-wrap:wrap">
-            <div class="kpi-item">
-              <div class="v">{on_high_price:.2f}</div>
-              <div class="caption">ON High @ {on_high_time.strftime('%H:%M')} ET</div>
-            </div>
-            <div class="kpi-item">
-              <div class="v">{on_low_price:.2f}</div>
-              <div class="caption">ON Low  @ {on_low_time.strftime('%H:%M')} ET</div>
-            </div>
-            <div class="kpi-item">
-              <div class="v">{forecast_date.strftime('%a %b %d')}</div>
-              <div class="caption">Session (CT)</div>
-            </div>
-          </div>
-          <div class="small" style="margin-top:8px">These anchors will power the entries table & projections in Part 2.</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    # Simple preview table: RTH 30-min slots with flat ON levels (projections/detections come in Part 2)
-    preview = pd.DataFrame({
-        "Time (CT)": RTH_SLOTS,
-        "Overnight High ($)": [on_high_price for _ in RTH_SLOTS],
-        "Overnight Low  ($)": [on_low_price  for _ in RTH_SLOTS],
+rows=[]
+for t in slots:
+    rows.append({
+        "Time": t.strftime("%H:%M"),
+        "ON High Line ($)": project_line(on_hi_price, on_hi_dt, t, OVERNIGHT_SLOPE),
+        "ON Low Line ($)":  project_line(on_lo_price, on_lo_dt, t, OVERNIGHT_SLOPE),
+        "Prev High Line ($)": project_line(0.0, on_hi_dt, t, 0.0),  # placeholder for Parts 2–3 (prior-day H/L/C)
     })
-    st.markdown("### 📋 Preview — RTH Slots with Overnight Levels")
-    st.dataframe(
-        preview,
-        use_container_width=True,
-        hide_index=True
-    )
+preview = pd.DataFrame(rows)
 
-# ─────────────────────────────── Placeholders for other tabs ───────────────────────────────
-def _placeholder_card(title: str, subtitle: str):
-    st.markdown(
-        f"""
-        <div class="panel">
-          <div style="font-weight:800;font-size:18px;margin-bottom:6px">{title}</div>
-          <div class="caption">{subtitle}</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+st.dataframe(
+    preview[["Time","ON High Line ($)","ON Low Line ($)"]],
+    use_container_width=True, hide_index=True,
+    column_config={
+        "Time": st.column_config.TextColumn("RTH Slot"),
+        "ON High Line ($)": st.column_config.NumberColumn(format="$%.2f"),
+        "ON Low Line ($)":  st.column_config.NumberColumn(format="$%.2f"),
+    }
+)
 
-if page == "Forecasts":
-    _placeholder_card("Forecast Lines", "We’ll generate RTH projections & entry logic from your anchors in Part 2.")
-elif page == "Signals":
-    _placeholder_card("Signals", "Touch/confirmation detection and summaries arrive in Part 3.")
-elif page == "Contract":
-    _placeholder_card("Contract Line", "User-picked low pair slope tool lands in Part 3.")
-elif page == "Fibonacci":
-    _placeholder_card("Fibonacci", "Bounce tools and 0.786 confluence in Part 3.")
-elif page == "Export":
-    _placeholder_card("Export Center", "ZIP/CSV exports for tables and summaries in Part 3.")
-elif page == "Settings / About":
-    st.markdown(
-        f"""
-        <div class="panel">
-          <div style="font-weight:800;font-size:18px;margin-bottom:6px">Settings / About</div>
-          <div class="caption">Version {VERSION} • {COMPANY}</div>
-          <hr/>
-          <div class="caption">Equities enabled: {", ".join(EQUITY_LIST)}</div>
-          <div class="caption">SPX RTH (CT): {RTH_START_CT.strftime('%H:%M')} – {RTH_END_CT.strftime('%H:%M')}</div>
-          <div class="caption">Overnight window (ET): {ON_START_ET.strftime('%H:%M')} – {ON_END_ET.strftime('%H:%M')}</div>
-          <div class="caption">Data Source: Yahoo Finance (^GSPC) with interval fallbacks</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-# ===============================================================================================================
+st.caption(
+    "Tip: enter your **Overnight High/Low** (price + time between 5:00 PM and 2:00 AM CT). "
+    "Lines are projected across today’s RTH in 30-minute slots. Slopes can be customized later."
+)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # End of PART 1
-# ===============================================================================================================
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
