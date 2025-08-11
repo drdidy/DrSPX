@@ -256,7 +256,6 @@ if st.session_state.page == "Overview":
 # - 30-min block math + line projection (±0.3171 per block)
 # - No volume, no Alpaca
 
-from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 import pandas as pd
