@@ -1,7 +1,8 @@
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# PART 1 — CORE SHELL + POLISHED UI + YF SPX ENGINE + OVERNIGHT INPUTS
-# MarketLens Pro (Streamlit) — Clean professional landing with working data
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================  PART 1 — CORE SHELL + LIVE SPX + ANCHOR INPUTS  ==============================
+# Enterprise UI, always-open sidebar, SPX from Yahoo Finance, hidden slope engine, overnight inputs (price+time)
+# --------------------------------------------------------------------------------------------------------------
+# Drop this in your main file (e.g., MarketLens.py). It runs on its own — no other parts needed yet.
+
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
@@ -10,500 +11,353 @@ import numpy as np
 import streamlit as st
 import yfinance as yf
 
-APP_NAME = "MarketLens Pro"
-VERSION = "4.1.0"
-CT = ZoneInfo("America/Chicago")
+# ───────────────────────────────  GLOBAL CONFIG  ───────────────────────────────
+APP_NAME   = "MarketLens Pro"
+TAGLINE    = "Enterprise SPX & Equities Forecasting"
+VERSION    = "5.0"
+COMPANY    = "Quantum Trading Systems"
+
 ET = ZoneInfo("America/New_York")
+CT = ZoneInfo("America/Chicago")
 
-# RTH (CT) for SPX: 8:30 → 15:00. We'll project to 14:30 final slot to match your 30m blocks.
-RTH_START_CT = time(8, 30)
-RTH_END_CT   = time(14, 30)
+# Market hours (SPX cash) in ET → converted in code as needed
+RTH_START_ET, RTH_END_ET = time(9, 30), time(16, 0)
+RTH_START_CT, RTH_END_CT = time(8, 30), time(15, 0)
 
-# Slopes per 30-min block (your latest direction: *descending* for prior-day levels)
-SPX_SLOPE = {
-    "HIGH": -0.2792,
-    "CLOSE": -0.2792,
-    "LOW": -0.2792,
+# SPX core slopes (per 30-minute block) — WORKS IN BACKGROUND (not shown in UI)
+# Previous-day anchors (descending from H/C/L; mirror ascending for TP)
+SPX_SLOPES = {
+    "prev_high_down": -0.2792,
+    "prev_close_down": -0.2792,
+    "prev_low_down": -0.2792,
+    "tp_mirror_up": +0.2792,
 }
-# Overnight lines will use a *flat* default slope unless you change later
-OVERNIGHT_SLOPE = 0.0
+# Overnight anchors (user inputs): low uses ascending; high uses descending
+SPX_OVERNIGHT_SLOPES = {
+    "overnight_low_up": +0.2792,
+    "overnight_high_down": -0.2792,
+}
 
-# ─────────────────────────── Streamlit page config ─────────────────────────
+# ───────────────────────────────  PAGE SETUP  ───────────────────────────────
 st.set_page_config(
-    page_title=f"{APP_NAME} — Professional SPX Analytics",
+    page_title=f"{APP_NAME} — SPX",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ──────────────────────────────── CSS (polished) ───────────────────────────
-CSS = """
+# ───────────────────────────────  PREMIUM CSS (Clean, Bold, Product-Ready)  ───────────────────────────────
+st.markdown("""
 <style>
-:root{
-  --bg:#0f1115; --card:#151823; --card2:#10131b; --muted:#8b93a7;
-  --accent:#5b8cff; --accent2:#8aa6ff; --success:#1fbf75; --warn:#f5a524; --error:#ff6b6b;
-  --radius:18px; --pad:18px; --shadow: 0 10px 30px rgba(0,0,0,.25);
+/* Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+
+/* App background */
+.stApp { 
+  background: radial-gradient(1200px 600px at 10% -10%, #f8fbff 0%, #ffffff 35%) no-repeat fixed;
 }
-.stApp { background: radial-gradient(1200px 600px at 15% -10%, #1b2030 0%, #0f1115 40%); color: #e8ecf1;}
-/* keep Streamlit header visible so the sidebar toggle exists */
-#MainMenu, footer {display:none !important;}
-.block-container {padding-top: 1.2rem !important;}
-.card{
-  background: linear-gradient(180deg, var(--card) 0%, var(--card2) 100%);
-  border:1px solid rgba(255,255,255,.06); border-radius: var(--radius);
-  padding: var(--pad); box-shadow: var(--shadow);
+
+/* Hide Streamlit chrome */
+#MainMenu, header[data-testid="stHeader"] { display: none !important; }
+
+/* Brand Hero */
+.hero {
+  border-radius: 24px;
+  padding: 22px 24px;
+  border: 1px solid rgba(0,0,0,0.06);
+  background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+  color: white;
+  box-shadow: 0 12px 30px rgba(99,102,241,0.25);
 }
-.hero{
-  border-radius: 22px; padding: 28px 24px;
-  background: linear-gradient(135deg, #121626 0%, #0d1220 60%),
-              radial-gradient(800px 300px at 10% -20%, #24315c66 0%, transparent 60%);
-  border:1px solid rgba(255,255,255,.06); box-shadow: var(--shadow);
+.hero .title { font-weight: 800; font-size: 26px; letter-spacing: -0.02em; }
+.hero .sub { opacity: 0.95; font-weight: 500; }
+.hero .meta { opacity: 0.8; font-size: 13px; margin-top: 4px; }
+
+/* KPI strip */
+.kpi {
+  display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin-top: 14px;
 }
-.hero h1{font-size:2rem; margin:0 0 .25rem 0;}
-.kpi{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;}
-.kpi .pill{
-  background:#0c0f18; border:1px solid rgba(255,255,255,.08); border-radius: 14px;
-  padding:14px; text-align:center;
+.kpi .card {
+  border-radius: 16px; padding: 14px 16px;
+  background: white; border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 4px 16px rgba(2,6,23,0.05);
 }
-.kpi .label{color:var(--muted); font-size:.85rem; margin-top:4px}
-.badge{
-  display:inline-flex; gap:8px; align-items:center; padding:8px 12px;
-  border-radius:999px; font-weight:600; font-size:.9rem;
-  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.08)
+.kpi .label { color: #6b7280; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.kpi .value { font-weight: 800; font-size: 22px; color: #0f172a; letter-spacing: -0.02em; }
+
+/* Section */
+.sec { margin-top: 18px; border-radius: 20px; padding: 18px; background: white; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 8px 30px rgba(2,6,23,0.05); }
+.sec h3 { margin: 0 0 8px 0; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+/* Sidebar polish */
+section[data-testid="stSidebar"] {
+  background: #0b1220 !important;
+  color: #e5e7eb;
+  border-right: 1px solid rgba(255,255,255,0.06);
 }
-.badge.ok{ background: linear-gradient(90deg, #123f2a, #0e2f20); color:#b7f7d5; border-color:#1c5f3d;}
-.badge.warn{ background: linear-gradient(90deg, #3a2d12, #2b210e); color:#ffe0a6; border-color:#5f4a1c;}
-.badge.err{ background: linear-gradient(90deg, #421d1d, #2a1313); color:#ffc1c1; border-color:#6b2a2a;}
-h3.section{margin:12px 0 6px 0;}
-.small{color:var(--muted); font-size:.9rem}
-.tbl .blank{color:#6d7386}
+section[data-testid="stSidebar"] .css-1cypcdb { color: #e5e7eb !important; }
+section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 { color: #e5e7eb !important; }
+.sidebar-card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px; padding: 12px 12px; margin: 10px 0;
+}
+
+/* Chips */
+.chip {
+  display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+  border:1px solid rgba(0,0,0,0.08); background:#f8fafc; font-size:12px; font-weight:700; color:#0f172a;
+}
+.chip.ok { background:#ecfdf5; border-color:#10b98133; color:#065f46; }
+.chip.info { background:#eef2ff; border-color:#6366f133; color:#312e81; }
+
+/* Table wrapper */
+.table-wrap {
+  border-radius: 16px; overflow: hidden; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 8px 24px rgba(2,6,23,0.05);
+}
 </style>
-"""
-st.markdown(CSS, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# ───────────────────────────── Utilities & data ────────────────────────────
-def _to_ct(ts: pd.DatetimeIndex|pd.Series) -> pd.Series:
-    return pd.to_datetime(ts, utc=True).tz_convert(CT)
-
-@st.cache_data(ttl=300)
-def yf_fetch_intraday(symbol: str, start_dt_ct: datetime, end_dt_ct: datetime) -> pd.DataFrame:
-    """Resilient fetch: try 1m → 5m → 15m. Return Dt(Open/High/Low/Close) in CT or empty df."""
-    tz = "America/Chicago"
-    intervals = ["1m", "5m", "15m"]
-    for itv in intervals:
-        try:
-            df = yf.download(
-                symbol,
-                start=start_dt_ct.astimezone(CT).strftime("%Y-%m-%d %H:%M"),
-                end=end_dt_ct.astimezone(CT).strftime("%Y-%m-%d %H:%M"),
-                interval=itv,
-                auto_adjust=False, progress=False, prepost=True, threads=False,
-            )
-            if df is None or df.empty:
-                continue
-            df = df.reset_index().rename(columns={"Datetime":"Dt","Date":"Dt"})
-            if "Dt" not in df.columns:
-                # yfinance sometimes calls index 'index'
-                if "index" in df.columns:
-                    df = df.rename(columns={"index":"Dt"})
-                else:
-                    # fallback: the first column is the timestamp
-                    df.columns = ["Dt"] + list(df.columns[1:])
-            # Normalize column names
-            cols = {c:c.capitalize() for c in df.columns}
-            df = df.rename(columns=cols)
-            need = {"Dt","Open","High","Low","Close"}
-            if not need.issubset(set(df.columns)):  # not our structure
-                continue
-            df["Dt"] = _to_ct(df["Dt"])
-            df = df.dropna(subset=["Open","High","Low","Close"]).sort_values("Dt")
-            if df.empty:
-                continue
-            return df[["Dt","Open","High","Low","Close"]].copy()
-        except Exception:
-            continue
-    return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-
-def rth_slots_30m(d: date) -> list[datetime]:
-    base = datetime.combine(d, RTH_START_CT, tzinfo=CT)
-    end  = datetime.combine(d, RTH_END_CT, tzinfo=CT)
-    out=[]
-    cur=base
-    while cur<=end:
-        out.append(cur)
-        cur += timedelta(minutes=30)
-    return out
-
-def friendly_status(df: pd.DataFrame) -> tuple[str,str]:
-    if df is None or df.empty:
-        return ("err","No data for the selected window")
-    return ("ok","Live data available")
-
-# ───────────────────────────── Sidebar (nav + inputs) ──────────────────────
-with st.sidebar:
-    st.markdown("### Navigation")
-    st.page_link("Marketlens.py", label="Overview", icon="🏠")
-    st.markdown("---")
-    st.markdown("### Session")
-    target_session: date = st.date_input("Trading Session (CT)", value=date.today(), help="RTH projection date")
-
-    st.markdown("### Overnight Levels (manual)")
-    st.caption("Session from **5:00 PM → 2:00 AM CT**")
-    colA, colB = st.columns(2)
-    with colA:
-        on_hi_price = st.number_input("Overnight High ($)", min_value=0.0, value=0.0, step=0.25, format="%.2f")
-    with colB:
-        on_hi_time  = st.time_input("High time", value=time(17, 0))
-    colC, colD = st.columns(2)
-    with colC:
-        on_lo_price = st.number_input("Overnight Low ($)",  min_value=0.0, value=0.0, step=0.25, format="%.2f")
-    with colD:
-        on_lo_time  = st.time_input("Low time", value=time(17, 0))
-
-# ───────────────────────────── Hero header ─────────────────────────────────
-st.markdown(
-    f"""
-    <div class="hero">
-      <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;">
-        <div>
-          <h1>{APP_NAME}</h1>
-          <div class="small">Professional S&P 500 analytics powered by Yahoo Finance</div>
-        </div>
-        <div class="badge">v{VERSION}</div>
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# ───────────────────────────── Market data status card ─────────────────────
-# Fetch a small, recent window around the chosen session to verify connectivity.
-check_start = datetime.combine(target_session - timedelta(days=1), time(7,0), tzinfo=CT)
-check_end   = datetime.combine(target_session, time(16,0), tzinfo=CT)
-df_check = yf_fetch_intraday("^GSPC", check_start, check_end)
-state, msg = friendly_status(df_check)
-
-st.markdown("### Market Data")
-st.markdown(
-    f"""
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-        <div class="badge {'ok' if state=='ok' else 'err'}">
-          {'🟢 Connected' if state=='ok' else '🔴 Not available'}
-        </div>
-        <div class="small">{'S&P 500'}</div>
-      </div>
-      <div style="margin-top:10px;color:{'#b7f7d5' if state=='ok' else '#ffc1c1'}">{msg}</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# ───────────────────────────── Overnight projection preview ────────────────
-st.markdown("### Overnight Projections → Today’s RTH")
-# Build a tiny, useful table even if no YF data was returned (so the page looks complete).
-slots = rth_slots_30m(target_session)
-def project_line(base_px: float, base_dt: datetime, t: datetime, slope_per_block: float) -> float:
-    if base_px <= 0 or base_dt is None:
-        return float("nan")
-    # 30-minute block count from base_dt to t
-    step = timedelta(minutes=30)
-    blocks = int(np.floor((t - base_dt) / step))
-    return round(base_px + slope_per_block * blocks, 2)
-
-on_hi_dt = datetime.combine(
-    target_session - timedelta(days=1) if on_hi_time >= time(17,0) else target_session,
-    on_hi_time, tzinfo=CT
-)
-on_lo_dt = datetime.combine(
-    target_session - timedelta(days=1) if on_lo_time >= time(17,0) else target_session,
-    on_lo_time, tzinfo=CT
-)
-
-rows=[]
-for t in slots:
-    rows.append({
-        "Time": t.strftime("%H:%M"),
-        "ON High Line ($)": project_line(on_hi_price, on_hi_dt, t, OVERNIGHT_SLOPE),
-        "ON Low Line ($)":  project_line(on_lo_price, on_lo_dt, t, OVERNIGHT_SLOPE),
-        "Prev High Line ($)": project_line(0.0, on_hi_dt, t, 0.0),  # placeholder for Parts 2–3 (prior-day H/L/C)
-    })
-preview = pd.DataFrame(rows)
-
-st.dataframe(
-    preview[["Time","ON High Line ($)","ON Low Line ($)"]],
-    use_container_width=True, hide_index=True,
-    column_config={
-        "Time": st.column_config.TextColumn("RTH Slot"),
-        "ON High Line ($)": st.column_config.NumberColumn(format="$%.2f"),
-        "ON Low Line ($)":  st.column_config.NumberColumn(format="$%.2f"),
-    }
-)
-
-st.caption(
-    "Tip: enter your **Overnight High/Low** (price + time between 5:00 PM and 2:00 AM CT). "
-    "Lines are projected across today’s RTH in 30-minute slots. Slopes can be customized later."
-)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# End of PART 1
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-# ============================== PART 2 — SPX DATA, ANCHORS & PROJECTIONS ==============================
-# Includes:
-# • Robust Yahoo Finance intraday fetch for ^GSPC (1m→5m→15m fallback)
-# • Prior-day H/L/C (RTH 08:30–15:00 CT) extraction
-# • User inputs for Overnight High/Low (+ time) (window 17:00–02:00 CT)
-# • Slope config (per 30-min block) for: Previous Day High/Close/Low (all −0.2792) and Overnight H/L (user-set)
-# • Projection table for today’s session (08:30–15:00 CT) for each active anchor line
-
-import datetime as _dt
-from datetime import datetime, date, time, timedelta
-from zoneinfo import ZoneInfo
-import pandas as pd
-import numpy as np
-import yfinance as yf
-import streamlit as st
-
-CT = ZoneInfo("America/Chicago")
-
-# ---------- Time helpers ----------
-RTH_START_CT = time(8,30)
-RTH_END_CT   = time(15,0)
-
-def _dt_range_ct(d_from: datetime, d_to: datetime):
-    """Ensure tz-aware CT datetimes (inclusive)."""
-    if d_from.tzinfo is None: d_from = d_from.replace(tzinfo=CT)
-    if d_to.tzinfo   is None: d_to   = d_to.replace(tzinfo=CT)
-    return d_from.astimezone(CT), d_to.astimezone(CT)
-
-def _slots_30m_for_day(d: date) -> list[datetime]:
-    cur = datetime(d.year, d.month, d.day, RTH_START_CT.hour, RTH_START_CT.minute, tzinfo=CT)
-    end = datetime(d.year, d.month, d.day, RTH_END_CT.hour, RTH_END_CT.minute, tzinfo=CT)
-    out = []
-    while cur <= end:
-        out.append(cur)
-        cur += timedelta(minutes=30)
-    return out
-
-# ---------- Yahoo fetch with resilient normalization ----------
+# ───────────────────────────────  HELPERS: YF FETCH + DATES  ───────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
-def yf_fetch_intraday(symbol: str, start_ct: datetime, end_ct: datetime) -> pd.DataFrame:
+def yf_fetch_intraday_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
     """
-    Return columns: Dt(CT tz), Open, High, Low, Close
-    Tries 1m then 5m then 15m. Silently returns empty df if no rows.
+    Fetch 1m bars from Yahoo, return local CT timestamps with OHLC columns.
+    Safe-guards against empty data and mixed columns.
     """
-    start_ct, end_ct = _dt_range_ct(start_ct, end_ct)
-
-    def _download(interval: str) -> pd.DataFrame:
+    try:
+        # Yahoo only allows granular ranges for ~7 days; request larger window first then filter locally.
         df = yf.download(
-            tickers=symbol,
-            interval=interval,
-            start=start_ct.astimezone(_dt.timezone.utc),
-            end=end_ct.astimezone(_dt.timezone.utc),
+            symbol,
+            interval="1m",
+            period="7d",
             auto_adjust=False,
             progress=False,
             prepost=True,
-            threads=False,
+            threads=True,
         )
-        if df is None or len(df) == 0:
-            return pd.DataFrame()
-        # Handle possible MultiIndex columns (("^GSPC","Open"), ...)
-        if isinstance(df.columns, pd.MultiIndex):
-            # pick the first level if present
-            if symbol in df.columns.levels[0]:
-                df = df.xs(symbol, axis=1, level=0)
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
+        df = df.reset_index().rename(columns={"Datetime":"Dt"})
+        # Unify timestamp column name
+        if "Datetime" in df.columns and "Dt" not in df.columns:
+            df.rename(columns={"Datetime":"Dt"}, inplace=True)
+        if "Dt" not in df.columns:
+            # Some yfinance versions use "index" as Datetime after reset_index()
+            if "index" in df.columns:
+                df["Dt"] = pd.to_datetime(df["index"])
             else:
-                df.columns = [c[0] for c in df.columns]  # ("Open",) → "Open"
-        df = df.rename_axis("ts").reset_index()
-        # yfinance returns tz-aware index if start/end tz-aware; ensure UTC then convert CT
-        if not pd.api.types.is_datetime64_any_dtype(df["ts"]):
-            df["ts"] = pd.to_datetime(df["ts"], utc=True)
-        else:
-            df["ts"] = pd.to_datetime(df["ts"], utc=True)
-        df["Dt"] = df["ts"].dt.tz_convert(CT)
-        keep = ["Dt","Open","High","Low","Close"]
-        df = df[keep].dropna(subset=["Open","High","Low","Close"]).sort_values("Dt")
-        return df
+                return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
 
-    for iv in ("1m","5m","15m"):
-        try:
-            got = _download(iv)
-            if not got.empty:
-                return got
-        except Exception:
-            continue
-    return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
+        # Force tz → ET, then convert → CT
+        dt = pd.to_datetime(df["Dt"], utc=True)
+        # Yahoo returns UTC; convert to ET then to CT for clarity in app
+        df["Dt"] = dt.dt.tz_convert(ET).dt.tz_convert(CT)
 
-# ---------- Previous-day RTH H/L/C ----------
-@st.cache_data(ttl=600, show_spinner=False)
-def spx_prevday_hlc(target_session: date) -> dict | None:
-    """
-    Compute prior day High/Low/Close using RTH window (08:30–15:00 CT).
-    Returns dict with prices and timestamps in CT.
-    """
-    prev = target_session - timedelta(days=1)
-    # If weekend, walk back to last weekday
-    while prev.weekday() >= 5:
-        prev -= timedelta(days=1)
+        # Only keep needed columns if they exist
+        cols = [c for c in ["Open","High","Low","Close"] if c in df.columns]
+        out = df[["Dt"] + cols].dropna(subset=cols)
+        # Local filter
+        mask = (out["Dt"] >= start_dt) & (out["Dt"] <= end_dt)
+        out = out.loc[mask].sort_values("Dt").reset_index(drop=True)
+        return out
+    except Exception:
+        return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
 
-    start_ct = datetime(prev.year, prev.month, prev.day, 8, 25, tzinfo=CT)
-    end_ct   = datetime(prev.year, prev.month, prev.day, 15,  5, tzinfo=CT)
+def previous_trading_day(ref_d: date, tz=ET) -> date:
+    """Return prior weekday (Mon→Fri)."""
+    d = ref_d - timedelta(days=1)
+    while d.weekday() >= 5:  # 5=Sat,6=Sun
+        d -= timedelta(days=1)
+    return d
 
-    df = yf_fetch_intraday("^GSPC", start_ct, end_ct)
-    if df.empty:
-        return None
-
-    # Restrict strictly to 08:30–15:00 bars
-    df = df.set_index("Dt").between_time(RTH_START_CT.strftime("%H:%M"), RTH_END_CT.strftime("%H:%M")).reset_index()
-    if df.empty:
-        return None
-
-    hi_idx = df["High"].idxmax()
-    lo_idx = df["Low"].idxmin()
-    close_row = df.iloc[-1]
-
-    return {
-        "day": prev,
-        "high": float(df.loc[hi_idx, "High"]),
-        "high_t": df.loc[hi_idx, "Dt"].to_pydatetime(),
-        "low": float(df.loc[lo_idx, "Low"]),
-        "low_t": df.loc[lo_idx, "Dt"].to_pydatetime(),
-        "close": float(close_row["Close"]),
-        "close_t": close_row["Dt"].to_pydatetime(),
-    }
-
-# ---------- Slopes & line projection ----------
-# Slopes are per 30-minute block (your provided values)
-SPX_SLOPES = {
-    "PD_HIGH": -0.2792,
-    "PD_CLOSE": -0.2792,
-    "PD_LOW": -0.2792,
-    # Overnight slopes are user configurable (defaults below)
-    "ON_HIGH": -0.2792,
-    "ON_LOW": -0.2792,
-}
-
-def _blocks_between_30m(t0: datetime, t1: datetime) -> int:
-    """Count 30-min steps (right-closed bar model)."""
-    if t1 < t0: t0, t1 = t1, t0
-    blocks = 0
-    cur = t0.replace(second=0, microsecond=0)
-    while cur < t1:
-        blocks += 1
-        cur += timedelta(minutes=30)
-    return blocks
-
-def proj_price(base_px: float, base_time: datetime, slope_per_30m: float, target_time: datetime) -> float:
-    blk = _blocks_between_30m(base_time, target_time)
-    return base_px + slope_per_30m * blk
-
-# ---------- UI: Anchor inputs (Overnight + preview) ----------
-st.markdown("### ⚓ SPX Anchors & Slopes")
-
-colA, colB = st.columns([2,1])
-with colA:
-    # Pull prior-day anchors
-    _d = st.session_state.get("ml_target_session", date.today())
-    prev = spx_prevday_hlc(_d)
-    if prev is None:
-        st.info("Prior-day H/L/C not available yet for the selected session.")
-    else:
-        st.success(
-            f"Prev Day ({prev['day']:%a %b %d})  •  "
-            f"H {prev['high']:.2f} @ {prev['high_t'].strftime('%H:%M')}  •  "
-            f"L {prev['low']:.2f} @ {prev['low_t'].strftime('%H:%M')}  •  "
-            f"C {prev['close']:.2f} @ {prev['close_t'].strftime('%H:%M')}"
-        )
-
-with colB:
-    st.caption("Slopes per 30-min block (defaults fixed at −0.2792).")
-    sl_pd_high  = st.number_input("Prev-Day High Slope",  value=SPX_SLOPES["PD_HIGH"],  step=0.0001, format="%.4f")
-    sl_pd_close = st.number_input("Prev-Day Close Slope", value=SPX_SLOPES["PD_CLOSE"], step=0.0001, format="%.4f")
-    sl_pd_low   = st.number_input("Prev-Day Low Slope",   value=SPX_SLOPES["PD_LOW"],   step=0.0001, format="%.4f")
-
-st.markdown("#### 🌙 Overnight Anchors (5:00 PM → 2:00 AM CT)")
-oc1, oc2, oc3 = st.columns([2,2,1])
-with oc1:
-    on_high_px = st.number_input("Overnight High Price", value=0.00, step=0.25, format="%.2f", help="Leave 0 to ignore")
-    on_high_t  = st.time_input("Overnight High Time (CT)", value=time(17,0), help="Between 17:00 and 02:00")
-with oc2:
-    on_low_px  = st.number_input("Overnight Low Price",  value=0.00, step=0.25, format="%.2f", help="Leave 0 to ignore")
-    on_low_t   = st.time_input("Overnight Low Time (CT)", value=time(17,30), help="Between 17:00 and 02:00")
-with oc3:
-    sl_on      = st.number_input("Overnight Slope (per 30m)", value=SPX_SLOPES["ON_LOW"], step=0.0001, format="%.4f")
-
-# ---------- Projection table ----------
-st.markdown("### 📋 Projection Table (08:30 – 15:00 CT)")
-
-def build_projection_for_day(session_d: date) -> tuple[pd.DataFrame, dict]:
-    """Create a table with lines from PD High/Close/Low and optional Overnight High/Low."""
-    meta = {"session": session_d}
-    slots = _slots_30m_for_day(session_d)
-
-    rows = []
-    if prev is not None:
-        bases = [
-            ("PD_HIGH",  prev["high"],  prev["high_t"],  sl_pd_high),
-            ("PD_CLOSE", prev["close"], prev["close_t"], sl_pd_close),
-            ("PD_LOW",   prev["low"],   prev["low_t"],   sl_pd_low),
-        ]
-        for label, px, t0, slope in bases:
-            for t in slots:
-                rows.append({
-                    "Time": t.strftime("%H:%M"),
-                    "Anchor": label.replace("PD_","PrevDay "),
-                    "Price": round(proj_price(px, t0, slope, t), 2)
-                })
-
-    # Overnight anchors (optional)
-    def _dt_for_time(session_ref: date, hhmm: time) -> datetime:
-        # If 00:00–02:00, that is technically next calendar day → use session_ref (same date as session?)
-        # We consider base time located on the *night before* the session:
-        base_day = session_ref  # session day at 00:00 CT
-        # if time is 17:00–23:59 → it’s the evening BEFORE session_d
-        if hhmm >= time(17,0):
-            base_day = session_ref - timedelta(days=1)
-        # if time is 00:00–02:00 → early morning OF the session
-        return datetime(base_day.year, base_day.month, base_day.day, hhmm.hour, hhmm.minute, tzinfo=CT)
-
-    if on_high_px > 0:
-        t0 = _dt_for_time(session_d, on_high_t)
-        for t in slots:
-            rows.append({
-                "Time": t.strftime("%H:%M"),
-                "Anchor": "Overnight High",
-                "Price": round(proj_price(on_high_px, t0, sl_on, t), 2)
-            })
-    if on_low_px > 0:
-        t0 = _dt_for_time(session_d, on_low_t)
-        for t in slots:
-            rows.append({
-                "Time": t.strftime("%H:%M"),
-                "Anchor": "Overnight Low",
-                "Price": round(proj_price(on_low_px, t0, sl_on, t), 2)
-            })
-
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df, meta
-    # Pivot to wide for a clean table (one row per 30m slot)
-    wide = df.pivot_table(index="Time", columns="Anchor", values="Price", aggfunc="first").reset_index()
-    # nice column order
-    cols = ["Time"]
-    for c in ["PrevDay High","PrevDay Close","PrevDay Low","Overnight High","Overnight Low"]:
-        if c in wide.columns: cols.append(c)
-    wide = wide[cols]
-    return wide, meta
-
-proj_table, proj_meta = build_projection_for_day(st.session_state.get("ml_target_session", date.today()))
-if proj_table.empty:
-    st.info("No projection yet. Verify prior-day data exists or add Overnight anchors.")
-else:
-    st.dataframe(
-        proj_table,
-        hide_index=True,
-        use_container_width=True,
-        column_config={"Time": st.column_config.TextColumn(width="small")}
+def rth_window_et(d: date) -> tuple[datetime, datetime]:
+    """RTH window in ET for a given date."""
+    return (
+        datetime.combine(d, RTH_START_ET, tzinfo=ET),
+        datetime.combine(d, RTH_END_ET, tzinfo=ET),
     )
-# ======================================================================================================
+
+def to_ct(dt: datetime) -> datetime:
+    return dt.astimezone(CT)
+
+# ───────────────────────────────  CORE: PREV-DAY H/L/C (HIDDEN ENGINE)  ───────────────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def prev_day_hlc_spx(ref_session: date) -> dict | None:
+    """
+    Compute Previous Day High / Low / Close for SPX (Yahoo ^GSPC) using 1m bars in ET RTH.
+    Returns dict with values + ET timestamps. Gracefully returns None if data missing.
+    """
+    try:
+        prev_d = previous_trading_day(ref_session, tz=ET)
+        rth_s, rth_e = rth_window_et(prev_d)
+        # pull a slightly wider local window to be safe
+        start_ct = to_ct(rth_s) - timedelta(minutes=5)
+        end_ct   = to_ct(rth_e) + timedelta(minutes=5)
+        df = yf_fetch_intraday_1m("^GSPC", start_ct, end_ct)
+        if df.empty: 
+            return None
+
+        # constrain back to ET RTH for H/L/C calc
+        df_et = df.copy()
+        df_et["Dt_ET"] = df_et["Dt"].dt.tz_convert(ET)
+        mask = (df_et["Dt_ET"].dt.time >= RTH_START_ET) & (df_et["Dt_ET"].dt.time <= RTH_END_ET)
+        rth = df_et.loc[mask].copy()
+        if rth.empty or not {"High","Low","Close"}.issubset(rth.columns):
+            return None
+
+        hi_idx = rth["High"].idxmax()
+        lo_idx = rth["Low"].idxmin()
+        prev_high = float(rth.loc[hi_idx,"High"])
+        prev_low  = float(rth.loc[lo_idx,"Low"])
+        prev_close = float(rth["Close"].iloc[-1])
+
+        hi_time_et = rth.loc[hi_idx,"Dt_ET"].to_pydatetime()
+        lo_time_et = rth.loc[lo_idx,"Dt_ET"].to_pydatetime()
+        close_time_et = rth["Dt_ET"].iloc[-1].to_pydatetime()
+
+        return {
+            "prev_day": prev_d,
+            "high": prev_high,
+            "low": prev_low,
+            "close": prev_close,
+            "high_time_et": hi_time_et,
+            "low_time_et": lo_time_et,
+            "close_time_et": close_time_et,
+        }
+    except Exception:
+        return None
+
+# ───────────────────────────────  LIVE PRICE (BANNER)  ───────────────────────────────
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_spx_last() -> dict:
+    """Last SPX price (1m) for banner. Returns dict with price/time or fallback dashes."""
+    try:
+        end_ct = datetime.now(tz=CT)
+        start_ct = end_ct - timedelta(hours=6)
+        df = yf_fetch_intraday_1m("^GSPC", start_ct, end_ct)
+        if df.empty: return {"px":"—","ts":"—"}
+        last = df.iloc[-1]
+        return {"px": f"{float(last['Close']):,.2f}", "ts": last["Dt"].strftime("%-I:%M %p CT")}
+    except Exception:
+        return {"px":"—","ts":"—"}
+
+# ───────────────────────────────  SIDEBAR — NAV, DATE, ANCHOR INPUTS  ───────────────────────────────
+with st.sidebar:
+    st.markdown("### 📚 Navigation")
+    page = st.radio(
+        label="",
+        options=["Overview", "Anchors", "Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Settings"],
+        index=0,
+        label_visibility="collapsed"
+    )
+
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    st.markdown("#### 📅 Session")
+    forecast_date = st.date_input(
+        "Target session",
+        value=date.today(),
+        help="The RTH session to analyze (SPX 09:30–16:00 ET)."
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Overnight Anchor Inputs (manual price + time) — used later for entries table
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    st.markdown("#### 🌙 Overnight Anchors (Manual)")
+    on_low_price  = st.number_input("Overnight Low Price", min_value=0.0, step=0.25, value=0.00, help="Enter the overnight swing LOW price.")
+    on_low_time   = st.time_input("Overnight Low Time (ET)", value=time(21, 0), help="Time between 5:00 PM and 7:00 AM ET.")
+    on_high_price = st.number_input("Overnight High Price", min_value=0.0, step=0.25, value=0.00, help="Enter the overnight swing HIGH price.")
+    on_high_time  = st.time_input("Overnight High Time (ET)", value=time(22, 30), help="Time between 5:00 PM and 7:00 AM ET.")
+    st.caption("Tip: You can leave these blank for now — levels will be used when you move to the Overnight tab later.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ───────────────────────────────  HERO + LIVE BANNER  ───────────────────────────────
+last = fetch_spx_last()
+st.markdown(f"""
+<div class="hero">
+  <div class="title">{APP_NAME}</div>
+  <div class="sub">{TAGLINE}</div>
+  <div class="meta">v{VERSION} • {COMPANY}</div>
+
+  <div class="kpi">
+    <div class="card">
+      <div class="label">SPX — Last</div>
+      <div class="value mono">{last['px']}</div>
+    </div>
+    <div class="card">
+      <div class="label">As of</div>
+      <div class="value">{last['ts']}</div>
+    </div>
+    <div class="card">
+      <div class="label">Session</div>
+      <div class="value">{forecast_date.strftime('%a %b %d, %Y')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Engine</div>
+      <div class="value"><span class="chip ok">Yahoo Finance • 1m</span></div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ───────────────────────────────  OVERVIEW (LIGHT CONTENT, NO DEV NOISE)  ───────────────────────────────
+if page == "Overview":
+    # Keep this part elegantly minimal — the heavy logic comes in Parts 2+ (you asked for ultra-clean)
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    st.markdown("<h3>Readiness</h3>", unsafe_allow_html=True)
+
+    anchors = prev_day_hlc_spx(forecast_date)
+    ready_chip = '<span class="chip ok">Prev-Day H/L/C Ready</span>' if anchors else '<span class="chip info">Fetching recent data…</span>'
+
+    st.markdown(
+        f"""
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            {ready_chip}
+            <span class="chip info">Overnight inputs waiting</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ───────────────────────────────  ANCHORS (DISPLAY-ONLY PREVIEW)  ───────────────────────────────
+if page == "Anchors":
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    st.markdown("<h3>Previous Day Anchors (SPX)</h3>", unsafe_allow_html=True)
+
+    anchors = prev_day_hlc_spx(forecast_date)
+    if not anchors:
+        st.info("Could not compute anchors yet. Try a recent weekday (Yahoo 1-minute data availability can vary).")
+    else:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Prev Day High", f"{anchors['high']:.2f}")
+            st.caption(f"Time ET: {anchors['high_time_et'].strftime('%-I:%M %p')}")
+        with col2:
+            st.metric("Prev Day Close", f"{anchors['close']:.2f}")
+            st.caption(f"Time ET: {anchors['close_time_et'].strftime('%-I:%M %p')}")
+        with col3:
+            st.metric("Prev Day Low", f"{anchors['low']:.2f}")
+            st.caption(f"Time ET: {anchors['low_time_et'].strftime('%-I:%M %p')}")
+
+        st.markdown(
+            """
+            <div class="table-wrap" style="margin-top:12px;">
+            <div style="padding:12px 14px;">
+              <div style="color:#6b7280;font-size:12px;">These anchors power your entry projections internally (descending lines from H/C/L with matching mirrored TP lines). Nothing to configure here — it’s automatic.</div>
+            </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ───────────────────────────────  PLACEHOLDER PAGES (WILL FILL IN PARTS 2+)  ───────────────────────────────
+if page in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Settings"}:
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
+    st.caption("This section will light up in the next parts with full professional tables, detection, contract logic, and exports.")
+    st.markdown('</div>', unsafe_allow_html=True)
