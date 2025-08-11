@@ -14,7 +14,7 @@ import yfinance as yf
 # ───────────────────────────────  GLOBAL CONFIG  ───────────────────────────────
 APP_NAME   = "MarketLens Pro"
 TAGLINE    = "Enterprise SPX & Equities Forecasting"
-VERSION    = "5.1"
+VERSION    = "5.1.1"
 COMPANY    = "Quantum Trading Systems"
 
 ET = ZoneInfo("America/New_York")
@@ -33,9 +33,9 @@ UNIVERSE = {
     "NFLX": "NFLX",
 }
 
-# TradingView mapping (best-effort general symbols)
+# TradingView mapping (best-effort)
 TV_MAP = {
-    "SPX500": "SP:SPX",        # alt options: "CURRENCYCOM:US500", "OANDA:US500USD"
+    "SPX500": "SP:SPX",        # alternatives: "CURRENCYCOM:US500", "OANDA:US500USD"
     "AAPL": "NASDAQ:AAPL",
     "MSFT": "NASDAQ:MSFT",
     "AMZN": "NASDAQ:AMZN",
@@ -61,7 +61,7 @@ st.set_page_config(
 # ───────────────────────────────  PREMIUM CSS  ───────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800;900&display=swap');
 html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
 
 /* App bg */
@@ -75,7 +75,7 @@ html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Sego
   color: white; box-shadow: 0 14px 36px rgba(99,102,241,.28);
 }
 .hero .title { font-weight: 900; font-size: 26px; letter-spacing: -0.02em; }
-.hero .sub { opacity: .95; font-weight: 600; }
+.hero .sub { opacity: .95; font-weight: 700; }
 .hero .meta { opacity: .85; font-size: 12px; margin-top: 4px; }
 
 /* KPI strip */
@@ -85,7 +85,7 @@ html, body, .stApp { font-family: Inter, -apple-system, BlinkMacSystemFont, Sego
   border: 1px solid rgba(0,0,0,0.06);
   box-shadow: 0 8px 24px rgba(2,6,23,0.07);
 }
-.klabel { color: #6b7280; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.klabel { color: #6b7280; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .kvalue { font-weight: 900; font-size: 22px; color: #0f172a; letter-spacing: -0.02em; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 
@@ -107,7 +107,7 @@ section[data-testid="stSidebar"] { background: #0b1220 !important; color: #e5e7e
 
 /* Chips */
 .chip { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
-  border:1px solid rgba(0,0,0,0.08); background:#f8fafc; font-size:12px; font-weight:800; color:#0f172a; }
+  border:1px solid rgba(0,0,0,0.08); background:#f8fafc; font-size:12px; font-weight:900; color:#0f172a; }
 .chip.ok { background:#ecfdf5; border-color:#10b98133; color:#065f46; }
 .chip.info { background:#eef2ff; border-color:#6366f133; color:#312e81; }
 
@@ -121,6 +121,28 @@ section[data-testid="stSidebar"] { background: #0b1220 !important; color: #e5e7e
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ───────────────────────────────  TIMEZONE HELPERS  ───────────────────────────────
+def _to_ct_str(ts_like) -> str:
+    """Robustly convert any timestamp (naive or tz-aware) to CT string."""
+    try:
+        ts = pd.to_datetime(ts_like)
+        try:
+            # If tz-aware, just convert
+            ts = ts.tz_convert(CT)
+        except Exception:
+            # If tz-naive, assume UTC (Yahoo) then convert
+            ts = ts.tz_localize("UTC").tz_convert(CT)
+        return ts.strftime("%-I:%M %p CT")
+    except Exception:
+        return "—"
+
+def _to_et_series(series) -> pd.Series:
+    s = pd.to_datetime(series)
+    try:
+        return s.dt.tz_convert(ET)
+    except Exception:
+        return s.dt.tz_localize("UTC").dt.tz_convert(ET)
 
 # ───────────────────────────────  HELPERS — YF  ───────────────────────────────
 def _yf_hist(symbol: str, period: str, interval: str) -> pd.DataFrame:
@@ -143,12 +165,12 @@ def fetch_live_strip(symbol_disp: str) -> dict:
     intraday = _yf_hist(yfsym, period="1d", interval="1m")
     if not intraday.empty and "Close" in intraday:
         last = intraday.iloc[-1]
-        return {"price": float(last["Close"]), "asof": pd.to_datetime(last["Dt"]).tz_localize("UTC").tz_convert(CT).strftime("%-I:%M %p CT")}
+        return {"price": float(last["Close"]), "asof": _to_ct_str(last["Dt"])}
     # fallback daily close
     daily = _yf_hist(yfsym, period="6mo", interval="1d")
-    if not daily.empty:
+    if not daily.empty and "Close" in daily:
         last = daily.iloc[-1]
-        ts = pd.to_datetime(last["Dt"]).tz_localize("UTC").tz_convert(CT).strftime("%b %-d")
+        ts = _to_ct_str(last["Dt"])
         return {"price": float(last["Close"]), "asof": f"Last close • {ts}"}
     return {"price": None, "asof": "—"}
 
@@ -159,22 +181,13 @@ def prev_day_anchors(symbol_disp: str, ref_session: date) -> dict | None:
     daily = _yf_hist(yfsym, period="2mo", interval="1d")
     if daily.empty:
         return None
-    daily["Dt"] = pd.to_datetime(daily["Dt"]).dt.tz_localize("UTC").dt.tz_convert(ET)
+    daily["Dt"] = _to_et_series(daily["Dt"])
     daily["D"] = daily["Dt"].dt.date
-    # prev trading day < ref_session
     days = sorted(daily["D"].unique())
     prev_candidates = [d for d in days if d < ref_session]
-    if not prev_candidates:
-        prev = days[-1]
-    else:
-        prev = prev_candidates[-1]
+    prev = prev_candidates[-1] if prev_candidates else days[-1]
     row = daily.loc[daily["D"]==prev].iloc[-1]
-    return {
-        "prev_day": prev,
-        "high": float(row["High"]),
-        "low": float(row["Low"]),
-        "close": float(row["Close"])
-    }
+    return {"prev_day": prev, "high": float(row["High"]), "low": float(row["Low"]), "close": float(row["Close"])}
 
 @st.cache_data(ttl=120, show_spinner=False)
 def intraday_15m(symbol_disp: str) -> pd.DataFrame:
@@ -183,15 +196,12 @@ def intraday_15m(symbol_disp: str) -> pd.DataFrame:
     df = _yf_hist(yfsym, period="5d", interval="15m")
     if df.empty: 
         return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-    df["Dt"] = pd.to_datetime(df["Dt"]).dt.tz_localize("UTC").dt.tz_convert(ET)
+    df["Dt"] = _to_et_series(df["Dt"])
     return df[["Dt","Open","High","Low","Close"]].dropna()
 
 # ───────────────────────────────  SIGNALS (15m)  ───────────────────────────────
 def first_touch_table(df15: pd.DataFrame, anchors: dict, tol: float = 0.5) -> pd.DataFrame:
-    """
-    Detect first 15m candle that touches prev-day High / Low / Close (±tol).
-    Returns small actionable table (first touch per line).
-    """
+    """Detect first 15m candle that touches prev-day High / Low / Close (±tol)."""
     if df15.empty or not anchors:
         return pd.DataFrame(columns=["Line","Time (ET)","Close","Touched"])
     lines = {
@@ -199,22 +209,15 @@ def first_touch_table(df15: pd.DataFrame, anchors: dict, tol: float = 0.5) -> pd
         "Prev Close": anchors["close"],
         "Prev Low": anchors["low"],
     }
-    seen = set()
-    rows = []
+    seen, rows = set(), []
     for _, r in df15.iterrows():
         lo, hi, cl = float(r["Low"]), float(r["High"]), float(r["Close"])
         t = r["Dt"]
         for name, lvl in lines.items():
-            if name in seen: 
+            if name in seen:
                 continue
-            touched = (lo - tol) <= lvl <= (hi + tol)
-            if touched:
-                rows.append({
-                    "Line": name,
-                    "Time (ET)": t.strftime("%Y-%m-%d %H:%M"),
-                    "Close": round(cl, 2),
-                    "Touched": f"{lvl:.2f}",
-                })
+            if (lo - tol) <= lvl <= (hi + tol):
+                rows.append({"Line": name, "Time (ET)": t.strftime("%Y-%m-%d %H:%M"), "Close": round(cl, 2), "Touched": f"{lvl:.2f}"})
                 seen.add(name)
         if len(seen) == 3:
             break
@@ -225,7 +228,7 @@ with st.sidebar:
     st.markdown("### 📚 Navigation")
     page = st.radio(
         label="",
-        options=["Overview", "Anchors", "Signals"],
+        options=["Overview", "Anchors", "Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Settings"],
         index=0,
         label_visibility="collapsed"
     )
@@ -312,13 +315,9 @@ if page == "Anchors":
         st.info("Could not compute anchors yet. Try a recent weekday.")
     else:
         c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Prev Day High", f"{anchors['high']:.2f}")
-        with c2:
-            st.metric("Prev Day Close", f"{anchors['close']:.2f}")
-        with c3:
-            st.metric("Prev Day Low", f"{anchors['low']:.2f}")
-
+        with c1: st.metric("Prev Day High", f"{anchors['high']:.2f}")
+        with c2: st.metric("Prev Day Close", f"{anchors['close']:.2f}")
+        with c3: st.metric("Prev Day Low", f"{anchors['low']:.2f}")
         st.caption("These anchors power intraday touch detection and projections behind the scenes.")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -329,8 +328,6 @@ if page == "Signals":
 
     anchors = prev_day_anchors(asset, forecast_date)
     df15 = intraday_15m(asset)
-
-    # filter to selected forecast day (ET)
     if not df15.empty:
         df15["D"] = df15["Dt"].dt.date
         df_day = df15[df15["D"] == forecast_date].copy()
@@ -345,9 +342,7 @@ if page == "Signals":
             st.info("No touches detected yet (±$0.50 tolerance).")
         else:
             st.dataframe(
-                table,
-                hide_index=True,
-                use_container_width=True,
+                table, hide_index=True, use_container_width=True,
                 column_config={
                     "Line": st.column_config.TextColumn("Line"),
                     "Time (ET)": st.column_config.TextColumn("Time (ET)"),
@@ -355,4 +350,11 @@ if page == "Signals":
                     "Touched": st.column_config.NumberColumn("Line Price ($)", format="%.2f"),
                 }
             )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ───────────────────────────────  PLACEHOLDERS  ───────────────────────────────
+if page in {"Forecasts", "Contracts", "Fibonacci", "Export", "Settings"}:
+    st.markdown('<div class="sec">', unsafe_allow_html=True)
+    st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
+    st.caption("This section will light up in the next parts with pro tables, projections, contract logic, and exports.")
     st.markdown('</div>', unsafe_allow_html=True)
