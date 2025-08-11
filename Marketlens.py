@@ -1,9 +1,9 @@
 # ==============================  PART 1 — CORE SHELL (SPX + STOCKS)  ==============================
-# Enterprise-grade shell with premium UI, SPX + Equities modules, Yahoo Finance engine, and Overnight inputs for SPX.
+# Enterprise-grade shell with premium UI, SPX + Multi-Asset Modules, Yahoo Finance engine, Overnight inputs for SPX and Stocks.
 # - Visible Streamlit header
 # - Always-open sidebar with pro 3D nav (option-menu)
 # - SPX prev-day H/L/C engine (hidden), overnight manual inputs (price+time)
-# - Stocks module (AAPL, MSFT, AMZN, GOOGL, META, NVDA, TSLA, NFLX) with live last-price banners
+# - Equities module (AAPL, MSFT, AMZN, GOOGL, META, NVDA, TSLA, NFLX) with live last-price banners
 # - Robust weekend/holiday fallback to most recent daily close
 # --------------------------------------------------------------------------------------------------
 
@@ -45,8 +45,8 @@ SPX_OVERNIGHT_SLOPES = {
     "overnight_high_down": -0.2792 # entry down from ON high
 }
 
-# Equities you requested
-EQUITY_TICKERS = ["AAPL","MSFT","AMZN","GOOGL","META","NVDA","TSLA","NFLX"]
+# Equities you requested (8 tickers)
+EQUITY_TICKERS = ["AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "TSLA", "NFLX"]
 
 # ───────────────────────────────  PAGE SETUP  ───────────────────────────────
 st.set_page_config(
@@ -194,47 +194,6 @@ def last_price_banner(symbol: str, label: str) -> dict:
     except Exception:
         return {"px": "—", "ts": "—"}
 
-def previous_trading_day(ref_d: date) -> date:
-    d = ref_d - timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
-
-def rth_window_et(d: date) -> tuple[datetime, datetime]:
-    return (
-        datetime.combine(d, RTH_START_ET, tzinfo=ET),
-        datetime.combine(d, RTH_END_ET, tzinfo=ET),
-    )
-
-@st.cache_data(ttl=300, show_spinner=False)
-def prev_day_hlc_spx(ref_session: date) -> dict | None:
-    """Prev-day H/L/C for SPX (^GSPC), computed on ET RTH using 1m data."""
-    try:
-        prev_d = previous_trading_day(ref_session)
-        start_et, end_et = rth_window_et(prev_d)
-        # Pull broad 1m, then filter by ET RTH
-        intr = yf_fetch_intraday_1m("^GSPC")
-        if intr.empty:
-            return None
-        df = intr.copy()
-        df["Dt_ET"] = df["Dt"].dt.tz_convert(ET)
-        m = (df["Dt_ET"] >= start_et) & (df["Dt_ET"] <= end_et)
-        rth = df.loc[m]
-        if rth.empty:
-            return None
-        hi_ix, lo_ix = rth["High"].idxmax(), rth["Low"].idxmin()
-        return {
-            "prev_day": prev_d,
-            "high": float(rth.loc[hi_ix,"High"]),
-            "low": float(rth.loc[lo_ix,"Low"]),
-            "close": float(rth["Close"].iloc[-1]),
-            "high_time_et": rth.loc[hi_ix,"Dt_ET"].to_pydatetime(),
-            "low_time_et": rth.loc[lo_ix,"Dt_ET"].to_pydatetime(),
-            "close_time_et": rth["Dt_ET"].iloc[-1].to_pydatetime(),
-        }
-    except Exception:
-        return None
-
 # ───────────────────────────────  SIDEBAR — NAV, SESSION, INPUTS  ───────────────────────────────
 with st.sidebar:
     st.markdown(
@@ -361,63 +320,4 @@ st.markdown(f"""
 
 # ───────────────────────────────  MAIN CONTENT  ───────────────────────────────
 if top_section == "SPX":
-    page = locals().get("spx_page","Overview")
-
-    if page == "Overview":
-        st.markdown('<div class="sec">', unsafe_allow_html=True)
-        st.markdown("<h3>Readiness</h3>", unsafe_allow_html=True)
-        anchors = prev_day_hlc_spx(forecast_date)
-        chip = "✅ Prev-Day H/L/C Ready" if anchors else "ℹ️ Fetching recent data…"
-        st.write(chip)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if page == "Anchors":
-        st.markdown('<div class="sec">', unsafe_allow_html=True)
-        st.markdown("<h3>Previous Day Anchors (SPX)</h3>", unsafe_allow_html=True)
-        anchors = prev_day_hlc_spx(forecast_date)
-        if not anchors:
-            st.info("Could not compute anchors yet. Try a recent weekday (Yahoo 1-minute availability can vary).")
-        else:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("Prev Day High", f"{anchors['high']:.2f}")
-                st.caption(f"Time ET: {anchors['high_time_et'].strftime('%-I:%M %p')}")
-            with c2:
-                st.metric("Prev Day Close", f"{anchors['close']:.2f}")
-                st.caption(f"Time ET: {anchors['close_time_et'].strftime('%-I:%M %p')}")
-            with c3:
-                st.metric("Prev Day Low", f"{anchors['low']:.2f}")
-                st.caption(f"Time ET: {anchors['low_time_et'].strftime('%-I:%M %p')}")
-            st.caption("Descending lines from H/C/L with mirrored TP lines run in the background.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if page == "Overnight":
-        st.markdown('<div class="sec">', unsafe_allow_html=True)
-        st.markdown("<h3>Overnight Anchors</h3>", unsafe_allow_html=True)
-        st.write(
-            f"- Low: **{locals().get('on_low_price',0):.2f}** @ **{locals().get('on_low_time',time(0,0)).strftime('%-I:%M %p ET')}**\n"
-            f"- High: **{locals().get('on_high_price',0):.2f}** @ **{locals().get('on_high_time',time(0,0)).strftime('%-I:%M %p ET')}**"
-        )
-        st.caption("These levels will project entries from 08:30–14:30 CT using your slope rules in the next part.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if page in {"Forecasts","Signals","Contracts","Fibonacci","Export","Settings"}:
-        st.markdown('<div class="sec">', unsafe_allow_html=True)
-        st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
-        st.caption("This section activates with full tables and visuals in Part 2+.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-else:
-    # EQUITIES MODULE
-    page = locals().get("eq_page","Overview")
-    if page == "Overview":
-        st.markdown('<div class="sec">', unsafe_allow_html=True)
-        st.markdown("<h3>Overview</h3>", unsafe_allow_html=True)
-        st.write("Weekly channel method: Monday/Tuesday anchors → projected channel → touch entries & profit targets.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if page in {"Anchors","Signals","Export","Settings"}:
-        st.markdown('<div class="sec">', unsafe_allow_html=True)
-        st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
-        st.caption("Detailed channel build, entries table, and exports arrive in Part 2+ for Equities.")
-        st.markdown('</div>', unsafe_allow_html=True)
+    page = locals().get("spx
