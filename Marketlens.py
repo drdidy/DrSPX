@@ -462,220 +462,133 @@ def _make_slots(start_t: time, end_t: time, step_min: int = 30) -> list[str]:
 
 # ========================== END PART 3 =================================================================
 
-# ===========================
-# PART 4 — SPX Anchors & Slope Engine
-#  - Pulls ^GSPC 1m from Yahoo
-#  - Extracts prior day's 5:00–5:29 PM (CT) candle high/low
-#  - Builds ascending/descending lines for forecast RTH (08:30–14:30 CT)
-#  - No volume. No extraneous UI.
-# ===========================
-from datetime import datetime, date, time, timedelta
-from zoneinfo import ZoneInfo
-import pandas as pd
-import streamlit as st
-import yfinance as yf
+# ============================================
+# **PART 4 — SPX FORECASTS & DAILY SCHEDULE**
+# ============================================
+# Renders the Forecasts page: projects Upper/Lower lines from the PRIOR-day 5:00–5:29 PM anchors
+# using your slope(s), and displays a clean daily schedule for the selected forecast date.
 
-# --- Timezones & session window (must match earlier parts) ---
-CT = ZoneInfo("America/Chicago")
-RTH_START, RTH_END = time(8, 30), time(14, 30)   # Regular Trading Hours
+# ---- Helpers (use the anchors & slots from Part 3) ----
 
-# --- SPX settings ---
-SPX_SYMBOL = "^GSPC"
-SPX_TICK = 0.01
-# Your strategy: use 5pm candle anchors with equal-magnitude, opposite slopes
-SPX_SLOPE_UP_PER_30M = +0.3171   # from 5pm HIGH, ascends each 30-min block
-SPX_SLOPE_DN_PER_30M = -0.3171   # from 5pm LOW, descends each 30-min block
+def _spx_project_line(base_price: float, base_time: datetime, target_dt: datetime, slope_per_block: float) -> float:
+    """Project a price from base_time → target_dt using slope_per_block per 30-min block."""
+    blocks = spx_blocks_between(base_time, target_dt)
+    return round(base_price + (slope_per_block * blocks), 2)
 
-# ---------- Helpers ----------
-def _round_tick(x: float, tick: float = SPX_TICK) -> float:
-    return round(round(x / tick) * tick, 2)
-
-def _make_slots(start: time, end: time, step_min: int = 30) -> list[str]:
-    cur = datetime(2025, 1, 1, start.hour, start.minute)
-    stop = datetime(2025, 1, 1, end.hour, end.minute)
-    out = []
-    while cur <= stop:
-        out.append(cur.strftime("%H:%M"))
-        cur += timedelta(minutes=step_min)
-    return out
-
-SPX_SLOTS = _make_slots(RTH_START, RTH_END)
-
-def _blocks_between(t1: datetime, t2: datetime) -> int:
-    """Count 30m blocks (right-closed) between t1 and t2 within same-day math."""
-    if t2 < t1:
-        t1, t2 = t2, t1
-    blocks, cur = 0, t1
-    while cur < t2:
-        blocks += 1
-        cur += timedelta(minutes=30)
-    return blocks
-
-# ---------- Yahoo minute data ----------
-@st.cache_data(ttl=300)
-def spx_fetch_1m(start_dt_ct: datetime, end_dt_ct: datetime) -> pd.DataFrame:
+def spx_build_daily_schedule(anchors: dict, forecast: date) -> pd.DataFrame:
     """
-    Fetch ^GSPC 1m bars from Yahoo within [start, end] CT.
-    Yahoo returns UTC; we convert to CT.
+    Build the daily schedule (LowerLine, UpperLine) across all 30-min slots for the forecast date.
+    Uses your slope setup from Part 3:
+      - Upper line is projected from the prior-day 5PM High anchor
+      - Lower line is projected from the prior-day 5PM Low  anchor
+      - If a distinct lower slope is defined, it is used; otherwise the upper slope is reused.
     """
-    # yfinance expects naive UTC or timezone-aware UTC; we’ll ask for a wide window via period/interval
-    # For precise windowing, use timezone convert after download.
-    # We’ll pull 2 days to be safe, then trim.
-    period = "5d"
-    df = yf.download(
-        SPX_SYMBOL,
-        interval="1m",
-        period=period,
-        progress=False,
-        auto_adjust=False,
-        prepost=True,
-        threads=True
-    )
-    if df is None or df.empty:
+    if not anchors:
         return pd.DataFrame()
 
-    # Normalize columns
-    df = df.rename(columns=str.title)
-    # Ensure tz-aware UTC then convert to CT
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("UTC")
-    df.index = df.index.tz_convert(CT)
+    # Prefer explicit per-line slopes if you defined them in Part 3; otherwise fall back to one slope.
+    slope_up   = globals().get("SPX_SLOPE_UP",   globals().get("SPX_SLOPE_PER_BLOCK", 0.3171))
+    slope_low  = globals().get("SPX_SLOPE_LOW",  slope_up)   # fallback to same slope if not provided
 
-    df = df.reset_index().rename(columns={"Datetime": "dt"})
-    # Trim to requested window
-    mask = (df["Dt"] >= start_dt_ct) & (df["Dt"] <= end_dt_ct)
-    out = df.loc[mask, ["Dt", "Open", "High", "Low", "Close"]].copy()
-    return out.sort_values("Dt").reset_index(drop=True)
-
-# ---------- 5:00–5:29 PM candle extraction ----------
-def spx_get_5pm_candle(forecast: date) -> dict | None:
-    """
-    Use the PRIOR CALENDAR DAY 5:00–5:29 PM (CT) 1m window.
-    - Anchor High = max high in that 30-min window
-    - Anchor Low  = min low  in that 30-min window
-    """
-    prior_day = forecast - timedelta(days=1)
-    start_5pm = datetime.combine(prior_day, time(17, 0), tzinfo=CT)
-    end_5pm = datetime.combine(prior_day, time(17, 29), tzinfo=CT)
-
-    # Pull a modest window to ensure we capture the band
-    start_pull = start_5pm - timedelta(minutes=5)
-    end_pull = end_5pm + timedelta(minutes=5)
-    data = spx_fetch_1m(start_pull, end_pull)
-    if data.empty:
-        return None
-
-    # Keep only 17:00–17:29
-    band = data[(data["Dt"] >= start_5pm) & (data["Dt"] <= end_5pm)].copy()
-    if band.empty:
-        return None
-
-    idx_hi = band["High"].idxmax()
-    idx_lo = band["Low"].idxmin()
-    hi_px = float(band.loc[idx_hi, "High"])
-    hi_t  = band.loc[idx_hi, "Dt"].to_pydatetime()
-    lo_px = float(band.loc[idx_lo, "Low"])
-    lo_t  = band.loc[idx_lo, "Dt"].to_pydatetime()
-
-    return {
-        "prior_day": prior_day,
-        "hi_anchor_price": hi_px,
-        "hi_anchor_time": hi_t,
-        "lo_anchor_price": lo_px,
-        "lo_anchor_time": lo_t,
-    }
-
-# ---------- Line projection for the forecast session ----------
-def _project_from_anchor(base_price: float, base_time: datetime, target_dt: datetime, slope_per_30m: float) -> float:
-    blocks = _blocks_between(base_time, target_dt)
-    return _round_tick(base_price + slope_per_30m * blocks, SPX_TICK)
-
-def spx_project_day_lines(forecast: date, anchors: dict) -> pd.DataFrame:
-    """
-    Build ascending line from 5pm HIGH (+0.3171/30m)
-    and descending line from 5pm LOW (−0.3171/30m)
-    for all 30m RTH slots of the forecast date.
-    """
     rows = []
-    for slot in SPX_SLOTS:
-        h, m = map(int, slot.split(":"))
-        tdt = datetime.combine(forecast, time(h, m), tzinfo=CT)
+    for slot in spx_make_slots(SPX_RTH_START, SPX_RTH_END, step_min=30):
+        hh, mm = map(int, slot.split(":"))
+        target_dt = datetime.combine(forecast, time(hh, mm), tzinfo=CT)
 
-        up_line = _project_from_anchor(
-            anchors["hi_anchor_price"], anchors["hi_anchor_time"], tdt, SPX_SLOPE_UP_PER_30M
+        upper_val = _spx_project_line(
+            anchors["hi_anchor_price"], anchors["hi_anchor_time"], target_dt, slope_up
         )
-        dn_line = _project_from_anchor(
-            anchors["lo_anchor_price"], anchors["lo_anchor_time"], tdt, SPX_SLOPE_DN_PER_30M
+        lower_val = _spx_project_line(
+            anchors["lo_anchor_price"], anchors["lo_anchor_time"], target_dt, slope_low
         )
-        rows.append({"Time": slot, "AscFrom5pmHigh": up_line, "DescFrom5pmLow": dn_line})
+
+        rows.append({"Time": slot, "LowerLine": lower_val, "UpperLine": upper_val})
 
     df = pd.DataFrame(rows)
-    return df
+    return df[["Time", "LowerLine", "UpperLine"]]
 
-# ---------- Minimal UI glue ----------
-def render_spx_anchors_and_lines(forecast: date | None = None):
-    """Small, clean section: compute anchors + show two tiles + build the line schedule."""
-    if forecast is None:
-        forecast = date.today() + timedelta(days=1)
+# ---- Page Renderer ----
 
-    st.markdown("### ⚓ SPX 5:00 Candle Anchors")
+def render_spx_forecasts():
+    st.markdown('<div class="section-header">📋 SPX Daily Forecast Schedule</div>', unsafe_allow_html=True)
 
-    anchors = spx_get_5pm_candle(forecast)
+    # 1) Get anchors (from Part 3, fixed to use "dt" everywhere)
+    anchors = spx_get_5pm_candle(st.session_state["forecast_date"])
     if not anchors:
-        st.info("Could not find the prior day's 5:00–5:29 PM candle for SPX. Try another forecast date.")
+        st.markdown(
+            """
+            <div class="premium-card" style="text-align:center;padding:var(--space-8);">
+                <div style="font-size:2rem;margin-bottom:var(--space-4);">⚠️</div>
+                <div style="font-weight:600;margin-bottom:var(--space-2);">Could not derive the prior-day 5:00–5:29 PM anchors</div>
+                <div style="color:var(--text-tertiary);">Try another date or check your network/data source</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
         return
 
-    colA, colB = st.columns(2)
-    with colA:
-        st.markdown(
-            f"""
-            <div class="anchor-tile">
-              <div class="anchor-icon" style="color:#34C759;">⬆️</div>
-              <div class="anchor-label">5:00 PM HIGH (CT)</div>
-              <div class="anchor-value" style="color:#34C759;">{anchors['hi_anchor_price']:.2f}</div>
-              <div class="anchor-meta">
-                {anchors['hi_anchor_time'].strftime('%b %d, %Y • %H:%M')}<br>
-                Slope: +{SPX_SLOPE_UP_PER_30M:.4f} / 30m
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    with colB:
-        st.markdown(
-            f"""
-            <div class="anchor-tile">
-              <div class="anchor-icon" style="color:#FF3B30;">⬇️</div>
-              <div class="anchor-label">5:00 PM LOW (CT)</div>
-              <div class="anchor-value" style="color:#FF3B30;">{anchors['lo_anchor_price']:.2f}</div>
-              <div class="anchor-meta">
-                {anchors['lo_anchor_time'].strftime('%b %d, %Y • %H:%M')}<br>
-                Slope: {SPX_SLOPE_DN_PER_30M:.4f} / 30m
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    # 2) Build the schedule
+    schedule_df = spx_build_daily_schedule(anchors, st.session_state["forecast_date"])
+    if schedule_df.empty:
+        st.warning("No schedule generated.")
+        return
 
-    # Build schedule
-    lines_df = spx_project_day_lines(forecast, anchors)
+    # 3) Top metrics
+    rng = schedule_df["UpperLine"].max() - schedule_df["LowerLine"].min()
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("📈 Upper @ Open", f"${float(schedule_df.loc[schedule_df['Time']=='08:30','UpperLine'].iloc[0]):.2f}")
+    with col2:
+        st.metric("📉 Lower @ Open", f"${float(schedule_df.loc[schedule_df['Time']=='08:30','LowerLine'].iloc[0]):.2f}")
+    with col3:
+        st.metric("📏 Channel Range", f"${rng:.2f}")
 
-    # Store for later parts (detections, exports, etc.)
-    st.session_state["spx_anchors"] = anchors
-    st.session_state["spx_lines_df"] = lines_df
-
-    st.markdown("### 📋 SPX Daily Line Schedule")
+    # 4) Display table
     st.dataframe(
-        lines_df,
+        schedule_df,
         use_container_width=True,
         hide_index=True,
         column_config={
             "Time": st.column_config.TextColumn("Time", width="small"),
-            "AscFrom5pmHigh": st.column_config.NumberColumn("Asc from 5pm High ($)", format="$%.2f"),
-            "DescFrom5pmLow": st.column_config.NumberColumn("Desc from 5pm Low ($)", format="$%.2f"),
+            "LowerLine": st.column_config.NumberColumn("Lower Line ($)", format="$%.2f"),
+            "UpperLine": st.column_config.NumberColumn("Upper Line ($)", format="$%.2f"),
         },
     )
 
-# --- Lightweight call (expects forecast_date set in Part 1 sidebar; falls back gracefully) ---
-_render_forecast = st.session_state.get("forecast_date", None)
-render_spx_anchors_and_lines(_render_forecast)
+    # 5) Context card
+    hi_t = anchors["hi_anchor_time"].astimezone(CT).strftime("%Y-%m-%d %H:%M")
+    lo_t = anchors["lo_anchor_time"].astimezone(CT).strftime("%Y-%m-%d %H:%M")
+    st.markdown(
+        f"""
+        <div class="premium-card" style="margin-top:var(--space-4);">
+            <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:var(--space-4);">
+                <div>
+                    <div style="font-weight:700;color:var(--primary);">Anchor Source (CT)</div>
+                    <div style="color:var(--text-secondary);font-size:var(--text-sm);">
+                        High: ${anchors['hi_anchor_price']:.2f} @ {hi_t}<br>
+                        Low:&nbsp; ${anchors['lo_anchor_price']:.2f} @ {lo_t}
+                    </div>
+                </div>
+                <div>
+                    <div style="font-weight:700;color:var(--primary);">Slope(s) per 30-min</div>
+                    <div style="color:var(--text-secondary);font-size:var(--text-sm);">
+                        Upper: {globals().get("SPX_SLOPE_UP", globals().get("SPX_SLOPE_PER_BLOCK", 0.3171)):+.4f}<br>
+                        Lower: {globals().get("SPX_SLOPE_LOW", globals().get("SPX_SLOPE_UP", globals().get("SPX_SLOPE_PER_BLOCK", 0.3171))):+.4f}
+                    </div>
+                </div>
+                <div>
+                    <div style="font-weight:700;color:var(--primary);">Session</div>
+                    <div style="color:var(--text-secondary);font-size:var(--text-sm);">
+                        {st.session_state["forecast_date"].strftime('%A, %B %d, %Y')}<br>
+                        {SPX_RTH_START.strftime('%H:%M')}–{SPX_RTH_END.strftime('%H:%M')} CT
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# ---- Hook into the main nav ----
+if st.session_state.get("nav") == "Forecasts":
+    render_spx_forecasts()
