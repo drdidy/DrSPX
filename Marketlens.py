@@ -248,223 +248,217 @@ def render_overview():
 if st.session_state.page == "Overview":
     render_overview()
 
-# ===========================================
-# ============= PART 3 (DATA) ===============
-# ===== SPX & EQUITIES DATA + ANCHORS ======
-# ===========================================
+# ========================== PART 3 — DATA LAYER (SPX via Yahoo, 5 PM Anchors) ==========================
+# Clean, Yahoo-only data utilities for SPX:
+# - 1m fetch (cached)
+# - 30m RTH resample
+# - 5:00–5:29 PM CT evening candle extraction (high & low)
+# - 30-min block math + line projection (±0.3171 per block)
+# - No volume, no Alpaca
 
+from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
-from typing import Dict, Optional, Tuple
 import pandas as pd
-import yfinance as yf
 import streamlit as st
+import yfinance as yf
 
-# ---- Shared constants (must match Part 1) ----
-ET = ZoneInfo("America/New_York")
-SPX_SYMBOL = "^GSPC"
-RTH_START = time(8, 30)  # ET
-RTH_END   = time(15, 30) # ET
+# ---- Time & Session ----
+CT = ZoneInfo("America/Chicago")
+RTH_START, RTH_END = time(8, 30), time(14, 30)        # CT window used across the app
+EVENING_ANCHOR_START = time(17, 0)                     # 5:00 PM CT
+EVENING_ANCHOR_END   = time(17, 29)                    # 5:29 PM CT
 
-# Keep your slope logic + new 5PM anchors
-SPX_SLOPES_DOWN = {"HIGH": -0.2792, "CLOSE": -0.2792, "LOW": -0.2792, "5PM_LOW": -0.3171}
-SPX_SLOPES_UP   = {"HIGH": +0.3171, "CLOSE": +0.3171, "LOW": +0.3171, "5PM_HIGH": +0.3171}
+# ---- SPX Parameters ----
+SPX_SYMBOL = "^GSPC"                                   # Yahoo’s S&P 500 index
+SPX_SLOPE_UP_PER_BLOCK   =  +0.3171                    # from 5pm LOW, 30-min blocks
+SPX_SLOPE_DOWN_PER_BLOCK =  -0.3171                    # from 5pm HIGH, 30-min blocks
 
-# Minimal equity universe (you can edit later)
-EQUITY_UNIVERSE = ["AAPL", "MSFT", "NVDA", "META", "TSLA", "AMZN", "GOOGL", "SPY"]
-
-# ---------- Core Yahoo helpers ----------
-
-@st.cache_data(ttl=90, show_spinner=False)
-def yf_intraday_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
-    """
-    1-minute bars from Yahoo within [start_dt, end_dt] (ET).
-    Returns a tz-naive ET-indexed DataFrame with columns: Open, High, Low, Close, Volume, dt, Time, Date.
-    """
-    tkr = yf.Ticker(symbol)
-    # Pull a slightly wider window to be safe
-    start_pad = (start_dt - timedelta(days=1)).astimezone(ET)
-    end_pad = (end_dt + timedelta(days=1)).astimezone(ET)
-    df = tkr.history(start=start_pad, end=end_pad, interval="1m")
-    if df is None or df.empty:
-        return pd.DataFrame()
-
-    # Normalize timezone to ET and slice exact window
-    df = df.tz_convert(ET) if df.index.tzinfo else df.tz_localize(ET)
-    df = df.loc[(df.index >= start_dt.astimezone(ET)) & (df.index <= end_dt.astimezone(ET))].copy()
+# -------------------------------------------------------------------------------------
+# Core helpers
+# -------------------------------------------------------------------------------------
+def _ensure_ct_index(df: pd.DataFrame) -> pd.DataFrame:
+    """Make index tz-aware in CT; name it 'dt' and sort."""
     if df.empty:
-        return pd.DataFrame()
+        return df
+    idx = df.index
+    if idx.tz is None:
+        # yfinance intraday is UTC-naive in some environments; treat as UTC then convert
+        df.index = pd.to_datetime(idx).tz_localize("UTC").tz_convert(CT)
+    else:
+        df.index = pd.to_datetime(idx).tz_convert(CT)
+    df.index.name = "dt"
+    return df.sort_index()
 
-    # Add helpers
-    df["dt"] = df.index.tz_convert(ET).tz_localize(None)
-    df["Time"] = df["dt"].dt.strftime("%H:%M")
-    df["Date"] = df["dt"].dt.date
+def _time_str(dt_: datetime) -> str:
+    return dt_.strftime("%H:%M")
+
+def _in_time_range(dt_: datetime, start_t: time, end_t: time) -> bool:
+    t = dt_.timetz()
+    return (t >= start_t) and (t <= end_t)
+
+# -------------------------------------------------------------------------------------
+# Yahoo fetchers (cached)
+# -------------------------------------------------------------------------------------
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_spx_1m(start_dt_ct: datetime, end_dt_ct: datetime) -> pd.DataFrame:
+    """
+    Fetch 1m SPX (Yahoo) between CT datetimes. Includes pre/post to capture 5pm window.
+    Returns columns: Open, High, Low, Close (no Volume), index 'dt' in CT.
+    """
+    if start_dt_ct.tzinfo is None:
+        start_dt_ct = start_dt_ct.replace(tzinfo=CT)
+    if end_dt_ct.tzinfo is None:
+        end_dt_ct = end_dt_ct.replace(tzinfo=CT)
+
+    # yfinance wants naive timestamps in local or UTC-aware index; give strings
+    df = yf.download(
+        SPX_SYMBOL,
+        start=start_dt_ct.astimezone(CT).strftime("%Y-%m-%d %H:%M:%S"),
+        end=end_dt_ct.astimezone(CT).strftime("%Y-%m-%d %H:%M:%S"),
+        interval="1m",
+        auto_adjust=False,
+        prepost=True,
+        progress=False,
+        threads=True,
+    )
+
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["Open", "High", "Low", "Close"])
+
+    df = df[["Open", "High", "Low", "Close"]].copy()
+    df = _ensure_ct_index(df)
     return df
 
 @st.cache_data(ttl=300, show_spinner=False)
-def yf_daily(symbol: str, lookback_days: int = 30) -> pd.DataFrame:
+def to_30m_rth(df_1m: pd.DataFrame) -> pd.DataFrame:
     """
-    Daily bars (1d) for lookback window. Returns tz-naive ET date index named 'Date'.
+    Resample 1m to 30m (right-closed) and filter to CT RTH window.
+    Returns: dt (index), Open, High, Low, Close, plus 'Time' HH:MM column.
     """
-    tkr = yf.Ticker(symbol)
-    df = tkr.history(period=f"{max(lookback_days, 7)}d", interval="1d")
-    if df is None or df.empty:
-        return pd.DataFrame()
-    # Normalize 'Date' column (naive ET date)
-    out = df.copy()
-    out = out.reset_index()
-    date_col = "Date" if "Date" in out.columns else out.columns[0]
-    out.rename(columns={date_col: "Date"}, inplace=True)
-    out["Date"] = pd.to_datetime(out["Date"]).dt.tz_localize(None)
-    out["DateOnly"] = out["Date"].dt.date
-    return out
+    if df_1m.empty:
+        return df_1m
 
-def _previous_trading_date(symbol: str, before_date: date) -> Optional[date]:
-    daily = yf_daily(symbol, lookback_days=45)
-    if daily.empty:
-        return None
-    prev = daily.loc[daily["DateOnly"] < before_date]
-    if prev.empty:
-        return None
-    return prev.iloc[-1]["DateOnly"]
+    ohlc = (
+        df_1m.resample("30min", label="right", closed="right")
+             .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last"})
+             .dropna(subset=["Open", "High", "Low", "Close"])
+    )
 
-# --------- Anchor extraction (Prev Day OHLC) ----------
+    # Keep only bars whose RIGHT edge falls inside RTH
+    ohlc = ohlc[_time_between_series(ohlc.index, RTH_START, RTH_END)]
+    ohlc["Time"] = ohlc.index.strftime("%H:%M")
+    return ohlc
 
-@st.cache_data(ttl=300, show_spinner=False)
-def get_prev_day_ohlc_anchor(
-    symbol: str,
-    forecast_session: date,
-    which: str  # "HIGH" | "CLOSE" | "LOW"
-) -> Optional[Dict]:
+def _time_between_series(idx: pd.DatetimeIndex, start_t: time, end_t: time) -> pd.Series:
+    """Vectorized mask for right-edge time window (CT)."""
+    # idx already CT
+    times = idx.time
+    return pd.Series([(t >= start_t) and (t <= end_t) for t in times], index=idx)
+
+# -------------------------------------------------------------------------------------
+# 5 PM candle extraction (CT) for evening anchors
+# -------------------------------------------------------------------------------------
+@st.cache_data(ttl=600, show_spinner=False)
+def spx_5pm_candle(forecast: date) -> dict | None:
     """
-    Returns dict: {'date': prev_day, 'price': float, 'time': time, 'label': which}
-    Time is a best-effort typical time (HIGH/LOW unknown intraday minute -> leave None).
-    For CLOSE we use 16:00 as the canonical 'close' time.
+    Find the most recent 5:00–5:29 PM CT candle BEFORE the forecast session begins.
+    By convention, that is 5 PM on the PRIOR calendar day (forecast - 1 day).
+    Returns dict: {'base_end_time', 'high', 'low'} where base_end_time ≈ 17:29 CT.
     """
-    prev_day = _previous_trading_date(symbol, forecast_session)
-    if not prev_day:
-        return None
-    daily = yf_daily(symbol, lookback_days=45)
-    row = daily.loc[daily["DateOnly"] == prev_day]
-    if row.empty:
-        return None
+    anchor_day = forecast - timedelta(days=1)
+    start_ct = datetime.combine(anchor_day, EVENING_ANCHOR_START, tzinfo=CT)
+    end_ct   = datetime.combine(anchor_day, (EVENING_ANCHOR_END.replace(second=59)), tzinfo=CT)
 
-    price = None
-    t_hint = None
-    if which == "HIGH":
-        price = float(row.iloc[0]["High"])
-        # unknown intraday minute -> keep time None
-    elif which == "LOW":
-        price = float(row.iloc[0]["Low"])
-    elif which == "CLOSE":
-        price = float(row.iloc[0]["Close"])
-        t_hint = time(16, 0)
-    else:
-        return None
-
-    return {
-        "date": prev_day,
-        "price": round(float(price), 2),
-        "time": t_hint,  # None for High/Low (unknown minute)
-        "label": which
-    }
-
-# --------- Anchor extraction (5:00–5:29 PM candle) ----------
-
-@st.cache_data(ttl=300, show_spinner=False)
-def get_5pm_candle_anchor(
-    symbol: str,
-    forecast_session: date,
-    candle_pick: str  # "5PM_HIGH" | "5PM_LOW"
-) -> Optional[Dict]:
-    """
-    Uses previous trading day 5:00–5:29 PM ET window:
-      - '5PM_HIGH' -> highest price in that 30-min window
-      - '5PM_LOW'  -> lowest  price in that 30-min window
-    Anchor time returned as 17:00.
-    """
-    prev_day = _previous_trading_date(symbol, forecast_session)
-    if not prev_day:
-        return None
-
-    start_dt = datetime.combine(prev_day, time(17, 0), ET)
-    end_dt   = datetime.combine(prev_day, time(17, 29, 59), ET)
-    df_1m = yf_intraday_1m(symbol, start_dt, end_dt)
+    df_1m = fetch_spx_1m(start_ct - timedelta(minutes=5), end_ct + timedelta(minutes=5))
     if df_1m.empty:
         return None
 
-    if candle_pick == "5PM_HIGH":
-        px = float(df_1m["High"].max())
-    elif candle_pick == "5PM_LOW":
-        px = float(df_1m["Low"].min())
-    else:
+    window = df_1m[(df_1m.index.time >= EVENING_ANCHOR_START) & (df_1m.index.time <= EVENING_ANCHOR_END)]
+    if window.empty:
         return None
 
-    return {
-        "date": prev_day,
-        "price": round(px, 2),
-        "time": time(17, 0),
-        "label": candle_pick
-    }
+    high_px = float(window["High"].max())
+    low_px  = float(window["Low"].min())
 
-# ---------- Unified anchor selector (SPX-focused) ----------
+    # Use the RIGHT edge of the 5:00–5:29 window as the base time (consistent with right-closed bars)
+    base_end_time = datetime.combine(anchor_day, time(17, 29), tzinfo=CT)
+    return {"base_end_time": base_end_time, "high": high_px, "low": low_px}
 
-def select_spx_anchor(forecast_session: date) -> Optional[Dict]:
+# -------------------------------------------------------------------------------------
+# Block math & projections
+# -------------------------------------------------------------------------------------
+def blocks_between_30m(t1: datetime, t2: datetime) -> int:
     """
-    Minimal UI in sidebar to pick SPX anchor source & variant.
-    Returns anchor dict or None. No extra markup.
+    Count 30-min right-closed buckets between t1 and t2 (CT). Order-agnostic.
+    We simply step in 30-min hops; this matches how your tables advance.
     """
-    with st.sidebar:
-        src = st.selectbox(
-            "Anchor source",
-            ["Prev Day (High/Close/Low)", "5:00 PM Candle (High/Low)"],
-            index=0,
-            key="spx_anchor_src"
-        )
-        if src.startswith("Prev Day"):
-            pick = st.selectbox("Which anchor", ["HIGH", "CLOSE", "LOW"], index=1, key="spx_anchor_pick")
-            anchor = get_prev_day_ohlc_anchor(SPX_SYMBOL, forecast_session, pick)
-        else:
-            pick = st.selectbox("Which 5 PM anchor", ["5PM_HIGH", "5PM_LOW"], index=0, key="spx_5pm_pick")
-            anchor = get_5pm_candle_anchor(SPX_SYMBOL, forecast_session, pick)
+    if t1.tzinfo is None: t1 = t1.replace(tzinfo=CT)
+    if t2.tzinfo is None: t2 = t2.replace(tzinfo=CT)
+    if t2 < t1:
+        t1, t2 = t2, t1
 
-    # Persist to session (for Parts 4/5)
-    if anchor:
-        st.session_state["spx_anchor"] = anchor
-        st.session_state["spx_anchor_source"] = src
-    return anchor
+    cur, blocks = t1, 0
+    while cur < t2:
+        blocks += 1
+        cur += timedelta(minutes=30)
+    return blocks
 
-# ---------- Convenience fetchers for other pages ----------
-
-@st.cache_data(ttl=90, show_spinner=False)
-def get_live_quote(symbol: str) -> Optional[Dict]:
+def project_from_evening_high(base_high: float, base_dt: datetime, target_dt: datetime) -> float:
     """
-    Lightweight last bar snapshot (today). Returns dict with price and daily H/L/C if available.
+    Down-sloping line from 5pm HIGH using −0.3171 per 30-min block.
     """
-    tkr = yf.Ticker(symbol)
-    intraday = tkr.history(period="1d", interval="1m")
-    daily = tkr.history(period="6d", interval="1d")
+    b = blocks_between_30m(base_dt, target_dt)
+    return round(base_high + SPX_SLOPE_DOWN_PER_BLOCK * b, 2)
 
-    if intraday is None or intraday.empty:
+def project_from_evening_low(base_low: float, base_dt: datetime, target_dt: datetime) -> float:
+    """
+    Up-sloping line from 5pm LOW using +0.3171 per 30-min block.
+    """
+    b = blocks_between_30m(base_dt, target_dt)
+    return round(base_low + SPX_SLOPE_UP_PER_BLOCK * b, 2)
+
+# -------------------------------------------------------------------------------------
+# Day schedule for SPX (two lines): from 5pm HIGH and from 5pm LOW
+# -------------------------------------------------------------------------------------
+@st.cache_data(ttl=300, show_spinner=False)
+def spx_schedule_for_day(forecast: date) -> pd.DataFrame | None:
+    """
+    Build the daily schedule (RTH 30m slots) with both evening-anchor lines:
+    - FromHigh: starts at 5pm HIGH, slope −0.3171 per block
+    - FromLow : starts at 5pm LOW , slope +0.3171 per block
+    """
+    anchors = spx_5pm_candle(forecast)
+    if not anchors:
         return None
 
-    last = intraday.iloc[-1]
-    price = float(last["Close"])
-    out = {"symbol": symbol, "price": round(price, 2)}
-    if daily is not None and not daily.empty:
-        out.update({
-            "today_high": round(float(daily.iloc[-1]["High"]), 2),
-            "today_low": round(float(daily.iloc[-1]["Low"]), 2),
-            "prev_close": round(float(daily.iloc[-2]["Close"]), 2) if len(daily) >= 2 else round(price, 2)
-        })
+    # Generate the RTH slot endpoints for the forecast day (right-closed)
+    slots = _make_slots(RTH_START, RTH_END)
+    rows = []
+    for hhmm in slots:
+        hh, mm = map(int, hhmm.split(":"))
+        tdt = datetime.combine(forecast, time(hh, mm), tzinfo=CT)
+        from_high = project_from_evening_high(anchors["high"], anchors["base_end_time"], tdt)
+        from_low  = project_from_evening_low(anchors["low"],  anchors["base_end_time"], tdt)
+        rows.append({"Time": hhmm, "FromHigh": from_high, "FromLow": from_low})
+
+    df = pd.DataFrame(rows)
+    df.attrs.update({
+        "evening_high": anchors["high"],
+        "evening_low": anchors["low"],
+        "evening_base_time": anchors["base_end_time"],
+        "slope_up_per_block": SPX_SLOPE_UP_PER_BLOCK,
+        "slope_down_per_block": SPX_SLOPE_DOWN_PER_BLOCK,
+    })
+    return df
+
+def _make_slots(start_t: time, end_t: time, step_min: int = 30) -> list[str]:
+    cur = datetime(2025, 1, 1, start_t.hour, start_t.minute)
+    stop = datetime(2025, 1, 1, end_t.hour, end_t.minute)
+    out = []
+    while cur <= stop:
+        out.append(cur.strftime("%H:%M"))
+        cur += timedelta(minutes=step_min)
     return out
 
-# ---------- Part 3 minimal integration point ----------
-
-def part3_bind_data_layer(forecast_session: date):
-    """
-    Call this once during page build (e.g., in Overview) to
-    1) let user choose SPX anchor
-    2) store anchor + source in session for later parts
-    """
-    _ = select_spx_anchor(forecast_session)
+# ========================== END PART 3 =================================================================
