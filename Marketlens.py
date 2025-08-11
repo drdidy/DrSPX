@@ -897,3 +897,303 @@ def render_export_center_equity(symbol: str, forecast_date: date):
 # - render_export_center_spx(forecast_date, tolerance)
 # - render_export_center_equity(selected_symbol, forecast_date)
 
+
+# ============================================================
+# ==================== PART 7 — RENDERING ====================
+# ========== Anchors + Forecasts (ES-backed, visible) ========
+# ============================================================
+
+from datetime import datetime, date, time, timedelta
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import streamlit as st
+
+# ---------- Guard: default constants if earlier parts missing ----------
+if "CT" not in globals():
+    from zoneinfo import ZoneInfo
+    CT = ZoneInfo("America/Chicago")
+if "ET" not in globals():
+    from zoneinfo import ZoneInfo
+    ET = ZoneInfo("America/New_York")
+
+if "RTH_START" not in globals():
+    RTH_START, RTH_END = time(8,30), time(15,0)  # CT 8:30–15:00
+if "ES_SYMBOL" not in globals():
+    ES_SYMBOL = "ES=F"
+
+# Slopes (per 30m block) — pulled from our latest agreement.
+# Previous-day H/L/C channels descend at same rate; overnight H ascends; overnight L descends.
+if "SPX_SLOPES" not in globals():
+    SPX_SLOPES = {
+        "PREV": -0.2792,   # applies to prev-day High, Close, Low lines
+        "ON_H": +0.3171,   # overnight High line
+        "ON_L": -0.3171,   # overnight Low line
+    }
+
+# ---------- Safe helpers (only define if missing) ----------
+if "make_slots_ct" not in globals():
+    def make_slots_ct(start: time, end: time, step_min: int = 30) -> list[str]:
+        cur = datetime(2025,1,1,start.hour,start.minute, tzinfo=CT)
+        stop = datetime(2025,1,1,end.hour,end.minute, tzinfo=CT)
+        out = []
+        while cur <= stop:
+            out.append(cur.strftime("%H:%M"))
+            cur += timedelta(minutes=step_min)
+        return out
+
+if "blocks_between_ct" not in globals():
+    def blocks_between_ct(t0: datetime, t1: datetime) -> int:
+        if t1 < t0: t0, t1 = t1, t0
+        # 30m blocks, right-closed bars
+        return int(np.ceil((t1 - t0).total_seconds() / 1800.0))
+
+if "yf_fetch_1m" not in globals():
+    import yfinance as yf
+    @st.cache_data(ttl=300, show_spinner=False)
+    def yf_fetch_1m(symbol: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+        """Fetch 1m bars, return columns: Dt (tz-aware CT), Open High Low Close Volume."""
+        try:
+            df = yf.download(
+                symbol,
+                start=start_dt.astimezone(ET),
+                end=end_dt.astimezone(ET),
+                interval="1m",
+                auto_adjust=False,
+                prepost=True,
+                progress=False,
+            )
+            if df is None or df.empty:
+                return pd.DataFrame()
+            df = df.reset_index().rename(columns={"Datetime":"Dt"})
+            # yfinance sometimes returns MultiIndex columns — normalize
+            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+            # Required OHLC cols may be missing in partial sessions; drop NAs defensively
+            needed = [c for c in ["Open","High","Low","Close"] if c in df.columns]
+            if not needed:
+                return pd.DataFrame()
+            df = df.dropna(subset=needed)
+            # If any OHLC column missing, synthesize from available to avoid KeyErrors (visual only)
+            for c in ["Open","High","Low","Close"]:
+                if c not in df.columns:
+                    df[c] = df[needed[0]]
+            # Localize to ET then convert to CT
+            if df["Dt"].dt.tz is None:
+                df["Dt"] = df["Dt"].dt.tz_localize("America/New_York")
+            df["Dt"] = df["Dt"].dt.tz_convert(CT)
+            cols = ["Dt","Open","High","Low","Close"]
+            return df[cols].sort_values("Dt")
+        except Exception:
+            return pd.DataFrame()
+
+if "resample_30m" not in globals():
+    def resample_30m(df_1m: pd.DataFrame) -> pd.DataFrame:
+        """Right-closed 30m OHLC from 1m."""
+        if df_1m.empty: return df_1m
+        g = (
+            df_1m.set_index("Dt")[["Open","High","Low","Close"]]
+            .resample("30min", label="right", closed="right")
+            .agg({"Open":"first","High":"max","Low":"min","Close":"last"})
+            .dropna(how="any")
+            .reset_index()
+        )
+        g["Time"] = g["Dt"].dt.tz_convert(CT).dt.strftime("%H:%M")
+        return g
+
+# ---------- ES anchors (prev-day H/L/C and overnight H/L) ----------
+if "es_prevday_hlc" not in globals():
+    @st.cache_data(ttl=600, show_spinner=False)
+    def es_prevday_hlc(target: date) -> dict | None:
+        """Compute previous regular session H/L/C (CT 8:30–15:00) for ES."""
+        prev = target - timedelta(days=1)
+        start = datetime.combine(prev, time(8,25), tzinfo=CT)
+        end   = datetime.combine(prev, time(15,5), tzinfo=CT)
+        m1 = yf_fetch_1m(ES_SYMBOL, start, end)
+        if m1.empty:
+            return None
+        rth = resample_30m(m1)
+        if rth.empty:
+            return None
+        h_idx = rth["High"].idxmax()
+        l_idx = rth["Low"].idxmin()
+        close_row = rth.iloc[-1]
+        return {
+            "day": prev,
+            "H": float(rth.loc[h_idx, "High"]), "H_t": rth.loc[h_idx, "Dt"].to_pydatetime(),
+            "L": float(rth.loc[l_idx, "Low"]),  "L_t": rth.loc[l_idx, "Dt"].to_pydatetime(),
+            "C": float(close_row["Close"]),     "C_t": close_row["Dt"].to_pydatetime(),
+        }
+
+if "es_overnight_hl" not in globals():
+    @st.cache_data(ttl=600, show_spinner=False)
+    def es_overnight_hl(target: date) -> dict | None:
+        """
+        Overnight window CT 17:00 → 02:00 (which is ET 18:00 → 03:00).
+        We scan ES 1m in that window and return High/Low + timestamps.
+        """
+        start = datetime.combine(target, time(17,0), tzinfo=CT)
+        end   = datetime.combine(target+timedelta(days=1), time(2,0), tzinfo=CT)
+        m1 = yf_fetch_1m(ES_SYMBOL, start, end)
+        if m1.empty:
+            return None
+        hi_idx = m1["High"].idxmax()
+        lo_idx = m1["Low"].idxmin()
+        return {
+            "ON_H": float(m1.loc[hi_idx, "High"]), "ON_H_t": m1.loc[hi_idx, "Dt"].to_pydatetime(),
+            "ON_L": float(m1.loc[lo_idx, "Low"]),  "ON_L_t": m1.loc[lo_idx, "Dt"].to_pydatetime(),
+        }
+
+# ---------- Projection engine (builds the RTH table) ----------
+if "project_spx_table" not in globals():
+    @st.cache_data(ttl=300, show_spinner=False)
+    def project_spx_table(forecast_d: date) -> tuple[pd.DataFrame, dict] | tuple[pd.DataFrame, None]:
+        """Projects 30m lines across RTH using agreed slopes from prev-day & overnight anchors."""
+        prev = es_prevday_hlc(forecast_d)
+        ono  = es_overnight_hl(forecast_d)
+        if not prev or not ono:
+            return pd.DataFrame(), None
+
+        slots = make_slots_ct(RTH_START, RTH_END)  # HH:MM (CT RTH)
+        rows = []
+        for s in slots:
+            hh, mm = map(int, s.split(":"))
+            tdt = datetime.combine(forecast_d, time(hh, mm), tzinfo=CT)
+
+            b_prev = SPX_SLOPES["PREV"]
+            b_onh  = SPX_SLOPES["ON_H"]
+            b_onl  = SPX_SLOPES["ON_L"]
+
+            # Blocks from anchors
+            kH  = blocks_between_ct(prev["H_t"],   tdt)
+            kC  = blocks_between_ct(prev["C_t"],   tdt)
+            kL  = blocks_between_ct(prev["L_t"],   tdt)
+            kOH = blocks_between_ct(ono["ON_H_t"], tdt)
+            kOL = blocks_between_ct(ono["ON_L_t"], tdt)
+
+            # Project
+            line_prev_H  = prev["H"]   + b_prev * kH
+            line_prev_C  = prev["C"]   + b_prev * kC
+            line_prev_L  = prev["L"]   + b_prev * kL
+            line_on_high = ono["ON_H"] + b_onh  * kOH
+            line_on_low  = ono["ON_L"] + b_onl  * kOL
+
+            rows.append({
+                "Time": s,
+                "Prev_H": round(line_prev_H,2),
+                "Prev_C": round(line_prev_C,2),
+                "Prev_L": round(line_prev_L,2),
+                "ON_High": round(line_on_high,2),
+                "ON_Low":  round(line_on_low,2),
+            })
+
+        table = pd.DataFrame(rows)
+
+        meta = {
+            "prev": prev,
+            "overnight": ono,
+            "slopes": SPX_SLOPES.copy(),
+            "forecast_date": forecast_d,
+        }
+        return table, meta
+
+# ---------- Plot builder ----------
+def _plot_projection(table: pd.DataFrame, forecast_d: date):
+    fig = go.Figure()
+    if table.empty:
+        return fig
+
+    x = table["Time"]
+    fig.add_trace(go.Scatter(x=x, y=table["Prev_H"],  name="Prev High",  mode="lines"))
+    fig.add_trace(go.Scatter(x=x, y=table["Prev_C"],  name="Prev Close", mode="lines"))
+    fig.add_trace(go.Scatter(x=x, y=table["Prev_L"],  name="Prev Low",   mode="lines"))
+    fig.add_trace(go.Scatter(x=x, y=table["ON_High"], name="Overnight High", mode="lines"))
+    fig.add_trace(go.Scatter(x=x, y=table["ON_Low"],  name="Overnight Low",  mode="lines"))
+
+    fig.update_layout(
+        height=420,
+        margin=dict(l=40,r=20,t=40,b=40),
+        title=f"ES-projected SPX Lines (CT RTH) — {forecast_d}",
+        xaxis_title="CT Time (30-min)",
+        yaxis_title="Price",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    )
+    return fig
+
+# ---------- Renderers wired into existing tabs ----------
+def render_anchors_tab_es(forecast_d: date):
+    st.markdown("### ⚓ ES Anchors (Prev-Day & Overnight)")
+    prev = es_prevday_hlc(forecast_d)
+    ono  = es_overnight_hl(forecast_d)
+
+    if not prev or not ono:
+        st.warning("Anchors unavailable yet — market data may be missing for your date selection.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Prev-Day High", f"{prev['H']:.2f}", prev["day"].strftime("from %a"))
+    with c2:
+        st.metric("Prev-Day Close", f"{prev['C']:.2f}")
+    with c3:
+        st.metric("Prev-Day Low", f"{prev['L']:.2f}")
+
+    d1, d2 = st.columns(2)
+    with d1:
+        st.metric("Overnight High (5p→2a CT)", f"{ono['ON_H']:.2f}", ono["ON_H_t"].strftime("%H:%M CT"))
+    with d2:
+        st.metric("Overnight Low (5p→2a CT)", f"{ono['ON_L']:.2f}", ono["ON_L_t"].strftime("%H:%M CT"))
+
+    # Small details box
+    st.caption(
+        f"Slopes per 30m — Prev: {SPX_SLOPES['PREV']:+.4f} • ON High: {SPX_SLOPES['ON_H']:+.4f} • ON Low: {SPX_SLOPES['ON_L']:+.4f}"
+    )
+
+def render_forecast_tab_es(forecast_d: date):
+    st.markdown("### 📈 Forecast Lines (RTH, 30-min)")
+    table, meta = project_spx_table(forecast_d)
+    if table.empty or not meta:
+        st.warning("Unable to project lines — anchors not available yet for the selected date.")
+        return
+
+    # Chart
+    fig = _plot_projection(table, forecast_d)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Table
+    st.dataframe(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Time": st.column_config.TextColumn("Time", width="small"),
+            "Prev_H": st.column_config.NumberColumn("Prev High", format="%.2f"),
+            "Prev_C": st.column_config.NumberColumn("Prev Close", format="%.2f"),
+            "Prev_L": st.column_config.NumberColumn("Prev Low", format="%.2f"),
+            "ON_High": st.column_config.NumberColumn("Overnight High", format="%.2f"),
+            "ON_Low": st.column_config.NumberColumn("Overnight Low", format="%.2f"),
+        },
+    )
+
+# ---------- Hook into your existing navigation / tabs ----------
+# If Parts 1–3 created tab containers, call these renderers inside them.
+# To be safe, we expose lightweight helpers you can call from those placeholders.
+
+def ML_render_anchors_section(forecast_d: date | None = None):
+    forecast_d = forecast_d or st.session_state.get("forecast_date") or date.today()
+    render_anchors_tab_es(forecast_d)
+
+def ML_render_forecast_section(forecast_d: date | None = None):
+    forecast_d = forecast_d or st.session_state.get("forecast_date") or date.today()
+    render_forecast_tab_es(forecast_d)
+
+# Optional: Auto-run in case your placeholders didn’t call them yet.
+# If your app already calls these, you can comment the block below.
+try:
+    _active_tab = st.session_state.get("ml_active_tab", "").lower()
+    _fd = st.session_state.get("forecast_date") or date.today()
+    if _active_tab == "anchors":
+        ML_render_anchors_section(_fd)
+    elif _active_tab == "forecasts":
+        ML_render_forecast_section(_fd)
+except Exception:
+    pass
