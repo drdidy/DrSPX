@@ -469,7 +469,6 @@ def _make_slots(start_t: time, end_t: time, step_min: int = 30) -> list[str]:
 #  - Builds ascending/descending lines for forecast RTH (08:30–14:30 CT)
 #  - No volume. No extraneous UI.
 # ===========================
-from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
 import pandas as pd
