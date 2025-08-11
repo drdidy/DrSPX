@@ -1,31 +1,18 @@
-# ==============================  **PART 1 / 10 — APP SHELL & NAVIGATION**  ==============================
-# MarketLens Pro (Rebuild)
-# Goal of Part 1:
-# - Minimal, production-clean Streamlit shell
-# - Fixed sidebar (expanded) with 8 tickers incl. SPX
-# - Simple theme + typography (no heavy CSS yet)
-# - Page router scaffold (placeholders only; real logic starts Part 2)
-# - Safe to run even without network access
+# ==============================  **PART 1 / 10 — APP SHELL & NAVIGATION (CLEAN)**  ==============================
+# What this provides (minimal, professional):
+# - Streamlit page config
+# - Light, clean design tokens (colors, spacing, fonts)
+# - Sidebar navigation + symbol picker with your 8 symbols + SPX
+# - Page router stubs (no placeholder paragraphs)
+# - A lean Overview stub (Part 2 will populate its content)
 
-from __future__ import annotations
-import os
-from datetime import datetime
 import streamlit as st
+from dataclasses import dataclass
 
-# --- Meta & Config ---
+# ---------- App Meta ----------
 APP_NAME = "MarketLens Pro"
-APP_VERSION = "5.0.0"
-APP_TAGLINE = "Professional Forecasting & Analytics"
-TICKERS = [
-    ("^GSPC", "SPX (S&P 500)"),
-    ("AMZN",  "AMZN"),
-    ("TSLA",  "TSLA"),
-    ("GOOGL", "GOOGL"),
-    ("AAPL",  "AAPL"),
-    ("MSFT",  "MSFT"),
-    ("META",  "META"),
-    ("NVDA",  "NVDA"),
-]
+APP_VERSION = "4.1.0"
+APP_TAGLINE = "Professional SPX & Equities Analytics"
 
 st.set_page_config(
     page_title=f"{APP_NAME} — {APP_TAGLINE}",
@@ -34,133 +21,136 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- Minimal, tasteful styling (kept light; full design system comes later) ---
-st.markdown("""
+# ---------- Design Tokens (lean) ----------
+COLORS = {
+    "primary": "#0A84FF",
+    "success": "#34C759",
+    "warning": "#FF9500",
+    "danger":  "#FF3B30",
+    "text":    "#111827",
+    "muted":   "#6B7280",
+    "surface": "#FFFFFF",
+    "panel":   "#F8FAFC",
+    "border":  "rgba(0,0,0,0.08)",
+}
+
+BASE_CSS = f"""
 <style>
-/* Base */
-html, body, .stApp { font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif; }
-h1,h2,h3 { letter-spacing:-0.02em; }
-.small { color: rgba(0,0,0,0.55); font-size:0.9rem; }
-[data-testid="stSidebar"] { border-right: 1px solid rgba(0,0,0,0.06); }
-
-/* Metric card feel */
-.block { border:1px solid rgba(0,0,0,0.08); border-radius:14px; padding:16px; background: #fff; }
-
-/* Dark mode tweaks */
-:root [data-theme="dark"] .block { background: #1f1f1f; border-color: rgba(255,255,255,0.08); }
-:root [data-theme="dark"] .small { color: rgba(255,255,255,0.65); }
+html, body, .stApp {{
+  font-family: ui-sans-serif, -apple-system, "SF Pro Text", Inter, Segoe UI, Roboto, sans-serif;
+  color: {COLORS["text"]};
+}}
+.block {{
+  background: {COLORS["panel"]};
+  border: 1px solid {COLORS["border"]};
+  border-radius: 14px;
+  padding: 14px 16px;
+}}
+h1,h2,h3 {{ letter-spacing: -0.01em; }}
 </style>
-""", unsafe_allow_html=True)
+"""
+st.markdown(BASE_CSS, unsafe_allow_html=True)
 
-# --- Session bootstrap ---
+# ---------- Symbol Set ----------
+@dataclass(frozen=True)
+class Ticker:
+    symbol: str
+    name: str
+
+SYMBOLS = [
+    Ticker("^GSPC", "S&P 500 (SPX)"),
+    Ticker("AAPL",  "Apple"),
+    Ticker("MSFT",  "Microsoft"),
+    Ticker("NVDA",  "NVIDIA"),
+    Ticker("META",  "Meta"),
+    Ticker("GOOGL", "Alphabet"),
+    Ticker("TSLA",  "Tesla"),
+    Ticker("NFLX",  "Netflix"),
+    Ticker("AMZN",  "Amazon"),
+]
+
+# ---------- Session Defaults ----------
 if "selected_symbol" not in st.session_state:
-    st.session_state.selected_symbol = "^GSPC"  # default to SPX
+    st.session_state.selected_symbol = SYMBOLS[0].symbol
 if "selected_name" not in st.session_state:
-    st.session_state.selected_name = "SPX (S&P 500)"
+    st.session_state.selected_name = SYMBOLS[0].name
+if "page" not in st.session_state:
+    st.session_state.page = "Overview"
 
-# --- Sidebar (Navigation) ---
+# ---------- Sidebar: Navigation ----------
 with st.sidebar:
     st.markdown(f"### {APP_NAME}")
     st.caption(APP_TAGLINE)
 
-    # Stock selector (single source of truth)
-    labels = {sym: label for sym, label in TICKERS}
-    symbol = st.selectbox(
-        "Symbol",
-        options=[sym for sym, _ in TICKERS],
-        index=0,
-        format_func=lambda s: labels[s],
-        help="Choose the instrument page",
-    )
-    st.session_state.selected_symbol = symbol
-    st.session_state.selected_name = labels[symbol]
+    # Symbol picker
+    names = [f"{t.name} — {t.symbol}" for t in SYMBOLS]
+    default_index = next((i for i,t in enumerate(SYMBOLS) if t.symbol == st.session_state.selected_symbol), 0)
+    sel = st.selectbox("Instrument", names, index=default_index)
+    sel_idx = names.index(sel)
+    st.session_state.selected_symbol = SYMBOLS[sel_idx].symbol
+    st.session_state.selected_name = SYMBOLS[sel_idx].name
 
     st.divider()
-    st.markdown("**Pages**")
-    page = st.radio(
-        label="",
-        options=["Overview", "Anchors & Forecast", "Signals", "Contract Line", "Fibonacci", "Export"],
-        label_visibility="collapsed",
-    )
 
-    st.divider()
-    st.markdown(
-        f"""
-        <div class="small">
-            v{APP_VERSION}<br/>
-            {datetime.now().strftime("%Y-%m-%d %H:%M")}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    pages = [
+        "Overview",
+        "Anchors",
+        "Forecasts",
+        "Signals",
+        "Contract",
+        "Fibonacci",
+        "Export",
+        "Settings / About",
+    ]
+    page = st.radio("Navigation", pages, index=pages.index(st.session_state.page))
+    st.session_state.page = page
 
-# --- Header / Hero (lightweight; expanded later) ---
-col1, col2 = st.columns([0.7, 0.3])
-with col1:
-    st.markdown(f"## {st.session_state.selected_name}")
-    st.caption("Clean. Fast. Professional.")
-with col2:
-    with st.container(border=True):
-        st.markdown("**Status**")
-        st.markdown(
-            "<span class='small'>Live data via Yahoo Finance (enabled in Part 2).</span>",
-            unsafe_allow_html=True,
-        )
-
-# --- Router scaffold (placeholders only in Part 1) ---
+# ---------- Page Stubs (no placeholder copy) ----------
 def render_overview():
     st.markdown("### Overview")
-    st.markdown(
-        """
-        <div class="block">
-        This is the streamlined shell. In **Part 2+**, we’ll wire:
-        <ul>
-            <li>Live SPX & equities fetch via <code>yfinance</code></li>
-            <li>Professional anchor inputs & validation</li>
-            <li>Forecast fan tables (Entry → TP1 → TP2)</li>
-            <li>Signal detection, Contract line, Fibonacci tools</li>
-            <li>Export center</li>
-        </ul>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Part 2 will inject live snapshot & anchors here.
 
-def render_anchors_forecast():
-    st.markdown("### Anchors & Forecast")
-    st.info("Coming in Part 2–4: anchor inputs, locking, fan generation.")
+def render_anchors():
+    st.markdown("### Anchors")
+
+def render_forecasts():
+    st.markdown("### Forecasts")
 
 def render_signals():
     st.markdown("### Signals")
-    st.info("Coming in Part 5–6: detection table, confidence, monitoring.")
 
 def render_contract():
-    st.markdown("### Contract Line")
-    st.info("Coming in Part 7: two-point slope → projected curve & lookup.")
+    st.markdown("### Contract")
 
 def render_fibonacci():
     st.markdown("### Fibonacci")
-    st.info("Coming in Part 8: 0.786 focus + confluence with contract line.")
 
 def render_export():
     st.markdown("### Export")
-    st.info("Coming in Part 9–10: CSV bundles, summary sheets, downloads.")
 
+def render_settings():
+    st.markdown("### Settings / About")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"**App:** {APP_NAME}")
+        st.write(f"**Version:** {APP_VERSION}")
+    with col2:
+        st.write("**Design:** Minimal, professional UI")
+        st.write("**Data:** yfinance (cached)")
+
+# ---------- Router ----------
 ROUTES = {
     "Overview": render_overview,
-    "Anchors & Forecast": render_anchors_forecast,
+    "Anchors": render_anchors,
+    "Forecasts": render_forecasts,
     "Signals": render_signals,
-    "Contract Line": render_contract,
+    "Contract": render_contract,
     "Fibonacci": render_fibonacci,
     "Export": render_export,
+    "Settings / About": render_settings,
 }
 
-# --- Render selected page ---
-ROUTES.get(page, render_overview)()
-
-# --- Footer (minimal, no clutter) ---
-st.markdown("---")
-st.caption("© MarketLens Pro — For educational analysis only.")
+ROUTES[page]()  # render current page
 
 # ==============================  **PART 2 / 10 — DATA LAYER & LIVE SNAPSHOT**  ==============================
 # What this adds:
