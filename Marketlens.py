@@ -221,114 +221,54 @@ elif nav == "Settings / About":
 # ─────────────────────────────────────────────────────────────────────────────
 # ██████  PART 4 — SPX 5:00 CANDLE ANCHOR DETECTION (via SPY)
 # ─────────────────────────────────────────────────────────────────────────────
+# Assumes from Parts 1–3:
+# - CT timezone `CT`
+# - yfinance minute fetch: fetch_1m_yf(ticker: str, start_dt: datetime, end_dt: datetime) -> DataFrame
+# - constants: SPX_LABEL (e.g., "SPX"), SPX_YF = "SPY"
+# - nav (active page), instrument (selected instrument), forecast_date (target session)
 
-def spx_get_5pm_candle(session_date: date) -> pd.DataFrame:
+def spx_get_5pm_window(session_date: date) -> pd.DataFrame:
     """
-    For the given forecast date, pull SPY minute data 3PM–6PM CT
-    and extract rows for the 5:00–5:29 PM CT candle window.
-    Returns DataFrame with Dt, Open, High, Low, Close.
+    Pull SPY 1m bars for the session_date 15:00–18:00 CT and
+    return rows strictly in the 17:00–17:29 CT window.
+    Columns: Dt (tz-aware CT), Open, High, Low, Close
     """
     start_pull = datetime.combine(session_date, time(15, 0), tzinfo=CT)
     end_pull = datetime.combine(session_date, time(18, 0), tzinfo=CT)
-    df = fetch_1m_yf(SPX_YF, start_pull, end_pull)  # SPX_YF = "SPY"
+    df = fetch_1m_yf(SPX_YF, start_pull, end_pull)
     if df.empty:
         return pd.DataFrame(columns=["Dt", "Open", "High", "Low", "Close"])
-    win = df[(df["Dt"].dt.time >= time(17, 0)) & (df["Dt"].dt.time <= time(17, 29))]
-    return win.reset_index(drop=True)
+    mask = (df["Dt"].dt.time >= time(17, 0)) & (df["Dt"].dt.time <= time(17, 29))
+    return df.loc[mask, ["Dt", "Open", "High", "Low", "Close"]].reset_index(drop=True)
 
 def render_spx_anchors_page(session_date: date):
-    """
-    Renders the Anchors page with SPX 5:00–5:29 PM CT candle info.
-    """
-    st.markdown('<div class="section"><div class="section-title">⚓ SPX 5:00 Candle Anchors</div>', unsafe_allow_html=True)
-    
-    anchors_df = spx_get_5pm_candle(session_date)
-    if anchors_df.empty:
-        st.warning("No 5:00–5:29 PM CT data found for SPX (via SPY) on this date.")
+    st.markdown('<div class="section"><div class="section-title">⚓ SPX 5:00 Candle Anchors (via SPY)</div>', unsafe_allow_html=True)
+
+    win = spx_get_5pm_window(session_date)
+    if win.empty:
+        st.warning("No 5:00–5:29 PM CT SPY data found for this date.")
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    st.dataframe(anchors_df, use_container_width=True)
+    hi = float(win["High"].max())
+    lo = float(win["Low"].min())
+    hi_t = win.loc[win["High"].idxmax(), "Dt"]
+    lo_t = win.loc[win["Low"].idxmin(), "Dt"]
 
-    high_val = anchors_df["High"].max()
-    low_val = anchors_df["Low"].min()
-    st.metric("5PM High", f"{high_val:.2f}")
-    st.metric("5PM Low", f"{low_val:.2f}")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("5PM High", f"{hi:.2f}", hi_t.strftime("%H:%M"))
+    with c2:
+        st.metric("5PM Low", f"{lo:.2f}", lo_t.strftime("%H:%M"))
+    with c3:
+        st.metric("Bars", f"{len(win)}", "17:00–17:29 CT")
 
+    st.dataframe(win, use_container_width=True, hide_index=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ===== Hook into nav
+# Hook
 if nav == "Anchors":
     if instrument != SPX_LABEL:
-        st.info("Anchors are only available for SPX.")
+        st.info("Anchors page is only applicable to SPX right now.")
     else:
         render_spx_anchors_page(forecast_date)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ██████  PART 5 — FORECASTS PAGE (SPY Anchors → SPX Levels)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def get_spx_open_ratio(session_date: date) -> float:
-    """
-    Returns SPX/SPY ratio at 8:30 AM CT open for the session_date.
-    """
-    start_dt = datetime.combine(session_date, time(8, 30), tzinfo=CT)
-    end_dt = start_dt + timedelta(minutes=1)
-    spy_df = fetch_1m_yf(SPX_YF, start_dt, end_dt)  # SPY
-    spx_df = fetch_1m_yf("^GSPC", start_dt, end_dt)  # SPX index
-    if spy_df.empty or spx_df.empty:
-        return None
-    spy_open = spy_df.iloc[0]["Open"]
-    spx_open = spx_df.iloc[0]["Open"]
-    return spx_open / spy_open if spy_open != 0 else None
-
-def project_spx_levels_from_spy(anchor_price: float, slopes: list, ratio: float) -> pd.DataFrame:
-    """
-    Given a SPY anchor price, slopes (list of slope values), and SPX/SPY ratio,
-    project SPX price targets (TP1, TP2).
-    """
-    data = []
-    for slope in slopes:
-        spy_proj = anchor_price + slope
-        spx_proj = spy_proj * ratio
-        data.append({
-            "SPY Level": round(spy_proj, 2),
-            "SPX Level": round(spx_proj, 2),
-            "Slope": slope
-        })
-    return pd.DataFrame(data)
-
-def render_spx_forecasts_page(session_date: date):
-    """
-    Render Forecasts page with SPX targets converted from SPY anchors.
-    """
-    st.markdown('<div class="section"><div class="section-title">📈 SPX Forecasts</div>', unsafe_allow_html=True)
-
-    anchors_df = spx_get_5pm_candle(session_date)
-    if anchors_df.empty:
-        st.warning("No SPY 5:00 PM anchor found for forecasts.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    ratio = get_spx_open_ratio(session_date)
-    if not ratio:
-        st.error("Could not fetch SPX/SPY open ratio for conversion.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    # Example slope logic (replace with your actual strategy)
-    high_anchor = anchors_df["High"].max()
-    slopes = [0.3171, -0.3171]  # Example: up & down projections from high anchor
-
-    forecast_df = project_spx_levels_from_spy(high_anchor, slopes, ratio)
-    st.dataframe(forecast_df, use_container_width=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ===== Hook into nav
-if nav == "Forecasts":
-    if instrument != SPX_LABEL:
-        st.info("Forecasts only available for SPX in this section.")
-    else:
-        render_spx_forecasts_page(forecast_date)
-
