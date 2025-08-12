@@ -5,7 +5,7 @@
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════
-# PART 1: CORE CONFIGURATION & GLOBAL SETTINGS (FIXED ORDER)
+# PART 1: CORE CONFIGURATION & GLOBAL SETTINGS (STREAMLIT FIXED)
 # ══════════════════════════════════════════════════════════════════════════════════════
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ SPX_OVERNIGHT_SLOPES = {"overnight_low_up": +0.2432, "overnight_high_down": -0.2
 
 # Instruments
 EQUITIES = ["^GSPC", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "NFLX", "TSLA", "GOOG", "BRK-B", "UNH", "JNJ", "V"]
-ES_SYMBOL = "ES=F"  # Fixed: Removed ^ prefix
+ES_SYMBOL = "ES=F"
 
 # ───────────────────────────────  PAGE SETUP  ───────────────────────────────
 st.set_page_config(
@@ -46,9 +46,6 @@ st.set_page_config(
     }
 )
 
-# NOTE: Hero section will be created AFTER sidebar variables are defined
-# This prevents the "asset is not defined" error
-
 # ───────────────────────────────  HELPER FUNCTIONS  ───────────────────────────────
 def previous_trading_day(ref_d: date) -> date:
     """Calculate the previous trading day (skip weekends)."""
@@ -57,64 +54,10 @@ def previous_trading_day(ref_d: date) -> date:
         d -= timedelta(days=1)
     return d
 
-def create_hero_section(asset_symbol, forecast_date_val):
-    """Create the hero section after variables are defined."""
-    # Get asset label and fetch market data
-    label = "SPX" if asset_symbol == "^GSPC" else asset_symbol
-    market_data = fetch_live_quote(asset_symbol)
-
-    # Safely determine change color
-    change_value = market_data.get('change', '—')
-    if change_value.startswith('+'):
-        change_color = "#10b981"
-    elif change_value.startswith('-'):
-        change_color = "#ef4444"
-    else:
-        change_color = "#64748b"
-
-    # Safely determine chip status
-    status = market_data.get('status', 'unknown')
-    if status == 'active':
-        chip_class = "ok"
-        pulse_class = "pulse-animation"
-    elif status == 'delayed':
-        chip_class = "info"
-        pulse_class = ""
-    else:
-        chip_class = "warning"
-        pulse_class = ""
-
-    # Generate hero HTML
-    hero_html = f"""
-    <div class="hero">
-      <h1>{APP_NAME}</h1>
-      <div class="sub">{TAGLINE}</div>
-      <div class="meta">v{VERSION} • {COMPANY}</div>
-
-      <div class="kpi">
-        <div class="card {pulse_class}">
-          <div class="label">{label} — Last Price</div>
-          <div class="value">{market_data.get('px', '—')}</div>
-        </div>
-        <div class="card">
-          <div class="label">Change • % Change</div>
-          <div class="value" style="color: {change_color};">{market_data.get('change', '—')} • {market_data.get('change_pct', '—')}</div>
-        </div>
-        <div class="card">
-          <div class="label">Last Updated</div>
-          <div class="value">{market_data.get('ts', '—')}</div>
-        </div>
-        <div class="card">
-          <div class="label">Data Source</div>
-          <div class="value"><span class="chip {chip_class}">{market_data.get('source', 'Unknown')}</span></div>
-        </div>
-      </div>
-    </div>
-    """
-    
-    return hero_html
-
-# This function will be called after the sidebar defines the variables
+# ───────────────────────────────  CLEAR STREAMLIT CACHE  ───────────────────────────────
+# Force clear any cached content that might be causing duplicate displays
+if 'hero_displayed' not in st.session_state:
+    st.session_state.hero_displayed = False
 
 
 
