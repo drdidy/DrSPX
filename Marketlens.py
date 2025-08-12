@@ -55,7 +55,7 @@ st.set_page_config(
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 2: PREMIUM UI STYLING & VISUAL DESIGN
+# PART 2 FIXED: PREMIUM UI STYLING WITH CORRECTED HERO SECTION
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 st.markdown("""
@@ -72,7 +72,7 @@ html, body, .stApp {
     background: radial-gradient(ellipse at top, #f7faff 0%, #ffffff 50%, #f1f5f9 100%) fixed;
 }
 
-/* ========== HERO SECTION ========== */
+/* ========== HERO SECTION (FIXED - NO BLACK SQUARE) ========== */
 .hero {
     border-radius: 28px;
     padding: 32px 36px;
@@ -88,19 +88,7 @@ html, body, .stApp {
     overflow: hidden;
 }
 
-.hero::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.03'%3E%3Cpath d='m36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-    opacity: 0.1;
-    z-index: 0;
-}
-
-.hero > * { position: relative; z-index: 1; }
+/* REMOVED: The problematic ::before pseudo-element that was causing the black square */
 
 .hero h1 { 
     margin: 0; 
@@ -110,6 +98,7 @@ html, body, .stApp {
     background: linear-gradient(135deg, #ffffff 0%, #e2e8f0 100%);
     background-clip: text;
     -webkit-background-clip: text;
+    color: white; /* Fallback for browsers that don't support background-clip */
 }
 
 .hero .sub { 
@@ -312,7 +301,7 @@ div[data-testid="stMetricLabel"] { color: #64748b !important; font-weight: 600 !
 div[data-testid="stMetricValue"] { color: #0f172a !important; font-weight: 800 !important; }
 .stCaption, .stCaption p { color: #64748b !important; }
 
-/* Hero text override */
+/* Hero text override - FIXED to ensure white text */
 .hero h1, .hero .sub, .hero .meta { color: #fff !important; }
 
 /* ========== MOBILE RESPONSIVENESS ========== */
@@ -382,7 +371,7 @@ div[data-testid="stMetricValue"] { color: #0f172a !important; font-weight: 800 !
 """, unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 3: CORE DATA FUNCTIONS & MARKET DATA INTEGRATION
+# PART 3 FIXED: CORE DATA FUNCTIONS WITH PROPER ES TO SPX CONVERSION
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 def previous_trading_day(ref_d: date) -> date:
@@ -391,6 +380,31 @@ def previous_trading_day(ref_d: date) -> date:
     while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_current_es_spx_offset() -> float:
+    """Calculate the current offset between ES futures and SPX index."""
+    try:
+        # Get current ES price
+        es_ticker = yf.Ticker("ES=F")
+        es_data = es_ticker.history(period="1d", interval="1m", prepost=True)
+        
+        # Get current SPX price  
+        spx_ticker = yf.Ticker("^GSPC")
+        spx_data = spx_ticker.history(period="1d", interval="1m", prepost=True)
+        
+        if not es_data.empty and not spx_data.empty:
+            current_es = float(es_data['Close'].iloc[-1])
+            current_spx = float(spx_data['Close'].iloc[-1])
+            offset = current_spx - current_es
+            return offset
+        else:
+            # Fallback to approximate offset if data unavailable
+            return -23.5  # Typical SPX-ES offset
+            
+    except Exception:
+        # Default offset if calculation fails
+        return -23.5
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_live_quote(symbol: str) -> dict:
@@ -573,7 +587,14 @@ def es_fetch_15m_ct(start_ct: datetime, end_ct: datetime) -> pd.DataFrame:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def es_asian_anchors_as_spx(forecast_d: date) -> dict | None:
-    """Calculate Asian session swing points from ES futures."""
+    """
+    Calculate Asian session swing points from ES futures and convert to SPX equivalent values.
+    
+    FIXED: Now properly converts ES prices to SPX using current market offset.
+    Since ES and SPX move 1:1 but have a price offset, we:
+    1. Get the current ES-SPX offset 
+    2. Apply that offset to ES Asian session values
+    """
     try:
         start_ct, end_ct = asian_window_ct(forecast_d)
         es = es_fetch_15m_ct(start_ct - timedelta(minutes=30), end_ct + timedelta(minutes=30))
@@ -581,20 +602,33 @@ def es_asian_anchors_as_spx(forecast_d: date) -> dict | None:
         if es.empty:
             return None
             
+        # Get ES swing points
         hi_idx = es["High"].idxmax()
         lo_idx = es["Low"].idxmin()
         
+        es_high = float(es.loc[hi_idx, "High"])
+        es_low = float(es.loc[lo_idx, "Low"])
+        
+        # Get current ES to SPX offset
+        offset = get_current_es_spx_offset()
+        
+        # Convert ES prices to SPX equivalent
+        # SPX = ES + offset (since moves are 1:1)
+        spx_high = es_high + offset
+        spx_low = es_low + offset
+        
         return {
-            "high_px": float(es.loc[hi_idx, "High"]),
+            "high_px": spx_high,
             "high_time_ct": es.loc[hi_idx, "Dt"].to_pydatetime(),
-            "low_px": float(es.loc[lo_idx, "Low"]),
+            "low_px": spx_low,
             "low_time_ct": es.loc[lo_idx, "Dt"].to_pydatetime(),
+            "es_high_raw": es_high,  # Keep original ES values for reference
+            "es_low_raw": es_low,
+            "conversion_offset": offset
         }
         
     except Exception:
         return None
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
