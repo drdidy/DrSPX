@@ -13,7 +13,6 @@ numpy>=1.26
 # Financial Data & Trading
 yfinance>=0.2.40
 alpaca-py>=0.20.0
-tvdatafeed>=2.0.0
 
 # Visualization & Export
 plotly>=5.22
