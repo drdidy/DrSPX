@@ -672,7 +672,7 @@ def es_asian_anchors_as_spx(forecast_d: date) -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 4: ADVANCED SIDEBAR NAVIGATION & USER INPUTS
+# PART 4: ADVANCED SIDEBAR NAVIGATION & HERO SECTION
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
@@ -737,22 +737,6 @@ with st.sidebar:
         format_func=lambda x: asset_display_map.get(x, x),
         help="Primary trading instrument for analysis. ES futures are automatically used for Asian session data."
     )
-    
-    # Asset classification badges
-    col1, col2 = st.columns(2)
-    with col1:
-        if asset == "^GSPC":
-            st.markdown('<span class="chip ok">📊 Index</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="chip info">📈 Equity</span>', unsafe_allow_html=True)
-    
-    with col2:
-        # Market cap classification for individual stocks
-        if asset in ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "META", "TSLA"]:
-            st.markdown('<span class="chip ok">🏢 Large Cap</span>', unsafe_allow_html=True)
-        elif asset in ["BRK-B", "UNH", "JNJ", "V"]:
-            st.markdown('<span class="chip info">🏛️ Blue Chip</span>', unsafe_allow_html=True)
-    
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Session Configuration Panel
@@ -763,57 +747,14 @@ with st.sidebar:
         "Target trading session",
         value=date.today(),
         help="Trading session for comprehensive analysis. Used for previous day anchors and Asian session calculations.",
-        max_value=date.today() + timedelta(days=7),  # Allow future dates for planning
-        min_value=date.today() - timedelta(days=30)   # Limit historical range
+        max_value=date.today() + timedelta(days=7),
+        min_value=date.today() - timedelta(days=30)
     )
-    
-    # Intelligent session status indicators
-    is_today = forecast_date == date.today()
-    is_future = forecast_date > date.today()
-    is_weekend = forecast_date.weekday() >= 5
-    is_monday = forecast_date.weekday() == 0
-    
-    # Session status with enhanced logic
-    status_col1, status_col2 = st.columns(2)
-    with status_col1:
-        if is_today and not is_weekend:
-            st.markdown('<span class="chip ok">🟢 Live Session</span>', unsafe_allow_html=True)
-        elif is_future:
-            st.markdown('<span class="chip info">🔮 Planning Mode</span>', unsafe_allow_html=True)
-        elif is_weekend:
-            st.markdown('<span class="chip warning">🚫 Weekend</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="chip info">📚 Historical</span>', unsafe_allow_html=True)
-    
-    with status_col2:
-        if is_monday:
-            st.markdown('<span class="chip info">📅 Monday</span>', unsafe_allow_html=True)
-        
-        # Check if it's a major market holiday (simplified check)
-        market_holidays = [
-            date(2025, 1, 1),   # New Year's Day
-            date(2025, 1, 20),  # MLK Day
-            date(2025, 2, 17),  # Presidents Day
-            date(2025, 5, 26),  # Memorial Day
-            date(2025, 7, 4),   # Independence Day
-            date(2025, 9, 1),   # Labor Day
-            date(2025, 11, 27), # Thanksgiving
-            date(2025, 12, 25), # Christmas
-        ]
-        
-        if forecast_date in market_holidays:
-            st.markdown('<span class="chip warning">🏦 Holiday</span>', unsafe_allow_html=True)
-    
-    # Session timing information
-    st.caption(f"Session: {forecast_date.strftime('%A, %B %d, %Y')}")
-    if not is_weekend and forecast_date not in market_holidays:
-        st.caption("📍 Regular Trading Hours: 9:30 AM - 4:00 PM ET")
-    
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Market Timing & Alerts
+    # Market Timing & Status
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-    st.markdown("#### ⏰ Market Timing")
+    st.markdown("#### ⏰ Market Status")
     
     # Real-time market status
     now_et = datetime.now(ET)
@@ -823,141 +764,17 @@ with st.sidebar:
     if now_et.weekday() < 5:  # Weekday
         market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
         market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
-        premarket_start = now_et.replace(hour=4, minute=0, second=0, microsecond=0)
-        afterhours_end = now_et.replace(hour=20, minute=0, second=0, microsecond=0)
         
-        if premarket_start <= now_et < market_open:
-            st.markdown('<span class="chip info">🌅 Pre-Market</span>', unsafe_allow_html=True)
-        elif market_open <= now_et <= market_close:
+        if market_open <= now_et <= market_close:
             st.markdown('<span class="chip ok">🟢 Market Open</span>', unsafe_allow_html=True)
-        elif market_close < now_et <= afterhours_end:
-            st.markdown('<span class="chip info">🌆 After Hours</span>', unsafe_allow_html=True)
+        elif now_et.time() < time(9, 30):
+            st.markdown('<span class="chip info">🌅 Pre-Market</span>', unsafe_allow_html=True)
         else:
-            st.markdown('<span class="chip">🌙 Market Closed</span>', unsafe_allow_html=True)
+            st.markdown('<span class="chip info">🌆 After Hours</span>', unsafe_allow_html=True)
     else:
-        st.markdown('<span class="chip">📴 Weekend</span>', unsafe_allow_html=True)
+        st.markdown('<span class="chip warning">📴 Weekend</span>', unsafe_allow_html=True)
     
     st.caption(f"Current: {current_time_str}")
-    
-    # Next market event
-    if now_et.weekday() < 5:
-        if now_et.time() < time(9, 30):
-            next_event = "Market opens at 9:30 AM ET"
-        elif now_et.time() < time(16, 0):
-            next_event = "Market closes at 4:00 PM ET"
-        else:
-            next_event = "Next session: Tomorrow 9:30 AM ET"
-    else:
-        days_until_monday = (7 - now_et.weekday()) % 7
-        if days_until_monday == 0:
-            days_until_monday = 1
-        next_event = f"Next session: {days_until_monday} day{'s' if days_until_monday != 1 else ''}"
-    
-    st.caption(f"⏭️ {next_event}")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Advanced Configuration (Collapsible)
-    with st.expander("🔧 Advanced Configuration", expanded=False):
-        # Overnight Analysis Settings
-        st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-        st.markdown("#### 🌙 Overnight Session Setup")
-        st.caption("Manual input for overnight swing points (5 PM - 9:30 AM ET)")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Overnight Low**")
-            on_low_price = st.number_input("Price", min_value=0.0, step=0.25, value=0.00, key="on_low_price")
-            on_low_time = st.time_input("Time (ET)", value=time(21, 0), key="on_low_time")
-        
-        with col2:
-            st.markdown("**Overnight High**")
-            on_high_price = st.number_input("Price", min_value=0.0, step=0.25, value=0.00, key="on_high_price")
-            on_high_time = st.time_input("Time (ET)", value=time(22, 30), key="on_high_time")
-        
-        # Validation
-        if on_low_price > 0 and on_high_price > 0:
-            if on_high_price > on_low_price:
-                range_pct = ((on_high_price - on_low_price) / on_low_price) * 100
-                st.success(f"✅ Range: {range_pct:.2f}%")
-            else:
-                st.error("⚠️ High should be greater than Low")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Risk Management Settings
-        st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-        st.markdown("#### ⚠️ Risk Management")
-        
-        risk_tolerance = st.selectbox(
-            "Risk Profile", 
-            ["Conservative", "Moderate", "Aggressive"],
-            index=1,
-            help="Affects position sizing and stop loss recommendations"
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            max_position_size = st.slider("Max Position %", 1, 100, 25, help="Maximum portfolio allocation")
-        with col2:
-            stop_loss_pct = st.slider("Stop Loss %", 0.5, 10.0, 2.0, 0.1, help="Default stop loss percentage")
-        
-        # Risk level indicator
-        if risk_tolerance == "Conservative":
-            st.markdown('<span class="chip ok">🛡️ Low Risk</span>', unsafe_allow_html=True)
-        elif risk_tolerance == "Moderate":
-            st.markdown('<span class="chip info">⚖️ Balanced</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="chip warning">🚀 High Risk</span>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Algorithm Parameters
-        st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-        st.markdown("#### 🎛️ Algorithm Parameters")
-        
-        # Slope adjustments
-        st.markdown("**Projection Slopes (per 30min)**")
-        col1, col2 = st.columns(2)
-        with col1:
-            upward_slope = st.number_input("Upward", value=0.2432, step=0.001, format="%.4f")
-        with col2:
-            downward_slope = st.number_input("Downward", value=-0.2432, step=0.001, format="%.4f")
-        
-        # Update global slopes if changed
-        if upward_slope != 0.2432 or downward_slope != -0.2432:
-            st.info("🔄 Custom slopes applied")
-        
-        # Time window settings
-        st.markdown("**Analysis Windows**")
-        asian_session_duration = st.slider("Asian Session (hours)", 1, 6, 3)
-        rth_start_hour = st.slider("RTH Start Hour (CT)", 6, 10, 8)
-        rth_end_hour = st.slider("RTH End Hour (CT)", 12, 18, 14)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # System Performance & Status
-    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-    st.markdown("#### 📊 System Performance")
-    
-    # Data quality indicators
-    data_sources = ["Yahoo Finance", "ES Futures", "Market Data"]
-    statuses = ["🟢 Active", "🟡 Delayed", "🟢 Active"]
-    
-    for source, status in zip(data_sources, statuses):
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            st.caption(source)
-        with col2:
-            st.caption(status)
-    
-    # Cache status
-    cache_info = st.cache_data.clear.__doc__ or "Cache system operational"
-    st.caption(f"📦 Cache: Active")
-    
-    # Last update timestamp
-    last_update = datetime.now(ET).strftime("%-I:%M:%S %p")
-    st.caption(f"🔄 Updated: {last_update}")
-    
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Quick Actions
@@ -966,42 +783,78 @@ with st.sidebar:
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🔄 Refresh Data", help="Force refresh market data"):
+        if st.button("🔄 Refresh", help="Refresh market data", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
     
     with col2:
-        if st.button("📋 Copy Settings", help="Copy current configuration"):
-            st.success("Settings copied!")
-    
-    # Export options
-    export_format = st.selectbox(
-        "Export Format",
-        ["CSV", "Excel", "JSON", "PDF Report"],
-        help="Choose format for data export"
-    )
-    
-    if st.button("📤 Export Data", use_container_width=True):
-        st.info(f"Exporting in {export_format} format...")
+        if st.button("📋 Export", help="Quick export", use_container_width=True):
+            st.success("Export ready!")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Footer with version info
-    st.markdown("""
-    <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); text-align: center;">
-        <p style="color: #64748b !important; font-size: 11px; margin: 0;">
-            © 2025 Quantum Trading Systems<br>
-            Professional Trading Analytics
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# HERO SECTION - CREATED AFTER SIDEBAR VARIABLES ARE DEFINED
+# ═══════════════════════════════════════════════════════════════════════════════════════
 
+# Now that asset and forecast_date are defined, create the hero section
+label = "SPX" if asset == "^GSPC" else asset
+market_data = fetch_live_quote(asset)
+
+# Safely determine change color
+change_value = market_data.get('change', '—')
+if change_value.startswith('+'):
+    change_color = "#10b981"
+elif change_value.startswith('-'):
+    change_color = "#ef4444"
+else:
+    change_color = "#64748b"
+
+# Safely determine chip status
+status = market_data.get('status', 'unknown')
+if status == 'active':
+    chip_class = "ok"
+    pulse_class = "pulse-animation"
+elif status == 'delayed':
+    chip_class = "info"
+    pulse_class = ""
+else:
+    chip_class = "warning"
+    pulse_class = ""
+
+# FIXED: Hero section with proper variable order
+st.markdown(f"""
+<div class="hero">
+  <h1>{APP_NAME}</h1>
+  <div class="sub">{TAGLINE}</div>
+  <div class="meta">v{VERSION} • {COMPANY}</div>
+
+  <div class="kpi">
+    <div class="card {pulse_class}">
+      <div class="label">{label} — Last Price</div>
+      <div class="value">{market_data.get('px', '—')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Change • % Change</div>
+      <div class="value" style="color: {change_color};">{market_data.get('change', '—')} • {market_data.get('change_pct', '—')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Last Updated</div>
+      <div class="value">{market_data.get('ts', '—')}</div>
+    </div>
+    <div class="card">
+      <div class="label">Data Source</div>
+      <div class="value"><span class="chip {chip_class}">{market_data.get('source', 'Unknown')}</span></div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 5A FIXED: CORE FUNCTIONS & HERO SECTION 
+# PART 5A: CORE FUNCTIONS ONLY (HERO SECTION REMOVED)
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 # Core projection and table helpers
@@ -1043,52 +896,11 @@ def _format_table_data(df):
     )
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# HERO SECTION WITH LIVE MARKET DATA (FIXED)
+# HERO SECTION REMOVED - WILL BE ADDED IN PART 4 AFTER VARIABLES ARE DEFINED
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
-# Get clean page name for processing
-clean_page = page.split(" ", 1)[1] if " " in page else page
-
-# Fetch real-time market data
-label = "SPX" if asset == "^GSPC" else asset
-market_data = fetch_live_quote(asset)
-
-# Determine status class for pulse animation
-status_class = "pulse-animation" if market_data.get('status') == 'active' else ""
-
-# Determine change color
-change_color = "#10b981" if market_data.get('change', '').startswith('+') else "#ef4444" if market_data.get('change', '').startswith('-') else "#64748b"
-
-# Determine chip class
-chip_class = "ok" if market_data.get('status') == 'active' else "info" if market_data.get('status') == 'delayed' else "warning"
-
-# FIXED: Enhanced hero section with proper HTML structure
-st.markdown(f"""
-<div class="hero">
-    <h1>{APP_NAME}</h1>
-    <div class="sub">{TAGLINE}</div>
-    <div class="meta">v{VERSION} • {COMPANY} • Advanced Analytics Platform</div>
-
-    <div class="kpi">
-        <div class="card {status_class}">
-            <div class="label">{label} — Last Price</div>
-            <div class="value">{market_data.get('px', '—')}</div>
-        </div>
-        <div class="card">
-            <div class="label">Change • % Change</div>
-            <div class="value" style="color: {change_color};">{market_data.get('change', '—')} • {market_data.get('change_pct', '—')}</div>
-        </div>
-        <div class="card">
-            <div class="label">Last Updated</div>
-            <div class="value">{market_data.get('ts', '—')}</div>
-        </div>
-        <div class="card">
-            <div class="label">Data Source</div>
-            <div class="value"><span class="chip {chip_class}">{market_data.get('source', 'Unknown')}</span></div>
-        </div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# Get clean page name for processing (safely)
+clean_page = page.split(" ", 1)[1] if " " in page and len(page.split(" ", 1)) > 1 else page
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
 # PAGE 1: DASHBOARD - SYSTEM OVERVIEW & READINESS STATUS
@@ -1103,6 +915,7 @@ if clean_page == "Dashboard":
     # Get all required data for status check
     anchors = get_previous_day_anchors(asset, forecast_date)
     asian = es_asian_anchors_as_spx(forecast_date)
+    market_data = fetch_live_quote(asset)
     
     # Status indicators with enhanced logic
     readiness_items = [
@@ -1141,20 +954,20 @@ if clean_page == "Dashboard":
             
             st.markdown(f"""
             <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 1px solid rgba(15,23,42,.08); box-shadow: 0 4px 12px rgba(0,0,0,.05);">
-                <div style="font-size: 28px; margin-bottom: 12px;">{status_icon}</div>
-                <div style="font-weight: 800; color: #0f172a; margin-bottom: 8px; font-size: 14px;">{item['name']}</div>
-                <div style="font-size: 12px; color: #64748b; line-height: 1.4;">{item['detail']}</div>
+                <div style="font-size: 24px; margin-bottom: 8px;">{status_icon}</div>
+                <div style="font-weight: 700; color: #0f172a; margin-bottom: 4px; font-size: 14px;">{item['name']}</div>
+                <div style="font-size: 12px; color: #64748b;">{item['detail']}</div>
             </div>
             """, unsafe_allow_html=True)
     
     # Overall system status
     overall_ready = all(item["status"] for item in readiness_items)
-    status_text = "🟢 All Systems Operational" if overall_ready else "🟡 Partial System Ready"
-    status_class = "ok" if overall_ready else "warning"
+    status_text = "🟢 All Systems Operational" if overall_ready else "🟡 Partial Ready"
+    status_chip = "ok" if overall_ready else "warning"
     
     st.markdown(f"""
-    <div style="text-align: center; margin-top: 32px;">
-        <span class="chip {status_class}" style="font-size: 16px; padding: 16px 32px;">
+    <div style="text-align: center; margin-top: 24px;">
+        <span class="chip {status_chip}" style="font-size: 14px; padding: 12px 24px;">
             {status_text}
         </span>
     </div>
@@ -1179,62 +992,6 @@ if clean_page == "Dashboard":
             range_pct = (prev_range / anchors['close']) * 100
             st.metric("Daily Range", f"{range_pct:.2f}%")
         
-        # Advanced market analytics
-        st.markdown("### 📈 Market Analytics")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            # Market position analysis
-            if market_data.get('px') != "—":
-                current_price = float(market_data['px'].replace(',', ''))
-                position_in_range = ((current_price - anchors['low']) / (anchors['high'] - anchors['low'])) * 100
-                
-                if position_in_range > 75:
-                    position_label = "Upper Range"
-                    position_color = "#ef4444"
-                elif position_in_range < 25:
-                    position_label = "Lower Range"
-                    position_color = "#10b981"
-                else:
-                    position_label = "Mid Range"
-                    position_color = "#6366f1"
-                
-                st.markdown(f"""
-                <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 2px solid {position_color}; box-shadow: 0 4px 12px rgba(0,0,0,.05);">
-                    <div style="font-size: 28px; margin-bottom: 12px;">📍</div>
-                    <div style="font-weight: 800; color: {position_color}; font-size: 16px;">{position_label}</div>
-                    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Position: {position_in_range:.1f}%</div>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        with col2:
-            # Volatility assessment
-            volatility_score = "High" if range_pct > 3 else "Moderate" if range_pct > 1.5 else "Low"
-            volatility_color = "#ef4444" if volatility_score == "High" else "#f59e0b" if volatility_score == "Moderate" else "#10b981"
-            
-            st.markdown(f"""
-            <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 2px solid {volatility_color}; box-shadow: 0 4px 12px rgba(0,0,0,.05);">
-                <div style="font-size: 28px; margin-bottom: 12px;">📊</div>
-                <div style="font-weight: 800; color: {volatility_color}; font-size: 16px;">{volatility_score} Volatility</div>
-                <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Range: {range_pct:.2f}%</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            # Trend analysis
-            if market_data.get('change') != "—":
-                trend = "Bullish" if market_data['change'].startswith('+') else "Bearish" if market_data['change'].startswith('-') else "Neutral"
-                trend_color = "#10b981" if trend == "Bullish" else "#ef4444" if trend == "Bearish" else "#64748b"
-                trend_icon = "📈" if trend == "Bullish" else "📉" if trend == "Bearish" else "➡️"
-                
-                st.markdown(f"""
-                <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 2px solid {trend_color}; box-shadow: 0 4px 12px rgba(0,0,0,.05);">
-                    <div style="font-size: 28px; margin-bottom: 12px;">{trend_icon}</div>
-                    <div style="font-weight: 800; color: {trend_color}; font-size: 16px;">{trend} Trend</div>
-                    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Change: {market_data['change']}</div>
-                </div>
-                """, unsafe_allow_html=True)
-        
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
@@ -1250,27 +1007,15 @@ elif clean_page == "Anchors":
     pd_anchors = get_previous_day_anchors(asset, forecast_date)
     if not pd_anchors:
         st.warning("⚠️ Unable to retrieve previous day anchors. Please verify the selected asset and date.")
-        
-        # Troubleshooting guidance
-        st.markdown("""
-        ### 🔧 Troubleshooting Steps:
-        1. **Check Date:** Ensure selected date is a recent trading day
-        2. **Verify Symbol:** Confirm the asset symbol is correct
-        3. **Network:** Check internet connectivity for Yahoo Finance
-        4. **Refresh:** Try refreshing the data using sidebar controls
-        """)
     else:
-        # Enhanced metrics display with professional styling
+        # Enhanced metrics display
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            change_from_high = ((float(market_data['px'].replace(',', '')) - pd_anchors['high']) / pd_anchors['high'] * 100) if market_data.get('px') != "—" else 0
-            st.metric("📈 Previous High", f"${pd_anchors['high']:,.2f}", f"{change_from_high:+.2f}%" if market_data.get('px') != "—" else None)
+            st.metric("📈 Previous High", f"${pd_anchors['high']:,.2f}")
         with col2:
-            change_from_close = ((float(market_data['px'].replace(',', '')) - pd_anchors['close']) / pd_anchors['close'] * 100) if market_data.get('px') != "—" else 0
-            st.metric("🎯 Previous Close", f"${pd_anchors['close']:,.2f}", f"{change_from_close:+.2f}%" if market_data.get('px') != "—" else None)
+            st.metric("🎯 Previous Close", f"${pd_anchors['close']:,.2f}")
         with col3:
-            change_from_low = ((float(market_data['px'].replace(',', '')) - pd_anchors['low']) / pd_anchors['low'] * 100) if market_data.get('px') != "—" else 0
-            st.metric("📉 Previous Low", f"${pd_anchors['low']:,.2f}", f"{change_from_low:+.2f}%" if market_data.get('px') != "—" else None)
+            st.metric("📉 Previous Low", f"${pd_anchors['low']:,.2f}")
         with col4:
             daily_range = pd_anchors['high'] - pd_anchors['low']
             st.metric("📏 Daily Range", f"${daily_range:.2f}")
@@ -1284,11 +1029,6 @@ elif clean_page == "Anchors":
             
             midpoint = (pd_anchors['high'] + pd_anchors['low']) / 2
             st.info(f"🎯 **Midpoint:** ${midpoint:.2f}")
-            
-            # Volume analysis if available
-            if 'volume' in pd_anchors and pd_anchors['volume'] > 0:
-                volume_millions = pd_anchors['volume'] / 1_000_000
-                st.info(f"📊 **Volume:** {volume_millions:.1f}M shares")
         
         with col2:
             volatility_score = "High" if range_pct > 3 else "Moderate" if range_pct > 1.5 else "Low"
@@ -1296,13 +1036,6 @@ elif clean_page == "Anchors":
             
             close_vs_range = ((pd_anchors['close'] - pd_anchors['low']) / daily_range) * 100
             st.info(f"📍 **Close Position:** {close_vs_range:.1f}% of range")
-            
-            # Gap analysis
-            if 'open' in pd_anchors:
-                gap = pd_anchors['open'] - pd_anchors['close']
-                gap_pct = (gap / pd_anchors['close']) * 100
-                gap_type = "Gap Up" if gap > 0 else "Gap Down" if gap < 0 else "No Gap"
-                st.info(f"📊 **Next Day Gap:** {gap_type} ({gap_pct:+.2f}%)")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1315,32 +1048,24 @@ elif clean_page == "Anchors":
     if not asian:
         st.warning("⚠️ Unable to compute Asian session anchors. Ensure ES futures data is available for the specified timeframe.")
         
-        # Show expected time window and guidance
+        # Show expected time window
         start_ct, end_ct = asian_window_ct(forecast_date)
         st.info(f"📅 **Expected Window:** {start_ct.strftime('%b %d, %Y %-I:%M %p')} → {end_ct.strftime('%-I:%M %p')} CT")
-        
-        st.markdown("""
-        ### 💡 Asian Session Requirements:
-        - **Data Source:** ES Futures (CME E-mini S&P 500)
-        - **Time Window:** 5:00 PM - 8:00 PM Central Time (previous day)
-        - **Granularity:** 15-minute intervals for precision
-        - **Conversion:** ES prices converted to SPX using real-time offset
-        """)
     else:
-        # Asian session metrics with enhanced display
+        # Asian session metrics
         col1, col2 = st.columns(2)
         with col1:
             st.metric("🔺 Asian Swing High", f"${asian['high_px']:,.2f}")
-            st.caption(f"🕐 Time: {asian['high_time_ct'].strftime('%-I:%M %p CT')} ({asian['high_time_ct'].strftime('%A')})")
+            st.caption(f"🕐 Time: {asian['high_time_ct'].strftime('%-I:%M %p CT')}")
             if 'es_high_raw' in asian:
-                st.caption(f"📊 ES Raw: ${asian['es_high_raw']:,.2f} (Offset: {asian.get('conversion_offset', 0):+.2f})")
+                st.caption(f"📊 ES Raw: ${asian['es_high_raw']:,.2f}")
         with col2:
             st.metric("🔻 Asian Swing Low", f"${asian['low_px']:,.2f}")
-            st.caption(f"🕐 Time: {asian['low_time_ct'].strftime('%-I:%M %p CT')} ({asian['low_time_ct'].strftime('%A')})")
+            st.caption(f"🕐 Time: {asian['low_time_ct'].strftime('%-I:%M %p CT')}")
             if 'es_low_raw' in asian:
-                st.caption(f"📊 ES Raw: ${asian['es_low_raw']:,.2f} (Offset: {asian.get('conversion_offset', 0):+.2f})")
+                st.caption(f"📊 ES Raw: ${asian['es_low_raw']:,.2f}")
         
-        # Asian session detailed analytics
+        # Asian session analytics
         asian_range = asian['high_px'] - asian['low_px']
         start_ct, end_ct = asian_window_ct(forecast_date)
         
@@ -1348,28 +1073,17 @@ elif clean_page == "Anchors":
         col1, col2, col3 = st.columns(3)
         with col1:
             st.info(f"📏 **Asian Range:** ${asian_range:.2f}")
-            asian_range_pct = (asian_range / asian['low_px']) * 100
-            st.info(f"📊 **Range %:** {asian_range_pct:.2f}%")
-        
         with col2:
-            st.info(f"📅 **Session Window:** {start_ct.strftime('%b %d')} {start_ct.strftime('%-I:%M %p')} → {end_ct.strftime('%-I:%M %p')} CT")
-            
             time_diff = abs((asian['high_time_ct'] - asian['low_time_ct']).total_seconds() / 3600)
             st.info(f"⏱️ **High-Low Spread:** {time_diff:.1f} hours")
-        
         with col3:
             asian_midpoint = (asian['high_px'] + asian['low_px']) / 2
             st.info(f"🎯 **Asian Midpoint:** ${asian_midpoint:.2f}")
             
-            # Compare to previous day range if available
-            if pd_anchors:
-                range_comparison = (asian_range / (pd_anchors['high'] - pd_anchors['low'])) * 100
-                st.info(f"📊 **vs Prev Day:** {range_comparison:.1f}% of range")
+        if 'conversion_offset' in asian:
+            st.success(f"🔄 **ES to SPX Conversion:** Offset = {asian['conversion_offset']:+.2f} points")
 
     st.markdown("</div>", unsafe_allow_html=True)
-    
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
