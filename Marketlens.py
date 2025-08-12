@@ -3,6 +3,11 @@
 # Professional Trading Application with Advanced Analytics & Real-time Data
 # ══════════════════════════════════════════════════════════════════════════════════════
 
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# PART 1: CORE CONFIGURATION & GLOBAL SETTINGS (FIXED ORDER)
+# ══════════════════════════════════════════════════════════════════════════════════════
+
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
@@ -41,165 +46,79 @@ st.set_page_config(
     }
 )
 
-# ───────────────────────────────  HERO + LIVE STRIP (FIXED)  ───────────────────────────────
-# Get asset label and fetch market data
-label = "SPX" if asset == "^GSPC" else asset
-market_data = fetch_live_quote(asset)
+# NOTE: Hero section will be created AFTER sidebar variables are defined
+# This prevents the "asset is not defined" error
 
-# Safely determine change color
-change_value = market_data.get('change', '—')
-if change_value.startswith('+'):
-    change_color = "#10b981"
-elif change_value.startswith('-'):
-    change_color = "#ef4444"
-else:
-    change_color = "#64748b"
+# ───────────────────────────────  HELPER FUNCTIONS  ───────────────────────────────
+def previous_trading_day(ref_d: date) -> date:
+    """Calculate the previous trading day (skip weekends)."""
+    d = ref_d - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
 
-# Safely determine chip status
-status = market_data.get('status', 'unknown')
-if status == 'active':
-    chip_class = "ok"
-    pulse_class = "pulse-animation"
-elif status == 'delayed':
-    chip_class = "info"
-    pulse_class = ""
-else:
-    chip_class = "warning"
-    pulse_class = ""
+def create_hero_section(asset_symbol, forecast_date_val):
+    """Create the hero section after variables are defined."""
+    # Get asset label and fetch market data
+    label = "SPX" if asset_symbol == "^GSPC" else asset_symbol
+    market_data = fetch_live_quote(asset_symbol)
 
-# FIXED: Hero section with proper data handling
-st.markdown(f"""
-<div class="hero">
-  <h1>{APP_NAME}</h1>
-  <div class="sub">{TAGLINE}</div>
-  <div class="meta">v{VERSION} • {COMPANY}</div>
-
-  <div class="kpi">
-    <div class="card {pulse_class}">
-      <div class="label">{label} — Last Price</div>
-      <div class="value">{market_data.get('px', '—')}</div>
-    </div>
-    <div class="card">
-      <div class="label">Change • % Change</div>
-      <div class="value" style="color: {change_color};">{market_data.get('change', '—')} • {market_data.get('change_pct', '—')}</div>
-    </div>
-    <div class="card">
-      <div class="label">Last Updated</div>
-      <div class="value">{market_data.get('ts', '—')}</div>
-    </div>
-    <div class="card">
-      <div class="label">Data Source</div>
-      <div class="value"><span class="chip {chip_class}">{market_data.get('source', 'Unknown')}</span></div>
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-# ───────────────────────────────  OVERVIEW (ORIGINAL LOGIC)  ───────────────────────────────
-if page == "📊 Dashboard" or page == "Overview":
-    clean_page = "Dashboard"  # Normalize page name
-    
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>🚀 System Readiness</h3>", unsafe_allow_html=True)
-
-    anchors = get_previous_day_anchors(asset, forecast_date)
-    asian = es_asian_anchors_as_spx(forecast_date)
-
-    # Status indicators
-    readiness_items = [
-        ("Live Data", market_data.get('px') != "—", f"Source: {market_data.get('source', 'Unknown')}"),
-        ("Previous Anchors", anchors is not None, f"Date: {anchors['prev_day'] if anchors else 'Unavailable'}"),
-        ("Asian Session", asian is not None, "ES Futures (5-8 PM CT)" if asian else "Data pending"),
-        ("Algorithm", True, "Slopes calibrated"),
-        ("Risk Mgmt", True, "Profile active")
-    ]
-    
-    # Create status display
-    cols = st.columns(len(readiness_items))
-    for i, (name, status, detail) in enumerate(readiness_items):
-        with cols[i]:
-            status_icon = "✅" if status else "⚠️"
-            
-            st.markdown(f"""
-            <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 1px solid rgba(15,23,42,.08); box-shadow: 0 4px 12px rgba(0,0,0,.05);">
-                <div style="font-size: 24px; margin-bottom: 8px;">{status_icon}</div>
-                <div style="font-weight: 700; color: #0f172a; margin-bottom: 4px; font-size: 13px;">{name}</div>
-                <div style="font-size: 11px; color: #64748b;">{detail}</div>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Overall status
-    overall_ready = all(status for _, status, _ in readiness_items)
-    status_text = "🟢 All Systems Operational" if overall_ready else "🟡 Partial Ready"
-    status_chip = "ok" if overall_ready else "warning"
-    
-    st.markdown(f"""
-    <div style="text-align: center; margin-top: 24px;">
-        <span class="chip {status_chip}" style="font-size: 14px; padding: 12px 24px;">
-            {status_text}
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ───────────────────────────────  ANCHORS (DISPLAY)  ───────────────────────────────
-elif page == "⚓ Anchors" or page == "Anchors":
-    clean_page = "Anchors"  # Normalize page name
-    
-    # Previous Day (daily)
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>⚓ Previous Day Anchors (Daily OHLC)</h3>", unsafe_allow_html=True)
-
-    pd_anchors = get_previous_day_anchors(asset, forecast_date)
-    if not pd_anchors:
-        st.info("Could not compute previous-day anchors. Try a recent weekday.")
+    # Safely determine change color
+    change_value = market_data.get('change', '—')
+    if change_value.startswith('+'):
+        change_color = "#10b981"
+    elif change_value.startswith('-'):
+        change_color = "#ef4444"
     else:
-        c1, c2, c3 = st.columns(3)
-        with c1: st.metric("Prev Day High", f"${pd_anchors['high']:,.2f}")
-        with c2: st.metric("Prev Day Close", f"${pd_anchors['close']:,.2f}")
-        with c3: st.metric("Prev Day Low", f"${pd_anchors['low']:,.2f}")
-        st.caption("These daily anchors power your projections internally.")
+        change_color = "#64748b"
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Asian Session via ES (5–8 PM CT)
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>🌏 Asian Session Anchors (SPX via ES, 5–8 PM CT)</h3>", unsafe_allow_html=True)
-
-    asian = es_asian_anchors_as_spx(forecast_date)
-    if not asian:
-        st.info("Could not compute anchors. Try a recent weekday and ensure ES data exists for 5–8 PM CT.")
+    # Safely determine chip status
+    status = market_data.get('status', 'unknown')
+    if status == 'active':
+        chip_class = "ok"
+        pulse_class = "pulse-animation"
+    elif status == 'delayed':
+        chip_class = "info"
+        pulse_class = ""
     else:
-        a1, a2 = st.columns(2)
-        with a1:
-            st.metric("Asian Swing High (SPX)", f"${asian['high_px']:,.2f}")
-            st.caption(f"Time CT: {asian['high_time_ct'].strftime('%-I:%M %p')}")
-            if 'es_high_raw' in asian:
-                st.caption(f"ES Raw: ${asian['es_high_raw']:,.2f}")
-        with a2:
-            st.metric("Asian Swing Low (SPX)", f"${asian['low_px']:,.2f}")
-            st.caption(f"Time CT: {asian['low_time_ct'].strftime('%-I:%M %p')}")
-            if 'es_low_raw' in asian:
-                st.caption(f"ES Raw: ${asian['es_low_raw']:,.2f}")
-        
-        start_ct, end_ct = asian_window_ct(forecast_date)
-        st.caption(f"Window used: {start_ct.strftime('%b %d, %Y %-I:%M %p')} → {end_ct.strftime('%-I:%M %p')} CT (prior evening)")
-        
-        if 'conversion_offset' in asian:
-            st.info(f"🔄 **ES to SPX Conversion Offset:** {asian['conversion_offset']:+.2f} points")
+        chip_class = "warning"
+        pulse_class = ""
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Generate hero HTML
+    hero_html = f"""
+    <div class="hero">
+      <h1>{APP_NAME}</h1>
+      <div class="sub">{TAGLINE}</div>
+      <div class="meta">v{VERSION} • {COMPANY}</div>
 
-# ───────────────────────────────  PLACEHOLDERS (ORIGINAL PATTERN)  ───────────────────────────────
-# These will be replaced by the other parts, but keeping the fallback pattern
-if page.split(" ", 1)[-1] in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Settings"}:
-    clean_page = page.split(" ", 1)[-1]  # Extract page name for other parts
+      <div class="kpi">
+        <div class="card {pulse_class}">
+          <div class="label">{label} — Last Price</div>
+          <div class="value">{market_data.get('px', '—')}</div>
+        </div>
+        <div class="card">
+          <div class="label">Change • % Change</div>
+          <div class="value" style="color: {change_color};">{market_data.get('change', '—')} • {market_data.get('change_pct', '—')}</div>
+        </div>
+        <div class="card">
+          <div class="label">Last Updated</div>
+          <div class="value">{market_data.get('ts', '—')}</div>
+        </div>
+        <div class="card">
+          <div class="label">Data Source</div>
+          <div class="value"><span class="chip {chip_class}">{market_data.get('source', 'Unknown')}</span></div>
+        </div>
+      </div>
+    </div>
+    """
     
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
-    st.caption("This section will be populated by the corresponding part modules.")
-    st.markdown('</div>', unsafe_allow_html=True)
+    return hero_html
+
+# This function will be called after the sidebar defines the variables
+
+
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════════
 # PART 2: PREMIUM UI STYLING & VISUAL DESIGN (FULLY FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════════════
