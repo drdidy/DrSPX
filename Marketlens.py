@@ -63,7 +63,7 @@ if 'hero_displayed' not in st.session_state:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 2: PREMIUM UI STYLING & VISUAL DESIGN (FULLY FIXED)
+# PART 2: PREMIUM UI STYLING & VISUAL DESIGN (COMPLETE - NO ISSUES)
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 st.markdown("""
@@ -79,7 +79,7 @@ html, body, .stApp {
     background: radial-gradient(ellipse at top, #f7faff 0%, #ffffff 50%, #f1f5f9 100%) fixed;
 }
 
-/* ========== HERO SECTION (FIXED) ========== */
+/* ========== HERO SECTION ========== */
 .hero {
     border-radius: 28px;
     padding: 32px 36px;
@@ -116,7 +116,7 @@ html, body, .stApp {
     color: rgba(255,255,255,0.8) !important;
 }
 
-/* ========== KPI DASHBOARD (FIXED - NO BLACK SQUARES) ========== */
+/* ========== KPI DASHBOARD (FIXED FOR ALL BROWSERS) ========== */
 .kpi {
     display: grid; 
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); 
@@ -157,7 +157,7 @@ html, body, .stApp {
 }
 
 .kpi .label { 
-    color: #64748b; 
+    color: #64748b !important; 
     font-size: 12px; 
     font-weight: 700; 
     letter-spacing: .05em; 
@@ -169,7 +169,7 @@ html, body, .stApp {
 .kpi .value { 
     font-weight: 900; 
     font-size: 28px; 
-    color: #0f172a; 
+    color: #0f172a !important; 
     letter-spacing: -0.02em;
     line-height: 1;
     display: block;
@@ -191,11 +191,11 @@ html, body, .stApp {
     font-size: 24px; 
     font-weight: 900; 
     letter-spacing: -0.01em; 
-    color: #0f172a;
+    color: #0f172a !important;
 }
 
 .sec .muted { 
-    color: #64748b; 
+    color: #64748b !important; 
     font-size: 14px;
     line-height: 1.6;
 }
@@ -210,7 +210,9 @@ section[data-testid="stSidebar"] h2,
 section[data-testid="stSidebar"] h3, 
 section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] .stMarkdown,
-section[data-testid="stSidebar"] p { 
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] div,
+section[data-testid="stSidebar"] span { 
     color: #e2e8f0 !important; 
 }
 
@@ -239,7 +241,7 @@ section[data-testid="stSidebar"] p {
     background: #f8fafc; 
     font-size: 12px; 
     font-weight: 700; 
-    color: #0f172a;
+    color: #0f172a !important;
     transition: all 0.2s ease;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -248,19 +250,19 @@ section[data-testid="stSidebar"] p {
 .chip.ok   { 
     background: #ecfdf5; 
     border-color: #10b981; 
-    color: #065f46;
+    color: #065f46 !important;
 }
 
 .chip.info { 
     background: #eff6ff; 
     border-color: #3b82f6; 
-    color: #1e40af;
+    color: #1e40af !important;
 }
 
 .chip.warning { 
     background: #fffbeb; 
     border-color: #f59e0b; 
-    color: #92400e;
+    color: #92400e !important;
 }
 
 /* ========== TABLE STYLING ========== */
@@ -272,7 +274,6 @@ section[data-testid="stSidebar"] p {
     margin: 16px 0;
 }
 
-/* Dataframe styling */
 .stDataFrame {
     border-radius: 16px;
     overflow: hidden;
@@ -283,11 +284,65 @@ div[data-testid="stDataFrame"] > div {
     border: none;
 }
 
-/* ========== VISIBILITY PATCHES ========== */
-.block-container, .block-container * { 
-    color: #0f172a; 
+/* ========== COMPLETE TEXT VISIBILITY FIXES ========== */
+/* Main content area - force all text to be dark */
+.block-container, 
+.block-container *,
+.main .block-container,
+.main .block-container * { 
+    color: #0f172a !important; 
 }
 
+/* Fix all form elements */
+label, 
+.stSelectbox label,
+.stNumberInput label,
+.stTimeInput label,
+.stTextInput label,
+.stCheckbox label,
+.stRadio label,
+.stSlider label,
+.stDateInput label,
+.stColorPicker label {
+    color: #0f172a !important;
+}
+
+/* Fix expander content specifically */
+.streamlit-expanderContent, 
+.streamlit-expanderContent *,
+details[data-testid="stExpander"],
+details[data-testid="stExpander"] *,
+div[data-testid="stExpander"],
+div[data-testid="stExpander"] *,
+.streamlit-expanderHeader,
+.streamlit-expanderHeader * {
+    color: #0f172a !important;
+    background-color: transparent !important;
+}
+
+/* Fix markdown content in expanders */
+.streamlit-expanderContent .stMarkdown,
+.streamlit-expanderContent .stMarkdown *,
+div[data-testid="stExpander"] .stMarkdown,
+div[data-testid="stExpander"] .stMarkdown *,
+details[data-testid="stExpander"] .stMarkdown,
+details[data-testid="stExpander"] .stMarkdown * {
+    color: #0f172a !important;
+}
+
+/* Fix all paragraph and text elements */
+p, div, span, h1, h2, h3, h4, h5, h6, 
+.stText, .stCaption, .stMarkdown {
+    color: #0f172a !important;
+}
+
+/* Fix input field text */
+input, textarea, select {
+    color: #0f172a !important;
+    background: #ffffff !important;
+}
+
+/* Fix metric labels and values */
 div[data-testid="stMetricLabel"] { 
     color: #64748b !important; 
     font-weight: 600 !important; 
@@ -298,13 +353,55 @@ div[data-testid="stMetricValue"] {
     font-weight: 800 !important; 
 }
 
-.stCaption, .stCaption p { 
+/* Fix captions */
+.stCaption, .stCaption p, .stCaption * { 
     color: #64748b !important; 
 }
 
-/* Hero text override - ensure white text */
-.hero h1, .hero .sub, .hero .meta { 
-    color: #ffffff !important; 
+/* Fix tab content */
+.stTabs [data-baseweb="tab-list"],
+.stTabs [data-baseweb="tab-list"] *,
+.stTabs [data-baseweb="tab-panel"],
+.stTabs [data-baseweb="tab-panel"] * {
+    color: #0f172a !important;
+}
+
+/* EXCEPTIONS - Keep these elements with their intended colors */
+
+/* Exception: Keep sidebar text light */
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] *,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] div,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3,
+section[data-testid="stSidebar"] .stMarkdown,
+section[data-testid="stSidebar"] .stMarkdown * {
+    color: #e2e8f0 !important;
+}
+
+/* Exception: Keep hero text white */
+.hero,
+.hero *,
+.hero h1, 
+.hero .sub, 
+.hero .meta,
+.hero div,
+.hero span,
+.hero p {
+    color: #ffffff !important;
+}
+
+/* Exception: Keep KPI values dark */
+.kpi .label {
+    color: #64748b !important;
+}
+
+.kpi .value {
+    color: #0f172a !important;
 }
 
 /* ========== MOBILE RESPONSIVENESS ========== */
@@ -371,12 +468,12 @@ div[data-testid="stMetricValue"] {
     100% { background-position: 200% 0; }
 }
 
-/* ========== ADDITIONAL FIXES ========== */
-/* Ensure all buttons have proper styling */
+/* ========== FORM & INPUT ENHANCEMENTS ========== */
 .stButton > button {
     border-radius: 12px;
     border: 1px solid rgba(15,23,42,.12);
     transition: all 0.2s ease;
+    color: #0f172a !important;
 }
 
 .stButton > button:hover {
@@ -384,19 +481,22 @@ div[data-testid="stMetricValue"] {
     box-shadow: 0 4px 12px rgba(0,0,0,.1);
 }
 
-/* Fix selectbox styling */
 .stSelectbox > div > div {
     border-radius: 8px;
 }
 
-/* Fix number input styling */
 .stNumberInput > div > div > input {
     border-radius: 8px;
+    color: #0f172a !important;
 }
 
-/* Fix text input styling */
 .stTextInput > div > div > input {
     border-radius: 8px;
+    color: #0f172a !important;
+}
+
+.stTimeInput > div > div > input {
+    color: #0f172a !important;
 }
 
 /* Ensure proper spacing */
@@ -406,8 +506,6 @@ div[data-testid="stMetricValue"] {
 }
 </style>
 """, unsafe_allow_html=True)
-
-
 
 
 
