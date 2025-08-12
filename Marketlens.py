@@ -992,8 +992,9 @@ with st.sidebar:
 
 
 
+
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 5A: CORE FUNCTIONS & HERO SECTION
+# PART 5A FIXED: CORE FUNCTIONS & HERO SECTION 
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 # Core projection and table helpers
@@ -1035,7 +1036,7 @@ def _format_table_data(df):
     )
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# HERO SECTION WITH LIVE MARKET DATA
+# HERO SECTION WITH LIVE MARKET DATA (FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 # Get clean page name for processing
@@ -1045,7 +1046,16 @@ clean_page = page.split(" ", 1)[1] if " " in page else page
 label = "SPX" if asset == "^GSPC" else asset
 market_data = fetch_live_quote(asset)
 
-# Enhanced hero section with live data
+# Determine status class for pulse animation
+status_class = "pulse-animation" if market_data.get('status') == 'active' else ""
+
+# Determine change color
+change_color = "#10b981" if market_data.get('change', '').startswith('+') else "#ef4444" if market_data.get('change', '').startswith('-') else "#64748b"
+
+# Determine chip class
+chip_class = "ok" if market_data.get('status') == 'active' else "info" if market_data.get('status') == 'delayed' else "warning"
+
+# FIXED: Enhanced hero section with proper HTML structure
 st.markdown(f"""
 <div class="hero">
     <h1>{APP_NAME}</h1>
@@ -1053,21 +1063,21 @@ st.markdown(f"""
     <div class="meta">v{VERSION} • {COMPANY} • Advanced Analytics Platform</div>
 
     <div class="kpi">
-        <div class="card {'pulse-animation' if market_data['status'] == 'active' else ''}">
+        <div class="card {status_class}">
             <div class="label">{label} — Last Price</div>
-            <div class="value">{market_data['px']}</div>
+            <div class="value">{market_data.get('px', '—')}</div>
         </div>
         <div class="card">
             <div class="label">Change • % Change</div>
-            <div class="value" style="color: {'#10b981' if market_data['change'].startswith('+') else '#ef4444' if market_data['change'].startswith('-') else '#64748b'}">{market_data['change']} • {market_data['change_pct']}</div>
+            <div class="value" style="color: {change_color};">{market_data.get('change', '—')} • {market_data.get('change_pct', '—')}</div>
         </div>
         <div class="card">
             <div class="label">Last Updated</div>
-            <div class="value">{market_data['ts']}</div>
+            <div class="value">{market_data.get('ts', '—')}</div>
         </div>
         <div class="card">
             <div class="label">Data Source</div>
-            <div class="value"><span class="chip {'ok' if market_data['status'] == 'active' else 'info' if market_data['status'] == 'delayed' else 'warning'}">{market_data['source']}</span></div>
+            <div class="value"><span class="chip {chip_class}">{market_data.get('source', 'Unknown')}</span></div>
         </div>
     </div>
 </div>
@@ -1091,8 +1101,8 @@ if clean_page == "Dashboard":
     readiness_items = [
         {
             "name": "Live Market Data",
-            "status": market_data['px'] != "—",
-            "detail": f"Source: {market_data['source']}"
+            "status": market_data.get('px') != "—",
+            "detail": f"Source: {market_data.get('source', 'Unknown')}"
         },
         {
             "name": "Previous Day Anchors",
@@ -1112,31 +1122,33 @@ if clean_page == "Dashboard":
         {
             "name": "Risk Management",
             "status": True,
-            "detail": f"Profile: {risk_tolerance if 'risk_tolerance' in locals() else 'Standard'}"
+            "detail": "Standard profile active"
         }
     ]
     
-    # Create status grid
+    # Create status grid with improved layout
     cols = st.columns(len(readiness_items))
     for i, item in enumerate(readiness_items):
         with cols[i]:
-            status_class = "ok" if item["status"] else "warning"
             status_icon = "✅" if item["status"] else "⚠️"
             
             st.markdown(f"""
-            <div style="text-align: center; padding: 16px;">
-                <div style="font-size: 24px; margin-bottom: 8px;">{status_icon}</div>
-                <div style="font-weight: 700; color: #0f172a; margin-bottom: 4px;">{item['name']}</div>
-                <div style="font-size: 12px; color: #64748b;">{item['detail']}</div>
+            <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 1px solid rgba(15,23,42,.08); box-shadow: 0 4px 12px rgba(0,0,0,.05);">
+                <div style="font-size: 28px; margin-bottom: 12px;">{status_icon}</div>
+                <div style="font-weight: 800; color: #0f172a; margin-bottom: 8px; font-size: 14px;">{item['name']}</div>
+                <div style="font-size: 12px; color: #64748b; line-height: 1.4;">{item['detail']}</div>
             </div>
             """, unsafe_allow_html=True)
     
     # Overall system status
     overall_ready = all(item["status"] for item in readiness_items)
+    status_text = "🟢 All Systems Operational" if overall_ready else "🟡 Partial System Ready"
+    status_class = "ok" if overall_ready else "warning"
+    
     st.markdown(f"""
-    <div style="text-align: center; margin-top: 24px;">
-        <span class="chip {'ok' if overall_ready else 'warning'}" style="font-size: 14px; padding: 12px 24px;">
-            {'🟢 All Systems Operational' if overall_ready else '🟡 Partial System Ready'}
+    <div style="text-align: center; margin-top: 32px;">
+        <span class="chip {status_class}" style="font-size: 16px; padding: 16px 32px;">
+            {status_text}
         </span>
     </div>
     """, unsafe_allow_html=True)
@@ -1166,7 +1178,7 @@ if clean_page == "Dashboard":
         col1, col2, col3 = st.columns(3)
         with col1:
             # Market position analysis
-            if market_data['px'] != "—":
+            if market_data.get('px') != "—":
                 current_price = float(market_data['px'].replace(',', ''))
                 position_in_range = ((current_price - anchors['low']) / (anchors['high'] - anchors['low'])) * 100
                 
@@ -1181,10 +1193,10 @@ if clean_page == "Dashboard":
                     position_color = "#6366f1"
                 
                 st.markdown(f"""
-                <div style="text-align: center; padding: 16px; background: linear-gradient(135deg, {position_color}15 0%, {position_color}05 100%); border-radius: 12px; border: 1px solid {position_color}30;">
-                    <div style="font-size: 24px; margin-bottom: 8px;">📍</div>
-                    <div style="font-weight: 700; color: {position_color};">{position_label}</div>
-                    <div style="font-size: 12px; color: #64748b;">Position: {position_in_range:.1f}%</div>
+                <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 2px solid {position_color}; box-shadow: 0 4px 12px rgba(0,0,0,.05);">
+                    <div style="font-size: 28px; margin-bottom: 12px;">📍</div>
+                    <div style="font-weight: 800; color: {position_color}; font-size: 16px;">{position_label}</div>
+                    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Position: {position_in_range:.1f}%</div>
                 </div>
                 """, unsafe_allow_html=True)
         
@@ -1194,25 +1206,25 @@ if clean_page == "Dashboard":
             volatility_color = "#ef4444" if volatility_score == "High" else "#f59e0b" if volatility_score == "Moderate" else "#10b981"
             
             st.markdown(f"""
-            <div style="text-align: center; padding: 16px; background: linear-gradient(135deg, {volatility_color}15 0%, {volatility_color}05 100%); border-radius: 12px; border: 1px solid {volatility_color}30;">
-                <div style="font-size: 24px; margin-bottom: 8px;">📊</div>
-                <div style="font-weight: 700; color: {volatility_color};">{volatility_score} Volatility</div>
-                <div style="font-size: 12px; color: #64748b;">Range: {range_pct:.2f}%</div>
+            <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 2px solid {volatility_color}; box-shadow: 0 4px 12px rgba(0,0,0,.05);">
+                <div style="font-size: 28px; margin-bottom: 12px;">📊</div>
+                <div style="font-weight: 800; color: {volatility_color}; font-size: 16px;">{volatility_score} Volatility</div>
+                <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Range: {range_pct:.2f}%</div>
             </div>
             """, unsafe_allow_html=True)
         
         with col3:
             # Trend analysis
-            if market_data['change'] != "—":
+            if market_data.get('change') != "—":
                 trend = "Bullish" if market_data['change'].startswith('+') else "Bearish" if market_data['change'].startswith('-') else "Neutral"
                 trend_color = "#10b981" if trend == "Bullish" else "#ef4444" if trend == "Bearish" else "#64748b"
                 trend_icon = "📈" if trend == "Bullish" else "📉" if trend == "Bearish" else "➡️"
                 
                 st.markdown(f"""
-                <div style="text-align: center; padding: 16px; background: linear-gradient(135deg, {trend_color}15 0%, {trend_color}05 100%); border-radius: 12px; border: 1px solid {trend_color}30;">
-                    <div style="font-size: 24px; margin-bottom: 8px;">{trend_icon}</div>
-                    <div style="font-weight: 700; color: {trend_color};">{trend} Trend</div>
-                    <div style="font-size: 12px; color: #64748b;">Change: {market_data['change']}</div>
+                <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 2px solid {trend_color}; box-shadow: 0 4px 12px rgba(0,0,0,.05);">
+                    <div style="font-size: 28px; margin-bottom: 12px;">{trend_icon}</div>
+                    <div style="font-weight: 800; color: {trend_color}; font-size: 16px;">{trend} Trend</div>
+                    <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Change: {market_data['change']}</div>
                 </div>
                 """, unsafe_allow_html=True)
         
@@ -1244,19 +1256,19 @@ elif clean_page == "Anchors":
         # Enhanced metrics display with professional styling
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            change_from_high = ((float(market_data['px'].replace(',', '')) - pd_anchors['high']) / pd_anchors['high'] * 100) if market_data['px'] != "—" else 0
-            st.metric("📈 Previous High", f"${pd_anchors['high']:,.2f}", f"{change_from_high:+.2f}%" if market_data['px'] != "—" else None)
+            change_from_high = ((float(market_data['px'].replace(',', '')) - pd_anchors['high']) / pd_anchors['high'] * 100) if market_data.get('px') != "—" else 0
+            st.metric("📈 Previous High", f"${pd_anchors['high']:,.2f}", f"{change_from_high:+.2f}%" if market_data.get('px') != "—" else None)
         with col2:
-            change_from_close = ((float(market_data['px'].replace(',', '')) - pd_anchors['close']) / pd_anchors['close'] * 100) if market_data['px'] != "—" else 0
-            st.metric("🎯 Previous Close", f"${pd_anchors['close']:,.2f}", f"{change_from_close:+.2f}%" if market_data['px'] != "—" else None)
+            change_from_close = ((float(market_data['px'].replace(',', '')) - pd_anchors['close']) / pd_anchors['close'] * 100) if market_data.get('px') != "—" else 0
+            st.metric("🎯 Previous Close", f"${pd_anchors['close']:,.2f}", f"{change_from_close:+.2f}%" if market_data.get('px') != "—" else None)
         with col3:
-            change_from_low = ((float(market_data['px'].replace(',', '')) - pd_anchors['low']) / pd_anchors['low'] * 100) if market_data['px'] != "—" else 0
-            st.metric("📉 Previous Low", f"${pd_anchors['low']:,.2f}", f"{change_from_low:+.2f}%" if market_data['px'] != "—" else None)
+            change_from_low = ((float(market_data['px'].replace(',', '')) - pd_anchors['low']) / pd_anchors['low'] * 100) if market_data.get('px') != "—" else 0
+            st.metric("📉 Previous Low", f"${pd_anchors['low']:,.2f}", f"{change_from_low:+.2f}%" if market_data.get('px') != "—" else None)
         with col4:
             daily_range = pd_anchors['high'] - pd_anchors['low']
             st.metric("📏 Daily Range", f"${daily_range:.2f}")
         
-        # Additional analytics section
+        # Additional analytics
         st.markdown("### 📊 Anchor Analytics")
         col1, col2 = st.columns(2)
         with col1:
@@ -1305,7 +1317,7 @@ elif clean_page == "Anchors":
         - **Data Source:** ES Futures (CME E-mini S&P 500)
         - **Time Window:** 5:00 PM - 8:00 PM Central Time (previous day)
         - **Granularity:** 15-minute intervals for precision
-        - **Conversion:** ES prices used as SPX equivalent (1:1 ratio)
+        - **Conversion:** ES prices converted to SPX using real-time offset
         """)
     else:
         # Asian session metrics with enhanced display
@@ -1313,9 +1325,13 @@ elif clean_page == "Anchors":
         with col1:
             st.metric("🔺 Asian Swing High", f"${asian['high_px']:,.2f}")
             st.caption(f"🕐 Time: {asian['high_time_ct'].strftime('%-I:%M %p CT')} ({asian['high_time_ct'].strftime('%A')})")
+            if 'es_high_raw' in asian:
+                st.caption(f"📊 ES Raw: ${asian['es_high_raw']:,.2f} (Offset: {asian.get('conversion_offset', 0):+.2f})")
         with col2:
             st.metric("🔻 Asian Swing Low", f"${asian['low_px']:,.2f}")
             st.caption(f"🕐 Time: {asian['low_time_ct'].strftime('%-I:%M %p CT')} ({asian['low_time_ct'].strftime('%A')})")
+            if 'es_low_raw' in asian:
+                st.caption(f"📊 ES Raw: ${asian['es_low_raw']:,.2f} (Offset: {asian.get('conversion_offset', 0):+.2f})")
         
         # Asian session detailed analytics
         asian_range = asian['high_px'] - asian['low_px']
@@ -1344,6 +1360,8 @@ elif clean_page == "Anchors":
                 st.info(f"📊 **vs Prev Day:** {range_comparison:.1f}% of range")
 
     st.markdown("</div>", unsafe_allow_html=True)
+    
+
 
 
 
