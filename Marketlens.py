@@ -1,9 +1,8 @@
-# ==============================  PART 1 — CORE SHELL (TV ES1! + YFinance)  ==============================
+# ==============================  PART 1 — CORE SHELL (Yahoo ES=F + YFinance)  ==============================
+# • Asian session anchors for SPX via Yahoo ES=F (5–8 PM CT), auto-converted to SPX (basis adjustable)
 # • Live strip for SPX & equities via your yfinance pattern (1m with daily fallback)
-# • Asian session anchors for SPX via TradingView ES1! (5–8 PM CT), auto-converted to SPX (basis adjustable)
 # • Clean, high-contrast UI (mobile friendly), visible header, always-open sidebar
-# ========================================================================================================
-
+# ============================================================================================================
 from __future__ import annotations
 from datetime import datetime, date, time, timedelta
 from zoneinfo import ZoneInfo
@@ -89,57 +88,7 @@ section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3, sectio
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────  TRADINGVIEW CLIENT + FETCHERS  ─────────────────────────────
-# (kept inside try/except so Part 1 runs even if tvDatafeed isn't installed yet)
-try:
-    from tvDatafeed import TvDatafeed, Interval  # pip install tvdatafeed
-except Exception:
-    TvDatafeed = None
-    Interval = None
-
-@st.cache_resource(show_spinner=False)
-def tv_client() -> TvDatafeed | None:
-    if TvDatafeed is None:
-        return None
-    try:
-        u = st.secrets["tradingview"]["username"]
-        p = st.secrets["tradingview"]["password"]
-        return TvDatafeed(username=u, password=p, chromedriver_path=None)
-    except Exception:
-        return None
-
-def es_to_spx(es_px: float) -> float:
-    """Map ES price to SPX estimate (they track ~1:1). Basis is adjustable if needed."""
-    return float(es_px) + ES_TO_SPX_BASIS
-
-@st.cache_data(ttl=300, show_spinner=False)
-def tv_fetch_es1m_ct(start_ct: datetime, end_ct: datetime) -> pd.DataFrame:
-    """
-    Fetch ES1! 1-minute bars via TradingView, convert index to CT, return columns: Dt, Open, High, Low, Close.
-    """
-    tv = tv_client()
-    if tv is None or Interval is None:
-        return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-    try:
-        # Get enough bars then filter locally
-        bars = tv.get_hist(symbol="ES1!", exchange="CME_MINI", interval=Interval.in_1_minute, n_bars=9000)
-        if bars is None or bars.empty:
-            return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-        df = bars.copy()
-        # tvDatafeed returns tz-naive UTC timestamps (most setups) — normalize to UTC then → CT
-        idx = pd.to_datetime(df.index)
-        if idx.tz is None:
-            idx = idx.tz_localize("UTC")
-        df["Dt"] = idx.tz_convert(CT)
-        keep = ["open","high","low","close"]
-        cols = [c for c in keep if c in df.columns]
-        out = df.rename(columns={"open":"Open","high":"High","low":"Low","close":"Close"})[["Dt"]+["Open","High","Low","Close"]].dropna()
-        mask = (out["Dt"] >= start_ct) & (out["Dt"] <= end_ct)
-        return out.loc[mask].reset_index(drop=True)
-    except Exception:
-        return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-
-# ─────────────────────────────  YOUR YFINANCE HELPERS (unchanged)  ─────────────────────────────
+# ─────────────────────────────  YF HELPERS  ─────────────────────────────
 def previous_trading_day(ref_d: date) -> date:
     d = ref_d - timedelta(days=1)
     while d.weekday() >= 5:
@@ -148,6 +97,7 @@ def previous_trading_day(ref_d: date) -> date:
 
 @st.cache_data(ttl=90, show_spinner=False)
 def fetch_live_quote(symbol: str) -> dict:
+    """Your pattern: try 1m today, fallback to last daily close."""
     try:
         tkr = yf.Ticker(symbol)
         intraday = tkr.history(period="1d", interval="1m", prepost=True)
@@ -168,25 +118,57 @@ def fetch_live_quote(symbol: str) -> dict:
         pass
     return {"px":"—","ts":"—","source":"—"}
 
-# ─────────────────────────────  ASIAN SESSION (ES→SPX) ANCHORS  ─────────────────────────────
+def es_to_spx(es_px: float) -> float:
+    return float(es_px) + ES_TO_SPX_BASIS
+
 def asian_window_ct_for(session_d: date) -> tuple[datetime, datetime]:
-    """
-    Asian window for the chosen session = PRIOR calendar day, 5:00–8:00 PM CT.
-    Example: session Tue Aug 12 → window Mon Aug 11 17:00–20:00 CT.
-    """
+    """Asian window = PRIOR calendar day, 5:00–8:00 PM CT."""
     prior = session_d - timedelta(days=1)
     start_ct = datetime.combine(prior, time(17,0), tzinfo=CT)
     end_ct   = datetime.combine(prior, time(20,0), tzinfo=CT)
     return start_ct, end_ct
 
 @st.cache_data(ttl=300, show_spinner=False)
+def yf_fetch_es1m_ct(start_ct: datetime, end_ct: datetime) -> pd.DataFrame:
+    """Fetch ES=F 1m (fallback 5m) from Yahoo, return CT-indexed DataFrame with OHLC."""
+    try:
+        # pull a bigger bucket then filter locally
+        df = yf.Ticker("ES=F").history(period="7d", interval="1m")  # 1m first
+        if (df is None or df.empty) and True:
+            df = yf.Ticker("ES=F").history(period="60d", interval="5m")  # fallback
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
+        df = df.reset_index()
+        # Normalize datetime column name
+        if "Datetime" in df.columns:
+            dt = pd.to_datetime(df["Datetime"])
+        elif "Date" in df.columns:
+            dt = pd.to_datetime(df["Date"])
+        else:
+            dt = pd.to_datetime(df[df.columns[0]])
+        # Yahoo often returns UTC tz-naive; force UTC then convert → CT
+        if dt.dt.tz is None:
+            dt = dt.dt.tz_localize("UTC")
+        dt_ct = dt.dt.tz_convert(CT)
+        out = pd.DataFrame({
+            "Dt": dt_ct,
+            "Open": df["Open"].astype(float),
+            "High": df["High"].astype(float),
+            "Low":  df["Low"].astype(float),
+            "Close":df["Close"].astype(float),
+        }).dropna()
+        mask = (out["Dt"] >= start_ct) & (out["Dt"] <= end_ct)
+        return out.loc[mask].reset_index(drop=True)
+    except Exception:
+        return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
+
+@st.cache_data(ttl=300, show_spinner=False)
 def compute_spx_asian_anchors(session_d: date) -> dict | None:
-    """Find swing High/Low during 5–8 PM CT from ES1!, map to SPX levels."""
+    """Find swing High/Low during 5–8 PM CT from ES=F, map to SPX levels."""
     start_ct, end_ct = asian_window_ct_for(session_d)
-    es = tv_fetch_es1m_ct(start_ct, end_ct)
+    es = yf_fetch_es1m_ct(start_ct, end_ct)
     if es.empty:
         return None
-    # ES → SPX mapping
     es["SPX_High"] = es["High"].apply(es_to_spx)
     es["SPX_Low"]  = es["Low"].apply(es_to_spx)
     hi_idx = es["SPX_High"].idxmax()
@@ -197,16 +179,14 @@ def compute_spx_asian_anchors(session_d: date) -> dict | None:
         "swing_high_time": es.loc[hi_idx, "Dt"].to_pydatetime(),
         "swing_low": float(es.loc[lo_idx, "SPX_Low"]),
         "swing_low_time": es.loc[lo_idx, "Dt"].to_pydatetime(),
-        "source": "TradingView ES1!",
+        "source": "Yahoo ES=F",
     }
 
 # ─────────────────────────────  SIDEBAR — NAV, ASSET, DATE, OVERNIGHT INPUTS  ─────────────────────────────
 with st.sidebar:
     st.markdown("### 📚 Navigation")
-    page = st.radio(
-        label="", options=["Overview","Anchors","Forecasts","Signals","Contracts","Fibonacci","Export","Settings"],
-        index=0, label_visibility="collapsed"
-    )
+    page = st.radio(label="", options=["Overview","Anchors","Forecasts","Signals","Contracts","Fibonacci","Export","Settings"],
+                    index=0, label_visibility="collapsed")
 
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
     st.markdown("#### 📈 Asset")
@@ -216,7 +196,7 @@ with st.sidebar:
 
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
     st.markdown("#### 📅 Session")
-    forecast_date = st.date_input("Target session", value=date.today(), help="Used to pick the prior evening Asian window.")
+    forecast_date = st.date_input("Target session", value=date.today(), help="Chooses the prior evening Asian window.")
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
@@ -254,13 +234,9 @@ st.markdown(f"""
 if page == "Overview":
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown("<h3>Readiness</h3>", unsafe_allow_html=True)
-
-    # Quick ping TradingView so user sees status
-    tv_status = "Connected" if tv_client() is not None else "Unavailable"
-    chip = '<span class="chip ok">TradingView: Connected</span>' if tv_status=="Connected" else '<span class="chip">TradingView: Unavailable</span>'
     st.markdown(f"""
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-          {chip}
+          <span class="chip ok">Yahoo: Connected</span>
           <span class="chip">Overnight inputs captured</span>
         </div>
     """, unsafe_allow_html=True)
@@ -273,7 +249,7 @@ if page == "Anchors":
 
     anchors = compute_spx_asian_anchors(forecast_date)
     if not anchors:
-        st.markdown('<div class="info">Could not compute anchors. Try a recent weekday and ensure TradingView data exists for 5–8 PM CT.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="info">Could not compute anchors. Try a recent weekday and ensure ES=F data exists for 5–8 PM CT.</div>', unsafe_allow_html=True)
     else:
         c1, c2 = st.columns(2)
         with c1:
@@ -282,8 +258,7 @@ if page == "Anchors":
         with c2:
             st.metric("Swing Low (SPX est.)", f"{anchors['swing_low']:.2f}")
             st.caption(f"Time (CT): {anchors['swing_low_time'].strftime('%-I:%M %p')}")
-
-        st.caption(f"Window: {anchors['win_start'].strftime('%a %-I:%M %p')}–{anchors['win_end'].strftime('%-I:%M %p')} CT • Source: {anchors['source']}")
+        st.caption(f"Window: {anchors['win_start'].strftime('%a %-I:%M %p')}–{anchors['win_end'].strftime('%-I:%M %p')} CT • Source: Yahoo ES=F")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
