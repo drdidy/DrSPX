@@ -54,8 +54,9 @@ st.set_page_config(
     }
 )
 
+
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 2 FIXED: PREMIUM UI STYLING WITH CORRECTED HERO SECTION
+# PART 2: PREMIUM UI STYLING & VISUAL DESIGN (FULLY FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 st.markdown("""
@@ -65,14 +66,13 @@ st.markdown("""
 /* ========== CORE FOUNDATION ========== */
 html, body, .stApp { 
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) fixed;
 }
 
 .stApp { 
     background: radial-gradient(ellipse at top, #f7faff 0%, #ffffff 50%, #f1f5f9 100%) fixed;
 }
 
-/* ========== HERO SECTION (FIXED - NO BLACK SQUARE) ========== */
+/* ========== HERO SECTION (FIXED) ========== */
 .hero {
     border-radius: 28px;
     padding: 32px 36px;
@@ -80,25 +80,17 @@ html, body, .stApp {
     border: 1px solid rgba(15,23,42,.08);
     background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 50%, #6366f1 100%);
     color: white;
-    box-shadow: 
-        0 25px 50px rgba(99,102,241,.25),
-        0 0 0 1px rgba(255,255,255,.1) inset,
-        0 1px 0 rgba(255,255,255,.2) inset;
+    box-shadow: 0 20px 40px rgba(99,102,241,.2);
     position: relative;
     overflow: hidden;
 }
-
-/* REMOVED: The problematic ::before pseudo-element that was causing the black square */
 
 .hero h1 { 
     margin: 0; 
     font-weight: 900; 
     font-size: 36px; 
     letter-spacing: -0.02em;
-    background: linear-gradient(135deg, #ffffff 0%, #e2e8f0 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: white; /* Fallback for browsers that don't support background-clip */
+    color: #ffffff !important;
 }
 
 .hero .sub { 
@@ -106,7 +98,7 @@ html, body, .stApp {
     font-weight: 700; 
     font-size: 18px;
     margin-top: 8px; 
-    color: rgba(255,255,255,0.9);
+    color: rgba(255,255,255,0.9) !important;
 }
 
 .hero .meta { 
@@ -114,10 +106,10 @@ html, body, .stApp {
     font-size: 14px; 
     margin-top: 12px;
     font-weight: 500;
-    color: rgba(255,255,255,0.8);
+    color: rgba(255,255,255,0.8) !important;
 }
 
-/* ========== KPI DASHBOARD ========== */
+/* ========== KPI DASHBOARD (FIXED - NO BLACK SQUARES) ========== */
 .kpi {
     display: grid; 
     grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); 
@@ -128,13 +120,10 @@ html, body, .stApp {
 .kpi .card {
     border-radius: 20px; 
     padding: 20px 24px;
-    background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-    border: 1px solid rgba(2,6,23,.08);
-    box-shadow: 
-        0 10px 25px rgba(2,6,23,.08),
-        0 0 0 1px rgba(255,255,255,.8) inset,
-        0 1px 0 rgba(255,255,255,.9) inset;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: #ffffff;
+    border: 1px solid rgba(15,23,42,.12);
+    box-shadow: 0 8px 20px rgba(0,0,0,.08);
+    transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
 }
@@ -146,14 +135,14 @@ html, body, .stApp {
     left: 0;
     right: 0;
     height: 3px;
-    background: linear-gradient(90deg, #0ea5e9 0%, #6366f1 100%);
+    background: #3b82f6;
     opacity: 0;
     transition: opacity 0.3s ease;
 }
 
 .kpi .card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 20px 40px rgba(2,6,23,.12);
+    box-shadow: 0 16px 32px rgba(0,0,0,.12);
 }
 
 .kpi .card:hover::before {
@@ -163,10 +152,11 @@ html, body, .stApp {
 .kpi .label { 
     color: #64748b; 
     font-size: 12px; 
-    font-weight: 900; 
-    letter-spacing: .08em; 
+    font-weight: 700; 
+    letter-spacing: .05em; 
     text-transform: uppercase;
     margin-bottom: 8px;
+    display: block;
 }
 
 .kpi .value { 
@@ -175,6 +165,7 @@ html, body, .stApp {
     color: #0f172a; 
     letter-spacing: -0.02em;
     line-height: 1;
+    display: block;
 }
 
 /* ========== SECTION CARDS ========== */
@@ -182,12 +173,9 @@ html, body, .stApp {
     margin-top: 32px; 
     border-radius: 24px; 
     padding: 32px; 
-    background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-    border: 1px solid rgba(2,6,23,.06);
-    box-shadow: 
-        0 20px 40px rgba(2,6,23,.08),
-        0 0 0 1px rgba(255,255,255,.8) inset,
-        0 1px 0 rgba(255,255,255,.9) inset;
+    background: #ffffff;
+    border: 1px solid rgba(15,23,42,.08);
+    box-shadow: 0 16px 32px rgba(0,0,0,.06);
     position: relative;
 }
 
@@ -197,9 +185,6 @@ html, body, .stApp {
     font-weight: 900; 
     letter-spacing: -0.01em; 
     color: #0f172a;
-    background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
 }
 
 .sec .muted { 
@@ -223,17 +208,16 @@ section[data-testid="stSidebar"] p {
 }
 
 .sidebar-card {
-    background: linear-gradient(145deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
+    background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 16px; 
     padding: 20px; 
     margin: 16px 0;
-    backdrop-filter: blur(10px);
     transition: all 0.3s ease;
 }
 
 .sidebar-card:hover {
-    background: linear-gradient(145deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.08) 100%);
+    background: rgba(255,255,255,0.12);
     border-color: rgba(255,255,255,0.2);
 }
 
@@ -244,7 +228,7 @@ section[data-testid="stSidebar"] p {
     gap: 8px; 
     padding: 8px 16px; 
     border-radius: 999px;
-    border: 1px solid rgba(2,6,23,.08); 
+    border: 1px solid rgba(15,23,42,.12); 
     background: #f8fafc; 
     font-size: 12px; 
     font-weight: 700; 
@@ -255,32 +239,29 @@ section[data-testid="stSidebar"] p {
 }
 
 .chip.ok   { 
-    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); 
+    background: #ecfdf5; 
     border-color: #10b981; 
     color: #065f46;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
 }
 
 .chip.info { 
-    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); 
+    background: #eff6ff; 
     border-color: #3b82f6; 
     color: #1e40af;
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
 }
 
 .chip.warning { 
-    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); 
+    background: #fffbeb; 
     border-color: #f59e0b; 
     color: #92400e;
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
 }
 
 /* ========== TABLE STYLING ========== */
 .table-wrap { 
     border-radius: 20px; 
     overflow: hidden; 
-    border: 1px solid rgba(2,6,23,.08); 
-    box-shadow: 0 15px 35px rgba(2,6,23,.08);
+    border: 1px solid rgba(15,23,42,.08); 
+    box-shadow: 0 12px 28px rgba(0,0,0,.06);
     margin: 16px 0;
 }
 
@@ -296,13 +277,28 @@ div[data-testid="stDataFrame"] > div {
 }
 
 /* ========== VISIBILITY PATCHES ========== */
-.block-container, .block-container * { color: #0f172a; }
-div[data-testid="stMetricLabel"] { color: #64748b !important; font-weight: 600 !important; }
-div[data-testid="stMetricValue"] { color: #0f172a !important; font-weight: 800 !important; }
-.stCaption, .stCaption p { color: #64748b !important; }
+.block-container, .block-container * { 
+    color: #0f172a; 
+}
 
-/* Hero text override - FIXED to ensure white text */
-.hero h1, .hero .sub, .hero .meta { color: #fff !important; }
+div[data-testid="stMetricLabel"] { 
+    color: #64748b !important; 
+    font-weight: 600 !important; 
+}
+
+div[data-testid="stMetricValue"] { 
+    color: #0f172a !important; 
+    font-weight: 800 !important; 
+}
+
+.stCaption, .stCaption p { 
+    color: #64748b !important; 
+}
+
+/* Hero text override - ensure white text */
+.hero h1, .hero .sub, .hero .meta { 
+    color: #ffffff !important; 
+}
 
 /* ========== MOBILE RESPONSIVENESS ========== */
 @media (max-width: 900px) {
@@ -346,10 +342,10 @@ div[data-testid="stMetricValue"] { color: #0f172a !important; font-weight: 800 !
     .sec { padding: 20px 16px; }
 }
 
-/* ========== ADVANCED ANIMATIONS ========== */
+/* ========== ANIMATIONS ========== */
 @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 20px rgba(99,102,241,.2); }
-    50% { box-shadow: 0 0 30px rgba(99,102,241,.4); }
+    0%, 100% { box-shadow: 0 0 20px rgba(59,130,246,.3); }
+    50% { box-shadow: 0 0 30px rgba(59,130,246,.5); }
 }
 
 .pulse-animation {
@@ -367,8 +363,45 @@ div[data-testid="stMetricValue"] { color: #0f172a !important; font-weight: 800 !
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
 }
+
+/* ========== ADDITIONAL FIXES ========== */
+/* Ensure all buttons have proper styling */
+.stButton > button {
+    border-radius: 12px;
+    border: 1px solid rgba(15,23,42,.12);
+    transition: all 0.2s ease;
+}
+
+.stButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,.1);
+}
+
+/* Fix selectbox styling */
+.stSelectbox > div > div {
+    border-radius: 8px;
+}
+
+/* Fix number input styling */
+.stNumberInput > div > div > input {
+    border-radius: 8px;
+}
+
+/* Fix text input styling */
+.stTextInput > div > div > input {
+    border-radius: 8px;
+}
+
+/* Ensure proper spacing */
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+}
 </style>
 """, unsafe_allow_html=True)
+
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
 # PART 3 FIXED: CORE DATA FUNCTIONS WITH PROPER ES TO SPX CONVERSION
