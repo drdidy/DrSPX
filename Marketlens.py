@@ -447,3 +447,24 @@ if page in {"Forecasts", "Signals", "Contracts", "Fibonacci", "Export", "Setting
     st.markdown(f"<h3>{page}</h3>", unsafe_allow_html=True)
     st.caption("This section lights up in the next parts with professional tables (entries & TP1/TP2), contract decay lines, and exports.")
     st.markdown('</div>', unsafe_allow_html=True)
+
+
+st.markdown("""
+<style>
+/* ===== VISIBILITY PATCH (Main area only) ===== */
+.block-container, .block-container * {
+  color: #0f172a !important;              /* deep slate for body text */
+}
+.sec h3, .hero h1, .hero .sub, .hero .meta {
+  color: white !important;                /* keep hero text white */
+}
+div[data-testid="stMetricLabel"]{ color:#64748b !important; }
+div[data-testid="stMetricValue"]{ color:#0f172a !important; }
+.stCaption, .stCaption p, .muted { color:#475569 !important; } /* captions / muted text */
+
+/* Keep sidebar dark */
+section[data-testid="stSidebar"], section[data-testid="stSidebar"] * {
+  color: #e5e7eb !important;
+}
+</style>
+""", unsafe_allow_html=True)
