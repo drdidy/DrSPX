@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+import traceback  # Added for better error debugging
 
 # ───────────────────────────────  GLOBAL CONFIG  ───────────────────────────────
 APP_NAME   = "MarketLens Pro"
@@ -27,7 +28,7 @@ SPX_OVERNIGHT_SLOPES = {"overnight_low_up": +0.2432, "overnight_high_down": -0.2
 
 # Instruments
 EQUITIES = ["^GSPC", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "NFLX", "TSLA"]
-ES_SYMBOL = "^ES=F"   # CME E-mini S&P 500 futures (continuous)
+ES_SYMBOL = "ES=F"   # Fixed: Removed the ^ prefix - ES=F is the correct symbol
 
 # ───────────────────────────────  PAGE SETUP  ───────────────────────────────
 st.set_page_config(
@@ -144,47 +145,111 @@ def previous_trading_day(ref_d: date) -> date:
 
 @st.cache_data(ttl=90, show_spinner=False)
 def fetch_live_quote(symbol: str) -> dict:
-    """Your pattern: 1m today, fallback to last daily close."""
+    """Enhanced error handling and debugging for live quotes."""
     try:
+        # Debug: Show what we're fetching
+        st.write(f"DEBUG: Attempting to fetch {symbol}")
+        
         tkr = yf.Ticker(symbol)
-        intraday = tkr.history(period="1d", interval="1m", prepost=True)
-        if isinstance(intraday, pd.DataFrame) and not intraday.empty and "Close" in intraday.columns:
-            last = intraday.iloc[-1]
-            px = float(last["Close"])
-            ts_idx = intraday.index[-1]
-            ts = (pd.Timestamp(ts_idx).tz_localize("UTC") if getattr(ts_idx, "tz", None) is None else pd.Timestamp(ts_idx)).tz_convert(ET)
-            return {"px": f"{px:,.2f}", "ts": ts.strftime("%a %-I:%M %p ET"), "source": "Yahoo 1m"}
-        daily = tkr.history(period="10d", interval="1d")
-        if isinstance(daily, pd.DataFrame) and not daily.empty and "Close" in daily.columns:
-            last = daily.iloc[-1]
-            px = float(last["Close"])
-            ts_idx = daily.index[-1]
-            ts = (pd.Timestamp(ts_idx).tz_localize("UTC") if getattr(ts_idx, "tz", None) is None else pd.Timestamp(ts_idx)).tz_convert(ET)
-            return {"px": f"{px:,.2f}", "ts": ts.strftime("%a 4:00 PM ET"), "source": "Yahoo 1d"}
-    except Exception:
-        pass
-    return {"px": "—", "ts": "—", "source": "—"}
+        
+        # Try 1-minute data first
+        try:
+            intraday = tkr.history(period="1d", interval="1m", prepost=True)
+            st.write(f"DEBUG: Intraday data shape: {intraday.shape if not intraday.empty else 'Empty'}")
+            st.write(f"DEBUG: Intraday columns: {list(intraday.columns) if not intraday.empty else 'N/A'}")
+            
+            if isinstance(intraday, pd.DataFrame) and not intraday.empty and "Close" in intraday.columns:
+                last = intraday.iloc[-1]
+                px = float(last["Close"])
+                ts_idx = intraday.index[-1]
+                
+                # Better timezone handling
+                if hasattr(ts_idx, 'tz') and ts_idx.tz is not None:
+                    ts = pd.Timestamp(ts_idx).tz_convert(ET)
+                else:
+                    ts = pd.Timestamp(ts_idx).tz_localize("US/Eastern")
+                
+                return {
+                    "px": f"{px:,.2f}", 
+                    "ts": ts.strftime("%a %-I:%M %p ET"), 
+                    "source": "Yahoo 1m"
+                }
+        except Exception as e:
+            st.write(f"DEBUG: 1m data failed: {str(e)}")
+        
+        # Fallback to daily data
+        try:
+            daily = tkr.history(period="5d", interval="1d")  # Reduced period for faster fetch
+            st.write(f"DEBUG: Daily data shape: {daily.shape if not daily.empty else 'Empty'}")
+            
+            if isinstance(daily, pd.DataFrame) and not daily.empty and "Close" in daily.columns:
+                last = daily.iloc[-1]
+                px = float(last["Close"])
+                ts_idx = daily.index[-1]
+                
+                # Better timezone handling
+                if hasattr(ts_idx, 'tz') and ts_idx.tz is not None:
+                    ts = pd.Timestamp(ts_idx).tz_convert(ET)
+                else:
+                    ts = pd.Timestamp(ts_idx).tz_localize("US/Eastern")
+                
+                return {
+                    "px": f"{px:,.2f}", 
+                    "ts": ts.strftime("%a 4:00 PM ET"), 
+                    "source": "Yahoo 1d"
+                }
+        except Exception as e:
+            st.write(f"DEBUG: Daily data failed: {str(e)}")
+            
+    except Exception as e:
+        st.write(f"DEBUG: Overall fetch failed for {symbol}: {str(e)}")
+        st.write(f"DEBUG: Traceback: {traceback.format_exc()}")
+    
+    return {"px": "—", "ts": "—", "source": "Error"}
 
 @st.cache_data(ttl=180, show_spinner=False)
 def get_previous_day_anchors(symbol: str, forecast_d: date) -> dict | None:
-    """Prev-day HIGH/CLOSE/LOW from daily candles."""
+    """Enhanced previous day anchors with better error handling."""
     try:
         prev_d = previous_trading_day(forecast_d)
-        df = yf.Ticker(symbol).history(period="1mo", interval="1d")
+        st.write(f"DEBUG: Getting anchors for {symbol} on {prev_d}")
+        
+        tkr = yf.Ticker(symbol)
+        df = tkr.history(period="1mo", interval="1d")
+        
         if df is None or df.empty:
+            st.write("DEBUG: No historical data returned")
             return None
-        idx = pd.Index(df.index)
-        dates_et = (pd.to_datetime(idx).tz_localize("UTC").tz_convert(ET).date
-                    if getattr(idx[0], "tz", None) is None else
-                    pd.to_datetime(idx).tz_convert(ET).date)
-        df = df.assign(_d=list(dates_et))
-        row = df[df["_d"] == prev_d]
-        if row.empty:
-            row = df.iloc[[-2]] if len(df) >= 2 else df.iloc[[-1]]
-            prev_d = row["_d"].iloc[-1]
-        r = row.iloc[-1]
-        return {"prev_day": prev_d, "high": float(r["High"]), "low": float(r["Low"]), "close": float(r["Close"])}
-    except Exception:
+            
+        st.write(f"DEBUG: Historical data shape: {df.shape}")
+        st.write(f"DEBUG: Historical data date range: {df.index[0]} to {df.index[-1]}")
+        
+        # Simplified date handling
+        df_dates = pd.to_datetime(df.index).date
+        df = df.copy()
+        df['_date'] = df_dates
+        
+        # Find the previous trading day
+        matching_rows = df[df['_date'] == prev_d]
+        if matching_rows.empty:
+            # If exact date not found, use the most recent available
+            st.write(f"DEBUG: Exact date {prev_d} not found, using most recent")
+            row = df.iloc[-1]
+            actual_date = df['_date'].iloc[-1]
+        else:
+            row = matching_rows.iloc[-1]
+            actual_date = prev_d
+            
+        return {
+            "prev_day": actual_date,
+            "high": float(row["High"]),
+            "low": float(row["Low"]),
+            "close": float(row["Close"])
+        }
+        
+    except Exception as e:
+        st.write(f"DEBUG: Previous day anchors failed: {str(e)}")
+        st.write(f"DEBUG: Traceback: {traceback.format_exc()}")
         return None
 
 # ───────────────────────────────  ES FUTURES → SPX: ASIAN WINDOW 5–8 PM CT  ───────────────────────────────
@@ -201,48 +266,90 @@ def asian_window_ct(forecast_d: date) -> tuple[datetime, datetime]:
 @st.cache_data(ttl=300, show_spinner=False)
 def es_fetch_15m_ct(start_ct: datetime, end_ct: datetime) -> pd.DataFrame:
     """
-    Fetch ES (^ES=F) with 15m granularity around the window, convert timestamps to CT,
-    and return a tidy OHLC dataframe.
+    Enhanced ES futures fetching with better error handling.
     """
     try:
+        st.write(f"DEBUG: Fetching ES data from {start_ct} to {end_ct}")
+        
         tkr = yf.Ticker(ES_SYMBOL)
-        # use a slightly wider period, then filter locally
-        raw = tkr.history(period="7d", interval="15m", prepost=True)
-        if raw is None or raw.empty:
+        # Try different periods to ensure we get data
+        for period in ["7d", "1mo", "3mo"]:
+            try:
+                raw = tkr.history(period=period, interval="15m", prepost=True)
+                if raw is not None and not raw.empty:
+                    break
+                st.write(f"DEBUG: Period {period} returned empty data")
+            except Exception as e:
+                st.write(f"DEBUG: Period {period} failed: {str(e)}")
+                continue
+        else:
+            st.write("DEBUG: All periods failed for ES data")
             return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-        df = raw.reset_index().rename(columns={"Datetime":"Dt"})
-        if "Dt" not in df.columns:
-            if "index" in df.columns:
-                df["Dt"] = pd.to_datetime(df["index"])
-            else:
-                return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-        dt = pd.to_datetime(df["Dt"], utc=True)
-        df["Dt"] = dt.dt.tz_convert(CT)
-        out = df[["Dt","Open","High","Low","Close"]].dropna()
-        mask = (out["Dt"] >= start_ct) & (out["Dt"] <= end_ct)
-        return out.loc[mask].sort_values("Dt").reset_index(drop=True)
-    except Exception:
+            
+        st.write(f"DEBUG: ES raw data shape: {raw.shape}")
+        
+        df = raw.reset_index()
+        
+        # Handle different possible column names
+        datetime_col = None
+        for col in ["Datetime", "Date", "index"]:
+            if col in df.columns:
+                datetime_col = col
+                break
+                
+        if datetime_col is None:
+            st.write("DEBUG: No datetime column found in ES data")
+            return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
+            
+        df = df.rename(columns={datetime_col: "Dt"})
+        
+        # Convert to datetime and timezone
+        df["Dt"] = pd.to_datetime(df["Dt"])
+        if df["Dt"].dt.tz is None:
+            df["Dt"] = df["Dt"].dt.tz_localize("UTC")
+        df["Dt"] = df["Dt"].dt.tz_convert(CT)
+        
+        # Filter columns and time window
+        required_cols = ["Dt", "Open", "High", "Low", "Close"]
+        df = df[required_cols].dropna()
+        
+        mask = (df["Dt"] >= start_ct) & (df["Dt"] <= end_ct)
+        result = df.loc[mask].sort_values("Dt").reset_index(drop=True)
+        
+        st.write(f"DEBUG: Filtered ES data shape: {result.shape}")
+        return result
+        
+    except Exception as e:
+        st.write(f"DEBUG: ES fetch failed: {str(e)}")
+        st.write(f"DEBUG: Traceback: {traceback.format_exc()}")
         return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
 
 @st.cache_data(ttl=300, show_spinner=False)
 def es_asian_anchors_as_spx(forecast_d: date) -> dict | None:
     """
     Compute Asian-session swing HIGH/LOW (5–8 PM CT) from ES and treat as SPX values (1:1 passthrough).
-    Returns:
-      { high_px, high_time_ct, low_px, low_time_ct }
     """
-    start_ct, end_ct = asian_window_ct(forecast_d)
-    es = es_fetch_15m_ct(start_ct - timedelta(minutes=30), end_ct + timedelta(minutes=30))
-    if es.empty:
+    try:
+        start_ct, end_ct = asian_window_ct(forecast_d)
+        es = es_fetch_15m_ct(start_ct - timedelta(minutes=30), end_ct + timedelta(minutes=30))
+        
+        if es.empty:
+            st.write("DEBUG: No ES data for Asian window")
+            return None
+            
+        hi_idx = es["High"].idxmax()
+        lo_idx = es["Low"].idxmin()
+        
+        return {
+            "high_px": float(es.loc[hi_idx, "High"]),
+            "high_time_ct": es.loc[hi_idx, "Dt"].to_pydatetime(),
+            "low_px": float(es.loc[lo_idx, "Low"]),
+            "low_time_ct": es.loc[lo_idx, "Dt"].to_pydatetime(),
+        }
+        
+    except Exception as e:
+        st.write(f"DEBUG: Asian anchors calculation failed: {str(e)}")
         return None
-    hi_idx = es["High"].idxmax()
-    lo_idx = es["Low"].idxmin()
-    return {
-        "high_px": float(es.loc[hi_idx, "High"]),
-        "high_time_ct": es.loc[hi_idx, "Dt"].to_pydatetime(),
-        "low_px": float(es.loc[lo_idx, "Low"]),
-        "low_time_ct": es.loc[lo_idx, "Dt"].to_pydatetime(),
-    }
 
 # ───────────────────────────────  SIDEBAR — NAV, ASSET, DATE, OVERNIGHT INPUTS  ───────────────────────────────
 with st.sidebar:
@@ -283,9 +390,27 @@ with st.sidebar:
     st.caption("These will power the Overnight Entries table in later parts.")
     st.markdown('</div>', unsafe_allow_html=True)
 
+# Add debug toggle
+with st.sidebar:
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    debug_mode = st.checkbox("Enable Debug Mode", value=True, help="Show debug information for troubleshooting")
+    st.markdown('</div>', unsafe_allow_html=True)
+
 # ───────────────────────────────  HERO + LIVE STRIP  ───────────────────────────────
 label = "SPX" if asset == "^GSPC" else asset
+
+# Only show debug info if debug mode is enabled
+if not debug_mode:
+    # Temporarily disable debug prints
+    import sys
+    from io import StringIO
+    old_stdout = sys.stdout
+    sys.stdout = StringIO()
+
 last = fetch_live_quote(asset)
+
+if not debug_mode:
+    sys.stdout = old_stdout
 
 st.markdown(f"""
 <div class="hero">
@@ -319,8 +444,15 @@ if page == "Overview":
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown("<h3>Readiness</h3>", unsafe_allow_html=True)
 
+    if not debug_mode:
+        old_stdout = sys.stdout
+        sys.stdout = StringIO()
+
     anchors = get_previous_day_anchors(asset, forecast_date)
     asian = es_asian_anchors_as_spx(forecast_date)
+
+    if not debug_mode:
+        sys.stdout = old_stdout
 
     chips = []
     chips.append('<span class="chip ok">Live strip ready</span>' if last['px'] != "—" else '<span class="chip info">Waiting on Yahoo data…</span>')
@@ -336,7 +468,15 @@ if page == "Anchors":
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown("<h3>Previous Day Anchors (Daily)</h3>", unsafe_allow_html=True)
 
+    if not debug_mode:
+        old_stdout = sys.stdout
+        sys.stdout = StringIO()
+
     pd_anchors = get_previous_day_anchors(asset, forecast_date)
+
+    if not debug_mode:
+        sys.stdout = old_stdout
+
     if not pd_anchors:
         st.info("Could not compute previous-day anchors. Try a recent weekday.")
     else:
@@ -352,7 +492,15 @@ if page == "Anchors":
     st.markdown('<div class="sec">', unsafe_allow_html=True)
     st.markdown("<h3>Asian Session Anchors (SPX via ES, 5–8 PM CT)</h3>", unsafe_allow_html=True)
 
+    if not debug_mode:
+        old_stdout = sys.stdout
+        sys.stdout = StringIO()
+
     asian = es_asian_anchors_as_spx(forecast_date)
+
+    if not debug_mode:
+        sys.stdout = old_stdout
+
     if not asian:
         st.info("Could not compute anchors. Try a recent weekday and ensure ES data exists for 5–8 PM CT.")
     else:
