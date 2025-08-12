@@ -410,8 +410,9 @@ div[data-testid="stMetricValue"] {
 
 
 
+
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 3 FIXED: CORE DATA FUNCTIONS WITH PROPER ES TO SPX CONVERSION
+# PART 3: CORE DATA FUNCTIONS & MARKET DATA INTEGRATION (FULLY FIXED)
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 def previous_trading_day(ref_d: date) -> date:
@@ -577,15 +578,18 @@ def asian_window_ct(forecast_d: date) -> tuple[datetime, datetime]:
     return start, end
 
 @st.cache_data(ttl=300, show_spinner=False)
-def es_fetch_15m_ct(start_ct: datetime, end_ct: datetime) -> pd.DataFrame:
-    """Fetch ES futures data with enhanced error handling."""
+def es_fetch_asian_data(start_ct: datetime, end_ct: datetime, interval: str = "30m") -> pd.DataFrame:
+    """
+    Fetch ES futures data with configurable interval (15m or 30m).
+    Default to 30m for line chart consistency.
+    """
     try:
         tkr = yf.Ticker(ES_SYMBOL)
         
         # Try multiple periods for robustness
         for period in ["7d", "1mo"]:
             try:
-                raw = tkr.history(period=period, interval="15m", prepost=True)
+                raw = tkr.history(period=period, interval=interval, prepost=True)
                 if raw is not None and not raw.empty:
                     break
             except Exception:
@@ -626,49 +630,69 @@ def es_fetch_15m_ct(start_ct: datetime, end_ct: datetime) -> pd.DataFrame:
         return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
 
 @st.cache_data(ttl=300, show_spinner=False)
-def es_asian_anchors_as_spx(forecast_d: date) -> dict | None:
+def es_asian_anchors_as_spx(forecast_d: date, timeframe: str = "30m") -> dict | None:
     """
-    Calculate Asian session swing points from ES futures and convert to SPX equivalent values.
+    FIXED FOR LINE CHART TRADING: Calculate Asian session swing points using CLOSE prices only.
     
-    FIXED: Now properly converts ES prices to SPX using current market offset.
-    Since ES and SPX move 1:1 but have a price offset, we:
-    1. Get the current ES-SPX offset 
-    2. Apply that offset to ES Asian session values
+    Args:
+        forecast_d: The forecast date
+        timeframe: "15m" or "30m" - choose based on your line chart timeframe
+    
+    Returns:
+        Dictionary with SPX-equivalent swing high/low CLOSE prices for perfect line chart matching.
     """
     try:
         start_ct, end_ct = asian_window_ct(forecast_d)
-        es = es_fetch_15m_ct(start_ct - timedelta(minutes=30), end_ct + timedelta(minutes=30))
+        es = es_fetch_asian_data(start_ct - timedelta(minutes=60), end_ct + timedelta(minutes=60), interval=timeframe)
         
         if es.empty:
             return None
             
-        # Get ES swing points
-        hi_idx = es["High"].idxmax()
-        lo_idx = es["Low"].idxmin()
+        # FIXED: Find the candles with highest and lowest CLOSE prices (line chart values)
+        # This gives you the actual line chart swing points, not candle wicks
+        highest_close_idx = es["Close"].idxmax()  # Candle with highest CLOSE
+        lowest_close_idx = es["Close"].idxmin()   # Candle with lowest CLOSE
         
-        es_high = float(es.loc[hi_idx, "High"])
-        es_low = float(es.loc[lo_idx, "Low"])
+        # Get the CLOSE prices (line chart values)
+        es_high_close = float(es.loc[highest_close_idx, "Close"])
+        es_low_close = float(es.loc[lowest_close_idx, "Close"])
         
-        # Get current ES to SPX offset
+        # Get current ES to SPX offset for conversion
         offset = get_current_es_spx_offset()
         
-        # Convert ES prices to SPX equivalent
+        # Convert ES CLOSE prices to SPX equivalent
         # SPX = ES + offset (since moves are 1:1)
-        spx_high = es_high + offset
-        spx_low = es_low + offset
+        spx_high_close = es_high_close + offset
+        spx_low_close = es_low_close + offset
         
         return {
-            "high_px": spx_high,
-            "high_time_ct": es.loc[hi_idx, "Dt"].to_pydatetime(),
-            "low_px": spx_low,
-            "low_time_ct": es.loc[lo_idx, "Dt"].to_pydatetime(),
-            "es_high_raw": es_high,  # Keep original ES values for reference
-            "es_low_raw": es_low,
-            "conversion_offset": offset
+            "high_px": spx_high_close,  # SPX equivalent of ES highest CLOSE
+            "high_time_ct": es.loc[highest_close_idx, "Dt"].to_pydatetime(),
+            "low_px": spx_low_close,    # SPX equivalent of ES lowest CLOSE  
+            "low_time_ct": es.loc[lowest_close_idx, "Dt"].to_pydatetime(),
+            "es_high_close_raw": es_high_close,  # Original ES close values for reference
+            "es_low_close_raw": es_low_close,
+            "conversion_offset": offset,
+            "timeframe": timeframe.upper(),
+            "method": "LINE_CHART_CLOSES",  # Clear indicator
+            "data_points": len(es)  # Number of candles analyzed
         }
         
     except Exception:
         return None
+
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# USAGE EXAMPLES FOR DIFFERENT TIMEFRAMES
+# ═══════════════════════════════════════════════════════════════════════════════════════
+
+# For 30-minute line chart (default):
+# asian = es_asian_anchors_as_spx(forecast_date, "30m")
+
+# For 15-minute line chart:
+# asian = es_asian_anchors_as_spx(forecast_date, "15m")
+
+# The function will now return the exact CLOSE prices that match your line chart!
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
