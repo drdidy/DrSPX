@@ -43,9 +43,16 @@ def apply_custom_styling():
     }
     
     /* Sidebar Styling */
-    .css-1d391kg {
-        background: rgba(15, 15, 35, 0.95);
-        border-right: 1px solid rgba(34, 211, 238, 0.3);
+    .css-1d391kg, .css-1cypcdb, .stSidebar > div {
+        background: rgba(15, 15, 35, 0.95) !important;
+        border-right: 1px solid rgba(34, 211, 238, 0.3) !important;
+        min-width: 300px !important;
+    }
+    
+    /* Force Sidebar Visibility */
+    .stSidebar {
+        display: block !important;
+        visibility: visible !important;
     }
     
     /* Main Content Area */
@@ -589,13 +596,14 @@ if __name__ == "__main__":
 
 
 
+
 # ==========================================
 # **PART 2A: DATA ENGINE & MARKET ANALYTICS FOUNDATION**
 # MarketLens Pro v5 by Max Pointe Consulting
 # ==========================================
 
 # ==========================================
-# ENHANCED DATA ENGINE
+# DATA ENGINE
 # ==========================================
 class MarketDataEngine:
     """
@@ -663,9 +671,9 @@ class MarketDataEngine:
         
         return max(0, quality_score), issues
     
-    def get_enhanced_market_data(self, symbol, period='5d', interval='30m', force_refresh=False):
+    def get_market_data(self, symbol, period='5d', interval='30m', force_refresh=False):
         """
-        Enhanced market data fetching with quality validation
+        Market data fetching with quality validation
         """
         cache_key = f"{symbol}_{period}_{interval}"
         current_time = datetime.now()
@@ -712,7 +720,7 @@ class MarketDataEngine:
             info = ticker.info
             
             # Get recent price data for calculations
-            recent_data, _ = self.get_enhanced_market_data(symbol, period='2d', interval='1m')
+            recent_data, _ = self.get_market_data(symbol, period='2d', interval='1m')
             
             snapshot = {
                 'symbol': symbol,
@@ -867,7 +875,7 @@ class MarketAnalytics:
         """
         try:
             # Get recent data for analysis
-            data, (quality_score, _) = self.data_engine.get_enhanced_market_data(
+            data, (quality_score, _) = self.data_engine.get_market_data(
                 symbol, period='5d', interval='30m'
             )
             
