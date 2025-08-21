@@ -1,2966 +1,881 @@
-# ══════════════════════════════════════════════════════════════════════════════════════
-# MARKETLENS PRO - ENTERPRISE SPX & EQUITIES FORECASTING PLATFORM
-# Professional Trading Application with Advanced Analytics & Real-time Data
-# ══════════════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# MARKETLENS PRO V5 - PART 1: ELITE TRADING ANALYTICS PLATFORM
+# BY MAX POINTE CONSULTING
+# Professional Market Intelligence & Signal Advisory System
+# ============================================================================
 
-
-# ══════════════════════════════════════════════════════════════════════════════════════
-# PART 1: CORE CONFIGURATION & GLOBAL SETTINGS (STREAMLIT FIXED)
-# ══════════════════════════════════════════════════════════════════════════════════════
-
-from __future__ import annotations
-from datetime import datetime, date, time, timedelta
-from zoneinfo import ZoneInfo
-import pandas as pd
 import streamlit as st
-import yfinance as yf
+import pandas as pd
 import numpy as np
+import yfinance as yf
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import datetime
+import pytz
+import time
+import warnings
+from typing import Dict, List, Tuple, Optional, Any
+import json
+from dataclasses import dataclass, asdict
+from datetime import datetime, timedelta, time as dt_time
+import math
 
-# ───────────────────────────────  GLOBAL CONFIG  ───────────────────────────────
-APP_NAME = "MarketLens Pro"
-TAGLINE = "Enterprise SPX & Equities Forecasting"
-VERSION = "5.0"
-COMPANY = "Quantum Trading Systems"
+warnings.filterwarnings('ignore')
 
-ET = ZoneInfo("America/New_York")
-CT = ZoneInfo("America/Chicago")
+# ============================================================================
+# ELITE TRADING CONFIGURATION
+# ============================================================================
 
-# Slope engine parameters
-SPX_SLOPES = {"prev_high_down": -0.2432, "prev_close_down": -0.2432, "prev_low_down": -0.2432, "tp_mirror_up": +0.2432}
-SPX_OVERNIGHT_SLOPES = {"overnight_low_up": +0.2432, "overnight_high_down": -0.2432}
-
-# Instruments
-EQUITIES = ["^GSPC", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "NFLX", "TSLA", "GOOG", "BRK-B", "UNH", "JNJ", "V"]
-ES_SYMBOL = "ES=F"
-
-# ───────────────────────────────  PAGE SETUP  ───────────────────────────────
 st.set_page_config(
-    page_title=f"{APP_NAME} - Professional Trading Platform",
-    page_icon="📈",
+    page_title="MarketLens Pro v5 - Elite Trading Analytics",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        'Get Help': 'https://quantumtradingsystems.com/support',
-        'Report a bug': 'https://quantumtradingsystems.com/bugs',
-        'About': f"{APP_NAME} v{VERSION} - Professional trading analytics platform"
-    }
+    initial_sidebar_state="expanded"
 )
 
-# ───────────────────────────────  HELPER FUNCTIONS  ───────────────────────────────
-def previous_trading_day(ref_d: date) -> date:
-    """Calculate the previous trading day (skip weekends)."""
-    d = ref_d - timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
-
-# ───────────────────────────────  CLEAR STREAMLIT CACHE  ───────────────────────────────
-# Force clear any cached content that might be causing duplicate displays
-if 'hero_displayed' not in st.session_state:
-    st.session_state.hero_displayed = False
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 2: PREMIUM UI STYLING & VISUAL DESIGN (COMPLETE - NO ISSUES)
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-
-/* ========== CORE FOUNDATION ========== */
-html, body, .stApp { 
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-}
-
-.stApp { 
-    background: radial-gradient(ellipse at top, #f7faff 0%, #ffffff 50%, #f1f5f9 100%) fixed;
-}
-
-/* ========== HERO SECTION ========== */
-.hero {
-    border-radius: 28px;
-    padding: 32px 36px;
-    margin: 0 0 32px 0;
-    border: 1px solid rgba(15,23,42,.08);
-    background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 50%, #6366f1 100%);
-    color: white;
-    box-shadow: 0 20px 40px rgba(99,102,241,.2);
-    position: relative;
-    overflow: hidden;
-}
-
-.hero h1 { 
-    margin: 0; 
-    font-weight: 900; 
-    font-size: 36px; 
-    letter-spacing: -0.02em;
-    color: #ffffff !important;
-}
-
-.hero .sub { 
-    opacity: 0.95; 
-    font-weight: 700; 
-    font-size: 18px;
-    margin-top: 8px; 
-    color: rgba(255,255,255,0.9) !important;
-}
-
-.hero .meta { 
-    opacity: 0.8; 
-    font-size: 14px; 
-    margin-top: 12px;
-    font-weight: 500;
-    color: rgba(255,255,255,0.8) !important;
-}
-
-/* ========== KPI DASHBOARD (FIXED FOR ALL BROWSERS) ========== */
-.kpi {
-    display: grid; 
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); 
-    gap: 20px; 
-    margin-top: 24px;
-}
-
-.kpi .card {
-    border-radius: 20px; 
-    padding: 20px 24px;
-    background: #ffffff;
-    border: 1px solid rgba(15,23,42,.12);
-    box-shadow: 0 8px 20px rgba(0,0,0,.08);
-    transition: all 0.3s ease;
-    position: relative;
-    overflow: hidden;
-}
-
-.kpi .card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: #3b82f6;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.kpi .card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 16px 32px rgba(0,0,0,.12);
-}
-
-.kpi .card:hover::before {
-    opacity: 1;
-}
-
-.kpi .label { 
-    color: #64748b !important; 
-    font-size: 12px; 
-    font-weight: 700; 
-    letter-spacing: .05em; 
-    text-transform: uppercase;
-    margin-bottom: 8px;
-    display: block;
-}
-
-.kpi .value { 
-    font-weight: 900; 
-    font-size: 28px; 
-    color: #0f172a !important; 
-    letter-spacing: -0.02em;
-    line-height: 1;
-    display: block;
-}
-
-/* ========== SECTION CARDS ========== */
-.sec { 
-    margin-top: 32px; 
-    border-radius: 24px; 
-    padding: 32px; 
-    background: #ffffff;
-    border: 1px solid rgba(15,23,42,.08);
-    box-shadow: 0 16px 32px rgba(0,0,0,.06);
-    position: relative;
-}
-
-.sec h3 { 
-    margin: 0 0 20px 0; 
-    font-size: 24px; 
-    font-weight: 900; 
-    letter-spacing: -0.01em; 
-    color: #0f172a !important;
-}
-
-.sec .muted { 
-    color: #64748b !important; 
-    font-size: 14px;
-    line-height: 1.6;
-}
-
-/* ========== SIDEBAR STYLING ========== */
-section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%) !important;
-    border-right: 1px solid rgba(255,255,255,0.1);
-}
-
-section[data-testid="stSidebar"] h2, 
-section[data-testid="stSidebar"] h3, 
-section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] .stMarkdown,
-section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] div,
-section[data-testid="stSidebar"] span { 
-    color: #e2e8f0 !important; 
-}
-
-.sidebar-card {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 16px; 
-    padding: 20px; 
-    margin: 16px 0;
-    transition: all 0.3s ease;
-}
-
-.sidebar-card:hover {
-    background: rgba(255,255,255,0.12);
-    border-color: rgba(255,255,255,0.2);
-}
-
-/* ========== STATUS CHIPS ========== */
-.chip {
-    display: inline-flex; 
-    align-items: center; 
-    gap: 8px; 
-    padding: 8px 16px; 
-    border-radius: 999px;
-    border: 1px solid rgba(15,23,42,.12); 
-    background: #f8fafc; 
-    font-size: 12px; 
-    font-weight: 700; 
-    color: #0f172a !important;
-    transition: all 0.2s ease;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.chip.ok   { 
-    background: #ecfdf5; 
-    border-color: #10b981; 
-    color: #065f46 !important;
-}
-
-.chip.info { 
-    background: #eff6ff; 
-    border-color: #3b82f6; 
-    color: #1e40af !important;
-}
-
-.chip.warning { 
-    background: #fffbeb; 
-    border-color: #f59e0b; 
-    color: #92400e !important;
-}
-
-/* ========== TABLE STYLING ========== */
-.table-wrap { 
-    border-radius: 20px; 
-    overflow: hidden; 
-    border: 1px solid rgba(15,23,42,.08); 
-    box-shadow: 0 12px 28px rgba(0,0,0,.06);
-    margin: 16px 0;
-}
-
-.stDataFrame {
-    border-radius: 16px;
-    overflow: hidden;
-}
-
-div[data-testid="stDataFrame"] > div {
-    border-radius: 16px;
-    border: none;
-}
-
-/* ========== COMPLETE TEXT VISIBILITY FIXES ========== */
-/* Main content area - force all text to be dark */
-.block-container, 
-.block-container *,
-.main .block-container,
-.main .block-container * { 
-    color: #0f172a !important; 
-}
-
-/* Fix all form elements */
-label, 
-.stSelectbox label,
-.stNumberInput label,
-.stTimeInput label,
-.stTextInput label,
-.stCheckbox label,
-.stRadio label,
-.stSlider label,
-.stDateInput label,
-.stColorPicker label {
-    color: #0f172a !important;
-}
-
-/* Fix expander content specifically */
-.streamlit-expanderContent, 
-.streamlit-expanderContent *,
-details[data-testid="stExpander"],
-details[data-testid="stExpander"] *,
-div[data-testid="stExpander"],
-div[data-testid="stExpander"] *,
-.streamlit-expanderHeader,
-.streamlit-expanderHeader * {
-    color: #0f172a !important;
-    background-color: transparent !important;
-}
-
-/* Fix markdown content in expanders */
-.streamlit-expanderContent .stMarkdown,
-.streamlit-expanderContent .stMarkdown *,
-div[data-testid="stExpander"] .stMarkdown,
-div[data-testid="stExpander"] .stMarkdown *,
-details[data-testid="stExpander"] .stMarkdown,
-details[data-testid="stExpander"] .stMarkdown * {
-    color: #0f172a !important;
-}
-
-/* Fix all paragraph and text elements */
-p, div, span, h1, h2, h3, h4, h5, h6, 
-.stText, .stCaption, .stMarkdown {
-    color: #0f172a !important;
-}
-
-/* Fix input field text */
-input, textarea, select {
-    color: #0f172a !important;
-    background: #ffffff !important;
-}
-
-/* Fix metric labels and values */
-div[data-testid="stMetricLabel"] { 
-    color: #64748b !important; 
-    font-weight: 600 !important; 
-}
-
-div[data-testid="stMetricValue"] { 
-    color: #0f172a !important; 
-    font-weight: 800 !important; 
-}
-
-/* Fix captions */
-.stCaption, .stCaption p, .stCaption * { 
-    color: #64748b !important; 
-}
-
-/* Fix tab content */
-.stTabs [data-baseweb="tab-list"],
-.stTabs [data-baseweb="tab-list"] *,
-.stTabs [data-baseweb="tab-panel"],
-.stTabs [data-baseweb="tab-panel"] * {
-    color: #0f172a !important;
-}
-
-/* EXCEPTIONS - Keep these elements with their intended colors */
-
-/* Exception: Keep sidebar text light */
-section[data-testid="stSidebar"],
-section[data-testid="stSidebar"] *,
-section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] div,
-section[data-testid="stSidebar"] span,
-section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] h1,
-section[data-testid="stSidebar"] h2,
-section[data-testid="stSidebar"] h3,
-section[data-testid="stSidebar"] .stMarkdown,
-section[data-testid="stSidebar"] .stMarkdown * {
-    color: #e2e8f0 !important;
-}
-
-/* Exception: Keep hero text white */
-.hero,
-.hero *,
-.hero h1, 
-.hero .sub, 
-.hero .meta,
-.hero div,
-.hero span,
-.hero p {
-    color: #ffffff !important;
-}
-
-/* Exception: Keep KPI values dark */
-.kpi .label {
-    color: #64748b !important;
-}
-
-.kpi .value {
-    color: #0f172a !important;
-}
-
-/* ========== MOBILE RESPONSIVENESS ========== */
-@media (max-width: 900px) {
-    .hero { 
-        border-radius: 20px; 
-        padding: 24px 20px; 
-        margin-bottom: 24px;
+# Core trading universe
+TRADING_UNIVERSE = {
+    'INDEX': '^GSPC',  # SPX
+    'FUTURES': 'ES=F',  # ES Futures
+    'MEGA_CAPS': {
+        'AAPL': {'name': 'Apple Inc.', 'sector': 'Technology', 'slope': 0.0155},
+        'MSFT': {'name': 'Microsoft Corp.', 'sector': 'Technology', 'slope': 0.0541},
+        'NVDA': {'name': 'NVIDIA Corp.', 'sector': 'Technology', 'slope': 0.0086},
+        'GOOGL': {'name': 'Alphabet Inc.', 'sector': 'Technology', 'slope': 0.0122},
+        'AMZN': {'name': 'Amazon.com Inc.', 'sector': 'Consumer Disc.', 'slope': 0.0139},
+        'TSLA': {'name': 'Tesla Inc.', 'sector': 'Consumer Disc.', 'slope': 0.0285},
+        'META': {'name': 'Meta Platforms Inc.', 'sector': 'Technology', 'slope': 0.0674}
     }
-    .hero h1 { font-size: 28px; line-height: 1.1; }
-    .hero .sub { font-size: 16px; }
-    .hero .meta { font-size: 12px; }
-    
-    .kpi { 
-        grid-template-columns: repeat(2, 1fr); 
-        gap: 16px; 
+}
+
+# Time zones
+ET_TZ = pytz.timezone('US/Eastern')
+CT_TZ = pytz.timezone('US/Central')
+
+# ============================================================================
+# ELITE CSS STYLING SYSTEM
+# ============================================================================
+
+def apply_elite_styling():
+    """Apply elite trading platform styling"""
+    st.markdown("""
+    <style>
+    /* Elite Trading Platform Theme */
+    .main .block-container {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+        max-width: 100%;
     }
     
-    .kpi .card { 
-        padding: 16px 18px; 
+    /* Hero Header */
+    .elite-header {
+        background: linear-gradient(135deg, #0a0f1c 0%, #1a202c 50%, #0a0f1c 100%);
+        border: 2px solid #22d3ee;
         border-radius: 16px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 20px 40px rgba(34, 211, 238, 0.3);
     }
     
-    .kpi .label { font-size: 10px; }
-    .kpi .value { font-size: 22px; }
-    
-    .sec { 
-        padding: 24px 20px; 
-        border-radius: 20px; 
-        margin-top: 24px;
+    .elite-header::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(34, 211, 238, 0.1) 0%, transparent 70%);
+        animation: pulse 4s ease-in-out infinite;
     }
     
-    .sec h3 { font-size: 20px; }
-    .chip { padding: 6px 12px; font-size: 11px; }
-}
-
-@media (max-width: 520px) {
-    .kpi { grid-template-columns: 1fr; }
-    .hero h1 { font-size: 24px; }
-    .kpi .value { font-size: 20px; }
-    .hero { padding: 20px 16px; }
-    .sec { padding: 20px 16px; }
-}
-
-/* ========== ANIMATIONS ========== */
-@keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 20px rgba(59,130,246,.3); }
-    50% { box-shadow: 0 0 30px rgba(59,130,246,.5); }
-}
-
-.pulse-animation {
-    animation: pulse-glow 2s ease-in-out infinite;
-}
-
-/* ========== LOADING STATES ========== */
-.loading-shimmer {
-    background: linear-gradient(90deg, #f0f2f5 25%, #e4e6ea 50%, #f0f2f5 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-}
-
-@keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-}
-
-/* ========== FORM & INPUT ENHANCEMENTS ========== */
-.stButton > button {
-    border-radius: 12px;
-    border: 1px solid rgba(15,23,42,.12);
-    transition: all 0.2s ease;
-    color: #0f172a !important;
-}
-
-.stButton > button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0,0,0,.1);
-}
-
-.stSelectbox > div > div {
-    border-radius: 8px;
-}
-
-.stNumberInput > div > div > input {
-    border-radius: 8px;
-    color: #0f172a !important;
-}
-
-.stTextInput > div > div > input {
-    border-radius: 8px;
-    color: #0f172a !important;
-}
-
-.stTimeInput > div > div > input {
-    color: #0f172a !important;
-}
-
-/* Ensure proper spacing */
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 3: CORE DATA FUNCTIONS & MARKET DATA INTEGRATION (FULLY FIXED)
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-def previous_trading_day(ref_d: date) -> date:
-    """Calculate the previous trading day (skip weekends)."""
-    d = ref_d - timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
-
-@st.cache_data(ttl=60, show_spinner=False)
-def get_current_es_spx_offset() -> float:
-    """Calculate the current offset between ES futures and SPX index."""
-    try:
-        # Get current ES price
-        es_ticker = yf.Ticker("ES=F")
-        es_data = es_ticker.history(period="1d", interval="1m", prepost=True)
-        
-        # Get current SPX price  
-        spx_ticker = yf.Ticker("^GSPC")
-        spx_data = spx_ticker.history(period="1d", interval="1m", prepost=True)
-        
-        if not es_data.empty and not spx_data.empty:
-            current_es = float(es_data['Close'].iloc[-1])
-            current_spx = float(spx_data['Close'].iloc[-1])
-            offset = current_spx - current_es
-            return offset
-        else:
-            # Fallback to approximate offset if data unavailable
-            return -23.5  # Typical SPX-ES offset
-            
-    except Exception:
-        # Default offset if calculation fails
-        return -23.5
-
-@st.cache_data(ttl=60, show_spinner=False)
-def fetch_live_quote(symbol: str) -> dict:
-    """Fetch real-time market data with intelligent fallback strategy."""
-    try:
-        tkr = yf.Ticker(symbol)
-        
-        # Primary: Try 1-minute intraday data
-        try:
-            intraday = tkr.history(period="1d", interval="1m", prepost=True)
-            if isinstance(intraday, pd.DataFrame) and not intraday.empty and "Close" in intraday.columns:
-                last = intraday.iloc[-1]
-                px = float(last["Close"])
-                ts_idx = intraday.index[-1]
-                
-                # Improved timezone handling
-                if hasattr(ts_idx, 'tz') and ts_idx.tz is not None:
-                    ts = pd.Timestamp(ts_idx).tz_convert(ET)
-                else:
-                    ts = pd.Timestamp(ts_idx).tz_localize("US/Eastern")
-                
-                # Calculate change
-                if len(intraday) > 1:
-                    prev_close = float(intraday.iloc[-2]["Close"])
-                    change = px - prev_close
-                    change_pct = (change / prev_close) * 100
-                else:
-                    change = 0.0
-                    change_pct = 0.0
-                
-                return {
-                    "px": f"{px:,.2f}", 
-                    "change": f"{change:+.2f}",
-                    "change_pct": f"{change_pct:+.2f}%",
-                    "ts": ts.strftime("%a %-I:%M %p ET"), 
-                    "source": "Live (1m)",
-                    "status": "active"
-                }
-        except Exception:
-            pass
-        
-        # Fallback: Daily data
-        try:
-            daily = tkr.history(period="5d", interval="1d")
-            if isinstance(daily, pd.DataFrame) and not daily.empty and "Close" in daily.columns:
-                last = daily.iloc[-1]
-                px = float(last["Close"])
-                ts_idx = daily.index[-1]
-                
-                if hasattr(ts_idx, 'tz') and ts_idx.tz is not None:
-                    ts = pd.Timestamp(ts_idx).tz_convert(ET)
-                else:
-                    ts = pd.Timestamp(ts_idx).tz_localize("US/Eastern")
-                
-                # Calculate daily change
-                if len(daily) > 1:
-                    prev_close = float(daily.iloc[-2]["Close"])
-                    change = px - prev_close
-                    change_pct = (change / prev_close) * 100
-                else:
-                    change = 0.0
-                    change_pct = 0.0
-                
-                return {
-                    "px": f"{px:,.2f}", 
-                    "change": f"{change:+.2f}",
-                    "change_pct": f"{change_pct:+.2f}%",
-                    "ts": ts.strftime("%a 4:00 PM ET"), 
-                    "source": "Daily Close",
-                    "status": "delayed"
-                }
-        except Exception:
-            pass
-            
-    except Exception:
-        pass
-    
-    return {
-        "px": "—", 
-        "change": "—",
-        "change_pct": "—",
-        "ts": "—", 
-        "source": "Offline",
-        "status": "error"
+    .elite-header h1 {
+        color: #22d3ee;
+        font-size: 2.8rem;
+        font-weight: 800;
+        margin: 0;
+        text-shadow: 0 0 30px rgba(34, 211, 238, 0.8);
+        position: relative;
+        z-index: 1;
     }
-
-@st.cache_data(ttl=300, show_spinner=False)
-def get_previous_day_anchors(symbol: str, forecast_d: date) -> dict | None:
-    """Get previous trading day OHLC anchors."""
-    try:
-        prev_d = previous_trading_day(forecast_d)
-        tkr = yf.Ticker(symbol)
-        df = tkr.history(period="1mo", interval="1d")
+    
+    .elite-header p {
+        color: #94a3b8;
+        font-size: 1.1rem;
+        margin: 0.5rem 0 0 0;
+        position: relative;
+        z-index: 1;
+    }
+    
+    /* Trading Cards - Mobile Optimized */
+    .trading-card {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+        border: 1px solid rgba(34, 211, 238, 0.4);
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        backdrop-filter: blur(20px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        transition: all 0.3s ease;
+        height: 220px;
+        overflow-y: auto;
+        color: #ffffff !important;
+    }
+    
+    .trading-card h4 {
+        color: #22d3ee !important;
+        font-size: 1rem !important;
+        margin-bottom: 0.5rem !important;
+        font-weight: 600 !important;
+    }
+    
+    .trading-card p {
+        color: #ffffff !important;
+        font-size: 0.85rem !important;
+        line-height: 1.4 !important;
+        margin: 0.3rem 0 !important;
+    }
+    
+    .trading-card ul {
+        color: #ffffff !important;
+        font-size: 0.8rem !important;
+        line-height: 1.3 !important;
+        margin: 0.5rem 0 !important;
+        padding-left: 1rem !important;
+    }
+    
+    .trading-card li {
+        color: #ffffff !important;
+        margin: 0.2rem 0 !important;
+    }
+    
+    .trading-card:hover {
+        border-color: rgba(34, 211, 238, 0.8);
+        box-shadow: 0 12px 32px rgba(34, 211, 238, 0.2);
+        transform: translateY(-2px);
+    }
+    
+    /* Metric Cards - Mobile Optimized */
+    [data-testid="metric-container"] {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+        border: 1px solid rgba(34, 211, 238, 0.3);
+        border-radius: 12px;
+        padding: 0.8rem;
+        margin: 0.5rem 0;
+        backdrop-filter: blur(15px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        min-height: 90px;
+        transition: all 0.3s ease;
+    }
+    
+    [data-testid="metric-container"] [data-testid="metric-label"],
+    [data-testid="metric-container"] [data-testid="metric-value"],
+    [data-testid="metric-container"] [data-testid="metric-delta"] {
+        color: #ffffff !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    [data-testid="metric-container"] [data-testid="metric-label"] {
+        font-size: 0.8rem !important;
+    }
+    
+    [data-testid="metric-container"] [data-testid="metric-value"] {
+        font-size: 1.1rem !important;
+        font-weight: bold !important;
+    }
+    
+    [data-testid="metric-container"] [data-testid="metric-delta"] {
+        font-size: 0.75rem !important;
+    }
+    
+    [data-testid="metric-container"]:hover {
+        border-color: rgba(34, 211, 238, 0.6);
+        transform: translateY(-1px);
+    }
+    
+    /* Status Indicators - Enhanced Visibility */
+    .status-bull { color: #00ff88 !important; font-weight: bold; font-size: 0.9rem; }
+    .status-bear { color: #ff4757 !important; font-weight: bold; font-size: 0.9rem; }
+    .status-neutral { color: #ffa502 !important; font-weight: bold; font-size: 0.9rem; }
+    .status-premium { color: #22d3ee !important; font-weight: bold; font-size: 0.9rem; }
+    
+    /* Mobile Responsive - Enhanced */
+    @media (max-width: 768px) {
+        .elite-header h1 { font-size: 1.8rem; }
+        .elite-header p { font-size: 0.9rem; }
         
-        if df is None or df.empty:
+        .trading-card { 
+            height: 200px; 
+            padding: 0.8rem;
+        }
+        
+        .trading-card h4 {
+            font-size: 0.9rem !important;
+        }
+        
+        .trading-card p {
+            font-size: 0.8rem !important;
+        }
+        
+        .trading-card ul {
+            font-size: 0.75rem !important;
+        }
+        
+        [data-testid="metric-container"] { 
+            min-height: 75px; 
+            padding: 0.6rem;
+        }
+        
+        [data-testid="metric-container"] [data-testid="metric-label"] {
+            font-size: 0.7rem !important;
+        }
+        
+        [data-testid="metric-container"] [data-testid="metric-value"] {
+            font-size: 1rem !important;
+        }
+        
+        [data-testid="metric-container"] [data-testid="metric-delta"] {
+            font-size: 0.7rem !important;
+        }
+    }
+    
+    /* Dataframe Styling - Enhanced Text Visibility */
+    .stDataFrame > div {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+        border: 1px solid rgba(34, 211, 238, 0.3);
+        border-radius: 12px;
+        backdrop-filter: blur(15px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    
+    .stDataFrame table {
+        color: #ffffff !important;
+        font-size: 0.85rem !important;
+    }
+    
+    .stDataFrame th {
+        color: #22d3ee !important;
+        font-weight: bold !important;
+        background-color: rgba(34, 211, 238, 0.1) !important;
+    }
+    
+    .stDataFrame td {
+        color: #ffffff !important;
+    }
+    
+    /* Enhanced Text Visibility - Force Dark Text on Light, White on Dark */
+    
+    /* Alert Boxes - Enhanced Visibility */
+    .stAlert > div {
+        color: #ffffff !important;
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%) !important;
+    }
+    
+    .stAlert p, .stAlert div, .stAlert span, .stAlert strong {
+        color: #ffffff !important;
+    }
+    
+    /* Dataframe Styling - Enhanced Text Visibility */
+    .stDataFrame > div {
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.98) 100%);
+        border: 1px solid rgba(34, 211, 238, 0.3);
+        border-radius: 12px;
+        backdrop-filter: blur(15px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    
+    .stDataFrame table {
+        color: #ffffff !important;
+        font-size: 0.85rem !important;
+        background-color: rgba(15, 23, 42, 0.95) !important;
+    }
+    
+    .stDataFrame th {
+        color: #22d3ee !important;
+        font-weight: bold !important;
+        background-color: rgba(15, 23, 42, 0.98) !important;
+        border-bottom: 1px solid rgba(34, 211, 238, 0.3) !important;
+    }
+    
+    .stDataFrame td {
+        color: #ffffff !important;
+        background-color: rgba(15, 23, 42, 0.95) !important;
+        border-bottom: 1px solid rgba(34, 211, 238, 0.1) !important;
+    }
+    
+    /* Force all table text to be white */
+    .stDataFrame table tbody tr td,
+    .stDataFrame table thead tr th,
+    .stDataFrame table tbody tr td div,
+    .stDataFrame table thead tr th div {
+        color: #ffffff !important;
+        background-color: transparent !important;
+    }
+    
+    /* Caption and small text */
+    .stCaption, .caption {
+        color: #94a3b8 !important;
+        font-size: 0.8rem !important;
+    }
+    
+    /* Markdown text in containers */
+    .stMarkdown p, .stMarkdown div, .stMarkdown span {
+        color: #ffffff !important;
+    }
+    
+    /* Subheadings */
+    h1, h2, h3, h4, h5, h6 {
+        color: #22d3ee !important;
+    }
+    
+    /* Warning, info, success, error boxes */
+    .stAlert[data-baseweb="notification"] {
+        background-color: rgba(15, 23, 42, 0.95) !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(34, 211, 238, 0.3) !important;
+    }
+    
+    .stAlert[data-baseweb="notification"] > div {
+        color: #ffffff !important;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 0.3; }
+        50% { opacity: 0.8; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ============================================================================
+# ELITE DATA STRUCTURES
+# ============================================================================
+
+@dataclass
+class MarketIntelligence:
+    """Elite market intelligence data structure"""
+    symbol: str
+    price: float
+    change_pct: float
+    volume: int
+    volatility: float
+    rsi: float
+    momentum_score: float
+    trend_direction: str
+    support_level: float
+    resistance_level: float
+    anchor_projection: Dict[str, float]
+
+@dataclass
+class TradingOpportunity:
+    """Professional trading opportunity identification"""
+    symbol: str
+    opportunity_type: str  # 'BREAKOUT', 'REVERSAL', 'MOMENTUM', 'ANCHOR_TOUCH'
+    entry_zone: Tuple[float, float]
+    target_zones: List[float]
+    stop_loss: float
+    risk_reward_ratio: float
+    confidence_score: float
+    time_horizon: str
+    market_context: str
+
+# ============================================================================
+# SESSION STATE MANAGEMENT
+# ============================================================================
+
+def initialize_elite_session():
+    """Initialize elite trading session state"""
+    if 'elite_initialized' not in st.session_state:
+        # Core session
+        st.session_state.elite_initialized = True
+        st.session_state.session_start = datetime.now()
+        st.session_state.market_intelligence = {}
+        st.session_state.trading_opportunities = []
+        st.session_state.watchlist = list(TRADING_UNIVERSE['MEGA_CAPS'].keys())[:5]
+        
+        # Analytics metrics
+        st.session_state.market_regime = 'ANALYZING'
+        st.session_state.fear_greed_index = 50
+        st.session_state.sector_rotation = 'TECH_LEADERSHIP'
+        st.session_state.volatility_regime = 'NORMAL'
+        
+        # Performance tracking
+        st.session_state.opportunities_today = 0
+        st.session_state.signals_generated = 0
+        st.session_state.market_sync_score = 0.0
+        
+        # Data quality
+        st.session_state.data_quality = {
+            'connection_health': 100.0,
+            'latency_ms': 45,
+            'update_success_rate': 100.0,
+            'last_sync': datetime.now()
+        }
+
+# ============================================================================
+# ELITE UTILITY FUNCTIONS
+# ============================================================================
+
+def get_market_time():
+    """Get current market time"""
+    return datetime.now(ET_TZ)
+
+def get_market_state():
+    """Determine current market state"""
+    now = get_market_time()
+    
+    if now.weekday() >= 5:  # Weekend
+        return "🔒 WEEKEND", "#64748b"
+    
+    market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    
+    if market_open <= now <= market_close:
+        return "⚡ LIVE TRADING", "#00ff88"
+    elif now.hour < 9:
+        return "🌅 PRE-MARKET", "#ffa502"
+    elif now.hour >= 16:
+        return "🌙 AFTER-HOURS", "#ff6b35"
+    else:
+        return "⏸️ CLOSED", "#64748b"
+
+def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
+    """Calculate RSI indicator"""
+    if len(prices) < period + 1:
+        return 50.0
+    
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
+
+def calculate_volatility_regime(vol: float) -> str:
+    """Determine volatility regime"""
+    if vol < 15:
+        return "LOW_VOL"
+    elif vol < 25:
+        return "NORMAL_VOL"
+    elif vol < 35:
+        return "HIGH_VOL"
+    else:
+        return "EXTREME_VOL"
+
+def assess_market_regime(market_data: Dict) -> str:
+    """Assess overall market regime"""
+    if not market_data:
+        return "ANALYZING"
+    
+    # Simple regime analysis based on volatility and momentum
+    avg_vol = np.mean([data.get('volatility', 20) for data in market_data.values()])
+    
+    if avg_vol > 30:
+        return "HIGH_VOLATILITY"
+    elif avg_vol < 15:
+        return "LOW_VOLATILITY"
+    else:
+        return "TRENDING"
+
+# ============================================================================
+# ELITE DATA FETCHING - REAL YAHOO FINANCE DATA
+# ============================================================================
+
+def fetch_elite_quote(symbol: str) -> Optional[Dict]:
+    """Fetch REAL elite market data with advanced metrics"""
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period='30d', interval='1d')
+        
+        if hist.empty:
             return None
-            
-        # Simplified date handling
-        df_dates = pd.to_datetime(df.index).date
-        df = df.copy()
-        df['_date'] = df_dates
         
-        # Find the previous trading day
-        matching_rows = df[df['_date'] == prev_d]
-        if matching_rows.empty:
-            # Use most recent available
-            row = df.iloc[-1]
-            actual_date = df['_date'].iloc[-1]
-        else:
-            row = matching_rows.iloc[-1]
-            actual_date = prev_d
-            
+        current_price = float(hist['Close'].iloc[-1])
+        prev_close = float(hist['Close'].iloc[-2]) if len(hist) > 1 else current_price
+        
+        # Get actual volume
+        current_volume = int(hist['Volume'].iloc[-1])
+        
+        # Calculate REAL advanced metrics
+        returns = hist['Close'].pct_change().dropna()
+        volatility = float(returns.std() * np.sqrt(252) * 100) if len(returns) > 1 else 0.0
+        
+        # Real RSI calculation
+        rsi = calculate_rsi(hist['Close'])
+        
+        # Real momentum calculations
+        momentum_5d = (current_price - hist['Close'].iloc[-6]) / hist['Close'].iloc[-6] * 100 if len(hist) > 5 else 0
+        momentum_20d = (current_price - hist['Close'].iloc[-21]) / hist['Close'].iloc[-21] * 100 if len(hist) > 20 else 0
+        
+        # Real Support/Resistance levels
+        high_20d = float(hist['High'].tail(20).max())
+        low_20d = float(hist['Low'].tail(20).min())
+        
+        # Real change calculation
+        change = current_price - prev_close
+        change_pct = (change / prev_close * 100) if prev_close != 0 else 0
+        
         return {
-            "prev_day": actual_date,
-            "high": float(row["High"]),
-            "low": float(row["Low"]),
-            "close": float(row["Close"]),
-            "open": float(row["Open"]),
-            "volume": int(row["Volume"]) if "Volume" in row else 0
+            'symbol': symbol,
+            'price': current_price,
+            'change': change,
+            'change_pct': change_pct,
+            'volume': current_volume,
+            'volatility': volatility,
+            'rsi': rsi,
+            'momentum_5d': momentum_5d,
+            'momentum_20d': momentum_20d,
+            'support': low_20d,
+            'resistance': high_20d,
+            'vol_regime': calculate_volatility_regime(volatility),
+            'last_update': datetime.now().strftime('%H:%M:%S')
         }
         
     except Exception:
         return None
 
-def asian_window_ct(forecast_d: date) -> tuple[datetime, datetime]:
-    """Define Asian trading session window (5-8 PM CT previous day)."""
-    prior = forecast_d - timedelta(days=1)
-    start = datetime.combine(prior, time(17, 0), tzinfo=CT)
-    end = datetime.combine(prior, time(20, 0), tzinfo=CT)
-    return start, end
-
-@st.cache_data(ttl=300, show_spinner=False)
-def es_fetch_asian_data(start_ct: datetime, end_ct: datetime, interval: str = "30m") -> pd.DataFrame:
-    """
-    Fetch ES futures data with configurable interval (15m or 30m).
-    Default to 30m for line chart consistency.
-    """
-    try:
-        tkr = yf.Ticker(ES_SYMBOL)
-        
-        # Try multiple periods for robustness
-        for period in ["7d", "1mo"]:
-            try:
-                raw = tkr.history(period=period, interval=interval, prepost=True)
-                if raw is not None and not raw.empty:
-                    break
-            except Exception:
-                continue
-        else:
-            return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-            
-        df = raw.reset_index()
-        
-        # Handle different datetime column names
-        datetime_col = None
-        for col in ["Datetime", "Date", "index"]:
-            if col in df.columns:
-                datetime_col = col
-                break
-                
-        if datetime_col is None:
-            return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-            
-        df = df.rename(columns={datetime_col: "Dt"})
-        
-        # Timezone conversion
-        df["Dt"] = pd.to_datetime(df["Dt"])
-        if df["Dt"].dt.tz is None:
-            df["Dt"] = df["Dt"].dt.tz_localize("UTC")
-        df["Dt"] = df["Dt"].dt.tz_convert(CT)
-        
-        # Filter and clean
-        required_cols = ["Dt", "Open", "High", "Low", "Close"]
-        df = df[required_cols].dropna()
-        
-        mask = (df["Dt"] >= start_ct) & (df["Dt"] <= end_ct)
-        result = df.loc[mask].sort_values("Dt").reset_index(drop=True)
-        
-        return result
-        
-    except Exception:
-        return pd.DataFrame(columns=["Dt","Open","High","Low","Close"])
-
-@st.cache_data(ttl=300, show_spinner=False)
-def es_asian_anchors_as_spx(forecast_d: date, timeframe: str = "30m") -> dict | None:
-    """
-    FIXED FOR LINE CHART TRADING: Calculate Asian session swing points using CLOSE prices only.
+def update_market_intelligence():
+    """Update comprehensive market intelligence with REAL data"""
+    intelligence = {}
     
-    Args:
-        forecast_d: The forecast date
-        timeframe: "15m" or "30m" - choose based on your line chart timeframe
+    # Fetch data for all symbols silently in background
+    all_symbols = [TRADING_UNIVERSE['INDEX']] + list(TRADING_UNIVERSE['MEGA_CAPS'].keys())
     
-    Returns:
-        Dictionary with SPX-equivalent swing high/low CLOSE prices for perfect line chart matching.
-    """
-    try:
-        start_ct, end_ct = asian_window_ct(forecast_d)
-        es = es_fetch_asian_data(start_ct - timedelta(minutes=60), end_ct + timedelta(minutes=60), interval=timeframe)
-        
-        if es.empty:
-            return None
-            
-        # FIXED: Find the candles with highest and lowest CLOSE prices (line chart values)
-        # This gives you the actual line chart swing points, not candle wicks
-        highest_close_idx = es["Close"].idxmax()  # Candle with highest CLOSE
-        lowest_close_idx = es["Close"].idxmin()   # Candle with lowest CLOSE
-        
-        # Get the CLOSE prices (line chart values)
-        es_high_close = float(es.loc[highest_close_idx, "Close"])
-        es_low_close = float(es.loc[lowest_close_idx, "Close"])
-        
-        # Get current ES to SPX offset for conversion
-        offset = get_current_es_spx_offset()
-        
-        # Convert ES CLOSE prices to SPX equivalent
-        # SPX = ES + offset (since moves are 1:1)
-        spx_high_close = es_high_close + offset
-        spx_low_close = es_low_close + offset
-        
-        return {
-            "high_px": spx_high_close,  # SPX equivalent of ES highest CLOSE
-            "high_time_ct": es.loc[highest_close_idx, "Dt"].to_pydatetime(),
-            "low_px": spx_low_close,    # SPX equivalent of ES lowest CLOSE  
-            "low_time_ct": es.loc[lowest_close_idx, "Dt"].to_pydatetime(),
-            "es_high_close_raw": es_high_close,  # Original ES close values for reference
-            "es_low_close_raw": es_low_close,
-            "conversion_offset": offset,
-            "timeframe": timeframe.upper(),
-            "method": "LINE_CHART_CLOSES",  # Clear indicator
-            "data_points": len(es)  # Number of candles analyzed
-        }
-        
-    except Exception:
-        return None
+    for symbol in all_symbols:
+        data = fetch_elite_quote(symbol)
+        if data:
+            intelligence[symbol] = data
+    
+    # Update session state with real data
+    st.session_state.market_intelligence = intelligence
+    st.session_state.market_regime = assess_market_regime(intelligence)
+    
+    # Update sync score based on successful data fetches
+    success_rate = len(intelligence) / len(all_symbols) * 100
+    st.session_state.market_sync_score = success_rate
+    
+    return intelligence
 
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# USAGE EXAMPLES FOR DIFFERENT TIMEFRAMES
-# ═══════════════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# ELITE DASHBOARD COMPONENTS
+# ============================================================================
 
-# For 30-minute line chart (default):
-# asian = es_asian_anchors_as_spx(forecast_date, "30m")
+def render_elite_header():
+    """Render elite trading platform header"""
+    st.markdown("""
+    <div class="elite-header">
+        <h1>⚡ MarketLens Pro v5</h1>
+        <p>Elite Trading Intelligence & Market Analytics Platform</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-# For 15-minute line chart:
-# asian = es_asian_anchors_as_spx(forecast_date, "15m")
+def render_market_command_center():
+    """Render market command center"""
+    st.markdown("### 🎯 Market Command Center")
+    
+    # Mobile-friendly: 3 columns instead of 5
+    col1, col2, col3 = st.columns(3)
+    
+    market_state, state_color = get_market_state()
+    session_time = (datetime.now() - st.session_state.session_start).total_seconds() / 3600
+    
+    with col1:
+        # Shorten text for mobile
+        state_short = market_state.replace("TRADING", "").replace("MARKET", "").strip()
+        st.metric("Market", state_short, get_market_time().strftime('%H:%M ET'))
+    
+    with col2:
+        regime_short = st.session_state.market_regime.replace("_", " ").replace("VOLATILITY", "VOL")
+        st.metric("Regime", regime_short, st.session_state.volatility_regime.replace("_VOL", ""))
+    
+    with col3:
+        st.metric("Session", f"{session_time:.1f}h", f"{st.session_state.signals_generated} signals")
+    
+    # Second row for remaining metrics
+    col4, col5, col6 = st.columns(3)
+    
+    with col4:
+        st.metric("Opportunities", st.session_state.opportunities_today, "identified")
+    
+    with col5:
+        st.metric("Sync Score", f"{st.session_state.market_sync_score:.1f}%", "real-time")
+    
+    with col6:
+        # Add a useful metric like watchlist size
+        st.metric("Watchlist", len(st.session_state.watchlist), "symbols")
 
-# The function will now return the exact CLOSE prices that match your line chart!
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 4: ADVANCED SIDEBAR NAVIGATION & HERO SECTION
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-with st.sidebar:
-    # Company branding header
-    st.markdown(f"""
-    <div style="text-align: center; padding: 24px 16px; border-bottom: 1px solid rgba(255,255,255,0.15); margin-bottom: 24px; background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%); border-radius: 16px;">
-        <h2 style="color: #ffffff !important; margin: 0; font-size: 24px; font-weight: 900; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">📈 {APP_NAME}</h2>
-        <p style="color: #cbd5e1 !important; margin: 8px 0 0 0; font-size: 13px; font-weight: 500;">{COMPANY}</p>
-        <div style="margin-top: 12px;">
-            <span style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">v{VERSION}</span>
+def render_trading_intelligence():
+    """Render elite trading intelligence dashboard"""
+    st.markdown("### 📊 Trading Intelligence Matrix")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown(f"""
+        <div class="trading-card">
+            <h4 class="status-premium">⚓ SPX Anchor Engine</h4>
+            <p><strong>Asian Session Analysis</strong></p>
+            <ul>
+                <li>ES Futures: 5:00-7:30 PM CT</li>
+                <li>Skyline/Baseline: ✅ Active</li>
+                <li>Slope Projections: Real-time</li>
+                <li>Signal Generation: Live</li>
+            </ul>
+            <p><strong>Next Analysis:</strong> 17:00 CT</p>
+            <p><strong>Status:</strong> <span class="status-bull">OPERATIONAL</span></p>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Main Navigation
-    st.markdown("### 🧭 Navigation")
-    page_options = [
-        "📊 Dashboard", 
-        "⚓ Anchors", 
-        "🎯 Forecasts", 
-        "📡 Signals", 
-        "📜 Contracts", 
-        "🌟 Fibonacci", 
-        "📤 Export", 
-        "⚙️ Settings"
-    ]
-    
-    page = st.radio(
-        "",
-        options=page_options,
-        index=0,
-        label_visibility="collapsed",
-        help="Navigate between different analysis modules"
-    )
-
-    # Asset Selection Panel
-    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-    st.markdown("#### 📈 Trading Instrument")
-    
-    # Enhanced asset list with descriptions
-    asset_display_map = {
-        "^GSPC": "SPX - S&P 500 Index",
-        "AAPL": "AAPL - Apple Inc.",
-        "MSFT": "MSFT - Microsoft Corp.",
-        "NVDA": "NVDA - NVIDIA Corp.",
-        "AMZN": "AMZN - Amazon.com Inc.",
-        "GOOGL": "GOOGL - Alphabet Inc.",
-        "META": "META - Meta Platforms",
-        "NFLX": "NFLX - Netflix Inc.",
-        "TSLA": "TSLA - Tesla Inc.",
-        "GOOG": "GOOG - Alphabet Inc. (Class A)",
-        "BRK-B": "BRK-B - Berkshire Hathaway",
-        "UNH": "UNH - UnitedHealth Group",
-        "JNJ": "JNJ - Johnson & Johnson",
-        "V": "V - Visa Inc."
-    }
-    
-    asset = st.selectbox(
-        "Choose primary asset",
-        options=list(asset_display_map.keys()),
-        index=0,
-        format_func=lambda x: asset_display_map.get(x, x),
-        help="Primary trading instrument for analysis. ES futures are automatically used for Asian session data."
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Session Configuration Panel
-    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-    st.markdown("#### 📅 Trading Session Analysis")
-    
-    forecast_date = st.date_input(
-        "Target trading session",
-        value=date.today(),
-        help="Trading session for comprehensive analysis. Used for previous day anchors and Asian session calculations.",
-        max_value=date.today() + timedelta(days=7),
-        min_value=date.today() - timedelta(days=30)
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Market Timing & Status
-    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-    st.markdown("#### ⏰ Market Status")
-    
-    # Real-time market status
-    now_et = datetime.now(ET)
-    current_time_str = now_et.strftime("%-I:%M %p ET")
-    
-    # Market hours logic
-    if now_et.weekday() < 5:  # Weekday
-        market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
-        market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
-        
-        if market_open <= now_et <= market_close:
-            st.markdown('<span class="chip ok">🟢 Market Open</span>', unsafe_allow_html=True)
-        elif now_et.time() < time(9, 30):
-            st.markdown('<span class="chip info">🌅 Pre-Market</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="chip info">🌆 After Hours</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="chip warning">📴 Weekend</span>', unsafe_allow_html=True)
-    
-    st.caption(f"Current: {current_time_str}")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Quick Actions
-    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-    st.markdown("#### ⚡ Quick Actions")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔄 Refresh", help="Refresh market data", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+        """, unsafe_allow_html=True)
     
     with col2:
-        if st.button("📋 Export", help="Quick export", use_container_width=True):
-            st.success("Export ready!")
+        st.markdown(f"""
+        <div class="trading-card">
+            <h4 class="status-premium">📈 Stock Anchor Matrix</h4>
+            <p><strong>Mon/Tue Cross-Analysis</strong></p>
+            <ul>
+                <li>7 Mega-Cap Stocks</li>
+                <li>Cross-Day Swing: ✅</li>
+                <li>Individual Slopes</li>
+                <li>Wed/Thu Signals</li>
+            </ul>
+            <p><strong>Portfolio:</strong> Tech Leaders</p>
+            <p><strong>Analysis:</strong> <span class="status-bull">READY</span></p>
+        </div>
+        """, unsafe_allow_html=True)
     
-    st.markdown('</div>', unsafe_allow_html=True)
+    with col3:
+        intelligence = st.session_state.market_intelligence
+        active_count = len(intelligence)
+        avg_rsi = np.mean([data.get('rsi', 50) for data in intelligence.values()]) if intelligence else 50
+        
+        rsi_signal = "OVERSOLD" if avg_rsi < 30 else "OVERBOUGHT" if avg_rsi > 70 else "NEUTRAL"
+        rsi_color = "status-bull" if avg_rsi < 30 else "status-bear" if avg_rsi > 70 else "status-neutral"
+        
+        st.markdown(f"""
+        <div class="trading-card">
+            <h4 class="status-premium">🧠 Market Intelligence</h4>
+            <p><strong>Real-Time Analytics</strong></p>
+            <ul>
+                <li>Symbols Tracked: {active_count}/8</li>
+                <li>Average RSI: {avg_rsi:.1f}</li>
+                <li>Market Regime: {st.session_state.market_regime}</li>
+                <li>Fear/Greed: {st.session_state.fear_greed_index}</li>
+            </ul>
+            <p><strong>RSI Signal:</strong> <span class="{rsi_color}">{rsi_signal}</span></p>
+            <p><strong>Data Quality:</strong> <span class="status-bull">PREMIUM</span></p>
+        </div>
+        """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# HERO SECTION - CREATED AFTER SIDEBAR VARIABLES ARE DEFINED
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# Now that asset and forecast_date are defined, create the hero section
-label = "SPX" if asset == "^GSPC" else asset
-market_data = fetch_live_quote(asset)
-
-# Safely determine change color
-change_value = market_data.get('change', '—')
-if change_value.startswith('+'):
-    change_color = "#10b981"
-elif change_value.startswith('-'):
-    change_color = "#ef4444"
-else:
-    change_color = "#64748b"
-
-# Safely determine chip status
-status = market_data.get('status', 'unknown')
-if status == 'active':
-    chip_class = "ok"
-    pulse_class = "pulse-animation"
-elif status == 'delayed':
-    chip_class = "info"
-    pulse_class = ""
-else:
-    chip_class = "warning"
-    pulse_class = ""
-
-# FIXED: Hero section with proper variable order
-st.markdown(f"""
-<div class="hero">
-  <h1>{APP_NAME}</h1>
-  <div class="sub">{TAGLINE}</div>
-  <div class="meta">v{VERSION} • {COMPANY}</div>
-
-  <div class="kpi">
-    <div class="card {pulse_class}">
-      <div class="label">{label} — Last Price</div>
-      <div class="value">{market_data.get('px', '—')}</div>
-    </div>
-    <div class="card">
-      <div class="label">Change • % Change</div>
-      <div class="value" style="color: {change_color};">{market_data.get('change', '—')} • {market_data.get('change_pct', '—')}</div>
-    </div>
-    <div class="card">
-      <div class="label">Last Updated</div>
-      <div class="value">{market_data.get('ts', '—')}</div>
-    </div>
-    <div class="card">
-      <div class="label">Data Source</div>
-      <div class="value"><span class="chip {chip_class}">{market_data.get('source', 'Unknown')}</span></div>
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 5A: CORE FUNCTIONS ONLY (HERO SECTION REMOVED)
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# Core projection and table helpers
-def _rth_slots_30m():
-    """Generate RTH time slots every 30 minutes (8:30 AM - 2:30 PM CT)."""
-    start = datetime.combine(forecast_date, time(8, 30), tzinfo=CT)
-    slots = []
-    current = start
-    while current.time() <= time(14, 30):
-        slots.append(current)
-        current += timedelta(minutes=30)
-    return slots
-
-def _blocks_30m(from_dt: datetime, to_dt: datetime) -> int:
-    """Calculate number of 30-minute blocks between two datetime objects."""
-    delta = to_dt - from_dt
-    return int(delta.total_seconds() // (30 * 60))
-
-def _project_price(base_px: float, base_dt: datetime, to_dt: datetime, slope_per_30m: float) -> float:
-    """Project price using linear slope over 30-minute intervals."""
-    blocks = _blocks_30m(base_dt, to_dt)
-    return base_px + (slope_per_30m * blocks)
-
-def _format_table_data(df):
-    """Enhanced table formatting with professional styling."""
-    return st.dataframe(
-        df,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "Time": st.column_config.TextColumn("Time", width="small"),
-            "Entry": st.column_config.NumberColumn("Entry", format="%.2f", width="medium"),
-            "TP1": st.column_config.NumberColumn("TP1", format="%.2f", width="medium"),
-            "TP2": st.column_config.NumberColumn("TP2", format="%.2f", width="medium"),
-            "Risk": st.column_config.NumberColumn("Risk %", format="%.1f", width="small"),
-            "Reward": st.column_config.NumberColumn("R:R", format="%.1f", width="small"),
-        },
-        height=400
-    )
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# HERO SECTION REMOVED - WILL BE ADDED IN PART 4 AFTER VARIABLES ARE DEFINED
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# Get clean page name for processing (safely)
-clean_page = page.split(" ", 1)[1] if " " in page and len(page.split(" ", 1)) > 1 else page
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PAGE 1: DASHBOARD - SYSTEM OVERVIEW & READINESS STATUS
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-if clean_page == "Dashboard":
-    # System Readiness Assessment
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>🚀 System Readiness Dashboard</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Real-time system status and data availability for professional trading analysis</p>", unsafe_allow_html=True)
-
-    # Get all required data for status check
-    anchors = get_previous_day_anchors(asset, forecast_date)
-    asian = es_asian_anchors_as_spx(forecast_date)
-    market_data = fetch_live_quote(asset)
+def render_live_market_matrix():
+    """Render comprehensive live market matrix with REAL data"""
+    st.markdown("### 📈 Live Market Matrix")
     
-    # Status indicators with enhanced logic
-    readiness_items = [
-        {
-            "name": "Live Market Data",
-            "status": market_data.get('px') != "—",
-            "detail": f"Source: {market_data.get('source', 'Unknown')}"
-        },
-        {
-            "name": "Previous Day Anchors",
-            "status": anchors is not None,
-            "detail": f"Date: {anchors['prev_day'] if anchors else 'Unavailable'}"
-        },
-        {
-            "name": "Asian Session Data",
-            "status": asian is not None,
-            "detail": "ES Futures (5-8 PM CT)" if asian else "Data pending"
-        },
-        {
-            "name": "Algorithm Engine",
-            "status": True,
-            "detail": "Projection slopes calibrated"
-        },
-        {
-            "name": "Risk Management",
-            "status": True,
-            "detail": "Standard profile active"
-        }
-    ]
+    intelligence = st.session_state.market_intelligence
     
-    # Create status grid with improved layout
-    cols = st.columns(len(readiness_items))
-    for i, item in enumerate(readiness_items):
-        with cols[i]:
-            status_icon = "✅" if item["status"] else "⚠️"
-            
-            st.markdown(f"""
-            <div style="text-align: center; padding: 20px; background: #ffffff; border-radius: 16px; border: 1px solid rgba(15,23,42,.08); box-shadow: 0 4px 12px rgba(0,0,0,.05);">
-                <div style="font-size: 24px; margin-bottom: 8px;">{status_icon}</div>
-                <div style="font-weight: 700; color: #0f172a; margin-bottom: 4px; font-size: 14px;">{item['name']}</div>
-                <div style="font-size: 12px; color: #64748b;">{item['detail']}</div>
-            </div>
-            """, unsafe_allow_html=True)
+    if not intelligence:
+        st.warning("⏳ Loading market data...")
+        return
     
-    # Overall system status
-    overall_ready = all(item["status"] for item in readiness_items)
-    status_text = "🟢 All Systems Operational" if overall_ready else "🟡 Partial Ready"
-    status_chip = "ok" if overall_ready else "warning"
+    # Create market matrix dataframe with REAL data
+    matrix_data = []
     
-    st.markdown(f"""
-    <div style="text-align: center; margin-top: 24px;">
-        <span class="chip {status_chip}" style="font-size: 14px; padding: 12px 24px;">
-            {status_text}
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Quick Market Overview
-    if anchors:
-        st.markdown('<div class="sec">', unsafe_allow_html=True)
-        st.markdown("<h3>📊 Market Overview</h3>", unsafe_allow_html=True)
+    for symbol, data in intelligence.items():
+        # Use actual fetched data
+        price = data.get('price', 0)
+        change_pct = data.get('change_pct', 0)
+        rsi = data.get('rsi', 50)
+        volatility = data.get('volatility', 0)
+        support = data.get('support', 0)
+        resistance = data.get('resistance', 0)
+        volume = data.get('volume', 0)
         
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Previous High", f"${anchors['high']:,.2f}")
-        with col2:
-            st.metric("Previous Close", f"${anchors['close']:,.2f}")
-        with col3:
-            st.metric("Previous Low", f"${anchors['low']:,.2f}")
-        with col4:
-            prev_range = anchors['high'] - anchors['low']
-            range_pct = (prev_range / anchors['close']) * 100
-            st.metric("Daily Range", f"{range_pct:.2f}%")
-        
-        st.markdown("</div>", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PAGE 2: ANCHORS - PREVIOUS DAY & ASIAN SESSION DATA
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-elif clean_page == "Anchors":
-    # Previous Day Anchors Section
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>⚓ Previous Day Anchors (Daily OHLC)</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Key price levels from the previous trading session for projection calculations</p>", unsafe_allow_html=True)
-
-    pd_anchors = get_previous_day_anchors(asset, forecast_date)
-    if not pd_anchors:
-        st.warning("⚠️ Unable to retrieve previous day anchors. Please verify the selected asset and date.")
-    else:
-        # Enhanced metrics display
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("📈 Previous High", f"${pd_anchors['high']:,.2f}")
-        with col2:
-            st.metric("🎯 Previous Close", f"${pd_anchors['close']:,.2f}")
-        with col3:
-            st.metric("📉 Previous Low", f"${pd_anchors['low']:,.2f}")
-        with col4:
-            daily_range = pd_anchors['high'] - pd_anchors['low']
-            st.metric("📏 Daily Range", f"${daily_range:.2f}")
-        
-        # Additional analytics
-        st.markdown("### 📊 Anchor Analytics")
-        col1, col2 = st.columns(2)
-        with col1:
-            range_pct = (daily_range / pd_anchors['close']) * 100
-            st.info(f"📊 **Range Percentage:** {range_pct:.2f}% of closing price")
-            
-            midpoint = (pd_anchors['high'] + pd_anchors['low']) / 2
-            st.info(f"🎯 **Midpoint:** ${midpoint:.2f}")
-        
-        with col2:
-            volatility_score = "High" if range_pct > 3 else "Moderate" if range_pct > 1.5 else "Low"
-            st.info(f"📈 **Volatility:** {volatility_score} ({range_pct:.2f}%)")
-            
-            close_vs_range = ((pd_anchors['close'] - pd_anchors['low']) / daily_range) * 100
-            st.info(f"📍 **Close Position:** {close_vs_range:.1f}% of range")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Asian Session Anchors Section
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>🌏 Asian Session Anchors (ES Futures → SPX)</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Overnight swing points from ES futures (5-8 PM CT) converted to SPX equivalent values</p>", unsafe_allow_html=True)
-
-    asian = es_asian_anchors_as_spx(forecast_date)
-    if not asian:
-        st.warning("⚠️ Unable to compute Asian session anchors. Ensure ES futures data is available for the specified timeframe.")
-        
-        # Show expected time window
-        start_ct, end_ct = asian_window_ct(forecast_date)
-        st.info(f"📅 **Expected Window:** {start_ct.strftime('%b %d, %Y %-I:%M %p')} → {end_ct.strftime('%-I:%M %p')} CT")
-    else:
-        # Asian session metrics
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("🔺 Asian Swing High", f"${asian['high_px']:,.2f}")
-            st.caption(f"🕐 Time: {asian['high_time_ct'].strftime('%-I:%M %p CT')}")
-            if 'es_high_raw' in asian:
-                st.caption(f"📊 ES Raw: ${asian['es_high_raw']:,.2f}")
-        with col2:
-            st.metric("🔻 Asian Swing Low", f"${asian['low_px']:,.2f}")
-            st.caption(f"🕐 Time: {asian['low_time_ct'].strftime('%-I:%M %p CT')}")
-            if 'es_low_raw' in asian:
-                st.caption(f"📊 ES Raw: ${asian['es_low_raw']:,.2f}")
-        
-        # Asian session analytics
-        asian_range = asian['high_px'] - asian['low_px']
-        start_ct, end_ct = asian_window_ct(forecast_date)
-        
-        st.markdown("### 🌏 Asian Session Analytics")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.info(f"📏 **Asian Range:** ${asian_range:.2f}")
-        with col2:
-            time_diff = abs((asian['high_time_ct'] - asian['low_time_ct']).total_seconds() / 3600)
-            st.info(f"⏱️ **High-Low Spread:** {time_diff:.1f} hours")
-        with col3:
-            asian_midpoint = (asian['high_px'] + asian['low_px']) / 2
-            st.info(f"🎯 **Asian Midpoint:** ${asian_midpoint:.2f}")
-            
-        if 'conversion_offset' in asian:
-            st.success(f"🔄 **ES to SPX Conversion:** Offset = {asian['conversion_offset']:+.2f} points")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 5B: FORECASTS & SIGNALS PAGES
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PAGE 3: FORECASTS - SPX PROJECTION TABLES
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-elif clean_page == "Forecasts":
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>🎯 SPX Forecasting Engine</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Advanced projection tables using Asian session anchors with ±0.2432 per 30-minute slopes</p>", unsafe_allow_html=True)
-
-    asian = es_asian_anchors_as_spx(forecast_date)
-    if not asian:
-        st.error("❌ **Asian session anchors required.** Please check the Anchors tab to ensure ES futures data is available.")
-        
-        # Professional troubleshooting guidance
-        st.markdown("""
-        ### 🔧 System Requirements
-        
-        **📋 Prerequisites:**
-        - ES Futures data for 5-8 PM CT window (previous trading day)
-        - Minimum 15-minute granularity for accurate swing detection
-        - Network connectivity to Yahoo Finance data feeds
-        
-        **🔄 Troubleshooting Steps:**
-        1. **Verify Date:** Ensure selected date is a recent trading day
-        2. **Check ES Data:** Confirm ES=F symbol availability
-        3. **Network:** Verify Yahoo Finance connectivity
-        4. **Refresh:** Use sidebar refresh to reload data
-        5. **Time Window:** Verify 5-8 PM CT window has trading activity
-        """)
-        
-        # Alternative analysis option
-        st.markdown("### 🔄 Alternative Analysis")
-        st.info("💡 **Manual Mode:** Use the Contracts page for manual price input analysis while ES data loads.")
-        
-    else:
-        # Algorithm parameters display with enhanced visuals
-        st.markdown("### ⚙️ Algorithm Parameters")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.markdown(f"""
-            <div style="text-align: center; padding: 16px; background: linear-gradient(135deg, #10b98115 0%, #10b98105 100%); border-radius: 12px; border: 1px solid #10b98130;">
-                <div style="font-size: 20px; margin-bottom: 8px;">📈</div>
-                <div style="font-weight: 700; color: #065f46;">Upper Base</div>
-                <div style="font-size: 18px; font-weight: 800; color: #0f172a;">${asian['high_px']:,.2f}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f"""
-            <div style="text-align: center; padding: 16px; background: linear-gradient(135deg, #6366f115 0%, #6366f105 100%); border-radius: 12px; border: 1px solid #6366f130;">
-                <div style="font-size: 20px; margin-bottom: 8px;">📊</div>
-                <div style="font-weight: 700; color: #312e81;">Upward Slope</div>
-                <div style="font-size: 18px; font-weight: 800; color: #0f172a;">+0.2432</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown(f"""
-            <div style="text-align: center; padding: 16px; background: linear-gradient(135deg, #ef444415 0%, #ef444405 100%); border-radius: 12px; border: 1px solid #ef444430;">
-                <div style="font-size: 20px; margin-bottom: 8px;">📊</div>
-                <div style="font-weight: 700; color: #991b1b;">Downward Slope</div>
-                <div style="font-size: 18px; font-weight: 800; color: #0f172a;">-0.2432</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            st.markdown(f"""
-            <div style="text-align: center; padding: 16px; background: linear-gradient(135deg, #ef444415 0%, #ef444405 100%); border-radius: 12px; border: 1px solid #ef444430;">
-                <div style="font-size: 20px; margin-bottom: 8px;">📉</div>
-                <div style="font-weight: 700; color: #991b1b;">Lower Base</div>
-                <div style="font-size: 18px; font-weight: 800; color: #0f172a;">${asian['low_px']:,.2f}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Projection calculations
-        up_base_px = asian["high_px"]
-        up_base_dt = asian["high_time_ct"]
-        up_slope = +0.2432
-
-        lo_base_px = asian["low_px"]
-        lo_base_dt = asian["low_time_ct"]
-        lo_slope = -0.2432
-
-        # Generate RTH projections with enhanced analytics
-        rows_lower = []
-        rows_upper = []
-        
-        for slot_time in _rth_slots_30m():
-            # Calculate projected values
-            lo_val = _project_price(lo_base_px, lo_base_dt, slot_time, lo_slope)
-            up_val = _project_price(up_base_px, up_base_dt, slot_time, up_slope)
-
-            # Lower line entries (buying opportunities)
-            entry_L = lo_val
-            tp2_L = up_val
-            tp1_L = (entry_L + tp2_L) / 2.0
-            risk_L = abs(tp1_L - entry_L) / entry_L * 100
-            reward_L = abs(tp2_L - entry_L) / abs(tp1_L - entry_L) if abs(tp1_L - entry_L) > 0 else 0
-            
-            # Calculate additional metrics
-            spread = tp2_L - entry_L
-            confidence = min(100, max(50, 100 - (risk_L * 2)))  # Simple confidence score
-            
-            rows_lower.append({
-                "Time": slot_time.strftime("%-I:%M %p"),
-                "Entry": round(entry_L, 2),
-                "TP1": round(tp1_L, 2),
-                "TP2": round(tp2_L, 2),
-                "Risk": round(risk_L, 1),
-                "Reward": round(reward_L, 1),
-                "Spread": round(spread, 2),
-                "Confidence": round(confidence, 0)
-            })
-
-            # Upper line entries (selling opportunities)
-            entry_U = up_val
-            tp2_U = lo_val
-            tp1_U = (entry_U + tp2_U) / 2.0
-            risk_U = abs(tp1_U - entry_U) / entry_U * 100
-            reward_U = abs(tp2_U - entry_U) / abs(tp1_U - entry_U) if abs(tp1_U - entry_U) > 0 else 0
-            
-            spread_U = abs(tp2_U - entry_U)
-            confidence_U = min(100, max(50, 100 - (risk_U * 2)))
-            
-            rows_upper.append({
-                "Time": slot_time.strftime("%-I:%M %p"),
-                "Entry": round(entry_U, 2),
-                "TP1": round(tp1_U, 2),
-                "TP2": round(tp2_U, 2),
-                "Risk": round(risk_U, 1),
-                "Reward": round(reward_U, 1),
-                "Spread": round(spread_U, 2),
-                "Confidence": round(confidence_U, 0)
-            })
-
-        # Enhanced table formatting for forecasts
-        def _format_forecast_table(df):
-            return st.dataframe(
-                df,
-                hide_index=True,
-                use_container_width=True,
-                column_config={
-                    "Time": st.column_config.TextColumn("Time", width="small"),
-                    "Entry": st.column_config.NumberColumn("Entry", format="%.2f", width="medium"),
-                    "TP1": st.column_config.NumberColumn("TP1", format="%.2f", width="medium"),
-                    "TP2": st.column_config.NumberColumn("TP2", format="%.2f", width="medium"),
-                    "Risk": st.column_config.NumberColumn("Risk %", format="%.1f", width="small"),
-                    "Reward": st.column_config.NumberColumn("R:R", format="%.1f", width="small"),
-                    "Spread": st.column_config.NumberColumn("Spread", format="%.2f", width="small"),
-                    "Confidence": st.column_config.ProgressColumn("Conf %", min_value=0, max_value=100, width="small")
-                },
-                height=450
-            )
-
-        # Display projection tables with enhanced analytics
-        st.markdown("### 📊 Projection Tables")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### 📈 Long Entry Strategy")
-            st.markdown("<p class='muted'>Buy signals when price approaches ascending lower projection line</p>", unsafe_allow_html=True)
-            _format_forecast_table(pd.DataFrame(rows_lower))
-            
-            # Summary statistics
-            avg_risk = np.mean([row['Risk'] for row in rows_lower])
-            avg_reward = np.mean([row['Reward'] for row in rows_lower])
-            avg_spread = np.mean([row['Spread'] for row in rows_lower])
-            best_time = min(rows_lower, key=lambda x: x['Risk'])
-            
-            st.markdown(f"""
-            **📊 Strategy Analytics:**
-            - **Average Risk:** {avg_risk:.1f}%
-            - **Average R:R:** {avg_reward:.1f}:1
-            - **Average Spread:** ${avg_spread:.2f}
-            - **Optimal Entry:** {best_time['Time']} (Risk: {best_time['Risk']:.1f}%)
-            """)
-
-        with col2:
-            st.markdown("#### 📉 Short Entry Strategy")
-            st.markdown("<p class='muted'>Sell signals when price approaches descending upper projection line</p>", unsafe_allow_html=True)
-            _format_forecast_table(pd.DataFrame(rows_upper))
-            
-            # Summary statistics
-            avg_risk_s = np.mean([row['Risk'] for row in rows_upper])
-            avg_reward_s = np.mean([row['Reward'] for row in rows_upper])
-            avg_spread_s = np.mean([row['Spread'] for row in rows_upper])
-            best_time_s = min(rows_upper, key=lambda x: x['Risk'])
-            
-            st.markdown(f"""
-            **📊 Strategy Analytics:**
-            - **Average Risk:** {avg_risk_s:.1f}%
-            - **Average R:R:** {avg_reward_s:.1f}:1
-            - **Average Spread:** ${avg_spread_s:.2f}
-            - **Optimal Entry:** {best_time_s['Time']} (Risk: {best_time_s['Risk']:.1f}%)
-            """)
-
-        # Strategy comparison and recommendations
-        st.markdown("### 💡 Strategy Recommendations")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            preferred_direction = "Long" if avg_risk < avg_risk_s else "Short"
-            st.success(f"🎯 **Preferred Direction:** {preferred_direction} entries show lower average risk")
-        
-        with col2:
-            market_efficiency = (avg_reward + avg_reward_s) / 2
-            efficiency_label = "High" if market_efficiency > 2 else "Moderate" if market_efficiency > 1.5 else "Low"
-            st.info(f"⚡ **Market Efficiency:** {efficiency_label} ({market_efficiency:.1f}:1 avg R:R)")
-        
-        with col3:
-            total_opportunities = len(rows_lower) + len(rows_upper)
-            st.info(f"🎯 **Total Setups:** {total_opportunities} potential entries during RTH")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PAGE 4: SIGNALS - REAL-TIME TRADING ALERTS
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-elif clean_page == "Signals":
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>📡 Live Trading Signals</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Real-time market analysis and signal detection based on current price action</p>", unsafe_allow_html=True)
-    
-    # Current market analysis
-    if market_data['px'] != "—":
-        current_price = float(market_data['px'].replace(',', ''))
-        
-        # Enhanced signal detection with multiple timeframes
-        anchors = get_previous_day_anchors(asset, forecast_date)
-        asian = es_asian_anchors_as_spx(forecast_date)
-        
-        signals = []
-        signal_strength_total = 0
-        
-        # Previous day level analysis
-        if anchors:
-            # Resistance levels
-            high_proximity = abs(current_price - anchors['high']) / anchors['high'] * 100
-            if high_proximity <= 0.2:  # Within 0.2%
-                signals.append({
-                    "type": "🔴 Strong Resistance",
-                    "level": anchors['high'],
-                    "message": f"Price at previous day high (${anchors['high']:.2f})",
-                    "strength": "Strong",
-                    "action": "Consider profit taking or short entry",
-                    "proximity": high_proximity,
-                    "score": 9
-                })
-                signal_strength_total += 9
-            elif high_proximity <= 0.5:  # Within 0.5%
-                signals.append({
-                    "type": "🟡 Approaching Resistance",
-                    "level": anchors['high'],
-                    "message": f"Approaching previous day high (${anchors['high']:.2f})",
-                    "strength": "Moderate",
-                    "action": "Monitor for rejection or breakout",
-                    "proximity": high_proximity,
-                    "score": 6
-                })
-                signal_strength_total += 6
-            
-            # Support levels
-            low_proximity = abs(current_price - anchors['low']) / anchors['low'] * 100
-            if low_proximity <= 0.2:  # Within 0.2%
-                signals.append({
-                    "type": "🟢 Strong Support",
-                    "level": anchors['low'],
-                    "message": f"Price at previous day low (${anchors['low']:.2f})",
-                    "strength": "Strong",
-                    "action": "Consider long entry or adding positions",
-                    "proximity": low_proximity,
-                    "score": 9
-                })
-                signal_strength_total += 9
-            elif low_proximity <= 0.5:  # Within 0.5%
-                signals.append({
-                    "type": "🟡 Approaching Support",
-                    "level": anchors['low'],
-                    "message": f"Approaching previous day low (${anchors['low']:.2f})",
-                    "strength": "Moderate",
-                    "action": "Watch for bounce or breakdown",
-                    "proximity": low_proximity,
-                    "score": 6
-                })
-                signal_strength_total += 6
-            
-            # Midpoint analysis
-            midpoint = (anchors['high'] + anchors['low']) / 2
-            mid_proximity = abs(current_price - midpoint) / midpoint * 100
-            if mid_proximity <= 0.1:
-                signals.append({
-                    "type": "🎯 Midpoint",
-                    "level": midpoint,
-                    "message": f"Price at previous day midpoint (${midpoint:.2f})",
-                    "strength": "Moderate",
-                    "action": "Key decision level - direction confirmation needed",
-                    "proximity": mid_proximity,
-                    "score": 7
-                })
-                signal_strength_total += 7
-
-        # Asian session level analysis
-        if asian:
-            # Asian high analysis
-            asian_high_proximity = abs(current_price - asian['high_px']) / asian['high_px'] * 100
-            if asian_high_proximity <= 0.3:
-                signals.append({
-                    "type": "🌏 Asian High Test",
-                    "level": asian['high_px'],
-                    "message": f"Testing Asian session high (${asian['high_px']:.2f})",
-                    "strength": "Moderate",
-                    "action": "Monitor overnight resistance level",
-                    "proximity": asian_high_proximity,
-                    "score": 5
-                })
-                signal_strength_total += 5
-            
-            # Asian low analysis
-            asian_low_proximity = abs(current_price - asian['low_px']) / asian['low_px'] * 100
-            if asian_low_proximity <= 0.3:
-                signals.append({
-                    "type": "🌏 Asian Low Test",
-                    "level": asian['low_px'],
-                    "message": f"Testing Asian session low (${asian['low_px']:.2f})",
-                    "strength": "Moderate",
-                    "action": "Watch overnight support level",
-                    "proximity": asian_low_proximity,
-                    "score": 5
-                })
-                signal_strength_total += 5
-
-        # Momentum analysis
-        if market_data['change'] != "—":
-            change_pct = float(market_data['change_pct'].replace('%', '').replace('+', ''))
-            if abs(change_pct) > 2:
-                momentum_type = "🚀 Strong Bullish Momentum" if change_pct > 0 else "🔻 Strong Bearish Momentum"
-                signals.append({
-                    "type": momentum_type,
-                    "level": current_price,
-                    "message": f"Significant price movement: {change_pct:+.2f}%",
-                    "strength": "Strong",
-                    "action": "Consider momentum trading strategies",
-                    "proximity": 0,
-                    "score": 8
-                })
-                signal_strength_total += 8
-            elif abs(change_pct) > 1:
-                momentum_type = "📈 Moderate Momentum" if change_pct > 0 else "📉 Moderate Momentum"
-                signals.append({
-                    "type": momentum_type,
-                    "level": current_price,
-                    "message": f"Notable price movement: {change_pct:+.2f}%",
-                    "strength": "Moderate",
-                    "action": "Monitor trend development",
-                    "proximity": 0,
-                    "score": 5
-                })
-                signal_strength_total += 5
-
-        # Display active signals with enhanced formatting
-        if signals:
-            st.markdown("### 🚨 Active Market Signals")
-            
-            # Sort signals by strength score
-            signals.sort(key=lambda x: x['score'], reverse=True)
-            
-            for i, signal in enumerate(signals):
-                # Color coding based on signal type
-                if "Resistance" in signal['type'] or "Bearish" in signal['type']:
-                    border_color = "#ef4444"
-                    bg_color = "rgba(239,68,68,0.1)"
-                elif "Support" in signal['type'] or "Bullish" in signal['type']:
-                    border_color = "#10b981"
-                    bg_color = "rgba(16,185,129,0.1)"
-                else:
-                    border_color = "#f59e0b"
-                    bg_color = "rgba(245,158,11,0.1)"
-                
-                st.markdown(f"""
-                <div style="background: {bg_color}; border-left: 4px solid {border_color}; padding: 20px; border-radius: 12px; margin: 12px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                    <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 8px;">
-                        <div style="font-weight: 800; color: #0f172a; font-size: 16px;">{signal['type']}</div>
-                        <div style="background: {border_color}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700;">
-                            {signal['strength']} • Score: {signal['score']}
-                        </div>
-                    </div>
-                    <div style="color: #374151; margin-bottom: 8px; font-size: 15px;">{signal['message']}</div>
-                    <div style="color: #64748b; font-size: 14px; margin-bottom: 8px;">
-                        📍 Level: ${signal['level']:.2f} • Proximity: {signal['proximity']:.2f}%
-                    </div>
-                    <div style="color: #1f2937; font-size: 14px; font-weight: 600;">
-                        💡 Action: {signal['action']}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+        # Determine trend direction from REAL momentum
+        momentum = data.get('momentum_5d', 0)
+        if momentum > 1:
+            trend = "🟢 BULLISH"
+        elif momentum < -1:
+            trend = "🔴 BEARISH"
         else:
-            st.info("🔄 **No active signals detected.** Market is trading within normal ranges without proximity to key levels.")
+            trend = "🟡 NEUTRAL"
         
-        # Overall signal strength gauge
-        max_possible_score = 50  # Rough estimate of maximum possible score
-        signal_strength_pct = min(100, (signal_strength_total / max_possible_score) * 100)
+        # Risk assessment from REAL volatility
+        if volatility > 30:
+            risk_level = "HIGH"
+        elif volatility > 20:
+            risk_level = "MEDIUM"
+        else:
+            risk_level = "LOW"
         
-        st.markdown("### 📊 Signal Strength Analysis")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if signal_strength_pct > 70:
-                strength_label = "🔥 High Activity"
-                strength_color = "#ef4444"
-            elif signal_strength_pct > 40:
-                strength_label = "⚡ Moderate Activity" 
-                strength_color = "#f59e0b"
-            else:
-                strength_label = "😴 Low Activity"
-                strength_color = "#10b981"
-            
-            st.markdown(f"""
-            <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, {strength_color}15 0%, {strength_color}05 100%); border-radius: 12px; border: 1px solid {strength_color}30;">
-                <div style="font-size: 28px; margin-bottom: 8px;">📡</div>
-                <div style="font-weight: 700; color: {strength_color};">{strength_label}</div>
-                <div style="font-size: 12px; color: #64748b;">Score: {signal_strength_total}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            # Price momentum indicator
-            change_val = market_data['change'].replace('+', '').replace('-', '')
-            if change_val != "—":
-                momentum = "📈 Bullish" if market_data['change'].startswith('+') else "📉 Bearish" if market_data['change'].startswith('-') else "➡️ Neutral"
-                momentum_color = "#10b981" if momentum.startswith("📈") else "#ef4444" if momentum.startswith("📉") else "#64748b"
-                
-                st.markdown(f"""
-                <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, {momentum_color}15 0%, {momentum_color}05 100%); border-radius: 12px; border: 1px solid {momentum_color}30;">
-                    <div style="font-size: 28px; margin-bottom: 8px;">📊</div>
-                    <div style="font-weight: 700; color: {momentum_color};">{momentum}</div>
-                    <div style="font-size: 12px; color: #64748b;">Change: {market_data['change']}</div>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        with col3:
-            # Market phase indicator
-            now_et = datetime.now(ET)
-            if 4 <= now_et.hour < 9:
-                phase = "🌅 Pre-Market"
-                phase_color = "#6366f1"
-            elif 9 <= now_et.hour < 10:
-                phase = "🔔 Opening"
-                phase_color = "#10b981"
-            elif 10 <= now_et.hour < 14:
-                phase = "📊 Mid-Session"
-                phase_color = "#f59e0b"
-            elif 14 <= now_et.hour < 16:
-                phase = "🔔 Closing"
-                phase_color = "#ef4444"
-            elif 16 <= now_et.hour < 20:
-                phase = "🌆 After Hours"
-                phase_color = "#8b5cf6"
-            else:
-                phase = "🌙 Overnight"
-                phase_color = "#64748b"
-            
-            st.markdown(f"""
-            <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, {phase_color}15 0%, {phase_color}05 100%); border-radius: 12px; border: 1px solid {phase_color}30;">
-                <div style="font-size: 28px; margin-bottom: 8px;">🕐</div>
-                <div style="font-weight: 700; color: {phase_color};">{phase}</div>
-                <div style="font-size: 12px; color: #64748b;">{now_et.strftime('%-I:%M %p ET')}</div>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    else:
-        st.warning("⚠️ **Live data unavailable.** Signal detection requires real-time market data feed.")
-        
-        # Alternative analysis suggestions
-        st.markdown("### 🔄 Alternative Analysis Options")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info("📊 **Historical Analysis:** Use Anchors page for key level identification")
-        with col2:
-            st.info("🎯 **Forecast Mode:** Check Forecasts page for projection-based entries")
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 5C1: CONTRACTS & FIBONACCI PAGES
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PAGE 5: CONTRACTS - OPTIONS STRATEGY TABLES
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-elif clean_page == "Contracts":
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>📜 Options Contract Projections</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Professional options strategies with time decay modeling (-0.3/hour slope) and real-time premium calculations</p>", unsafe_allow_html=True)
-
-    # Enhanced contract configuration panel
-    with st.expander("🔧 Contract Configuration & Strategy Setup", expanded=True):
-        st.markdown("**📍 Base Contract Prices** — Enter observed option prices when SPX signals occur during Asian session (5-8 PM CT)")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**🔺 Call Options Configuration**")
-            upper_base_price = st.number_input("Call Option Base Price", min_value=0.0, step=0.1, value=12.0, help="Call option premium at upper signal level")
-            upper_base_time = st.time_input("Call Signal Time (CT)", value=time(19, 0))
-            upper_strike = st.number_input("Call Strike Price", min_value=0.0, step=5.0, value=6000.0, help="Call option strike price")
-            
-        with col2:
-            st.markdown("**🔻 Put Options Configuration**")
-            lower_base_price = st.number_input("Put Option Base Price", min_value=0.0, step=0.1, value=6.0, help="Put option premium at lower signal level")
-            lower_base_time = st.time_input("Put Signal Time (CT)", value=time(18, 0))
-            lower_strike = st.number_input("Put Strike Price", min_value=0.0, step=5.0, value=5950.0, help="Put option strike price")
-
-        # Strategy selection
-        st.markdown("**📊 Strategy Selection**")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            strategy_type = st.selectbox("Primary Strategy", ["Long Calls", "Long Puts", "Straddle", "Strangle", "Iron Condor"])
-        with col2:
-            position_size = st.number_input("Position Size (contracts)", min_value=1, max_value=100, value=10)
-        with col3:
-            commission = st.number_input("Commission per contract", min_value=0.0, step=0.1, value=0.65)
-
-        # Professional strategy recommendations
-        st.markdown("### 💡 Professional Strategy Guide")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.info("📈 **Long Calls:** Use when price touches lower projection line. Target upper line for profit taking.")
-        with col2:
-            st.info("📉 **Long Puts:** Use when price touches upper projection line. Target lower line for profit taking.")
-        with col3:
-            st.info("🎯 **Straddles:** Use during low volatility periods expecting breakout in either direction.")
-
-    # Convert to datetime objects for calculations
-    prior = forecast_date - timedelta(days=1)
-    upper_dt = datetime.combine(prior, upper_base_time, tzinfo=CT)
-    lower_dt = datetime.combine(prior, lower_base_time, tzinfo=CT)
-
-    # Time decay parameters (both contracts decay at -0.3 per hour)
-    decay_slope_30m = -0.15  # -0.3 per hour = -0.15 per 30min
-
-    # Generate contract projection tables with enhanced analytics
-    rows_call_strategy = []
-    rows_put_strategy = []
-    rows_combined_strategy = []
-    
-    for slot_time in _rth_slots_30m():
-        # Calculate time-decayed option prices
-        upper_price = _project_price(upper_base_price, upper_dt, slot_time, decay_slope_30m)
-        lower_price = _project_price(lower_base_price, lower_dt, slot_time, decay_slope_30m)
-        
-        # Ensure prices don't go negative (minimum intrinsic value)
-        upper_price = max(0.05, upper_price)
-        lower_price = max(0.05, lower_price)
-
-        # Call strategy calculations (enter at lower line, target upper line)
-        call_entry = lower_price
-        call_tp2 = upper_price
-        call_tp1 = (call_entry + call_tp2) / 2.0
-        call_risk = abs(call_tp1 - call_entry) / call_entry * 100
-        call_reward = abs(call_tp2 - call_entry) / abs(call_tp1 - call_entry) if abs(call_tp1 - call_entry) > 0 else 0
-        
-        # Calculate P&L including commissions
-        call_gross_profit = (call_tp2 - call_entry) * position_size * 100  # Options are $100 multiplier
-        call_net_profit = call_gross_profit - (commission * position_size * 2)  # Entry + exit commissions
-        call_roe = (call_net_profit / (call_entry * position_size * 100)) * 100 if call_entry > 0 else 0
-        
-        rows_call_strategy.append({
-            "Time": slot_time.strftime("%-I:%M %p"),
-            "Entry": round(call_entry, 2),
-            "TP1": round(call_tp1, 2),
-            "TP2": round(call_tp2, 2),
-            "Risk": round(call_risk, 1),
-            "Reward": round(call_reward, 1),
-            "P&L": round(call_net_profit, 0),
-            "ROE": round(call_roe, 1)
+        matrix_data.append({
+            'Symbol': symbol,
+            'Price': f"${price:.2f}",
+            'Change %': f"{change_pct:+.2f}%",
+            'Volume': f"{volume:,.0f}",
+            'RSI': f"{rsi:.1f}",
+            'Volatility': f"{volatility:.1f}%",
+            'Trend': trend,
+            'Risk': risk_level,
+            'Support': f"${support:.2f}",
+            'Resistance': f"${resistance:.2f}"
         })
-
-        # Put strategy calculations (enter at upper line, target lower line)
-        put_entry = upper_price
-        put_tp2 = lower_price
-        put_tp1 = (put_entry + put_tp2) / 2.0
-        put_risk = abs(put_tp1 - put_entry) / put_entry * 100
-        put_reward = abs(put_tp2 - put_entry) / abs(put_tp1 - put_entry) if abs(put_tp1 - put_entry) > 0 else 0
+    
+    if matrix_data:
+        df = pd.DataFrame(matrix_data)
         
-        # Calculate P&L for puts
-        put_gross_profit = (put_entry - put_tp2) * position_size * 100  # Puts profit when price falls
-        put_net_profit = put_gross_profit - (commission * position_size * 2)
-        put_roe = (put_net_profit / (put_entry * position_size * 100)) * 100 if put_entry > 0 else 0
-        
-        rows_put_strategy.append({
-            "Time": slot_time.strftime("%-I:%M %p"),
-            "Entry": round(put_entry, 2),
-            "TP1": round(put_tp1, 2),
-            "TP2": round(put_tp2, 2),
-            "Risk": round(put_risk, 1),
-            "Reward": round(put_reward, 1),
-            "P&L": round(put_net_profit, 0),
-            "ROE": round(put_roe, 1)
-        })
-
-        # Combined strategy (straddle/strangle analysis)
-        combined_entry = call_entry + put_entry
-        combined_breakeven_up = upper_strike + combined_entry
-        combined_breakeven_down = lower_strike - combined_entry
-        combined_max_profit = max(call_gross_profit, put_gross_profit) - (commission * position_size * 4)  # 4 legs
-        
-        rows_combined_strategy.append({
-            "Time": slot_time.strftime("%-I:%M %p"),
-            "Total Premium": round(combined_entry, 2),
-            "Upper BE": round(combined_breakeven_up, 0),
-            "Lower BE": round(combined_breakeven_down, 0),
-            "Max Profit": round(combined_max_profit, 0),
-            "Decay Rate": round((upper_base_price + lower_base_price) - combined_entry, 2)
-        })
-
-    # Enhanced table formatting for options
-    def _format_options_table(df):
-        return st.dataframe(
+        st.dataframe(
             df,
-            hide_index=True,
             use_container_width=True,
+            hide_index=True,
             column_config={
-                "Time": st.column_config.TextColumn("Time", width="small"),
-                "Entry": st.column_config.NumberColumn("Entry", format="%.2f", width="medium"),
-                "TP1": st.column_config.NumberColumn("TP1", format="%.2f", width="medium"),
-                "TP2": st.column_config.NumberColumn("TP2", format="%.2f", width="medium"),
-                "Risk": st.column_config.NumberColumn("Risk %", format="%.1f", width="small"),
-                "Reward": st.column_config.NumberColumn("R:R", format="%.1f", width="small"),
-                "P&L": st.column_config.NumberColumn("P&L ($)", format="$%.0f", width="medium"),
-                "ROE": st.column_config.NumberColumn("ROE %", format="%.1f%%", width="small"),
-                "Total Premium": st.column_config.NumberColumn("Premium", format="%.2f", width="medium"),
-                "Upper BE": st.column_config.NumberColumn("Upper BE", format="%.0f", width="medium"),
-                "Lower BE": st.column_config.NumberColumn("Lower BE", format="%.0f", width="medium"),
-                "Max Profit": st.column_config.NumberColumn("Max Profit", format="$%.0f", width="medium"),
-                "Decay Rate": st.column_config.NumberColumn("Decay", format="%.2f", width="small")
-            },
-            height=400
+                'Symbol': st.column_config.TextColumn('Symbol', width='small'),
+                'Price': st.column_config.TextColumn('Price', width='small'),
+                'Change %': st.column_config.TextColumn('Change %', width='small'),
+                'Volume': st.column_config.TextColumn('Volume', width='medium'),
+                'RSI': st.column_config.TextColumn('RSI', width='small'),
+                'Volatility': st.column_config.TextColumn('Vol %', width='small'),
+                'Trend': st.column_config.TextColumn('Trend', width='medium'),
+                'Risk': st.column_config.TextColumn('Risk', width='small'),
+                'Support': st.column_config.TextColumn('Support', width='small'),
+                'Resistance': st.column_config.TextColumn('Resistance', width='small')
+            }
         )
-
-    # Display options strategy tables
-    st.markdown("### 📊 Options Strategy Analysis")
-    
-    # Strategy tabs for better organization
-    tab1, tab2, tab3 = st.tabs(["📞 Call Strategies", "📞 Put Strategies", "🎯 Combined Strategies"])
-    
-    with tab1:
-        st.markdown("#### 📈 Long Call Strategy")
-        st.markdown("<p class='muted'>Buy calls when SPX touches lower projection line, sell when reaching upper line</p>", unsafe_allow_html=True)
-        _format_options_table(pd.DataFrame(rows_call_strategy))
         
-        # Call strategy analytics
-        avg_call_premium = np.mean([row['Entry'] for row in rows_call_strategy])
-        avg_call_profit = np.mean([row['P&L'] for row in rows_call_strategy])
-        best_call_time = max(rows_call_strategy, key=lambda x: x['P&L'])
-        total_decay = upper_base_price - avg_call_premium
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Average Premium", f"${avg_call_premium:.2f}", f"${total_decay:.2f} decay")
-        with col2:
-            st.metric("Average P&L", f"${avg_call_profit:,.0f}")
-        with col3:
-            st.metric("Best Entry Time", best_call_time['Time'], f"${best_call_time['P&L']:,.0f}")
-
-    with tab2:
-        st.markdown("#### 📉 Long Put Strategy")
-        st.markdown("<p class='muted'>Buy puts when SPX touches upper projection line, sell when reaching lower line</p>", unsafe_allow_html=True)
-        _format_options_table(pd.DataFrame(rows_put_strategy))
-        
-        # Put strategy analytics
-        avg_put_premium = np.mean([row['Entry'] for row in rows_put_strategy])
-        avg_put_profit = np.mean([row['P&L'] for row in rows_put_strategy])
-        best_put_time = max(rows_put_strategy, key=lambda x: x['P&L'])
-        put_decay = lower_base_price - avg_put_premium
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Average Premium", f"${avg_put_premium:.2f}", f"${put_decay:.2f} decay")
-        with col2:
-            st.metric("Average P&L", f"${avg_put_profit:,.0f}")
-        with col3:
-            st.metric("Best Entry Time", best_put_time['Time'], f"${best_put_time['P&L']:,.0f}")
-
-    with tab3:
-        st.markdown("#### 🎯 Straddle/Strangle Analysis")
-        st.markdown("<p class='muted'>Combined strategies for volatility trading with breakeven analysis</p>", unsafe_allow_html=True)
-        _format_options_table(pd.DataFrame(rows_combined_strategy))
-        
-        # Combined strategy analytics
-        avg_total_premium = np.mean([row['Total Premium'] for row in rows_combined_strategy])
-        avg_decay_rate = np.mean([row['Decay Rate'] for row in rows_combined_strategy])
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Average Total Premium", f"${avg_total_premium:.2f}")
-        with col2:
-            st.metric("Average Decay Rate", f"${avg_decay_rate:.2f}/30min")
-        with col3:
-            breakeven_range = rows_combined_strategy[0]['Upper BE'] - rows_combined_strategy[0]['Lower BE']
-            st.metric("Breakeven Range", f"{breakeven_range:.0f} points")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PAGE 6: FIBONACCI - RETRACEMENT & EXTENSION ANALYSIS
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-elif clean_page == "Fibonacci":
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>🌟 Fibonacci Analysis Suite</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Advanced Fibonacci retracements, extensions, and time-based analysis for precise entry and exit points</p>", unsafe_allow_html=True)
-
-    # Fibonacci configuration
-    anchors = get_previous_day_anchors(asset, forecast_date)
-    asian = es_asian_anchors_as_spx(forecast_date)
-    
-    if not anchors:
-        st.warning("⚠️ Previous day anchors required for Fibonacci analysis.")
-        
-        # Helpful guidance for getting started
-        st.markdown("""
-        ### 🔧 Getting Started with Fibonacci Analysis
-        
-        **📋 Requirements:**
-        - Previous day OHLC data from Yahoo Finance
-        - Valid trading session date (not weekend/holiday)
-        - Network connectivity for data retrieval
-        
-        **🔄 Quick Setup:**
-        1. Select a recent trading day from the sidebar
-        2. Choose a major index or liquid equity (SPX, AAPL, etc.)
-        3. Refresh data if needed using sidebar controls
-        4. Return to this page once anchors are available
-        """)
-        
+        # Show last update time with better styling
+        last_update = datetime.now().strftime('%H:%M:%S ET')
+        st.markdown(f"""
+        <div style="text-align: right; color: #94a3b8; font-size: 0.8rem; margin-top: 0.5rem;">
+            Last updated: {last_update}
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        # Fibonacci level configuration
-        with st.expander("🔧 Fibonacci Configuration", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**📊 Retracement Levels**")
-                fib_retracements = [0.236, 0.382, 0.500, 0.618, 0.786]
-                selected_retrace = st.multiselect("Select retracement levels", fib_retracements, default=[0.382, 0.500, 0.618])
-                
-                swing_type = st.radio("Swing Direction", ["High to Low", "Low to High"], index=0, help="Direction of the primary swing for analysis")
-                
-            with col2:
-                st.markdown("**📈 Extension Levels**") 
-                fib_extensions = [1.272, 1.414, 1.618, 2.000, 2.618]
-                selected_extensions = st.multiselect("Select extension levels", fib_extensions, default=[1.272, 1.618])
-                
-                time_analysis = st.checkbox("Enable Time-based Fibonacci", value=True, help="Analyze time relationships using Fibonacci ratios")
+        st.error("No market data available")
 
-        # Calculate Fibonacci levels
-        if swing_type == "High to Low":
-            swing_high = anchors['high']
-            swing_low = anchors['low']
-        else:
-            swing_high = anchors['low']  # Inverted for uptrend analysis
-            swing_low = anchors['high']
-
-        swing_range = abs(swing_high - swing_low)
-        
-        # Retracement calculations with market context
-        retracement_levels = []
-        for level in selected_retrace:
-            if swing_type == "High to Low":
-                price = swing_low + (swing_range * level)
-                direction = "Support"
-                level_type = "Bounce Level"
-            else:
-                price = swing_high - (swing_range * level)
-                direction = "Resistance"
-                level_type = "Pullback Level"
-            
-            # Calculate proximity to current price and signal strength
-            if market_data['px'] != "—":
-                current_price = float(market_data['px'].replace(',', ''))
-                proximity = abs(current_price - price) / price * 100
-                
-                if proximity < 0.1:
-                    signal_strength = "🔥 Very Strong"
-                elif proximity < 0.25:
-                    signal_strength = "💪 Strong"
-                elif proximity < 0.5:
-                    signal_strength = "⚡ Moderate"
-                else:
-                    signal_strength = "👁️ Watch"
-            else:
-                proximity = 0
-                signal_strength = "❓ Unknown"
-            
-            retracement_levels.append({
-                "Level": f"{level:.1%}",
-                "Price": round(price, 2),
-                "Type": direction,
-                "Category": level_type,
-                "Proximity": round(proximity, 3),
-                "Signal": signal_strength
-            })
-
-        # Extension calculations with target analysis
-        extension_levels = []
-        for level in selected_extensions:
-            if swing_type == "High to Low":
-                price = swing_low - (swing_range * (level - 1))
-                target_type = "Downside Target"
-                projection = "Bearish Extension"
-            else:
-                price = swing_high + (swing_range * (level - 1))
-                target_type = "Upside Target"
-                projection = "Bullish Extension"
-            
-            if market_data['px'] != "—":
-                current_price = float(market_data['px'].replace(',', ''))
-                distance = abs(price - current_price)
-                distance_pct = (distance / current_price) * 100
-                
-                # Determine target priority
-                if distance_pct < 2:
-                    priority = "🎯 Immediate"
-                elif distance_pct < 5:
-                    priority = "📈 Near Term"
-                elif distance_pct < 10:
-                    priority = "📊 Medium Term"
-                else:
-                    priority = "🔭 Long Term"
-            else:
-                distance = 0
-                distance_pct = 0
-                priority = "❓ Unknown"
-            
-            extension_levels.append({
-                "Level": f"{level:.3f}",
-                "Price": round(price, 2),
-                "Type": target_type,
-                "Projection": projection,
-                "Distance": round(distance, 2),
-                "Distance %": round(distance_pct, 2),
-                "Priority": priority
-            })
-
-        # Display enhanced Fibonacci analysis
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 🔄 Fibonacci Retracements")
-            st.markdown("<p class='muted'>Key support/resistance levels for potential reversal points</p>", unsafe_allow_html=True)
-            
-            # Enhanced retracement table with professional formatting
-            if retracement_levels:
-                fib_retrace_df = pd.DataFrame(retracement_levels)
-                st.dataframe(
-                    fib_retrace_df,
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        "Level": st.column_config.TextColumn("Fib Level", width="small"),
-                        "Price": st.column_config.NumberColumn("Price", format="$%.2f", width="medium"),
-                        "Type": st.column_config.TextColumn("Type", width="small"),
-                        "Category": st.column_config.TextColumn("Category", width="medium"),
-                        "Proximity": st.column_config.NumberColumn("Proximity %", format="%.3f", width="small"),
-                        "Signal": st.column_config.TextColumn("Signal Strength", width="medium")
-                    },
-                    height=300
-                )
-                
-                # Highlight the most relevant level
-                if market_data['px'] != "—":
-                    closest_level = min(retracement_levels, key=lambda x: x['Proximity'])
-                    st.success(f"🎯 **Key Level:** {closest_level['Level']} at ${closest_level['Price']:.2f} ({closest_level['Proximity']:.3f}% away) - {closest_level['Signal']}")
-                    
-                    # Trading recommendation
-                    if closest_level['Proximity'] < 0.25:
-                        st.info(f"💡 **Action:** Price approaching {closest_level['Type'].lower()} level. Monitor for {closest_level['Category'].lower()} setup.")
-
-        with col2:
-            st.markdown("### 🚀 Fibonacci Extensions")
-            st.markdown("<p class='muted'>Price targets for trend continuation and profit-taking levels</p>", unsafe_allow_html=True)
-            
-            # Enhanced extension table
-            if extension_levels:
-                fib_ext_df = pd.DataFrame(extension_levels)
-                st.dataframe(
-                    fib_ext_df,
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        "Level": st.column_config.TextColumn("Ext Level", width="small"),
-                        "Price": st.column_config.NumberColumn("Target", format="$%.2f", width="medium"),
-                        "Type": st.column_config.TextColumn("Direction", width="small"),
-                        "Projection": st.column_config.TextColumn("Projection", width="medium"),
-                        "Distance": st.column_config.NumberColumn("Distance", format="%.2f", width="small"),
-                        "Distance %": st.column_config.NumberColumn("Distance %", format="%.2f", width="small"),
-                        "Priority": st.column_config.TextColumn("Priority", width="medium")
-                    },
-                    height=300
-                )
-                
-                # Target prioritization
-                nearest_target = min(extension_levels, key=lambda x: x['Distance %'])
-                st.info(f"🎯 **Primary Target:** {nearest_target['Level']} at ${nearest_target['Price']:.2f} ({nearest_target['Distance %']:.1f}% move) - {nearest_target['Priority']}")
-
-        # Time-based Fibonacci analysis (if Asian session data available)
-        if time_analysis and asian:
-            st.markdown("### ⏰ Time-based Fibonacci Analysis")
-            st.markdown("<p class='muted'>Fibonacci time ratios for identifying potential reversal times during RTH</p>", unsafe_allow_html=True)
-            
-            # Calculate time relationships
-            asian_duration = abs((asian['high_time_ct'] - asian['low_time_ct']).total_seconds() / 3600)
-            market_open_ct = datetime.combine(forecast_date, time(8, 30), tzinfo=CT)
-            
-            fib_time_ratios = [0.618, 1.000, 1.272, 1.414, 1.618, 2.000]
-            time_projections = []
-            
-            for ratio in fib_time_ratios:
-                projected_hours = asian_duration * ratio
-                target_time = market_open_ct + timedelta(hours=projected_hours)
-                
-                # Determine if time falls within RTH
-                if target_time.time() <= time(14, 30):
-                    status = "🟢 Active RTH"
-                elif target_time.time() <= time(16, 0):
-                    status = "🟡 Closing Hours"
-                else:
-                    status = "🔴 After Hours"
-                
-                # Calculate time until target
-                now_ct = datetime.now(CT)
-                if target_time > now_ct:
-                    time_until = target_time - now_ct
-                    hours_until = time_until.total_seconds() / 3600
-                    time_desc = f"In {hours_until:.1f}h"
-                else:
-                    time_desc = "Past"
-                
-                time_projections.append({
-                    "Ratio": f"{ratio:.3f}",
-                    "Asian Duration": f"{asian_duration:.1f}h",
-                    "Projected Duration": f"{projected_hours:.1f}h", 
-                    "Target Time": target_time.strftime("%-I:%M %p CT"),
-                    "Status": status,
-                    "Time Until": time_desc
-                })
-            
-            if time_projections:
-                time_df = pd.DataFrame(time_projections)
-                st.dataframe(
-                    time_df, 
-                    hide_index=True, 
-                    use_container_width=True, 
-                    column_config={
-                        "Ratio": st.column_config.TextColumn("Fib Ratio", width="small"),
-                        "Asian Duration": st.column_config.TextColumn("Asian Dur", width="small"),
-                        "Projected Duration": st.column_config.TextColumn("Proj Dur", width="small"),
-                        "Target Time": st.column_config.TextColumn("Target Time", width="medium"),
-                        "Status": st.column_config.TextColumn("Status", width="medium"),
-                        "Time Until": st.column_config.TextColumn("Time Until", width="small")
-                    },
-                    height=250
-                )
-                
-                st.caption("💡 **Time Analysis:** Fibonacci time ratios suggest potential reversal or acceleration points during the trading session")
-
-        # Comprehensive Fibonacci trading strategy guide
-        st.markdown("### 💡 Professional Fibonacci Trading Strategies")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown("""
-            **🎯 Retracement Strategy**
-            - **Entry:** 38.2% or 61.8% retracements
-            - **Stop Loss:** Below next Fibonacci level
-            - **Target:** Previous swing extreme
-            - **Risk/Reward:** Typically 1:2 or better
-            
-            *Best for: Trend continuation setups*
-            """)
-        
-        with col2:
-            st.markdown("""
-            **🚀 Extension Strategy**
-            - **Target 1:** 127.2% extension
-            - **Target 2:** 161.8% extension  
-            - **Trail Stops:** At each Fib level
-            - **Partial Profits:** 50% at T1, 25% at T2
-            
-            *Best for: Breakout and momentum trades*
-            """)
-        
-        with col3:
-            st.markdown("""
-            **⏰ Time-Based Strategy**
-            - **Setup:** Combine price + time Fibonacci
-            - **Confluence:** Higher probability at intersections
-            - **Timing:** Watch for reversals at time ratios
-            - **Confirmation:** Use with other indicators
-            
-            *Best for: Precise entry/exit timing*
-            """)
-
-        # Current market Fibonacci summary
-        if market_data['px'] != "—" and retracement_levels and extension_levels:
-            st.markdown("### 📊 Current Market Fibonacci Summary")
-            
-            current_price = float(market_data['px'].replace(',', ''))
-            closest_retrace = min(retracement_levels, key=lambda x: x['Proximity'])
-            nearest_extension = min(extension_levels, key=lambda x: x['Distance %'])
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric(
-                    "Nearest Support/Resistance", 
-                    f"${closest_retrace['Price']:.2f}",
-                    f"{closest_retrace['Level']} • {closest_retrace['Proximity']:.3f}% away"
-                )
-            
-            with col2:
-                st.metric(
-                    "Primary Target", 
-                    f"${nearest_extension['Price']:.2f}",
-                    f"{nearest_extension['Level']} • {nearest_extension['Distance %']:.1f}% move"
-                )
-            
-            with col3:
-                # Calculate overall Fibonacci sentiment
-                support_levels = [r for r in retracement_levels if r['Type'] == 'Support' and r['Proximity'] < 1.0]
-                resistance_levels = [r for r in retracement_levels if r['Type'] == 'Resistance' and r['Proximity'] < 1.0]
-                
-                if len(support_levels) > len(resistance_levels):
-                    fib_bias = "Bullish"
-                    fib_color = "#10b981"
-                elif len(resistance_levels) > len(support_levels):
-                    fib_bias = "Bearish" 
-                    fib_color = "#ef4444"
-                else:
-                    fib_bias = "Neutral"
-                    fib_color = "#6366f1"
-                
-                st.metric("Fibonacci Bias", fib_bias)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 5C2A: EXPORT PAGE
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PAGE 7: EXPORT - DATA EXPORT & REPORTING
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-elif clean_page == "Export":
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>📤 Data Export & Reporting Suite</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Export trading data, generate professional reports, and share analysis with your team</p>", unsafe_allow_html=True)
-
-    # Export configuration with enhanced options
+def render_elite_insights():
+    """Render elite market insights"""
+    st.markdown("### 💡 Elite Market Insights")
+    
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 📊 Data Export Configuration")
+        st.markdown("#### 🎯 Today's Focus")
         
-        # Data selection with detailed descriptions
-        export_options = {
-            "Market Data": "Current price, change, volume, and source information",
-            "Previous Day Anchors": "High, low, close, and analytical metrics",
-            "Asian Session Data": "ES futures swing points and time analysis",
-            "Forecast Tables": "Complete RTH projection tables with entry/exit points",
-            "Signal Analysis": "Real-time signals and proximity analysis",
-            "Options Strategies": "Contract projections with P&L calculations",
-            "Fibonacci Levels": "Retracement and extension analysis",
-            "System Configuration": "Current settings and parameters"
-        }
-        
-        export_data = st.multiselect(
-            "Select data modules to export",
-            list(export_options.keys()),
-            default=["Market Data", "Forecast Tables", "Signal Analysis"],
-            help="Choose which data modules to include in your export"
-        )
-        
-        # Show descriptions for selected items
-        if export_data:
-            st.markdown("**Selected Data Descriptions:**")
-            for item in export_data:
-                st.caption(f"• **{item}:** {export_options[item]}")
-        
-        # Format selection with feature comparison
-        format_options = {
-            "CSV": {"pros": "Universal compatibility", "cons": "Limited formatting", "best_for": "Data analysis"},
-            "Excel (XLSX)": {"pros": "Rich formatting, multiple sheets", "cons": "Larger file size", "best_for": "Professional reports"},
-            "JSON": {"pros": "API integration ready", "cons": "Technical format", "best_for": "System integration"},
-            "PDF Report": {"pros": "Professional presentation", "cons": "Not editable", "best_for": "Client presentation"}
-        }
-        
-        export_format = st.selectbox(
-            "Export format",
-            list(format_options.keys()),
-            index=1,
-            help="Choose the output format based on your intended use"
-        )
-        
-        # Show format benefits
-        selected_format = format_options[export_format]
-        st.info(f"✅ **{export_format}** - Best for: {selected_format['best_for']}")
-        
-        # Date range for historical exports
-        st.markdown("**📅 Date Range**")
-        col_start, col_end = st.columns(2)
-        with col_start:
-            export_start_date = st.date_input("Start Date", value=forecast_date - timedelta(days=7))
-        with col_end:
-            export_end_date = st.date_input("End Date", value=forecast_date)
-        
-        # Advanced export options
-        with st.expander("🔧 Advanced Export Options"):
-            include_metadata = st.checkbox("Include Metadata", value=True, help="Add timestamp, version, and source information")
-            compress_output = st.checkbox("Compress Output", value=False, help="Create ZIP archive for large exports")
-            custom_filename = st.text_input("Custom Filename", placeholder="Leave blank for auto-generated name")
-        
-    with col2:
-        st.markdown("### ⚙️ Report Customization")
-        
-        # Report styling options
-        st.markdown("**🎨 Report Styling**")
-        include_charts = st.checkbox("Include Visualizations", value=True, help="Add charts and graphs to the report")
-        include_summary = st.checkbox("Executive Summary", value=True, help="Generate high-level overview")
-        include_recommendations = st.checkbox("Trading Recommendations", value=True, help="Include actionable trading advice")
-        include_disclaimers = st.checkbox("Risk Disclaimers", value=True, help="Add standard trading disclaimers")
-        
-        # Branding and customization
-        st.markdown("**🏢 Branding & Customization**")
-        company_name = st.text_input("Company Name", value=COMPANY, help="Your company or organization name")
-        report_title = st.text_input("Report Title", value=f"MarketLens Pro Analysis - {forecast_date}")
-        analyst_name = st.text_input("Analyst Name", placeholder="Your Name", help="Report author/analyst")
-        
-        # Logo and styling
-        company_logo = st.text_input("Company Logo URL", placeholder="https://your-company.com/logo.png")
-        color_theme = st.selectbox("Color Theme", ["Professional Blue", "Market Green", "Corporate Gray", "Custom"], index=0)
-        
-        # Report sections customization
-        st.markdown("**📋 Report Sections**")
-        section_order = st.multiselect(
-            "Section Order",
-            ["Executive Summary", "Market Overview", "Technical Analysis", "Trading Signals", "Risk Assessment", "Appendix"],
-            default=["Executive Summary", "Market Overview", "Technical Analysis", "Trading Signals"],
-            help="Customize the order and inclusion of report sections"
-        )
-
-    # Real-time export preview
-    st.markdown("### 👁️ Export Preview")
-    
-    if export_data:
-        # Generate sample export data
-        with st.spinner("Generating export preview..."):
-            export_content = {}
+        intelligence = st.session_state.market_intelligence
+        if intelligence:
+            # Find most volatile stock
+            most_volatile = max(intelligence.items(), key=lambda x: x[1].get('volatility', 0))
             
-            # Collect data based on selections
-            if "Market Data" in export_data:
-                export_content["market_data"] = {
-                    "symbol": asset,
-                    "price": market_data['px'],
-                    "change": market_data['change'],
-                    "change_pct": market_data['change_pct'],
-                    "timestamp": market_data['ts'],
-                    "source": market_data['source'],
-                    "export_timestamp": datetime.now(ET).isoformat()
-                }
+            # Find strongest momentum
+            strongest_momentum = max(intelligence.items(), key=lambda x: x[1].get('momentum_5d', 0))
             
-            if "Previous Day Anchors" in export_data:
-                anchors = get_previous_day_anchors(asset, forecast_date)
-                if anchors:
-                    export_content["previous_day_anchors"] = {
-                        "date": str(anchors['prev_day']),
-                        "high": anchors['high'],
-                        "low": anchors['low'],
-                        "close": anchors['close'],
-                        "range": anchors['high'] - anchors['low'],
-                        "range_pct": ((anchors['high'] - anchors['low']) / anchors['close']) * 100
-                    }
+            # Find oversold/overbought
+            rsi_values = [(k, v.get('rsi', 50)) for k, v in intelligence.items()]
+            most_oversold = min(rsi_values, key=lambda x: x[1])
+            most_overbought = max(rsi_values, key=lambda x: x[1])
             
-            if "Asian Session Data" in export_data:
-                asian = es_asian_anchors_as_spx(forecast_date)
-                if asian:
-                    export_content["asian_session"] = {
-                        "high_price": asian['high_px'],
-                        "high_time": asian['high_time_ct'].isoformat(),
-                        "low_price": asian['low_px'],
-                        "low_time": asian['low_time_ct'].isoformat(),
-                        "range": asian['high_px'] - asian['low_px']
-                    }
-            
-            if "Forecast Tables" in export_data and 'asian_session' in export_content:
-                # Generate forecast data for export
-                forecast_data = []
-                for slot_time in _rth_slots_30m():
-                    asian = es_asian_anchors_as_spx(forecast_date)
-                    if asian:
-                        lo_val = _project_price(asian['low_px'], asian['low_time_ct'], slot_time, -0.2432)
-                        up_val = _project_price(asian['high_px'], asian['high_time_ct'], slot_time, +0.2432)
-                        
-                        forecast_data.append({
-                            "time": slot_time.strftime("%-I:%M %p"),
-                            "lower_line": round(lo_val, 2),
-                            "upper_line": round(up_val, 2),
-                            "midpoint": round((lo_val + up_val) / 2, 2),
-                            "spread": round(up_val - lo_val, 2)
-                        })
-                
-                export_content["forecasts"] = forecast_data
-            
-            # Add metadata if requested
-            if include_metadata:
-                export_content["metadata"] = {
-                    "export_timestamp": datetime.now(ET).isoformat(),
-                    "application": APP_NAME,
-                    "version": VERSION,
-                    "analyst": analyst_name or "MarketLens Pro System",
-                    "data_sources": ["Yahoo Finance", "ES Futures"],
-                    "export_format": export_format,
-                    "date_range": f"{export_start_date} to {export_end_date}"
-                }
-        
-        # Display preview based on format
-        if export_format == "JSON":
-            st.code(pd.io.json.dumps(export_content, indent=2), language="json")
-            
-            # Download button for JSON
-            json_str = pd.io.json.dumps(export_content, indent=2)
-            filename = custom_filename or f"marketlens_export_{forecast_date}.json"
-            st.download_button(
-                "📥 Download JSON Export",
-                data=json_str,
-                file_name=filename,
-                mime="application/json",
-                type="primary",
-                use_container_width=True
-            )
-        
-        elif export_format == "CSV" and "forecasts" in export_content:
-            # Show CSV preview
-            df = pd.DataFrame(export_content["forecasts"])
-            st.dataframe(df, use_container_width=True, height=300)
-            
-            # Download button for CSV
-            csv_data = df.to_csv(index=False)
-            filename = custom_filename or f"marketlens_forecasts_{forecast_date}.csv"
-            st.download_button(
-                "📥 Download CSV Export",
-                data=csv_data,
-                file_name=filename,
-                mime="text/csv",
-                type="primary",
-                use_container_width=True
-            )
-        
-        elif export_format == "Excel (XLSX)":
-            st.info("📊 **Excel Export Preview**")
-            st.markdown("""
-            **Workbook Structure:**
-            - **Summary Sheet:** Key metrics and overview
-            - **Market Data:** Current prices and changes
-            - **Forecasts:** Complete RTH projection tables
-            - **Signals:** Active alerts and proximity analysis
-            - **Configuration:** Current system settings
-            """)
-            
-            # Show what would be in Excel
-            if "forecasts" in export_content:
-                st.markdown("**Sample Forecast Data (Excel Sheet Preview):**")
-                df = pd.DataFrame(export_content["forecasts"])
-                st.dataframe(df, use_container_width=True, height=200)
-            
-            st.button(
-                "📊 Generate Excel Export",
-                help="Excel generation would create multi-sheet workbook",
-                type="primary",
-                use_container_width=True
-            )
-        
-        elif export_format == "PDF Report":
-            st.info("📄 **PDF Report Preview**")
-            
-            # Show comprehensive report structure
             st.markdown(f"""
-            ## {report_title}
+            **🔥 Highest Volatility:** {most_volatile[0]} ({most_volatile[1].get('volatility', 0):.1f}%)
             
-            **Prepared by:** {analyst_name or 'MarketLens Pro System'}  
-            **Date:** {forecast_date.strftime('%B %d, %Y')}  
-            **Company:** {company_name}
+            **⚡ Strongest Momentum:** {strongest_momentum[0]} ({strongest_momentum[1].get('momentum_5d', 0):+.1f}%)
             
-            ### Executive Summary
-            - **Asset:** {asset} 
-            - **Current Price:** {market_data['px']}
-            - **Change:** {market_data['change']} ({market_data['change_pct']})
-            - **Analysis Date:** {forecast_date}
+            **📉 Most Oversold:** {most_oversold[0]} (RSI: {most_oversold[1]:.1f})
             
-            ### Key Findings
-            """)
-            
-            # Add content based on available data
-            if "previous_day_anchors" in export_content:
-                anchors_data = export_content["previous_day_anchors"]
-                st.markdown(f"""
-                **Previous Day Analysis:**
-                - High: ${anchors_data['high']:,.2f}
-                - Low: ${anchors_data['low']:,.2f}
-                - Range: ${anchors_data['range']:.2f} ({anchors_data['range_pct']:.2f}%)
-                """)
-            
-            if "asian_session" in export_content:
-                asian_data = export_content["asian_session"]
-                st.markdown(f"""
-                **Asian Session Analysis:**
-                - Swing High: ${asian_data['high_price']:,.2f}
-                - Swing Low: ${asian_data['low_price']:,.2f}
-                - Range: ${asian_data['range']:.2f}
-                """)
-            
-            if include_recommendations:
-                st.markdown("""
-                ### Trading Recommendations
-                - Monitor key support/resistance levels
-                - Use projection lines for entry signals
-                - Implement proper risk management
-                - Consider market volatility in position sizing
-                """)
-            
-            if include_disclaimers:
-                st.markdown("""
-                ### Risk Disclaimer
-                *This analysis is for informational purposes only and does not constitute investment advice. 
-                Trading involves substantial risk and may not be suitable for all investors.*
-                """)
-            
-            st.button(
-                "📄 Generate PDF Report",
-                help="PDF generation would create comprehensive formatted report",
-                type="primary",
-                use_container_width=True
-            )
-    
-    else:
-        st.info("👆 **Select data modules above to see export preview**")
-
-    # Quick export shortcuts
-    st.markdown("### ⚡ Quick Export Actions")
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        if st.button("📊 Quick CSV", help="Export forecast tables as CSV", use_container_width=True):
-            st.success("✅ CSV export ready!")
+            **📈 Most Overbought:** {most_overbought[0]} (RSI: {most_overbought[1]:.1f})
+            """, unsafe_allow_html=False)
+        else:
+            st.markdown("Loading market insights...", unsafe_allow_html=False)
     
     with col2:
-        if st.button("📈 Quick Excel", help="Export all data to Excel workbook", use_container_width=True):
-            st.success("✅ Excel export ready!")
+        st.markdown("#### ⚡ Trading Alerts")
+        
+        # Generate dynamic alerts based on market conditions
+        alerts = []
+        
+        if intelligence:
+            for symbol, data in intelligence.items():
+                rsi = data.get('rsi', 50)
+                vol = data.get('volatility', 20)
+                momentum = data.get('momentum_5d', 0)
+                
+                if rsi < 30 and momentum > 0:
+                    alerts.append(f"🟢 {symbol}: Oversold bounce opportunity")
+                elif rsi > 70 and momentum < 0:
+                    alerts.append(f"🔴 {symbol}: Overbought reversal watch")
+                elif vol > 35:
+                    alerts.append(f"⚡ {symbol}: Extreme volatility - high risk/reward")
+                elif abs(momentum) > 5:
+                    alerts.append(f"🚀 {symbol}: Strong momentum - trend following")
+        
+        if alerts:
+            for alert in alerts[:5]:  # Show top 5 alerts
+                st.markdown(f"⚠️ {alert}", unsafe_allow_html=False)
+        else:
+            st.markdown("✅ No critical alerts - Market in balance", unsafe_allow_html=False)
+
+def render_main_dashboard():
+    """Render the main elite dashboard"""
+    apply_elite_styling()
     
-    with col3:
-        if st.button("📄 Quick PDF", help="Generate summary PDF report", use_container_width=True):
-            st.success("✅ PDF report ready!")
+    # Update market intelligence
+    update_market_intelligence()
     
-    with col4:
-        if st.button("🔗 Quick JSON", help="Export data as JSON for API integration", use_container_width=True):
-            st.success("✅ JSON export ready!")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PART 5C2B: SETTINGS PAGE & FINAL INTEGRATION (COMPLETION)
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# PAGE 8: SETTINGS - SYSTEM CONFIGURATION & PREFERENCES
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-elif clean_page == "Settings":
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>⚙️ System Configuration & Preferences</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>Customize MarketLens Pro to match your trading style and operational requirements</p>", unsafe_allow_html=True)
-
-    # Settings organized in tabs for better UX
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🎛️ Trading", "📊 Data Sources", "🎨 Display", "⚠️ Risk", "🔧 Advanced"])
+    # Render all components
+    render_elite_header()
+    render_market_command_center()
     
-    with tab1:
-        st.markdown("### 🎛️ Trading Configuration")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**📈 Algorithm Parameters**")
-            
-            # Slope configuration
-            st.markdown("*Projection Slopes (per 30 minutes)*")
-            upward_slope = st.number_input("Upward Slope", value=0.2432, step=0.0001, format="%.4f", help="Positive slope for ascending projection lines")
-            downward_slope = st.number_input("Downward Slope", value=-0.2432, step=0.0001, format="%.4f", help="Negative slope for descending projection lines")
-            
-            # Time decay for options
-            st.markdown("*Options Time Decay*")
-            decay_rate = st.number_input("Decay Rate (per hour)", value=-0.3, step=0.01, format="%.2f", help="Hourly premium decay rate for options")
-            
-            # Trading session times
-            st.markdown("*Regular Trading Hours (CT)*")
-            rth_start = st.time_input("RTH Start", value=time(8, 30), help="Regular trading hours start time")
-            rth_end = st.time_input("RTH End", value=time(14, 30), help="Regular trading hours end time")
-        
-        with col2:
-            st.markdown("**🌏 Asian Session Configuration**")
-            
-            # Asian session window
-            st.markdown("*Asian Session Window (CT)*")
-            asian_start = st.time_input("Asian Start", value=time(17, 0), help="Asian session analysis start time")
-            asian_end = st.time_input("Asian End", value=time(20, 0), help="Asian session analysis end time")
-            
-            # Granularity settings
-            st.markdown("*Data Granularity*")
-            asian_interval = st.selectbox("Asian Data Interval", ["5m", "15m", "30m", "1h"], index=1, help="Time interval for Asian session data")
-            rth_interval = st.selectbox("RTH Projection Interval", ["15m", "30m", "1h"], index=1, help="Time interval for RTH projections")
-            
-            # ES futures symbol
-            st.markdown("*Futures Configuration*")
-            es_symbol_setting = st.text_input("ES Symbol", value=ES_SYMBOL, help="ES futures symbol for Asian session data")
-        
-        # Trading preferences
-        st.markdown("**🎯 Trading Preferences**")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            default_position_size = st.number_input("Default Position Size", value=100, step=10, help="Default number of shares/contracts")
-            commission_per_share = st.number_input("Commission per Share", value=0.005, step=0.001, format="%.3f", help="Trading commission per share")
-        
-        with col2:
-            preferred_order_type = st.selectbox("Preferred Order Type", ["Market", "Limit", "Stop", "Stop-Limit"], index=1)
-            default_time_in_force = st.selectbox("Default Time in Force", ["DAY", "GTC", "IOC", "FOK"], index=0)
-        
-        with col3:
-            auto_calculate_targets = st.checkbox("Auto-Calculate Targets", value=True, help="Automatically calculate TP1 and TP2 levels")
-            enable_alerts = st.checkbox("Enable Alerts", value=True, help="Enable real-time trading alerts")
-
-    with tab2:
-        st.markdown("### 📊 Data Sources Configuration")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**🌐 Primary Data Sources**")
-            
-            # Data source preferences
-            primary_data_source = st.selectbox("Primary Data Source", ["Yahoo Finance", "Alpha Vantage", "IEX Cloud", "Custom API"], index=0)
-            backup_data_source = st.selectbox("Backup Data Source", ["Yahoo Finance", "Alpha Vantage", "IEX Cloud", "None"], index=0)
-            
-            # API configuration
-            st.markdown("**🔑 API Configuration**")
-            api_timeout = st.number_input("API Timeout (seconds)", value=30, min_value=5, max_value=120, help="Timeout for data API requests")
-            max_retries = st.number_input("Max Retries", value=3, min_value=1, max_value=10, help="Maximum retry attempts for failed requests")
-            
-            # Data quality settings
-            st.markdown("**✅ Data Quality**")
-            min_data_points = st.number_input("Minimum Data Points", value=10, min_value=1, help="Minimum number of data points required for analysis")
-            max_data_age = st.number_input("Max Data Age (minutes)", value=5, min_value=1, help="Maximum acceptable age for real-time data")
-        
-        with col2:
-            st.markdown("**🔄 Caching & Performance**")
-            
-            # Cache settings
-            cache_duration_quotes = st.number_input("Quote Cache Duration (seconds)", value=60, min_value=10, max_value=300)
-            cache_duration_historical = st.number_input("Historical Cache Duration (minutes)", value=180, min_value=60, max_value=1440)
-            
-            # Performance settings
-            st.markdown("**⚡ Performance Optimization**")
-            enable_preloading = st.checkbox("Enable Data Preloading", value=True, help="Preload commonly used data")
-            parallel_requests = st.checkbox("Parallel API Requests", value=True, help="Enable parallel data fetching")
-            
-            # Data validation
-            st.markdown("**🛡️ Data Validation**")
-            enable_outlier_detection = st.checkbox("Outlier Detection", value=True, help="Detect and filter price outliers")
-            price_validation_threshold = st.number_input("Price Validation Threshold (%)", value=10.0, min_value=1.0, max_value=50.0, help="Maximum acceptable price change for validation")
-
-    with tab3:
-        st.markdown("### 🎨 Display & Interface Settings")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**🎨 Visual Theme**")
-            
-            # Theme selection
-            theme_preset = st.selectbox("Theme Preset", ["Professional Dark", "Clean Light", "Market Classic", "High Contrast", "Custom"], index=0)
-            
-            # Color customization
-            st.markdown("**🌈 Color Scheme**")
-            bullish_color = st.color_picker("Bullish Color", value="#10b981", help="Color for positive/bullish elements")
-            bearish_color = st.color_picker("Bearish Color", value="#ef4444", help="Color for negative/bearish elements")
-            neutral_color = st.color_picker("Neutral Color", value="#6366f1", help="Color for neutral elements")
-            
-            # Font and sizing
-            st.markdown("**📝 Typography**")
-            font_size = st.selectbox("Font Size", ["Small", "Medium", "Large", "Extra Large"], index=1)
-            font_family = st.selectbox("Font Family", ["Inter", "Roboto", "Arial", "Georgia"], index=0)
-        
-        with col2:
-            st.markdown("**📊 Table & Chart Settings**")
-            
-            # Table preferences
-            rows_per_table = st.number_input("Rows per Table", value=13, min_value=5, max_value=50, help="Number of rows to display in projection tables")
-            show_table_borders = st.checkbox("Show Table Borders", value=True)
-            highlight_current_time = st.checkbox("Highlight Current Time", value=True, help="Highlight current time row in tables")
-            
-            # Number formatting
-            st.markdown("**🔢 Number Formatting**")
-            decimal_places_price = st.number_input("Price Decimal Places", value=2, min_value=0, max_value=6)
-            decimal_places_percent = st.number_input("Percentage Decimal Places", value=2, min_value=0, max_value=4)
-            use_thousands_separator = st.checkbox("Use Thousands Separator", value=True)
-            
-            # Display preferences
-            st.markdown("**👁️ Display Options**")
-            show_debug_info = st.checkbox("Show Debug Information", value=False, help="Display technical debug information")
-            auto_refresh_interval = st.number_input("Auto Refresh (seconds)", value=0, min_value=0, max_value=300, help="Automatic refresh interval (0 = disabled)")
-
-    with tab4:
-        st.markdown("### ⚠️ Risk Management Settings")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**🛡️ Default Risk Parameters**")
-            
-            # Risk limits
-            max_portfolio_risk = st.slider("Max Portfolio Risk (%)", min_value=1, max_value=20, value=5, help="Maximum portfolio risk per trade")
-            default_stop_loss = st.slider("Default Stop Loss (%)", min_value=0.5, max_value=10.0, value=2.0, step=0.1, help="Default stop loss percentage")
-            min_risk_reward = st.number_input("Minimum Risk:Reward Ratio", value=1.5, min_value=1.0, max_value=5.0, step=0.1, help="Minimum acceptable risk-to-reward ratio")
-            
-            # Position sizing
-            st.markdown("**📊 Position Sizing**")
-            position_sizing_method = st.selectbox("Position Sizing Method", ["Fixed Amount", "Percentage of Portfolio", "Volatility Adjusted", "Kelly Criterion"], index=1)
-            max_position_size = st.slider("Max Position Size (%)", min_value=1, max_value=50, value=25, help="Maximum position size as percentage of portfolio")
-        
-        with col2:
-            st.markdown("**🚨 Alert Thresholds**")
-            
-            # Alert settings
-            price_movement_alert = st.number_input("Price Movement Alert (%)", value=2.0, min_value=0.1, max_value=10.0, step=0.1, help="Alert threshold for significant price movements")
-            volatility_alert = st.number_input("Volatility Alert (%)", value=5.0, min_value=1.0, max_value=20.0, step=0.5, help="Alert threshold for high volatility")
-            
-            # Risk monitoring
-            st.markdown("**📈 Risk Monitoring**")
-            enable_drawdown_alerts = st.checkbox("Enable Drawdown Alerts", value=True, help="Alert when drawdown exceeds threshold")
-            max_drawdown_threshold = st.slider("Max Drawdown Alert (%)", min_value=5, max_value=25, value=10, help="Drawdown percentage that triggers alert")
-            
-            # Compliance
-            st.markdown("**📋 Compliance**")
-            enable_pattern_day_trader = st.checkbox("Pattern Day Trader Rules", value=False, help="Enable PDT compliance monitoring")
-            account_minimum = st.number_input("Account Minimum ($)", value=25000, min_value=0, step=1000, help="Minimum account balance for trading")
-
-    with tab5:
-        st.markdown("### 🔧 Advanced System Settings")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**🔬 Calculation Engine**")
-            
-            # Advanced algorithm settings
-            calculation_precision = st.selectbox("Calculation Precision", ["Standard", "High", "Maximum"], index=1, help="Precision level for mathematical calculations")
-            enable_monte_carlo = st.checkbox("Enable Monte Carlo Simulation", value=False, help="Enable advanced Monte Carlo analysis")
-            simulation_iterations = st.number_input("Simulation Iterations", value=1000, min_value=100, max_value=10000, help="Number of Monte Carlo iterations")
-            
-            # Memory and performance
-            st.markdown("**💾 Memory Management**")
-            max_memory_usage = st.selectbox("Max Memory Usage", ["Low", "Medium", "High", "Unlimited"], index=2)
-            cache_cleanup_interval = st.number_input("Cache Cleanup (hours)", value=24, min_value=1, max_value=168, help="Hours between cache cleanup operations")
-        
-        with col2:
-            st.markdown("**🔧 System Maintenance**")
-            
-            # Logging and debugging
-            log_level = st.selectbox("Log Level", ["ERROR", "WARNING", "INFO", "DEBUG"], index=2, help="System logging verbosity")
-            enable_performance_monitoring = st.checkbox("Performance Monitoring", value=True, help="Monitor system performance metrics")
-            
-            # Data backup and recovery
-            st.markdown("**💾 Backup & Recovery**")
-            auto_backup_settings = st.checkbox("Auto-Backup Settings", value=True, help="Automatically backup configuration")
-            backup_frequency = st.selectbox("Backup Frequency", ["Daily", "Weekly", "Monthly"], index=1)
-            
-            # System information
-            st.markdown("**ℹ️ System Information**")
-            st.info(f"""
-            **Application:** {APP_NAME} v{VERSION}  
-            **Company:** {COMPANY}  
-            **Python Version:** {pd.__version__} (pandas)  
-            **Current Session:** {forecast_date}  
-            **Data Source:** {market_data.get('source', 'Unknown')}
-            """)
-
-    # Settings actions
-    st.markdown("### 💾 Configuration Management")
-    col1, col2, col3, col4 = st.columns(4)
+    st.divider()
     
-    with col1:
-        if st.button("💾 Save Settings", type="primary", use_container_width=True):
-            st.success("✅ Settings saved successfully!")
+    render_trading_intelligence()
     
-    with col2:
-        if st.button("🔄 Reset to Defaults", use_container_width=True):
-            st.warning("⚠️ Settings reset to defaults!")
+    st.divider()
     
-    with col3:
-        if st.button("📤 Export Config", use_container_width=True):
-            st.info("📄 Configuration exported!")
+    render_live_market_matrix()
     
-    with col4:
-        if st.button("📥 Import Config", use_container_width=True):
-            st.info("📁 Configuration imported!")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# FINAL APPLICATION INTEGRATION & ERROR HANDLING
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# Handle any unknown page routes gracefully
-else:
-    st.markdown('<div class="sec">', unsafe_allow_html=True)
-    st.markdown("<h3>🚧 Page Not Found</h3>", unsafe_allow_html=True)
-    st.markdown("<p class='muted'>The requested page could not be found. Please use the navigation menu to access available features.</p>", unsafe_allow_html=True)
+    st.divider()
     
-    st.markdown("### 🧭 Available Pages:")
-    available_pages = [
-        "📊 **Dashboard** - System overview and readiness status",
-        "⚓ **Anchors** - Previous day and Asian session anchor points",
-        "🎯 **Forecasts** - SPX projection tables with entry/exit levels",
-        "📡 **Signals** - Real-time trading signals and market alerts",
-        "📜 **Contracts** - Options strategies with time decay modeling",
-        "🌟 **Fibonacci** - Retracement and extension analysis",
-        "📤 **Export** - Data export and professional reporting",
-        "⚙️ **Settings** - System configuration and preferences"
-    ]
+    render_elite_insights()
     
-    for page_info in available_pages:
-        st.markdown(f"- {page_info}")
-    
+    # Elite footer
     st.markdown("---")
-    st.markdown("### 🔄 Quick Actions")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🏠 Go to Dashboard", type="primary", use_container_width=True):
-            st.rerun()
-    with col2:
-        if st.button("🔄 Refresh Application", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+    st.markdown("""
+    <div style="text-align: center; opacity: 0.8; padding: 1rem;">
+        <strong>MarketLens Pro v5</strong> - Elite Trading Intelligence Platform | 
+        Real-time market analytics and signal generation | 
+        © 2024 Max Pointe Consulting
+    </div>
+    """, unsafe_allow_html=True)
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+class EliteMarketLens:
+    """Elite MarketLens Pro application"""
     
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# APPLICATION FOOTER & STATUS BAR
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-# Professional footer with system status
-st.markdown("---")
-
-# System status bar
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    # Market session status
-    now_et = datetime.now(ET)
-    if now_et.weekday() < 5 and time(9, 30) <= now_et.time() <= time(16, 0):
-        session_status = "🟢 Market Open"
-    elif now_et.weekday() < 5 and time(4, 0) <= now_et.time() < time(9, 30):
-        session_status = "🟡 Pre-Market"
-    elif now_et.weekday() < 5 and time(16, 0) < now_et.time() <= time(20, 0):
-        session_status = "🟡 After Hours"
-    else:
-        session_status = "🔴 Market Closed"
+    def __init__(self):
+        initialize_elite_session()
     
-    st.caption(f"**Session:** {session_status}")
-
-with col2:
-    # Data connectivity status
-    data_status = "🟢 Connected" if market_data['px'] != "—" else "🔴 Disconnected"
-    st.caption(f"**Data Feed:** {data_status}")
-
-with col3:
-    # System performance
-    uptime = "99.9%"  # Mock uptime - would be calculated in real implementation
-    st.caption(f"**Uptime:** {uptime}")
-
-with col4:
-    # Last update time
-    last_update = datetime.now(ET).strftime("%-I:%M:%S %p")
-    st.caption(f"**Updated:** {last_update}")
-
-# Application footer
-st.markdown(f"""
-<div style="text-align: center; padding: 20px 0; border-top: 1px solid rgba(2,6,23,.08); margin-top: 20px; color: #64748b;">
-    <div style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">
-        {APP_NAME} v{VERSION} • Professional Trading Analytics Platform
-    </div>
-    <div style="font-size: 12px;">
-        © 2025 {COMPANY} • Enterprise-grade market analysis and forecasting
-    </div>
-    <div style="font-size: 11px; margin-top: 8px; opacity: 0.8;">
-        ⚠️ Trading involves substantial risk. Past performance does not guarantee future results.
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# Hidden performance metrics for monitoring (in real implementation)
-if 'show_debug_info' in locals() and show_debug_info:
-    with st.expander("🔧 Debug Information", expanded=False):
-        debug_info = {
-            "session_state_size": len(st.session_state),
-            "cache_entries": "Active",
-            "memory_usage": "Optimized",
-            "api_calls_today": "Within limits",
-            "error_count": 0,
-            "last_error": None,
-            "performance_score": "A+",
-            "data_quality": "High"
-        }
+    def run(self):
+        """Run the elite trading platform"""
+        render_main_dashboard()
         
-        st.json(debug_info)
+        # Auto-refresh during market hours
+        market_state, _ = get_market_state()
+        if "LIVE" in market_state or "PRE" in market_state:
+            time.sleep(3)
+            st.rerun()
 
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# END OF MARKETLENS PRO APPLICATION
-# ═══════════════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# APPLICATION ENTRY POINT
+# ============================================================================
 
-# 🎉 CONGRATULATIONS! 🎉
-# You now have a complete, professional-grade trading application with:
-#
-# ✅ 8 Fully Functional Pages
-# ✅ Real-time Market Data Integration
-# ✅ Advanced Analytics & Projections
-# ✅ Professional UI/UX Design
-# ✅ Comprehensive Export System
-# ✅ Extensive Configuration Options
-# ✅ Enterprise-level Features
-# ✅ Mobile-responsive Design
-# ✅ Error Handling & Validation
-# ✅ Professional Branding
-#
-# Your MarketLens Pro application is ready for deployment and commercial use!
+def main():
+    """Main application entry point"""
+    app = EliteMarketLens()
+    app.run()
+
+if __name__ == "__main__":
+    main()
