@@ -77,34 +77,67 @@ def apply_custom_styling():
     
     /* Metrics Cards */
     [data-testid="metric-container"] {
-        background: rgba(26, 26, 46, 0.6);
-        border: 1px solid rgba(34, 211, 238, 0.3);
+        background: rgba(15, 15, 35, 0.9) !important;
+        border: 1px solid rgba(34, 211, 238, 0.5);
         padding: 1rem;
         border-radius: 10px;
         backdrop-filter: blur(10px);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
     }
     
     /* Numbers in Metrics */
     [data-testid="metric-container"] > div {
         font-family: 'JetBrains Mono', monospace;
-        color: #00ff88;
+        color: #00ff88 !important;
+    }
+    
+    /* Metric Labels */
+    [data-testid="metric-container"] [data-testid="metric-container"] > label {
+        color: #ffffff !important;
+        font-weight: 500 !important;
     }
     
     /* Professional Glass Cards */
     .glass-card {
-        background: rgba(26, 26, 46, 0.6);
-        border: 1px solid rgba(34, 211, 238, 0.3);
+        background: rgba(15, 15, 35, 0.95) !important;
+        border: 1px solid rgba(34, 211, 238, 0.5);
         border-radius: 15px;
         padding: 1.5rem;
         backdrop-filter: blur(10px);
         margin: 1rem 0;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* Glass Card Text */
+    .glass-card h3 {
+        color: #22d3ee !important;
+        margin-bottom: 1rem !important;
+        font-weight: 600 !important;
+    }
+    
+    .glass-card p {
+        color: #ffffff !important;
+        font-size: 1.1rem !important;
+        line-height: 1.6 !important;
+        opacity: 0.95 !important;
     }
     
     /* Success/Warning/Error Styling */
     .stAlert {
-        background: rgba(26, 26, 46, 0.8);
+        background: rgba(15, 15, 35, 0.9) !important;
         border-left: 4px solid #00ff88;
-        color: #ffffff;
+        color: #ffffff !important;
+        border-radius: 8px;
+    }
+    
+    /* Alert Text */
+    .stAlert > div {
+        color: #ffffff !important;
+    }
+    
+    /* Main Text Color Override */
+    .main p, .main div, .main span {
+        color: #ffffff !important;
     }
     
     /* Button Styling */
@@ -402,12 +435,12 @@ def create_metric_card(title, value, delta=None, delta_color="normal"):
 
 def create_info_card(title, content):
     """
-    Create professional info card with glass effect
+    Create professional info card with glass effect and high contrast
     """
     st.markdown(f"""
     <div class="glass-card">
-        <h3 style="color: #22d3ee; margin-bottom: 1rem;">{title}</h3>
-        <p style="color: #ffffff; font-size: 1.1rem; line-height: 1.6;">{content}</p>
+        <h3 style="color: #22d3ee !important; margin-bottom: 1rem !important; font-weight: 600 !important;">{title}</h3>
+        <p style="color: #ffffff !important; font-size: 1.1rem !important; line-height: 1.6 !important; opacity: 0.95 !important; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">{content}</p>
     </div>
     """, unsafe_allow_html=True)
 
