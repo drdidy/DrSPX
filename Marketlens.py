@@ -1,6 +1,6 @@
 # app.py
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🔮 SPX PROPHET — Enterprise Edition with Enhanced UI
+# 🔮 SPX PROPHET — Complete Entry/Exit Trading System
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -9,8 +9,6 @@ import numpy as np
 import pytz
 from datetime import datetime, date, time, timedelta
 from typing import List, Tuple
-import plotly.graph_objects as go
-import plotly.express as px
 
 # ───────────────────────────────────────────────────────────────────────────────
 # CONFIG & PAGE SETUP
@@ -67,7 +65,6 @@ st.markdown("""
         --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
         --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-        --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
     }
     
     html, body, [class*="css"] {
@@ -131,31 +128,59 @@ st.markdown("""
         line-height: 1.4;
     }
     
-    /* Status Indicators */
-    .status-positive { color: var(--success); }
-    .status-negative { color: var(--error); }
-    .status-neutral { color: var(--text-muted); }
-    
-    /* Form Enhancements */
-    .form-section {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-bottom: 1rem;
-        box-shadow: var(--shadow-sm);
+    /* Alert/Info Boxes */
+    .info-box {
+        background: linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%);
+        border-left: 4px solid var(--primary);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
     }
     
-    .form-header {
+    .success-box {
+        background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+        border-left: 4px solid var(--success);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    
+    .warning-box {
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+        border-left: 4px solid var(--warning);
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    
+    /* Main Header */
+    .main-header {
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 16px;
+        margin-bottom: 2rem;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .header-title {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .header-subtitle {
         font-size: 1.125rem;
-        font-weight: 600;
-        color: var(--text-primary);
-        margin-bottom: 1rem;
-        padding-bottom: 0.75rem;
-        border-bottom: 1px solid var(--border-light);
+        opacity: 0.9;
+        position: relative;
+        z-index: 1;
     }
     
-    /* Table Styling */
+    /* Enhanced Tables */
     .dataframe {
         border-radius: 8px !important;
         overflow: hidden !important;
@@ -178,31 +203,6 @@ st.markdown("""
         font-family: 'Inter', monospace !important;
     }
     
-    /* Alert/Info Boxes */
-    .info-box {
-        background: linear-gradient(135deg, #dbeafe 0%, #e0f2fe 100%);
-        border-left: 4px solid var(--primary);
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    
-    .warning-box {
-        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-        border-left: 4px solid var(--warning);
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    
-    .success-box {
-        background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-        border-left: 4px solid var(--success);
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    
     /* Button Enhancements */
     .stButton > button {
         border-radius: 8px !important;
@@ -220,100 +220,43 @@ st.markdown("""
         box-shadow: var(--shadow-md) !important;
     }
     
-    /* Tab Styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+    /* Form Section */
+    .form-section {
         background: var(--surface);
-        border-radius: 12px;
-        padding: 4px;
         border: 1px solid var(--border);
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        padding: 0px 24px;
-        background-color: transparent;
-        border-radius: 8px;
-        color: var(--text-secondary);
-        font-weight: 500;
-        transition: all 0.2s ease;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%) !important;
-        color: white !important;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
         box-shadow: var(--shadow-sm);
     }
     
-    /* Sidebar Styling */
-    .css-1d391kg {
+    .pair-section {
         background: var(--surface);
-        border-right: 1px solid var(--border);
+        border: 2px solid var(--border-light);
+        border-radius: 12px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
     }
     
-    /* Header */
-    .main-header {
-        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-        color: white;
-        padding: 2rem;
-        border-radius: 16px;
-        margin-bottom: 2rem;
-        text-align: center;
-        position: relative;
-        overflow: hidden;
+    .bounce-section {
+        background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+        border: 1px solid #10b981;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
     }
     
-    .main-header::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        right: -50%;
-        width: 200%;
-        height: 200%;
-        background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-        animation: pulse 4s ease-in-out infinite;
+    .rejection-section {
+        background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+        border: 1px solid #ef4444;
+        border-radius: 8px;
+        padding: 1rem;
     }
-    
-    @keyframes pulse {
-        0%, 100% { opacity: 0.5; transform: scale(1); }
-        50% { opacity: 0.8; transform: scale(1.1); }
-    }
-    
-    .header-title {
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-        position: relative;
-        z-index: 1;
-    }
-    
-    .header-subtitle {
-        font-size: 1.125rem;
-        opacity: 0.9;
-        position: relative;
-        z-index: 1;
-    }
-    
-    /* Loading Animation */
-    .loading {
-        display: inline-block;
-        width: 20px;
-        height: 20px;
-        border: 3px solid rgba(255,255,255,.3);
-        border-radius: 50%;
-        border-top-color: var(--primary);
-        animation: spin 1s ease-in-out infinite;
-    }
-    
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
-    
 </style>
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────────────────────────────────────
-# TIME / BLOCK HELPERS (UNCHANGED)
+# TIME / BLOCK HELPERS
 # ───────────────────────────────────────────────────────────────────────────────
 def fmt_ct(dt: datetime) -> datetime:
     if dt.tzinfo is None: return CT.localize(dt)
@@ -370,7 +313,7 @@ def blocks_simple_30m(d1: datetime, d2: datetime) -> int:
     return int((d2 - d1).total_seconds() // (30*60))
 
 # ───────────────────────────────────────────────────────────────────────────────
-# FAN & PROJECTIONS (UNCHANGED)
+# FAN & PROJECTIONS
 # ───────────────────────────────────────────────────────────────────────────────
 def fan_levels_for_slot(anchor_close: float, anchor_time: datetime, slot_dt: datetime) -> Tuple[float,float]:
     blocks = count_blocks_spx(anchor_time, slot_dt)
@@ -410,7 +353,7 @@ def calculate_rejection_exit(rejection_dt1: datetime, rejection_dt2: datetime,
 st.markdown("""
 <div class='main-header'>
     <div class='header-title'>🔮 SPX Prophet</div>
-    <div class='header-subtitle'>Professional Trading Analytics & Projection System</div>
+    <div class='header-subtitle'>Complete Entry/Exit Trading Analytics System</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -420,7 +363,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### ⚙️ Configuration")
     
-    # Help toggle
+    # Help and Reset buttons
     col1, col2 = st.columns([1, 1])
     with col1:
         if st.button("❓ Help", key="help_toggle"):
@@ -434,11 +377,11 @@ with st.sidebar:
     if st.session_state.show_help:
         st.markdown("""
         <div class='info-box'>
-            <strong>Quick Guide:</strong><br>
-            • Set previous trading day close (SPX Anchor)<br>
-            • Configure PDH/PDL levels<br>
-            • Use BC Forecast for bounce + rejection projections<br>
-            • Review Plan Card for complete entry/exit strategy
+            <strong>Complete System Guide:</strong><br>
+            • Set SPX anchor (≤3:00 PM close)<br>
+            • Configure PDH/PDL key levels<br>
+            • Use BC Forecast for bounce-rejection pairs<br>
+            • Review Plan Card for complete strategy
         </div>
         """, unsafe_allow_html=True)
     
@@ -452,7 +395,7 @@ with st.sidebar:
     
     st.markdown("#### 💰 Market Data")
     
-    # Main inputs with validation
+    # Main inputs
     anchor_close = st.number_input(
         "SPX Anchor (≤ 3:00 PM CT Close)", 
         value=float(DEFAULT_ANCHOR), 
@@ -471,7 +414,7 @@ with st.sidebar:
     
     st.markdown("#### 📊 Key Levels")
     
-    # PDH/PDL with better defaults
+    # PDH/PDL
     col1, col2 = st.columns(2)
     with col1:
         pdh = st.number_input("PDH", value=anchor_close + 10.0, step=0.25, format="%.2f", help="Previous Day High")
@@ -562,11 +505,11 @@ st.markdown("<br>", unsafe_allow_html=True)
 tab1, tab2, tab3 = st.tabs(["📊 SPX Anchors", "🎯 BC Forecast", "📋 Trading Plan"])
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
-# ║ TAB 1 — Enhanced SPX Anchors                                                ║
+# ║ TAB 1 — Enhanced SPX Anchors with Entry/Exit                                ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝
 with tab1:
-    st.markdown("### 📊 SPX Anchor Levels - RTH Projections")
-    st.markdown("Real-time anchor levels for 30-minute intervals from 8:30 AM to 2:30 PM CT")
+    st.markdown("### 📊 SPX Anchor Levels - Complete Entry/Exit Projections")
+    st.markdown("Real-time anchor levels and contract entry/exit projections for 30-minute intervals from 8:30 AM to 2:30 PM CT")
     
     anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
 
@@ -590,7 +533,7 @@ with tab1:
         st.markdown(f"""
         <div class='success-box'>
             <strong>{status_msg}</strong><br>
-            Projections below include BC-fitted slopes and reference points.
+            Projections below include BC-fitted slopes and rejection-based exit levels.
         </div>
         """, unsafe_allow_html=True)
 
@@ -630,12 +573,12 @@ with tab1:
         # Contract exit projection
         c_exit = ""
         if rejection_result:
-            c_exit = calculate_rejection_exit(
+            c_exit_val = calculate_rejection_exit(
                 rejection_result['r1_dt'], rejection_result['r2_dt'],
                 rejection_result['c_r1'], rejection_result['c_r2'], slot
             )
-            if c_exit:
-                c_exit = f"{c_exit:.2f}"
+            if c_exit_val:
+                c_exit = f"{c_exit_val:.2f}"
         
         # Calculate entry/exit spread
         entry_exit_spread = ""
@@ -669,20 +612,20 @@ with tab1:
         rows_low.append(low_row)
 
     # Display tables with better organization
-    tab_col1, tab_col2, tab_col3 = st.tabs(["📈 Close Levels", "⬆️ High Levels", "⬇️ Low Levels"])
+    tab_col1, tab_col2, tab_col3 = st.tabs(["📈 Complete Entry/Exit", "⬆️ High/Resistance Levels", "⬇️ Low/Support Levels"])
     
     with tab_col1:
-        st.markdown("**Complete projection table with all key levels**")
+        st.markdown("**Complete projection table with entry/exit levels and spreads**")
         df_close = pd.DataFrame(rows_close)
         st.dataframe(df_close, use_container_width=True, hide_index=True)
     
     with tab_col2:
-        st.markdown("**Focus on resistance/high levels**")
+        st.markdown("**Focus on resistance/high levels and entries**")
         df_high = pd.DataFrame(rows_high)
         st.dataframe(df_high, use_container_width=True, hide_index=True)
     
     with tab_col3:
-        st.markdown("**Focus on support/low levels**")
+        st.markdown("**Focus on support/low levels and entries**")
         df_low = pd.DataFrame(rows_low)
         st.dataframe(df_low, use_container_width=True, hide_index=True)
     
@@ -709,16 +652,18 @@ with tab1:
         st.metric("Range Expansion", f"{expansion:.2f}", delta=expansion_pct)
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
-# ║ TAB 2 — Enhanced BC Forecast                                                ║
+# ║ TAB 2 — Complete BC Forecast with Bounce-Rejection Pairs                   ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝
 with tab2:
-    st.markdown("### 🎯 BC Forecast - Two-Bounce Projection System")
+    st.markdown("### 🎯 BC Forecast - Complete Entry/Exit System")
     
     st.markdown("""
     <div class='info-box'>
-        <strong>How BC Forecast Works:</strong><br>
-        Select exactly two bounce points between 3:30 PM (previous day) and 8:00 AM (projection day).
-        The system will calculate optimal slopes and project through RTH based on your bounce data.
+        <strong>Complete Trading System Setup:</strong><br>
+        • Configure bounce-rejection pairs for complete entry/exit projections<br>
+        • Each bounce provides entry calculations, each rejection provides exit calculations<br>
+        • System projects both entry and exit levels through all RTH periods<br>
+        • Time window: 3:30 PM (previous day) → 8:00 AM (projection day)
     </div>
     """, unsafe_allow_html=True)
 
@@ -733,38 +678,124 @@ with tab2:
     bounce_slots = [dt.strftime("%Y-%m-%d %H:%M") for dt in tmp_slots]
     bounce_display = [f"{dt.strftime('%a %m/%d %H:%M')} CT" for dt in tmp_slots]
 
-    # Enhanced form with better UX
-    with st.form("bc_form", clear_on_submit=False):
-        st.markdown("#### 🎯 Configure Bounce Points")
+    # Enhanced form with bounce-rejection pairs
+    with st.form("complete_bc_form", clear_on_submit=False):
+        
+        st.markdown("#### 🔄 Configure Bounce-Rejection Pairs")
+        st.markdown("*Set up each bounce with its corresponding rejection for complete entry/exit system*")
         
         col1, col2 = st.columns(2)
+        
+        # LEFT COLUMN: First Bounce → First Rejection Pair
         with col1:
-            st.markdown("**First Bounce**")
-            b1_idx = st.selectbox("Time Slot", range(len(bounce_slots)), format_func=lambda x: bounce_display[x], index=0, key="bc_b1")
-            spx_b1 = st.number_input("SPX Price", value=anchor_close, step=0.25, format="%.2f", key="spx_b1")
+            st.markdown("""
+            <div class='pair-section'>
+                <h4>🔵 First Bounce-Rejection Pair</h4>
+            """, unsafe_allow_html=True)
             
+            st.markdown("""
+            <div class='bounce-section'>
+                <strong>🟢 First Bounce (Entry Calculation)</strong>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            b1_idx = st.selectbox(
+                "Time Slot", 
+                range(len(bounce_slots)), 
+                format_func=lambda x: bounce_display[x], 
+                index=0, 
+                key="bc_b1",
+                help="When the first bounce occurred"
+            )
+            col_b1_1, col_b1_2 = st.columns(2)
+            with col_b1_1:
+                spx_b1 = st.number_input("SPX Price", value=anchor_close, step=0.25, format="%.2f", key="spx_b1")
+            with col_b1_2:
+                c_b1 = st.number_input("Contract Price", value=contract_3pm, step=0.05, format="%.2f", key="c_b1")
+            
+            st.markdown("""
+            <div class='rejection-section'>
+                <strong>🔴 First Rejection (Exit Calculation)</strong>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            r1_idx = st.selectbox(
+                "Time Slot", 
+                range(len(bounce_slots)), 
+                format_func=lambda x: bounce_display[x], 
+                index=min(5, len(bounce_slots)-1), 
+                key="rej_r1",
+                help="When the first rejection occurred (should be AFTER first bounce)"
+            )
+            col_r1_1, col_r1_2 = st.columns(2)
+            with col_r1_1:
+                spx_r1 = st.number_input("SPX Price", value=anchor_close + 5.0, step=0.25, format="%.2f", key="spx_r1")
+            with col_r1_2:
+                c_r1 = st.number_input("Contract Price", value=contract_3pm + 2.0, step=0.05, format="%.2f", key="c_r1")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+        # RIGHT COLUMN: Second Bounce → Second Rejection Pair    
         with col2:
-            st.markdown("**Second Bounce**")
+            st.markdown("""
+            <div class='pair-section'>
+                <h4>🔵 Second Bounce-Rejection Pair</h4>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("""
+            <div class='bounce-section'>
+                <strong>🟢 Second Bounce (Entry Calculation)</strong>
+            </div>
+            """, unsafe_allow_html=True)
+            
             default_b2 = min(10, len(bounce_slots)-1)
-            b2_idx = st.selectbox("Time Slot", range(len(bounce_slots)), format_func=lambda x: bounce_display[x], index=default_b2, key="bc_b2")
-            spx_b2 = st.number_input("SPX Price", value=anchor_close, step=0.25, format="%.2f", key="spx_b2")
+            b2_idx = st.selectbox(
+                "Time Slot", 
+                range(len(bounce_slots)), 
+                format_func=lambda x: bounce_display[x], 
+                index=default_b2, 
+                key="bc_b2",
+                help="When the second bounce occurred"
+            )
+            col_b2_1, col_b2_2 = st.columns(2)
+            with col_b2_1:
+                spx_b2 = st.number_input("SPX Price", value=anchor_close, step=0.25, format="%.2f", key="spx_b2")
+            with col_b2_2:
+                c_b2 = st.number_input("Contract Price", value=contract_3pm, step=0.05, format="%.2f", key="c_b2")
+            
+            st.markdown("""
+            <div class='rejection-section'>
+                <strong>🔴 Second Rejection (Exit Calculation)</strong>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            r2_idx = st.selectbox(
+                "Time Slot", 
+                range(len(bounce_slots)), 
+                format_func=lambda x: bounce_display[x], 
+                index=min(15, len(bounce_slots)-1), 
+                key="rej_r2",
+                help="When the second rejection occurred (should be AFTER second bounce)"
+            )
+            col_r2_1, col_r2_2 = st.columns(2)
+            with col_r2_1:
+                spx_r2 = st.number_input("SPX Price", value=anchor_close + 7.0, step=0.25, format="%.2f", key="spx_r2")
+            with col_r2_2:
+                c_r2 = st.number_input("Contract Price", value=contract_3pm + 3.0, step=0.05, format="%.2f", key="c_r2")
+            
+            st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("#### 💼 Contract Optimization (Optional)")
-        st.caption("Provide contract prices at the same bounce times to optimize contract slope")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            c_b1 = st.number_input("Contract @ Bounce 1", value=contract_3pm, step=0.05, format="%.2f", key="c_b1")
-        with col2:
-            c_b2 = st.number_input("Contract @ Bounce 2", value=contract_3pm, step=0.05, format="%.2f", key="c_b2")
+        # Optional: Skip rejections checkbox
+        skip_rejections = st.checkbox("Skip rejection calculations (entries only)", value=False, help="Check this if you only want entry projections without exits")
 
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            submitted = st.form_submit_button("🚀 Generate BC Forecast", use_container_width=True)
+            submitted = st.form_submit_button("🚀 Generate Complete Entry/Exit Forecast", use_container_width=True)
 
     if submitted:
-        with st.spinner("Calculating BC Forecast..."):
+        with st.spinner("Calculating Complete Entry/Exit Forecast..."):
             try:
                 b1_dt = fmt_ct(datetime.strptime(bounce_slots[b1_idx], "%Y-%m-%d %H:%M"))
                 b2_dt = fmt_ct(datetime.strptime(bounce_slots[b2_idx], "%Y-%m-%d %H:%M"))
@@ -772,20 +803,45 @@ with tab2:
                 if b2_dt <= b1_dt:
                     st.error("⚠️ Second bounce must be after first bounce.")
                 else:
-                    # Calculate slopes
+                    # Calculate bounce slopes (entry system)
                     spx_blocks = count_blocks_spx(b1_dt, b2_dt)
                     if spx_blocks <= 0:
                         st.error("⚠️ Bounces must be at least 30 minutes apart with valid blocks.")
                     else:
                         spx_slope = (float(spx_b2) - float(spx_b1)) / spx_blocks
                         
-                        # Contract slope
+                        # Contract slope for bounces
                         bounce_blocks = blocks_simple_30m(b1_dt, b2_dt)
                         contract_slope = SLOPE_CONTRACT_DEFAULT
                         if bounce_blocks > 0 and (c_b2 != c_b1):
                             contract_slope = float((float(c_b2) - float(c_b1)) / bounce_blocks)
 
-                        # Build projection table
+                        # Calculate rejection slopes if NOT skipped
+                        rejection_data = None
+                        if not skip_rejections:
+                            try:
+                                r1_dt = fmt_ct(datetime.strptime(bounce_slots[r1_idx], "%Y-%m-%d %H:%M"))
+                                r2_dt = fmt_ct(datetime.strptime(bounce_slots[r2_idx], "%Y-%m-%d %H:%M"))
+                                
+                                if r2_dt > r1_dt:
+                                    rejection_blocks = blocks_simple_30m(r1_dt, r2_dt)
+                                    if rejection_blocks > 0:
+                                        spx_rej_slope = (float(spx_r2) - float(spx_r1)) / rejection_blocks
+                                        contract_rej_slope = (float(c_r2) - float(c_r1)) / rejection_blocks if c_r2 != c_r1 else 0
+                                        
+                                        rejection_data = {
+                                            'r1_dt': r1_dt, 'r2_dt': r2_dt,
+                                            'spx_r1': float(spx_r1), 'spx_r2': float(spx_r2),
+                                            'c_r1': float(c_r1), 'c_r2': float(c_r2),
+                                            'spx_rej_slope': spx_rej_slope,
+                                            'contract_rej_slope': contract_rej_slope
+                                        }
+                                else:
+                                    st.warning("⚠️ Second rejection must be after first rejection. Exit projections disabled.")
+                            except Exception as e:
+                                st.warning(f"⚠️ Rejection calculation error: {e}. Entry projections will proceed.")
+
+                        # Build comprehensive projection table
                         rows = []
                         anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
                         
@@ -795,49 +851,91 @@ with tab2:
                             blocks_from_b2 = blocks_simple_30m(b2_dt, slot)
                             c_proj = round(float(c_b2) + contract_slope * blocks_from_b2, 2)
                             
+                            # Calculate exit levels if rejections are configured
+                            c_exit = ""
+                            spx_exit = ""
+                            entry_exit_spread = ""
+                            
+                            if rejection_data:
+                                c_exit_val = calculate_rejection_exit(
+                                    rejection_data['r1_dt'], rejection_data['r2_dt'],
+                                    rejection_data['c_r1'], rejection_data['c_r2'], slot
+                                )
+                                if c_exit_val:
+                                    c_exit = f"{c_exit_val:.2f}"
+                                    entry_exit_spread = f"{c_proj - c_exit_val:.2f}"
+                                
+                                # SPX exit projection
+                                exit_blocks = blocks_simple_30m(rejection_data['r2_dt'], slot)
+                                spx_exit = round(rejection_data['spx_r2'] + rejection_data['spx_rej_slope'] * exit_blocks, 2)
+                            
                             rows.append({
                                 "⭐": "🎯" if slot.strftime("%H:%M") in ["08:30", "10:00", "12:00", "14:30"] else "",
                                 "Time": slot.strftime("%H:%M"),
                                 "Top": top, 
                                 "Bottom": bot,
-                                "SPX Proj": spx_proj,
-                                "Contract Proj": c_proj,
-                                "SPX vs Top": f"{spx_proj - top:.2f}",
-                                "SPX vs Bot": f"{spx_proj - bot:.2f}"
+                                "SPX Entry": spx_proj,
+                                "Contract Entry": c_proj,
+                                "SPX Exit": spx_exit if spx_exit else "—",
+                                "Contract Exit": c_exit if c_exit else "—",
+                                "Entry/Exit Spread": entry_exit_spread if entry_exit_spread else "—"
                             })
                         
                         out_df = pd.DataFrame(rows)
                         
                         # Success message with key stats
-                        st.markdown("""
+                        success_msg = "✅ Complete Entry/Exit Forecast Generated!"
+                        if rejection_data:
+                            success_msg += " Both entry and exit projections calculated."
+                        else:
+                            success_msg += " Entry projections calculated (exits skipped)."
+                        
+                        st.markdown(f"""
                         <div class='success-box'>
-                            <strong>✅ BC Forecast Generated Successfully!</strong><br>
-                            Slope calculations complete. Review projections below.
+                            <strong>{success_msg}</strong><br>
+                            Review comprehensive projections below.
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Display metrics
+                        # Display enhanced metrics
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
-                            st.metric("SPX Slope", f"{spx_slope:.3f}", help="SPX slope per 30-minute block")
+                            st.metric("SPX Entry Slope", f"{spx_slope:.3f}", help="SPX entry slope per 30-minute block")
                         with col2:
-                            st.metric("Contract Slope", f"{contract_slope:.3f}", help="Contract slope per 30-minute block")
+                            st.metric("Contract Entry Slope", f"{contract_slope:.3f}", help="Contract entry slope per 30-minute block")
                         with col3:
-                            direction = "📈 Bullish" if spx_slope > 0 else "📉 Bearish"
-                            st.metric("Bias", direction, help="Overall directional bias from bounces")
+                            if rejection_data:
+                                st.metric("SPX Exit Slope", f"{rejection_data['spx_rej_slope']:.3f}", help="SPX exit slope per 30-minute block")
+                            else:
+                                st.metric("SPX Exit Slope", "—", help="No rejection data")
                         with col4:
-                            time_span = int((b2_dt - b1_dt).total_seconds() // 3600)
-                            st.metric("Time Span", f"{time_span}h", help="Hours between bounces")
+                            if rejection_data:
+                                st.metric("Contract Exit Slope", f"{rejection_data['contract_rej_slope']:.3f}", help="Contract exit slope per 30-minute block")
+                            else:
+                                st.metric("Contract Exit Slope", "—", help="No rejection data")
                         
-                        # Main projection table
-                        st.markdown("### 📊 RTH Projections from BC Fit")
+                        # Direction analysis
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            entry_direction = "📈 Bullish Entry" if spx_slope > 0 else "📉 Bearish Entry"
+                            st.markdown(f"**Entry Bias:** {entry_direction}")
+                        with col2:
+                            if rejection_data:
+                                exit_direction = "📈 Rising Exits" if rejection_data['spx_rej_slope'] > 0 else "📉 Falling Exits"
+                                st.markdown(f"**Exit Pattern:** {exit_direction}")
+                            else:
+                                st.markdown("**Exit Pattern:** Not configured")
+                        
+                        # Main comprehensive projection table
+                        st.markdown("### 📊 Complete RTH Projections (Entries + Exits)")
                         st.dataframe(out_df, use_container_width=True, hide_index=True)
                         
-                        # Band analysis
+                        # Enhanced band analysis
                         spx_band = sigma1
                         c_band_28 = round(abs(contract_slope) * 28, 2)
+                        c_exit_band = round(abs(rejection_data['contract_rej_slope']) * 28, 2) if rejection_data else 0
                         
-                        col1, col2 = st.columns(2)
+                        col1, col2, col3 = st.columns(3)
                         with col1:
                             st.markdown(f"""
                             <div class='metric-card'>
@@ -850,11 +948,29 @@ with tab2:
                         with col2:
                             st.markdown(f"""
                             <div class='metric-card'>
-                                <div class='metric-label'>Contract Band to 8:30</div>
+                                <div class='metric-label'>Contract Entry Band</div>
                                 <div class='metric-value'>±{c_band_28:.2f}</div>
                                 <div class='metric-sub'>28 blocks @ {contract_slope:.3f}/30m</div>
                             </div>
                             """, unsafe_allow_html=True)
+                        
+                        with col3:
+                            if c_exit_band:
+                                st.markdown(f"""
+                                <div class='metric-card'>
+                                    <div class='metric-label'>Contract Exit Band</div>
+                                    <div class='metric-value'>±{c_exit_band:.2f}</div>
+                                    <div class='metric-sub'>28 blocks @ {rejection_data['contract_rej_slope']:.3f}/30m</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"""
+                                <div class='metric-card'>
+                                    <div class='metric-label'>Contract Exit Band</div>
+                                    <div class='metric-value'>—</div>
+                                    <div class='metric-sub'>No rejection data</div>
+                                </div>
+                                """, unsafe_allow_html=True)
 
                         # Store in session state
                         st.session_state["bc_result"] = {
@@ -865,32 +981,39 @@ with tab2:
                             "contract": {"slope": contract_slope, "ref_price": float(c_b2), "ref_dt": b2_dt},
                         }
                         
+                        # Store rejection data separately
+                        if rejection_data:
+                            st.session_state["rejection_result"] = rejection_data
+                        else:
+                            st.session_state["rejection_result"] = None
+                        
                         # Auto-refresh other tabs
-                        st.success("🔄 Data updated! Check other tabs for BC-enhanced projections.")
+                        st.success("🔄 Complete system updated! Check other tabs for enhanced projections with entries and exits.")
 
             except Exception as e:
                 st.error(f"❌ Forecast generation failed: {e}")
                 st.markdown("""
                 <div class='warning-box'>
                     <strong>Troubleshooting Tips:</strong><br>
-                    • Ensure bounce times are in correct order<br>
-                    • Check that SPX prices are reasonable<br>
-                    • Verify contract prices if provided
+                    • Ensure all times are in correct chronological order<br>
+                    • Check that SPX and contract prices are reasonable<br>
+                    • Verify rejection points occur after bounce points<br>
+                    • Make sure time slots are at least 30 minutes apart
                 </div>
                 """, unsafe_allow_html=True)
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
-# ║ TAB 3 — Enhanced Trading Plan                                               ║
+# ║ TAB 3 — Complete Trading Plan                                               ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝
 with tab3:
-    st.markdown("### 📋 Trading Plan - Session Strategy (Ready by 8:00 AM)")
+    st.markdown("### 📋 Complete Trading Plan - Entry & Exit Strategy (Ready by 8:00 AM)")
     
     # Quick status check
     current_ct = fmt_ct(datetime.now())
     plan_ready_time = fmt_ct(datetime.combine(proj_day, time(8, 0)))
     
     if current_ct >= plan_ready_time:
-        status_msg = "🟢 **Plan Active** - Ready for trading session"
+        status_msg = "🟢 **Plan Active** - Ready for complete trading session"
         status_class = "success-box"
     elif current_ct >= plan_ready_time - timedelta(hours=1):
         status_msg = "🟡 **Plan Preparation** - Final setup in progress"
@@ -1004,8 +1127,8 @@ with tab3:
 
     st.markdown("---")
 
-    # Key time projections table
-    st.markdown("### ⏰ Key Time Projections")
+    # Key time projections table with entry/exit
+    st.markdown("### ⏰ Key Time Projections (Entry/Exit System)")
     
     key_times = ["08:30", "09:00", "10:00", "11:00", "12:00", "13:00", "13:30", "14:30"]
     proj_rows = []
@@ -1023,6 +1146,7 @@ with tab3:
         contract_entry = ""
         spx_exit = ""
         contract_exit = ""
+        entry_exit_spread = ""
         
         if bc and "table" in bc:
             try:
@@ -1039,17 +1163,13 @@ with tab3:
                     spx_exit_val = bc_row.iloc[0]['SPX Exit']
                     if spx_exit_val != "—" and spx_exit_val:
                         spx_exit = f"{float(spx_exit_val):.2f}"
+                    
+                    # Get spread
+                    spread_val = bc_row.iloc[0]['Entry/Exit Spread']
+                    if spread_val != "—" and spread_val:
+                        entry_exit_spread = spread_val
             except:
                 pass
-        
-        # Calculate entry/exit spread
-        spread = ""
-        if contract_entry and contract_exit:
-            try:
-                spread_val = float(contract_entry) - float(contract_exit)
-                spread = f"{spread_val:.2f}"
-            except:
-                spread = "—"
         
         # Market session context
         session_context = ""
@@ -1071,7 +1191,7 @@ with tab3:
             "SPX Entry": spx_entry or "—",
             "Contract Entry": contract_entry or "—",
             "Contract Exit": contract_exit or "—",
-            "Entry/Exit Spread": spread or "—"
+            "Entry/Exit Spread": entry_exit_spread or "—"
         })
     
     df_plan = pd.DataFrame(proj_rows)
@@ -1113,14 +1233,13 @@ with tab3:
         - Review performance after close
         """)
 
-
 # ───────────────────────────────────────────────────────────────────────────────
 # FOOTER
 # ───────────────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: var(--text-muted); font-size: 0.875rem; padding: 1rem;'>"
-    "🔮 SPX Prophet v2.0 | Professional Trading Analytics | "
+    "🔮 SPX Prophet v2.1 - Complete Entry/Exit System | "
     f"Last Updated: {fmt_ct(datetime.now()).strftime('%H:%M CT')}"
     "</div>", 
     unsafe_allow_html=True
