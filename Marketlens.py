@@ -31,7 +31,6 @@ RTH_END   = time(14, 30)
 
 DEFAULT_ANCHOR = 6400.00
 DEFAULT_CONTRACT_3PM = 20.00
-DEFAULT_ON_PAD = 0.0  # no auto pad; tables are time-based, setup lives in Plan Card
 
 # ───────────────────────────────────────────────────────────────────────────────
 # TIME / BLOCK HELPERS
@@ -50,8 +49,7 @@ def rth_slots_ct(day: date) -> List[datetime]:
     return out
 
 def is_maintenance(dt: datetime) -> bool:
-    # CME maintenance hour 4–5 PM CT
-    return dt.hour == 16
+    return dt.hour == 16  # CME maintenance 4–5 PM CT
 
 def in_weekend_gap(dt: datetime) -> bool:
     wd = dt.weekday()  # Mon=0..Sun=6
@@ -128,7 +126,7 @@ hr { border-top: 1px solid var(--border); }
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — Inputs
+# SIDEBAR — Inputs (PDH/PDL are here, plainly visible)
 # ───────────────────────────────────────────────────────────────────────────────
 st.sidebar.title("🔧 Settings")
 
@@ -139,12 +137,14 @@ proj_day = st.sidebar.date_input("Projection Day", value=prev_day + timedelta(da
 anchor_close = st.sidebar.number_input("SPX Anchor (≤ 3:00 PM CT Close)", value=float(DEFAULT_ANCHOR), step=0.25, format="%.2f")
 contract_3pm = st.sidebar.number_input("Contract Price @ 3:00 PM", value=float(DEFAULT_CONTRACT_3PM), step=0.05, format="%.2f")
 
-with st.sidebar.expander("Key Levels", expanded=True):
-    pdh = st.number_input("Prev Day High (PDH)", value=anchor_close+10.0, step=0.25, format="%.2f")
-    pdl = st.number_input("Prev Day Low (PDL)",  value=anchor_close-10.0, step=0.25, format="%.2f")
-    use_on = st.checkbox("Track Overnight High/Low (optional)", value=False)
-    onh = st.number_input("Overnight High (ONH)", value=anchor_close+5.0, step=0.25, format="%.2f", disabled=not use_on)
-    onl = st.number_input("Overnight Low (ONL)",  value=anchor_close-5.0, step=0.25, format="%.2f", disabled=not use_on)
+# >>> These are the high/low inputs you asked for (front-and-center):
+pdh = st.sidebar.number_input("Previous Day High (PDH)", value=anchor_close + 10.0, step=0.25, format="%.2f", help="Enter yesterday's SPX high.")
+pdl = st.sidebar.number_input("Previous Day Low (PDL)",  value=anchor_close - 10.0, step=0.25, format="%.2f", help="Enter yesterday's SPX low.")
+
+st.sidebar.markdown("---")
+use_on = st.sidebar.checkbox("Also track Overnight High/Low (optional)", value=False)
+onh = st.sidebar.number_input("Overnight High (ONH)", value=anchor_close + 5.0, step=0.25, format="%.2f", disabled=not use_on)
+onl = st.sidebar.number_input("Overnight Low (ONL)",  value=anchor_close - 5.0, step=0.25, format="%.2f", disabled=not use_on)
 
 # Precompute sigma @ 8:30 for header
 sigma1, sigma2, spx_blocks_to_830 = sigma_bands_at_830(anchor_close, prev_day)  # ~±8.5, ±17.0
@@ -160,7 +160,8 @@ with c2:
 with c3:
     st.markdown(f"<div class='card'><div class='kicker'>Contract to 08:30 (28 blocks @ {SLOPE_CONTRACT_DEFAULT:.2f})</div><div class='metric'>± {SLOPE_CONTRACT_DEFAULT*28:.2f}</div></div>", unsafe_allow_html=True)
 with c4:
-    st.markdown(f"<div class='card'><div class='kicker'>PDH / PDL</div><div class='metric'>{pdh:.2f} / {pdl:.2f}</div></div>", unsafe_allow_html=True)
+    extra = f" • ONH/ONL {onh:.2f}/{onl:.2f}" if use_on else ""
+    st.markdown(f"<div class='card'><div class='kicker'>PDH / PDL</div><div class='metric'>{pdh:.2f} / {pdl:.2f}</div><div class='kicker'>{extra}</div></div>", unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -176,50 +177,51 @@ with tab1:
     st.subheader("SPX Anchors — 30-min levels (08:30 → 14:30)")
     anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
 
-    # Try to pull BC result (recalibrated slopes), else use defaults
+    # Use BC result if available (recalibrated contract slope/anchor); else defaults
     bc = st.session_state.get("bc_result", None)
     contract_slope = SLOPE_CONTRACT_DEFAULT
     contract_ref_dt = fmt_ct(datetime.combine(prev_day, time(15, 0)))
     contract_ref_px = float(contract_3pm)
-
     if bc and "contract" in bc:
         contract_slope = float(bc["contract"]["slope"])
-        # When BC exists, we anchor at Bounce #2 time/price
         contract_ref_dt = bc["contract"]["ref_dt"]
         contract_ref_px = float(bc["contract"]["ref_price"])
 
-    # Helper to project contract value for any slot:
     def contract_proj_for_slot(slot_dt: datetime) -> float:
-        # Forward blocks depend on whether ref is 3pm or a later bounce
+        # If ref is 3pm prior day -> use 28-block overnight logic for 8:30, then simple 30m forward
         if contract_ref_dt.time() == time(15,0) and contract_ref_dt.date() == prev_day:
-            # From 3 PM prior-day → slot, use contract overnight block logic
-            blocks = count_blocks_contract(prev_day, slot_dt)
+            # For any RTH slot: blocks from 3pm prior-day using contract rules until 8:30,
+            # then add plain 30m steps from 8:30 to that slot.
+            dt_830 = fmt_ct(datetime.combine(proj_day, time(8,30)))
+            base_blocks = count_blocks_contract(prev_day, min(slot_dt, dt_830))
+            if slot_dt <= dt_830:
+                total_blocks = base_blocks
+            else:
+                total_blocks = base_blocks + blocks_simple_30m(dt_830, slot_dt)
+            return round(contract_ref_px + contract_slope * total_blocks, 2)
         else:
-            # From a bounce (overnight) to slot: simple 30m steps
+            # If ref is an overnight bounce (b2), just simple 30m from ref to slot.
             blocks = blocks_simple_30m(contract_ref_dt, slot_dt)
-        return round(contract_ref_px + contract_slope * blocks, 2)
+            return round(contract_ref_px + contract_slope * blocks, 2)
 
-    # Close Table
-    rows_close = []
-    # High Table
-    rows_high = []
-    # Low Table
-    rows_low  = []
+    # Tables
+    rows_close, rows_high, rows_low = [], [], []
 
     for slot in rth_slots_ct(proj_day):
         tlabel = slot.strftime("%H:%M")
         top, bot = fan_levels_for_slot(anchor_close, anchor_time, slot)
-        # SPX projection row from BC table if available
+
+        # SPX projection from BC (if available)
         spx_proj_val = ""
         if bc and "table" in bc:
             try:
                 spx_proj_val = float(bc["table"].loc[bc["table"]["Time"]==tlabel, "SPX Proj"].iloc[0])
             except Exception:
                 spx_proj_val = ""
+
         # Contract projection
         c_proj = contract_proj_for_slot(slot)
 
-        # Close table (minimal)
         rows_close.append({
             "⭐": "⭐" if tlabel=="08:30" else "",
             "Time": tlabel,
@@ -228,14 +230,12 @@ with tab1:
             "SPX Proj (if BC)": spx_proj_val,
             "Contract Proj": c_proj,
         })
-        # High table (Top focus)
         rows_high.append({
             "⭐": "⭐" if tlabel=="08:30" else "",
             "Time": tlabel,
             "Top": top,
             "Contract Proj": c_proj,
         })
-        # Low table (Bottom focus)
         rows_low.append({
             "⭐": "⭐" if tlabel=="08:30" else "",
             "Time": tlabel,
@@ -260,10 +260,8 @@ with tab2:
 
     overnight_start = fmt_ct(datetime.combine(prev_day, time(21, 0)))
     overnight_end   = fmt_ct(datetime.combine(proj_day, time(7, 0)))
-    overnight_slots = [dt.strftime("%Y-%m-%d %H:%M") for dt in rth_slots_ct(prev_day)]  # placeholder
-    # build proper 21:00→07:00 slots:
-    tmp_slots = []
-    cur = overnight_start
+    # Build list of 30m slots from 21:00 → 07:00 CT
+    tmp_slots, cur = [], overnight_start
     while cur <= overnight_end:
         tmp_slots.append(cur)
         cur += timedelta(minutes=30)
@@ -280,7 +278,7 @@ with tab2:
             spx_b2 = st.number_input("SPX @ Bounce #2", value=anchor_close, step=0.25, format="%.2f")
 
         st.markdown("---")
-        st.markdown("**Contract (single, optional)** — prices at the SAME two times")
+        st.markdown("**Contract (optional)** — prices at the SAME two times")
         cA1, cA2 = st.columns(2)
         with cA1:
             c_b1 = st.number_input("Contract Price @ Bounce #1", value=contract_3pm, step=0.05, format="%.2f")
@@ -296,14 +294,13 @@ with tab2:
             if b2_dt <= b1_dt:
                 st.error("Bounce #2 must be after Bounce #1.")
             else:
-                # SPX slope using SPX block logic (skip maintenance)
                 spx_blocks = count_blocks_spx(b1_dt, b2_dt)
                 if spx_blocks <= 0:
                     st.error("Bounce times must be at least 30 minutes apart.")
                 else:
                     spx_slope = (float(spx_b2) - float(spx_b1)) / spx_blocks
 
-                    # Contract slope using simple 30m between the two bounces (overnight)
+                    # Contract slope between the two overnight bounces (simple 30m blocks)
                     bounce_blocks = blocks_simple_30m(b1_dt, b2_dt)
                     contract_slope = SLOPE_CONTRACT_DEFAULT
                     if bounce_blocks > 0 and (c_b2 != c_b1):
@@ -365,13 +362,14 @@ with tab3:
     # Card 1 — Anchor & Bands
     c1, c2 = st.columns(2)
     with c1:
+        on_extra = f" • ONH/ONL {onh:.2f}/{onl:.2f}" if use_on else ""
         st.markdown(f"""
 <div class='card'>
   <div class='kicker'>Card 1 — Anchor & Bands</div>
   <div class='metric'>Anchor: {anchor_close:.2f}</div>
   <div class='kicker'>8:30 Fan → Top {top_830:.2f} • Bottom {bot_830:.2f}</div>
   <div class='kicker'>Bands → ±{sigma1:.2f} (1σ) • ±{sigma2:.2f} (2σ)</div>
-  <div class='kicker'>PDH / PDL → {pdh:.2f} / {pdl:.2f}{(" • ONH/ONL → %.2f / %.2f" % (onh,onl)) if use_on else ""}</div>
+  <div class='kicker'>PDH / PDL → {pdh:.2f} / {pdl:.2f}{on_extra}</div>
 </div>
 """, unsafe_allow_html=True)
     with c2:
@@ -382,28 +380,31 @@ with tab3:
             c_ref_px = float(bc["contract"]["ref_price"])
             blocks = blocks_simple_30m(c_ref_dt, slot_830)
             c_830 = round(c_ref_px + c_slope * blocks, 2)
+            slope_used = c_slope
         else:
             # From 3 PM prior-day using 28 valid blocks
             c_830 = round(float(contract_3pm) + SLOPE_CONTRACT_DEFAULT * 28, 2)
+            slope_used = SLOPE_CONTRACT_DEFAULT
 
         st.markdown(f"""
 <div class='card'>
   <div class='kicker'>Card 2 — Contract Snapshot</div>
   <div class='metric'>3:00 PM: {float(contract_3pm):.2f} → 8:30: {c_830:.2f}</div>
-  <div class='kicker'>Slope: {(bc['contract']['slope'] if bc and 'contract' in bc else SLOPE_CONTRACT_DEFAULT):.2f} per 30m • 28-block overnight</div>
+  <div class='kicker'>Slope: {slope_used:.2f} per 30m • 28-block overnight</div>
 </div>
 """, unsafe_allow_html=True)
 
-    # Card 3 — Key Levels (actionable)
+    # Card 3 — Key Action Levels
     k1, k2 = st.columns(2)
     with k1:
+        # Simple “what to do” phrasing
         st.markdown(f"""
 <div class='card'>
   <div class='kicker'>Card 3 — Key Action Levels</div>
-  <div class='kicker'>Sell Setup: near Top {top_830:.2f} (or PDH {pdh:.2f} if closer)</div>
-  <div class='kicker'>Buy Setup: near Bottom {bot_830:.2f} (or PDL {pdl:.2f} if closer)</div>
-  <div class='kicker'>Stops: beyond edge/PDH/PDL by a small pad</div>
-  <div class='kicker'>Targets: opposite edge first; stretch to PDH/PDL if closer</div>
+  <div class='kicker'>Sell from: near Top {top_830:.2f} (or PDH {pdh:.2f} if closer)</div>
+  <div class='kicker'>Buy from: near Bottom {bot_830:.2f} (or PDL {pdl:.2f} if closer)</div>
+  <div class='kicker'>Stops: just beyond the edge/PDH/PDL by a small pad</div>
+  <div class='kicker'>Targets: opposite edge first; extend to PDH/PDL if nearer</div>
 </div>
 """, unsafe_allow_html=True)
     with k2:
