@@ -20,6 +20,8 @@ from typing import List, Tuple, Optional
 # ───────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ───────────────────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="🔮 SPX Prophet", page_icon="📈", layout="wide")
+
 CT = pytz.timezone("America/Chicago")
 
 SLOPE_SPX = 0.25                 # per 30m, fixed
@@ -139,7 +141,6 @@ def confluence_chips(top: float, bottom: float,
 def smart_stop(is_sell_from_top: bool, top: float, bottom: float,
                pdh: Optional[float], pdl: Optional[float], pad: float) -> str:
     if is_sell_from_top:
-        # If PDH exists and is near/above Top, use PDH+pad; else Top+pad
         level = pdh if (pdh is not None and pdh >= top and abs(pdh - top) <= 2*pad) else top
         return f"{level + pad:.2f}"
     else:
@@ -149,7 +150,6 @@ def smart_stop(is_sell_from_top: bool, top: float, bottom: float,
 def smart_tp(is_sell_from_top: bool, top: float, bottom: float,
              pdh: Optional[float], pdl: Optional[float]) -> str:
     if is_sell_from_top:
-        # TP1 is nearer of Bottom vs PDL if available
         if pdl is not None and abs(bottom - pdl) < abs(bottom - top):
             return f"{pdl:.2f} (PDL)"
         return f"{bottom:.2f} (Bottom)"
@@ -159,10 +159,8 @@ def smart_tp(is_sell_from_top: bool, top: float, bottom: float,
         return f"{top:.2f} (Top)"
 
 # ───────────────────────────────────────────────────────────────────────────────
-# UI
+# STYLES
 # ───────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="🔮 SPX Prophet", page_icon="📈", layout="wide")
-
 st.markdown("""
 <style>
 :root { --brand:#2563eb; --surface:#ffffff; --muted:#f8fafc; --text:#0f172a; --sub:#475569; --border:#e2e8f0; }
@@ -234,20 +232,26 @@ with tab1:
     hilo_rows  = []
     for slot in rth_slots_ct(proj_day):
         top, bot, width = fan_levels_for_slot(anchor_close, anchor_time, slot)
-        # Distances to key levels
-        pdh_dist = round(top - pdh, 2) if pdh is not None else np.nan
-        pdl_dist = round(bottom - pdl, 2) if pdl is not None else np.nan
-        onh_dist = round(top - onh, 2) if use_on and onh is not None else np.nan
-        onl_dist = round(bottom - onl, 2) if use_on and onl is not None else np.nan
-        chips = confluence_chips(top, bot, pdh, pdl, onh if use_on else None, onl if use_on else None, confl_thr)
+
+        # Distances to key levels (safe fallbacks if user clears values)
+        pdh_val = float(pdh) if pdh is not None else None
+        pdl_val = float(pdl) if pdl is not None else None
+        onh_val = float(onh) if (use_on and onh is not None) else None
+        onl_val = float(onl) if (use_on and onl is not None) else None
+
+        pdh_dist = round(top - pdh_val, 2) if pdh_val is not None else ""
+        pdl_dist = round(bot - pdl_val, 2) if pdl_val is not None else ""
+        onh_dist = round(top - onh_val, 2) if onh_val is not None else ""
+        onl_dist = round(bot - onl_val, 2) if onl_val is not None else ""
+        chips = confluence_chips(top, bot, pdh_val, pdl_val, onh_val, onl_val, float(confl_thr))
 
         # CLOSE table
         entry_plan  = "Top touch & bearish close → Sell  |  Bottom touch & bullish close → Buy"
         trigger     = "Touch edge, close inside/above(Top) or inside/below(Bottom)"
-        stop_sell   = smart_stop(True, top, bot, pdh, pdl, stop_pad)
-        stop_buy    = smart_stop(False, top, bot, pdh, pdl, stop_pad)
-        tp_sell     = smart_tp(True, top, bot, pdh, pdl)
-        tp_buy      = smart_tp(False, top, bot, pdh, pdl)
+        stop_sell   = smart_stop(True, top, bot, pdh_val, pdl_val, float(stop_pad))
+        stop_buy    = smart_stop(False, top, bot, pdh_val, pdl_val, float(stop_pad))
+        tp_sell     = smart_tp(True, top, bot, pdh_val, pdl_val)
+        tp_buy      = smart_tp(False, top, bot, pdh_val, pdl_val)
 
         close_rows.append({
             "⭐": "⭐" if slot.strftime("%H:%M") == "08:30" else "",
@@ -264,14 +268,14 @@ with tab1:
 
         # HIGH/LOW table (intrabar excursion)
         mid = round((top + bot)/2.0, 2)
-        exp_high = round(mid + intrabar_pad, 2)
-        exp_low  = round(mid - intrabar_pad, 2)
+        exp_high = round(mid + float(intrabar_pad), 2)
+        exp_low  = round(mid - float(intrabar_pad), 2)
         hilo_rows.append({
             "⭐": "⭐" if slot.strftime("%H:%M") == "08:30" else "",
             "Time": slot.strftime("%H:%M"),
             "Top": top, "Bottom": bot, "Width": width,
             "Exp High (SPX)": exp_high, "Exp Low (SPX)": exp_low,
-            "Entry Zone": f"Sell near Top±{intrabar_pad:.2f} • Buy near Bottom±{intrabar_pad:.2f}",
+            "Entry Zone": f"Sell near Top±{float(intrabar_pad):.2f} • Buy near Bottom±{float(intrabar_pad):.2f}",
             "Exit Zone": "Mirror side ± pad",
             "Confluence": chips
         })
@@ -403,7 +407,12 @@ with tab3:
     anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
     slot_830    = fmt_ct(datetime.combine(proj_day, time(8, 30)))
     top_830, bot_830, width_830 = fan_levels_for_slot(anchor_close, anchor_time, slot_830)
-    chips_830 = confluence_chips(top_830, bot_830, pdh, pdl, onh if use_on else None, onl if use_on else None, confl_thr)
+    chips_830 = confluence_chips(top_830, bot_830,
+                                 float(pdh) if pdh is not None else None,
+                                 float(pdl) if pdl is not None else None,
+                                 (float(onh) if (use_on and onh is not None) else None),
+                                 (float(onl) if (use_on and onl is not None) else None),
+                                 float(confl_thr))
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -411,6 +420,7 @@ with tab3:
     with c2:
         st.markdown(f"<div class='card'><div class='kicker'>8:30 Fan</div><div class='metric'>Top {top_830:.2f} • Bottom {bot_830:.2f}</div><div class='kicker'>Width {width_830:.2f}</div></div>", unsafe_allow_html=True)
     with c3:
+        sigma1, sigma2, _ = sigma_bands_at_830(anchor_close, prev_day)
         st.markdown(f"<div class='card'><div class='kicker'>Bands to 8:30</div><div class='metric'>±1σ {sigma1:.2f} • ±2σ {sigma2:.2f}</div></div>", unsafe_allow_html=True)
 
     st.markdown("### Key Slots (SPX & Contracts)")
@@ -425,7 +435,14 @@ with tab3:
             "⭐":"⭐" if label=="08:30" else "",
             "Time": label,
             "Top": top, "Bottom": bot, "Width": width,
-            "Confluence": confluence_chips(top, bot, pdh, pdl, onh if use_on else None, onl if use_on else None, confl_thr)
+            "Confluence": confluence_chips(
+                top, bot,
+                float(pdh) if pdh is not None else None,
+                float(pdl) if pdl is not None else None,
+                (float(onh) if (use_on and onh is not None) else None),
+                (float(onl) if (use_on and onl is not None) else None),
+                float(confl_thr)
+            )
         }
         if bc and "table" in bc:
             tdf = bc["table"]
@@ -433,7 +450,7 @@ with tab3:
             try:
                 row["SPX Proj"] = float(tdf.loc[tdf["Time"]==label, "SPX Proj"].iloc[0])
             except Exception:
-                row["SPX Proj"] = np.nan
+                row["SPX Proj"] = ""
             # pull contract columns if present
             for key in ["contract_A","contract_B"]:
                 info = bc.get(key)
@@ -442,15 +459,15 @@ with tab3:
                     try:
                         row[colname] = float(tdf.loc[tdf["Time"]==label, colname].iloc[0])
                     except Exception:
-                        row[colname] = np.nan
+                        row[colname] = ""
         else:
-            row["SPX Proj"] = np.nan
+            row["SPX Proj"] = ""
         row["Entry Plan"] = "Top touch & bearish close → Sell  |  Bottom touch & bullish close → Buy"
-        row["Stops/Targets"] = f"Stop: Top+{DEFAULT_STOP_PAD:.2f} / Bottom-{DEFAULT_STOP_PAD:.2f} • TP1: opp edge • TP2: edge±width"
+        row["Stops/Targets"] = f"Stop: Top+{float(DEFAULT_STOP_PAD):.2f} / Bottom-{float(DEFAULT_STOP_PAD):.2f} • TP1: opp edge • TP2: edge±width"
         rows_plan.append(row)
 
     st.dataframe(pd.DataFrame(rows_plan), use_container_width=True, hide_index=True)
 
     st.markdown("### Notes for 08:30")
     st.write(f"- **Confluence** at 08:30: {chips_830 or 'None'}")
-    st.write(f"- **PDH/PDL**: {pdh:.2f} / {pdl:.2f}" + (f" • **ONH/ONL**: {onh:.2f} / {onl:.2f}" if use_on else ""))
+    st.write(f"- **PDH/PDL**: {float(pdh):.2f} / {float(pdl):.2f}" + (f" • **ONH/ONL**: {float(onh):.2f} / {float(onl):.2f}" if use_on else ""))
