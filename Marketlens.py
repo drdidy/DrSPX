@@ -702,7 +702,11 @@ with tab1:
     
     with col3:
         expansion = close_width - morning_width
-        st.metric("Range Expansion", f"{expansion:.2f}", delta=f"{(expansion/morning_width)*100:.1f}%")
+        if morning_width > 0:
+            expansion_pct = f"{(expansion/morning_width)*100:.1f}%"
+        else:
+            expansion_pct = "N/A"
+        st.metric("Range Expansion", f"{expansion:.2f}", delta=expansion_pct)
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
 # ║ TAB 2 — Enhanced BC Forecast                                                ║
