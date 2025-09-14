@@ -1,14 +1,13 @@
 # app.py
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🔮 SPX PROPHET — Minimal, Robust, SPX-only
-# • Anchor: prior session ≤ 3:00 PM CT close (user-input; no network fetch)
-# • Slopes: SPX = ±0.25 per 30m (fixed); Contracts = ±0.33 per 30m default
-# • Blocks: SPX uses 34 blocks 3:00→8:30 (skip 4–5 PM) → ±8.5 (±1σ), ±17 (±2σ)
-#           Contracts use 28 blocks 3:00→3:30 (1) + 7:00 PM→8:30 AM (27) → ±9.24 at 0.33
-# • BC Forecast: exactly 2 bounces (21:00–07:00 CT) + (optional) 1–2 contracts’ prices at both bounces
-#                → fit slopes; project SPX & contracts across RTH (8:30–14:30)
-# • Tables: Close table & High/Low table for every 30m slot; ⭐ highlight 8:30
-# • Plan Card: concise 8:00 AM prep using the above
+# 🔮 SPX PROPHET — SPX-only, robust, no external data
+# • Anchor: prior day ≤ 3:00 PM CT close (manual input)
+# • SPX slope: ±0.25/30m (fixed) → 34 blocks to 8:30 → ±8.50 (±1σ), ±17.00 (±2σ)
+# • Contract slope: ±0.33/30m default (28 blocks to 8:30 → ±9.24); override from 2 prices
+# • BC Forecast: EXACTLY 2 bounces (21:00–07:00 CT) → project SPX & up to 2 contracts through RTH
+# • Tables: CLOSE table + HIGH/LOW table for every 30m (8:30→14:30), ⭐ highlights 8:30
+# • PDH/PDL (+ optional ONH/ONL): distances, confluence chips, smart stops/targets
+# • Plan Card: concise at 8:00 AM
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -16,26 +15,26 @@ import pandas as pd
 import numpy as np
 import pytz
 from datetime import datetime, date, time, timedelta
-from typing import List, Optional, Tuple
+from typing import List, Tuple, Optional
 
 # ───────────────────────────────────────────────────────────────────────────────
-# CONFIG & CONSTANTS
+# CONFIG
 # ───────────────────────────────────────────────────────────────────────────────
 CT = pytz.timezone("America/Chicago")
 
-SLOPE_SPX = 0.25          # per 30m (fixed)
-SLOPE_CONTRACT_DEFAULT = 0.33  # per 30m (default; overridden by two prices)
+SLOPE_SPX = 0.25                 # per 30m, fixed
+SLOPE_CONTRACT_DEFAULT = 0.33    # per 30m default; can be overridden via BC inputs
 
 RTH_START = time(8, 30)
 RTH_END   = time(14, 30)
 
-# UI defaults
 DEFAULT_ANCHOR = 6400.00
-DEFAULT_PAD_RANGE = 2.0   # pad for High/Low table (intrabar wiggle)
-DEFAULT_STOP_PAD = 2.0    # stop distance beyond edge
+DEFAULT_PAD_RANGE = 2.0   # intrabar pad for high/low projections & entry zones
+DEFAULT_STOP_PAD = 2.0    # stop beyond edge (or beyond PDH/PDL when close)
+DEFAULT_CONFLUENCE_THRESH = 2.0  # pts to call a confluence with PDH/PDL/ONH/ONL
 
 # ───────────────────────────────────────────────────────────────────────────────
-# TIME / BLOCK HELPERS
+# TIME HELPERS
 # ───────────────────────────────────────────────────────────────────────────────
 def fmt_ct(dt: datetime) -> datetime:
     if dt.tzinfo is None: return CT.localize(dt)
@@ -51,55 +50,6 @@ def rth_slots_ct(day: date) -> List[datetime]:
         cur += timedelta(minutes=30)
     return out
 
-def is_maintenance(dt: datetime) -> bool:
-    # CME maintenance 4–5 PM CT (we skip the *ending* of each 30m block)
-    return dt.hour == 16
-
-def in_weekend_gap(dt: datetime) -> bool:
-    # Fri ≥ 17:00 → Sun < 17:00 is excluded (for completeness)
-    wd = dt.weekday()
-    if wd == 5: return True
-    if wd == 6 and dt.hour < 17: return True
-    if wd == 4 and dt.hour >= 17: return True
-    return False
-
-def count_blocks_spx(anchor_time: datetime, target_time: datetime) -> int:
-    """Count 30m blocks for SPX from anchor → target, skipping 4–5 PM + weekend gap."""
-    anchor_time = fmt_ct(anchor_time); target_time = fmt_ct(target_time)
-    if target_time <= anchor_time: return 0
-    t = anchor_time
-    blocks = 0
-    while t < target_time:
-        t_next = t + timedelta(minutes=30)
-        if not is_maintenance(t_next) and not in_weekend_gap(t_next):
-            blocks += 1
-        t = t_next
-    return blocks
-
-def count_blocks_contract(anchor_day: date, target_dt: datetime) -> int:
-    """
-    Contract valid overnight blocks from 3:00 PM anchor-day to target_dt:
-    • Count 3:00→3:30 PM = 1 block
-    • Skip 3:30 PM → 7:00 PM
-    • Count 7:00 PM (anchor-day) → target_dt in 30m steps
-    Assumes target_dt is on the projection day (next trading day).
-    """
-    target_dt = fmt_ct(target_dt)
-    anchor_3pm   = fmt_ct(datetime.combine(anchor_day, time(15, 0)))
-    anchor_330pm = fmt_ct(datetime.combine(anchor_day, time(15, 30)))
-    anchor_7pm   = fmt_ct(datetime.combine(anchor_day, time(19, 0)))
-
-    if target_dt <= anchor_3pm: return 0
-    blocks = 0
-    # 3:00 → 3:30
-    if target_dt > anchor_3pm:
-        blocks += 1 if target_dt >= anchor_330pm else 0
-    # 7:00 PM → target
-    if target_dt > anchor_7pm:
-        delta_min = int((target_dt - anchor_7pm).total_seconds() // 60)
-        blocks += delta_min // 30
-    return blocks
-
 def gen_slots(start_dt: datetime, end_dt: datetime, step_min: int = 30) -> List[datetime]:
     start_dt = fmt_ct(start_dt); end_dt = fmt_ct(end_dt)
     out = []
@@ -108,6 +58,55 @@ def gen_slots(start_dt: datetime, end_dt: datetime, step_min: int = 30) -> List[
         out.append(cur)
         cur += timedelta(minutes=step_min)
     return out
+
+def is_maintenance(dt: datetime) -> bool:
+    # Skip 4–5 PM CT maintenance hour for SPX block counting
+    return dt.hour == 16
+
+def in_weekend_gap(dt: datetime) -> bool:
+    wd = dt.weekday()  # Mon=0..Sun=6
+    if wd == 5: return True
+    if wd == 6 and dt.hour < 17: return True
+    if wd == 4 and dt.hour >= 17: return True
+    return False
+
+def count_blocks_spx(t0: datetime, t1: datetime) -> int:
+    """SPX blocks anchor→target, skip 4–5 PM and weekend gap."""
+    t0 = fmt_ct(t0); t1 = fmt_ct(t1)
+    if t1 <= t0: return 0
+    t = t0
+    blocks = 0
+    while t < t1:
+        t_next = t + timedelta(minutes=30)
+        if not is_maintenance(t_next) and not in_weekend_gap(t_next):
+            blocks += 1
+        t = t_next
+    return blocks
+
+def count_blocks_contract(anchor_day: date, target_dt: datetime) -> int:
+    """
+    Contract valid blocks: 3:00→3:30 PM (1) + 7:00 PM→target in 30m steps.
+    Used for 3 PM → 8:30 AM = 28 blocks.
+    """
+    target_dt = fmt_ct(target_dt)
+    anchor_3pm   = fmt_ct(datetime.combine(anchor_day, time(15, 0)))
+    anchor_330pm = fmt_ct(datetime.combine(anchor_day, time(15, 30)))
+    anchor_7pm   = fmt_ct(datetime.combine(anchor_day, time(19, 0)))
+
+    if target_dt <= anchor_3pm: return 0
+    blocks = 0
+    if target_dt >= anchor_330pm:
+        blocks += 1  # 3:00→3:30
+    if target_dt > anchor_7pm:
+        delta_min = int((target_dt - anchor_7pm).total_seconds() // 60)
+        blocks += delta_min // 30
+    return blocks
+
+# Simple 30m difference used within overnight (between two bounce points)
+def blocks_simple_30m(d1: datetime, d2: datetime) -> int:
+    d1 = fmt_ct(d1); d2 = fmt_ct(d2)
+    if d2 <= d1: return 0
+    return int((d2 - d1).total_seconds() // (30*60))
 
 # ───────────────────────────────────────────────────────────────────────────────
 # FAN & PROJECTIONS
@@ -118,30 +117,49 @@ def fan_levels_for_slot(anchor_close: float, anchor_time: datetime, slot_dt: dat
     bot = anchor_close - SLOPE_SPX * blocks
     return round(top, 2), round(bot, 2), round(top - bot, 2)
 
-def sigma_bands_at_830(anchor_close: float, anchor_day: date) -> Tuple[float, float]:
-    # SPX: 3:00 PM → 8:30 AM = 34 valid blocks → ±8.5
+def sigma_bands_at_830(anchor_close: float, anchor_day: date) -> Tuple[float, float, int]:
     anchor_3pm = fmt_ct(datetime.combine(anchor_day, time(15, 0)))
     next_830   = fmt_ct(datetime.combine(anchor_day + timedelta(days=1), time(8, 30)))
     blocks_830 = count_blocks_spx(anchor_3pm, next_830)  # should be 34
     move = SLOPE_SPX * blocks_830
-    return round(move, 2), round(2 * move, 2)  # (±1σ, ±2σ)
+    return round(move, 2), round(2*move, 2), blocks_830
 
-def project_line_from_two_points(p1_dt: datetime, p1_price: float,
-                                 p2_dt: datetime, p2_price: float,
-                                 block_counter) -> Tuple[float, datetime]:
-    """Return slope per 30m using supplied block_counter between p1→p2, anchored at p2."""
-    b = block_counter(p1_dt, p2_dt) if block_counter != count_blocks_spx else block_counter(p1_dt, p2_dt)  # noqa
-    if b <= 0: return 0.0, p2_dt
-    slope = (p2_price - p1_price) / b
-    return float(slope), p2_dt
+def confluence_chips(top: float, bottom: float,
+                     pdh: Optional[float], pdl: Optional[float],
+                     onh: Optional[float], onl: Optional[float],
+                     thr: float) -> str:
+    chips = []
+    def near(a,b): return (a is not None) and (b is not None) and (abs(a-b) <= thr)
+    if near(top, pdh): chips.append("Top≈PDH")
+    if near(bottom, pdl): chips.append("Bottom≈PDL")
+    if onh is not None and near(top, onh): chips.append("Top≈ONH")
+    if onl is not None and near(bottom, onl): chips.append("Bottom≈ONL")
+    return " • ".join(chips)
 
-def project_value_from_ref(ref_dt: datetime, ref_price: float, slope_per_block: float,
-                           target_dt: datetime, block_counter) -> float:
-    b = block_counter(ref_dt, target_dt) if block_counter != count_blocks_spx else block_counter(ref_dt, target_dt)  # noqa
-    return round(ref_price + slope_per_block * b, 2)
+def smart_stop(is_sell_from_top: bool, top: float, bottom: float,
+               pdh: Optional[float], pdl: Optional[float], pad: float) -> str:
+    if is_sell_from_top:
+        # If PDH exists and is near/above Top, use PDH+pad; else Top+pad
+        level = pdh if (pdh is not None and pdh >= top and abs(pdh - top) <= 2*pad) else top
+        return f"{level + pad:.2f}"
+    else:
+        level = pdl if (pdl is not None and pdl <= bottom and abs(bottom - pdl) <= 2*pad) else bottom
+        return f"{level - pad:.2f}"
+
+def smart_tp(is_sell_from_top: bool, top: float, bottom: float,
+             pdh: Optional[float], pdl: Optional[float]) -> str:
+    if is_sell_from_top:
+        # TP1 is nearer of Bottom vs PDL if available
+        if pdl is not None and abs(bottom - pdl) < abs(bottom - top):
+            return f"{pdl:.2f} (PDL)"
+        return f"{bottom:.2f} (Bottom)"
+    else:
+        if pdh is not None and abs(top - pdh) < abs(top - bottom):
+            return f"{pdh:.2f} (PDH)"
+        return f"{top:.2f} (Top)"
 
 # ───────────────────────────────────────────────────────────────────────────────
-# UI LAYOUT
+# UI
 # ───────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="🔮 SPX Prophet", page_icon="📈", layout="wide")
 
@@ -149,7 +167,7 @@ st.markdown("""
 <style>
 :root { --brand:#2563eb; --surface:#ffffff; --muted:#f8fafc; --text:#0f172a; --sub:#475569; --border:#e2e8f0; }
 html, body { background: var(--muted); color: var(--text); }
-.card { background: rgba(255,255,255,0.9); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 12px 32px rgba(2,6,23,0.07); }
+.card { background: rgba(255,255,255,0.92); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 12px 32px rgba(2,6,23,0.07); }
 .metric { font-size:1.8rem; font-weight:700; }
 .kicker { color:var(--sub); font-size:.85rem; }
 .badge { background:#e2e8f0; border:1px solid #cbd5e1; border-radius:999px; padding:2px 8px; font-weight:600; font-size:.75rem; }
@@ -158,7 +176,7 @@ html, body { background: var(--muted); color: var(--text); }
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────────────────────────────────────
-# SIDEBAR — Global Inputs
+# SIDEBAR — Inputs
 # ───────────────────────────────────────────────────────────────────────────────
 st.sidebar.title("🔧 Settings")
 
@@ -168,28 +186,35 @@ proj_day = st.sidebar.date_input("Projection Day", value=prev_day + timedelta(da
 
 anchor_close = st.sidebar.number_input("Prev Day ≤ 3:00 PM CT Close (SPX)", value=float(DEFAULT_ANCHOR), step=0.25, format="%.2f")
 
-with st.sidebar.expander("Risk Pads (for entries/exits)", expanded=False):
+with st.sidebar.expander("Key Levels (previous/overnight)", expanded=True):
+    pdh = st.number_input("Prev Day High (PDH)", value=anchor_close+10.0, step=0.25, format="%.2f")
+    pdl = st.number_input("Prev Day Low (PDL)",  value=anchor_close-10.0, step=0.25, format="%.2f")
+    use_on = st.checkbox("Also track Overnight High/Low", value=False)
+    onh = st.number_input("Overnight High (ONH)", value=anchor_close+5.0, step=0.25, format="%.2f", disabled=not use_on)
+    onl = st.number_input("Overnight Low (ONL)",  value=anchor_close-5.0, step=0.25, format="%.2f", disabled=not use_on)
+
+with st.sidebar.expander("Pads & Confluence", expanded=False):
     intrabar_pad = st.number_input("Intrabar Range Pad (pts)", value=float(DEFAULT_PAD_RANGE), step=0.25, format="%.2f")
     stop_pad     = st.number_input("Stop Pad beyond Edge (pts)", value=float(DEFAULT_STOP_PAD), step=0.25, format="%.2f")
+    confl_thr    = st.number_input("Confluence Threshold (pts)", value=float(DEFAULT_CONFLUENCE_THRESH), step=0.25, format="%.2f")
 
-st.sidebar.markdown("---")
-st.sidebar.caption(f"SPX slope = ±{SLOPE_SPX:.2f} / 30m • Contract default slope = ±{SLOPE_CONTRACT_DEFAULT:.2f} / 30m")
+st.sidebar.caption(f"SPX slope = ±{SLOPE_SPX:.2f}/30m • Contracts = ±{SLOPE_CONTRACT_DEFAULT:.2f}/30m (default)")
 
-# Precompute sigma @ 8:30 for header
-sigma1, sigma2 = sigma_bands_at_830(anchor_close, prev_day)
+# Precompute sigma @ 8:30
+sigma1, sigma2, spx_blocks_to_830 = sigma_bands_at_830(anchor_close, prev_day)  # expected 34 blocks → 8.5 & 17.0
 
 # ───────────────────────────────────────────────────────────────────────────────
 # HEADER METRICS
 # ───────────────────────────────────────────────────────────────────────────────
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.markdown(f"<div class='card'><div class='kicker'>Anchor (≤ 3:00 PM CT)</div><div class='metric'>💠 {anchor_close:.2f}</div></div>", unsafe_allow_html=True)
-with col2:
-    st.markdown(f"<div class='card'><div class='kicker'>±1σ to 8:30</div><div class='metric'>± {sigma1:.2f}</div></div>", unsafe_allow_html=True)
-with col3:
-    st.markdown(f"<div class='card'><div class='kicker'>±2σ to 8:30</div><div class='metric'>± {sigma2:.2f}</div></div>", unsafe_allow_html=True)
-with col4:
-    st.markdown(f"<div class='card'><div class='kicker'>Contracts (28 blocks @ {SLOPE_CONTRACT_DEFAULT:.2f})</div><div class='metric'>± {SLOPE_CONTRACT_DEFAULT*28:.2f}</div></div>", unsafe_allow_html=True)
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    st.markdown(f"<div class='card'><div class='kicker'>Anchor (≤3:00 PM CT)</div><div class='metric'>💠 {anchor_close:.2f}</div></div>", unsafe_allow_html=True)
+with c2:
+    st.markdown(f"<div class='card'><div class='kicker'>SPX to 8:30 ({spx_blocks_to_830} blocks @ {SLOPE_SPX:.2f})</div><div class='metric'>± {sigma1:.2f} (1σ) • ± {sigma2:.2f} (2σ)</div></div>", unsafe_allow_html=True)
+with c3:
+    st.markdown(f"<div class='card'><div class='kicker'>Contracts to 8:30 (28 blocks @ {SLOPE_CONTRACT_DEFAULT:.2f})</div><div class='metric'>± {SLOPE_CONTRACT_DEFAULT*28:.2f}</div></div>", unsafe_allow_html=True)
+with c4:
+    st.markdown(f"<div class='card'><div class='kicker'>Confluence Threshold</div><div class='metric'>{confl_thr:.2f} pts</div></div>", unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -202,47 +227,60 @@ tab1, tab2, tab3 = st.tabs(["SPX Anchors", "BC Forecast", "Plan Card"])
 # ║ TAB 1 — SPX Anchors                                                         ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝
 with tab1:
-    st.subheader("SPX Anchors — Entries & Exits (8:30 → 14:30, every 30m)")
+    st.subheader("SPX Anchors — Entries & Exits (every 30m from 08:30→14:30)")
     anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
 
-    rows_close = []
-    rows_hilo  = []
+    close_rows = []
+    hilo_rows  = []
     for slot in rth_slots_ct(proj_day):
         top, bot, width = fan_levels_for_slot(anchor_close, anchor_time, slot)
+        # Distances to key levels
+        pdh_dist = round(top - pdh, 2) if pdh is not None else np.nan
+        pdl_dist = round(bottom - pdl, 2) if pdl is not None else np.nan
+        onh_dist = round(top - onh, 2) if use_on and onh is not None else np.nan
+        onl_dist = round(bottom - onl, 2) if use_on and onl is not None else np.nan
+        chips = confluence_chips(top, bot, pdh, pdl, onh if use_on else None, onl if use_on else None, confl_thr)
 
-        # Close table: generic plan triggers (your edge logic summarized as prompts)
+        # CLOSE table
         entry_plan  = "Top touch & bearish close → Sell  |  Bottom touch & bullish close → Buy"
-        entry_trig  = "Touch edge + candle closes inside/above(Top) or inside/below(Bottom)"
-        stop_txt    = f"If selling: Top+{stop_pad:.2f}  |  If buying: Bottom-{stop_pad:.2f}"
-        tp1_txt     = "Opposite edge"
-        tp2_txt     = "Opposite edge ± fan width (optional)"
-        rows_close.append({
+        trigger     = "Touch edge, close inside/above(Top) or inside/below(Bottom)"
+        stop_sell   = smart_stop(True, top, bot, pdh, pdl, stop_pad)
+        stop_buy    = smart_stop(False, top, bot, pdh, pdl, stop_pad)
+        tp_sell     = smart_tp(True, top, bot, pdh, pdl)
+        tp_buy      = smart_tp(False, top, bot, pdh, pdl)
+
+        close_rows.append({
             "⭐": "⭐" if slot.strftime("%H:%M") == "08:30" else "",
             "Time": slot.strftime("%H:%M"),
-            "Top": top, "Bottom": bot,
+            "Top": top, "Bottom": bot, "Width": width,
+            "PDH Dist": pdh_dist, "PDL Dist": pdl_dist,
+            **({"ONH Dist": onh_dist, "ONL Dist": onl_dist} if use_on else {}),
+            "Confluence": chips,
             "Entry Plan": entry_plan,
-            "Trigger": entry_trig,
-            "Stop": stop_txt, "TP1": tp1_txt, "TP2": tp2_txt,
+            "Trigger": trigger,
+            "Stop (Sell/Buy)": f"{stop_sell} / {stop_buy}",
+            "TP1 (Sell/Buy)": f"{tp_sell} / {tp_buy}",
         })
 
-        # High/Low table: show expected excursion zones using a simple intrabar pad
-        exp_mid = round((top + bot)/2.0, 2)
-        exp_high = round(exp_mid + intrabar_pad, 2)
-        exp_low  = round(exp_mid - intrabar_pad, 2)
-        rows_hilo.append({
+        # HIGH/LOW table (intrabar excursion)
+        mid = round((top + bot)/2.0, 2)
+        exp_high = round(mid + intrabar_pad, 2)
+        exp_low  = round(mid - intrabar_pad, 2)
+        hilo_rows.append({
             "⭐": "⭐" if slot.strftime("%H:%M") == "08:30" else "",
             "Time": slot.strftime("%H:%M"),
-            "Top": top, "Bottom": bot,
+            "Top": top, "Bottom": bot, "Width": width,
             "Exp High (SPX)": exp_high, "Exp Low (SPX)": exp_low,
-            "Entry Zone": f"Sell near Top±{intrabar_pad:.2f}  |  Buy near Bottom±{intrabar_pad:.2f}",
-            "Exit Zone": "Mirror side ± pad"
+            "Entry Zone": f"Sell near Top±{intrabar_pad:.2f} • Buy near Bottom±{intrabar_pad:.2f}",
+            "Exit Zone": "Mirror side ± pad",
+            "Confluence": chips
         })
 
-    st.markdown("### Close Table — actionable entries/exits (per 30m)")
-    st.dataframe(pd.DataFrame(rows_close), use_container_width=True, hide_index=True)
+    st.markdown("### Close Table — actionable entries/exits")
+    st.dataframe(pd.DataFrame(close_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("### High/Low Table — excursion-based entries/exits (per 30m)")
-    st.dataframe(pd.DataFrame(rows_hilo), use_container_width=True, hide_index=True)
+    st.markdown("### High/Low Table — excursion-based entries/exits")
+    st.dataframe(pd.DataFrame(hilo_rows), use_container_width=True, hide_index=True)
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
 # ║ TAB 2 — BC Forecast (EXACTLY 2 bounces)                                     ║
@@ -250,14 +288,13 @@ with tab1:
 with tab2:
     st.subheader("BC Forecast — Two Overnight Bounces → Project SPX & Contracts")
 
-    # Build slot list for 21:00 (prev_day) → 07:00 (proj_day)
     overnight_start = fmt_ct(datetime.combine(prev_day, time(21, 0)))
     overnight_end   = fmt_ct(datetime.combine(proj_day, time(7, 0)))
     overnight_slots = gen_slots(overnight_start, overnight_end, 30)
     slot_labels = [dt.strftime("%Y-%m-%d %H:%M") for dt in overnight_slots]
 
     with st.form("bc_form", clear_on_submit=False):
-        st.markdown("**Bounce Inputs (required)** — choose two slots and enter SPX prices")
+        st.markdown("**Bounce Inputs (required)** — choose two 30-min slots & enter SPX prices")
         c1, c2 = st.columns(2)
         with c1:
             b1_sel = st.selectbox("Bounce #1 (slot, CT)", slot_labels, index=0, key="bc_b1")
@@ -267,22 +304,21 @@ with tab2:
             spx_b2 = st.number_input("SPX @ Bounce #2", value=anchor_close, step=0.25, format="%.2f")
 
         st.markdown("---")
-        st.markdown("**Contracts (optional)** — enter prices at the same two bounce times")
+        st.markdown("**Contracts (optional)** — prices at the SAME two bounce times")
         cA1, cA2, cB1, cB2 = st.columns(4)
         with cA1:
             nameA = st.text_input("Contract A (e.g., 6525c)", value="ATM-A")
         with cA2:
-            cA_b1 = st.number_input("A price @ B#1", value=10.00, step=0.05, format="%.2f")
+            cA_b1 = st.number_input("A price @ Bounce #1", value=10.00, step=0.05, format="%.2f")
         with cB1:
             nameB = st.text_input("Contract B (optional)", value="ATM-B")
         with cB2:
-            cB_b1 = st.number_input("B price @ B#1", value=9.50, step=0.05, format="%.2f")
+            cB_b1 = st.number_input("B price @ Bounce #1", value=9.50, step=0.05, format="%.2f")
         cA3, cA4, cB3, cB4 = st.columns(4)
         with cA3:
-            cA_b2 = st.number_input("A price @ B#2", value=10.50, step=0.05, format="%.2f")
+            cA_b2 = st.number_input("A price @ Bounce #2", value=10.50, step=0.05, format="%.2f")
         with cA4:
-            cB_b2 = st.number_input("B price @ B#2", value=9.80, step=0.05, format="%.2f")
-        st.caption("If either A or B is not truly used, just ignore its columns — default slope 0.33 will apply for projections.")
+            cB_b2 = st.number_input("B price @ Bounce #2", value=9.80, step=0.05, format="%.2f")
 
         submitted = st.form_submit_button("📈 Project")
 
@@ -293,78 +329,67 @@ with tab2:
             if b2_dt <= b1_dt:
                 st.error("Bounce #2 must be after Bounce #1.")
             else:
-                # Underlying slope from bounces (use SPX block logic)
-                spx_slope, ref_dt = project_line_from_two_points(b1_dt, float(spx_b1), b2_dt, float(spx_b2), count_blocks_spx)
+                # SPX slope from bounces (SPX block logic)
+                spx_blocks = count_blocks_spx(b1_dt, b2_dt)
+                if spx_blocks <= 0:
+                    st.error("Selected bounce times must be at least 30 minutes apart.")
+                else:
+                    spx_slope = (float(spx_b2) - float(spx_b1)) / spx_blocks
 
-                # Contract slopes from bounces (straight 30m blocks between two bounce times; both are within 21:00–07:00)
-                def blocks_simple(d1: datetime, d2: datetime) -> int:
-                    d1 = fmt_ct(d1); d2 = fmt_ct(d2)
-                    if d2 <= d1: return 0
-                    return int((d2 - d1).total_seconds() // (30*60))
+                    # Contract slopes from the two provided prices (simple 30m steps between bounces)
+                    bounce_blocks_30m = blocks_simple_30m(b1_dt, b2_dt)
+                    slope_A = SLOPE_CONTRACT_DEFAULT
+                    slope_B = SLOPE_CONTRACT_DEFAULT
+                    if bounce_blocks_30m > 0 and (cA_b2 != cA_b1):
+                        slope_A = float((float(cA_b2) - float(cA_b1)) / bounce_blocks_30m)
+                    if bounce_blocks_30m > 0 and (cB_b2 != cB_b1):
+                        slope_B = float((float(cB_b2) - float(cB_b1)) / bounce_blocks_30m)
 
-                slope_A = SLOPE_CONTRACT_DEFAULT
-                slope_B = SLOPE_CONTRACT_DEFAULT
-                if all(x is not None for x in [cA_b1, cA_b2]) and (cA_b2 != cA_b1):
-                    bA = blocks_simple(b1_dt, b2_dt)
-                    if bA > 0:
-                        slope_A = float((float(cA_b2) - float(cA_b1)) / bA)
-                if all(x is not None for x in [cB_b1, cB_b2]) and (cB_b2 != cB_b1):
-                    bB = blocks_simple(b1_dt, b2_dt)
-                    if bB > 0:
-                        slope_B = float((float(cB_b2) - float(cB_b1)) / bB)
+                    # Build RTH projections table
+                    rows = []
+                    anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
+                    for slot in rth_slots_ct(proj_day):
+                        # Fan
+                        top, bot, width = fan_levels_for_slot(anchor_close, anchor_time, slot)
+                        # SPX projection from bounce line (anchor at Bounce #2)
+                        spx_proj = round(float(spx_b2) + spx_slope * count_blocks_spx(b2_dt, slot), 2)
+                        # Contracts projections anchored at Bounce #2
+                        blocks_from_b2 = blocks_simple_30m(b2_dt, slot)
+                        A_proj = round(float(cA_b2) + slope_A * blocks_from_b2, 2)
+                        B_proj = round(float(cB_b2) + slope_B * blocks_from_b2, 2)
 
-                # Build RTH projections table
-                rows = []
-                for slot in rth_slots_ct(proj_day):
-                    # SPX fan
-                    top, bot, width = fan_levels_for_slot(anchor_close, fmt_ct(datetime.combine(prev_day, time(15,0))), slot)
+                        rows.append({
+                            "⭐": "⭐" if slot.strftime("%H:%M") == "08:30" else "",
+                            "Time": slot.strftime("%H:%M"),
+                            "Top": top, "Bottom": bot, "SPX Proj": spx_proj,
+                            f"{nameA} Proj": A_proj,
+                            f"{nameB} Proj": B_proj
+                        })
 
-                    # SPX projection from bounce line
-                    spx_proj = project_value_from_ref(ref_dt, float(spx_b2), spx_slope, slot, count_blocks_spx)
+                    out_df = pd.DataFrame(rows)
+                    st.markdown("### RTH Projection (SPX & Contracts)")
+                    st.dataframe(out_df, use_container_width=True, hide_index=True)
 
-                    # Contracts projected from B#2 using their slopes (contract blocks forward from B#2)
-                    def contract_blocks_from_ref(ref_dt_, tgt_dt_):
-                        # both ref (overnight) and target (RTH) use simple 30m steps post 7pm
-                        return int((fmt_ct(tgt_dt_) - fmt_ct(ref_dt_)).total_seconds() // (30*60))
+                    # Bands at 8:30
+                    A_band_28 = round(abs(slope_A) * 28, 2)
+                    B_band_28 = round(abs(slope_B) * 28, 2)
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.markdown(f"<div class='card'><div class='kicker'>SPX ± to 8:30</div><div class='metric'>± {sigma1:.2f} (1σ) • ± {sigma2:.2f} (2σ)</div></div>", unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f"<div class='card'><div class='kicker'>{nameA} ± to 8:30 (28 blocks)</div><div class='metric'>± {A_band_28:.2f}</div></div>", unsafe_allow_html=True)
+                    with c3:
+                        st.markdown(f"<div class='card'><div class='kicker'>{nameB} ± to 8:30 (28 blocks)</div><div class='metric'>± {B_band_28:.2f}</div></div>", unsafe_allow_html=True)
 
-                    A_proj = round(float(cA_b2) + slope_A * contract_blocks_from_ref(b2_dt, slot), 2)
-                    B_proj = round(float(cB_b2) + slope_B * contract_blocks_from_ref(b2_dt, slot), 2)
-
-                    rows.append({
-                        "⭐": "⭐" if slot.strftime("%H:%M") == "08:30" else "",
-                        "Time": slot.strftime("%H:%M"),
-                        "Top": top, "Bottom": bot,
-                        "SPX Proj": spx_proj,
-                        f"{nameA} Proj": A_proj,
-                        f"{nameB} Proj": B_proj
-                    })
-
-                out_df = pd.DataFrame(rows)
-                st.markdown("### RTH Projection (SPX & Contracts)")
-                st.dataframe(out_df, use_container_width=True, hide_index=True)
-
-                # Bands at 8:30 (SPX 34 blocks; Contracts 28 blocks)
-                anchor_3pm = fmt_ct(datetime.combine(prev_day, time(15,0)))
-                slot_830   = fmt_ct(datetime.combine(proj_day, time(8,30)))
-                spx_blocks_to_830 = count_blocks_spx(anchor_3pm, slot_830)  # ≈34
-                A_band_28 = round(abs(slope_A) * 28, 2)
-                B_band_28 = round(abs(slope_B) * 28, 2)
-
-                colA, colB, colC = st.columns(3)
-                with colA:
-                    st.markdown(f"<div class='card'><div class='kicker'>SPX ± to 8:30 ({spx_blocks_to_830} blocks @ 0.25)</div><div class='metric'>± {SLOPE_SPX*spx_blocks_to_830:.2f}</div></div>", unsafe_allow_html=True)
-                with colB:
-                    st.markdown(f"<div class='card'><div class='kicker'>{nameA} ± to 8:30 (28 blocks)</div><div class='metric'>± {A_band_28:.2f}</div></div>", unsafe_allow_html=True)
-                with colC:
-                    st.markdown(f"<div class='card'><div class='kicker'>{nameB} ± to 8:30 (28 blocks)</div><div class='metric'>± {B_band_28:.2f}</div></div>", unsafe_allow_html=True)
-
-                # Save for Plan Card
-                st.session_state["bc_result"] = {
-                    "table": out_df,
-                    "spx_slope": spx_slope,
-                    "contract_A": {"name": nameA, "slope": slope_A, "ref_price": float(cA_b2), "ref_dt": b2_dt},
-                    "contract_B": {"name": nameB, "slope": slope_B, "ref_price": float(cB_b2), "ref_dt": b2_dt},
-                }
+                    # Save for Plan Card
+                    st.session_state["bc_result"] = {
+                        "table": out_df,
+                        "spx_slope": spx_slope,
+                        "b2_dt": b2_dt,
+                        "spx_b2": float(spx_b2),
+                        "contract_A": {"name": nameA, "slope": slope_A, "ref_price": float(cA_b2), "ref_dt": b2_dt},
+                        "contract_B": {"name": nameB, "slope": slope_B, "ref_price": float(cB_b2), "ref_dt": b2_dt},
+                    }
 
         except Exception as e:
             st.error(f"Could not compute projection: {e}")
@@ -373,72 +398,59 @@ with tab2:
 # ║ TAB 3 — Plan Card (8:00 AM)                                                 ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝
 with tab3:
-    st.subheader("Plan Card — concise session prep (ready for 8:00 AM)")
+    st.subheader("Plan Card — concise session prep (ready by 08:00 AM)")
 
     anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
     slot_830    = fmt_ct(datetime.combine(proj_day, time(8, 30)))
-    fan_top_830, fan_bot_830, width_830 = fan_levels_for_slot(anchor_close, anchor_time, slot_830)
+    top_830, bot_830, width_830 = fan_levels_for_slot(anchor_close, anchor_time, slot_830)
+    chips_830 = confluence_chips(top_830, bot_830, pdh, pdl, onh if use_on else None, onl if use_on else None, confl_thr)
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown(f"<div class='card'><div class='kicker'>Anchor</div><div class='metric'>💠 {anchor_close:.2f}</div><div class='kicker'>Prev ≤ 3:00 PM CT</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card'><div class='kicker'>Anchor (≤3:00 PM CT)</div><div class='metric'>💠 {anchor_close:.2f}</div></div>", unsafe_allow_html=True)
     with c2:
-        st.markdown(f"<div class='card'><div class='kicker'>8:30 Fan</div><div class='metric'>Top {fan_top_830:.2f} • Bottom {fan_bot_830:.2f}</div><div class='kicker'>Width {width_830:.2f}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card'><div class='kicker'>8:30 Fan</div><div class='metric'>Top {top_830:.2f} • Bottom {bot_830:.2f}</div><div class='kicker'>Width {width_830:.2f}</div></div>", unsafe_allow_html=True)
     with c3:
         st.markdown(f"<div class='card'><div class='kicker'>Bands to 8:30</div><div class='metric'>±1σ {sigma1:.2f} • ±2σ {sigma2:.2f}</div></div>", unsafe_allow_html=True)
 
     st.markdown("### Key Slots (SPX & Contracts)")
     key_slots = ["08:30","10:00","13:30","14:30"]
     rows_plan = []
-    # Pull BC result if available
     bc = st.session_state.get("bc_result", None)
-
-    # Contract defaults if no BC inputs
-    def contract_projection_from_3pm(name: str, slope: float, slot_dt: datetime) -> float:
-        # Requires you to know the 3pm contract price; since we don't fetch, we leave blank unless BC gave a ref
-        return np.nan
 
     for label in key_slots:
         dt = fmt_ct(datetime.combine(proj_day, datetime.strptime(label, "%H:%M").time()))
         top, bot, width = fan_levels_for_slot(anchor_close, anchor_time, dt)
-
-        row = {"⭐":"⭐" if label=="08:30" else "", "Time": label, "Top": top, "Bottom": bot}
-
-        if bc:
-            # SPX projected from BC slope (anchored at B#2)
-            spx_proj = project_value_from_ref(
-                bc["table"].iloc[0:0].get("dummy", pd.Series()).index.min() or fmt_ct(datetime.combine(prev_day, time(21,0))),  # dummy for signature
-                # We anchored spx line at b2_dt with spx_b2 in the tab above; stash slope & reconstruct via fan at need.
-                # Simpler: reuse the already-rendered table if available:
-                0.0, 0.0, dt, count_blocks_spx
-            )
-            # Instead of recomputing, pull from saved table if present:
+        row = {
+            "⭐":"⭐" if label=="08:30" else "",
+            "Time": label,
+            "Top": top, "Bottom": bot, "Width": width,
+            "Confluence": confluence_chips(top, bot, pdh, pdl, onh if use_on else None, onl if use_on else None, confl_thr)
+        }
+        if bc and "table" in bc:
+            tdf = bc["table"]
+            # pull SPX proj
             try:
-                spx_row = bc["table"][bc["table"]["Time"] == label]
-                if not spx_row.empty:
-                    row["SPX Proj"] = float(spx_row["SPX Proj"].iloc[0])
-                else:
-                    row["SPX Proj"] = np.nan
+                row["SPX Proj"] = float(tdf.loc[tdf["Time"]==label, "SPX Proj"].iloc[0])
             except Exception:
                 row["SPX Proj"] = np.nan
-
-            # Contracts from saved table
+            # pull contract columns if present
             for key in ["contract_A","contract_B"]:
-                info = bc.get(key, None)
+                info = bc.get(key)
                 if info:
                     colname = f"{info['name']} Proj"
                     try:
-                        row[colname] = float(bc["table"].loc[bc["table"]["Time"]==label, colname].iloc[0])
+                        row[colname] = float(tdf.loc[tdf["Time"]==label, colname].iloc[0])
                     except Exception:
                         row[colname] = np.nan
         else:
             row["SPX Proj"] = np.nan
-
-        # Entry/Exit outline for the slot
         row["Entry Plan"] = "Top touch & bearish close → Sell  |  Bottom touch & bullish close → Buy"
-        row["Stops / Targets"] = f"Stop: Top+{stop_pad:.2f} or Bottom-{stop_pad:.2f} • TP1: opposite edge • TP2: edge±width"
+        row["Stops/Targets"] = f"Stop: Top+{DEFAULT_STOP_PAD:.2f} / Bottom-{DEFAULT_STOP_PAD:.2f} • TP1: opp edge • TP2: edge±width"
         rows_plan.append(row)
 
     st.dataframe(pd.DataFrame(rows_plan), use_container_width=True, hide_index=True)
 
-    st.caption("Tip: use BC Forecast to populate SPX & contract projections in this Plan Card. Default slopes are fixed (SPX 0.25, Contracts 0.33).")
+    st.markdown("### Notes for 08:30")
+    st.write(f"- **Confluence** at 08:30: {chips_830 or 'None'}")
+    st.write(f"- **PDH/PDL**: {pdh:.2f} / {pdl:.2f}" + (f" • **ONH/ONL**: {onh:.2f} / {onl:.2f}" if use_on else ""))
