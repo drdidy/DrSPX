@@ -15,7 +15,7 @@ from typing import List, Tuple
 # CONFIG & PAGE SETUP
 # ───────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="SPX Prophet - Premium Trading Analytics", 
+    page_title="SPX Prophet - Professional Trading Analytics", 
     page_icon="🔮", 
     layout="wide",
     initial_sidebar_state="expanded"
@@ -735,7 +735,7 @@ st.markdown("""
     <i class="fas fa-crystal-ball hero-icon icon-2"></i>
     <i class="fas fa-rocket hero-icon icon-3"></i>
     <div class='hero-title'>🔮 SPX Prophet</div>
-    <div class='hero-subtitle'>Premium Trading Analytics</div>
+    <div class='hero-subtitle'>Professional Trading Analytics & Strategy Platform</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -743,7 +743,7 @@ st.markdown("""
 # PREMIUM SIDEBAR
 # ───────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚙️ Premium Configuration")
+    st.markdown("### ⚙️ Configuration")
     
     # Enhanced buttons with icons
     col1, col2 = st.columns([1, 1])
@@ -759,11 +759,11 @@ with st.sidebar:
     if st.session_state.show_help:
         st.markdown("""
         <div class='premium-info-box'>
-            <strong><i class="fas fa-lightbulb"></i> Premium Guide:</strong><br>
+            <strong><i class="fas fa-lightbulb"></i> Quick Guide:</strong><br>
             • Configure SPX anchor and key levels<br>
             • Use advanced BC Forecast system<br>
-            • Monitor glassmorphism analytics<br>
-            • Execute with premium trading plan
+            • Monitor real-time analytics<br>
+            • Execute with comprehensive trading plan
         </div>
         """, unsafe_allow_html=True)
     
@@ -811,9 +811,9 @@ with st.sidebar:
         onh = anchor_close + 5.0
         onl = anchor_close - 5.0
     
-    # Premium Status Section
+    # Status information
     st.markdown("---")
-    st.markdown("#### 📈 System Status")
+    st.markdown("#### 📈 Market Status")
     
     current_time = fmt_ct(datetime.now())
     market_status = "🔴 Closed"
@@ -830,7 +830,7 @@ with st.sidebar:
     
     sigma1, sigma2, spx_blocks_to_830 = sigma_bands_at_830(anchor_close, prev_day)
     st.markdown(f"**Blocks to 8:30:** {spx_blocks_to_830}")
-    st.markdown(f"**1σ Band:** ±{sigma1:.2f}")
+    st.markdown(f"**Sigma Band:** ±{sigma1:.2f}")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # PREMIUM METRIC CARDS WITH LARGE ICONS
@@ -893,8 +893,8 @@ tab1, tab2, tab3 = st.tabs(["📊 SPX Anchors", "🎯 BC Forecast", "📋 Tradin
 with tab1:
     st.markdown("""
     <div class='glass-card'>
-        <h2><i class="fas fa-crosshairs"></i> SPX Anchor Levels - Premium Entry/Exit System</h2>
-        <p>Real-time glassmorphism analytics for 30-minute intervals from 8:30 AM to 2:30 PM CT</p>
+        <h2><i class="fas fa-crosshairs"></i> SPX Anchor Levels - Complete Entry/Exit System</h2>
+        <p>Real-time anchor analytics for 30-minute intervals from 8:30 AM to 2:30 PM CT</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -982,14 +982,14 @@ with tab1:
             "Range Width": f"{top - bot:.2f}"
         })
 
-    st.markdown("### 📈 Complete Premium Projections")
+    st.markdown("### 📈 Complete Projections")
     df_close = pd.DataFrame(rows_close)
     st.dataframe(df_close, use_container_width=True, hide_index=True)
     
-    # Premium analytics section
+    # Analytics section
     st.markdown("""
     <div class='glass-card'>
-        <h3><i class="fas fa-analytics"></i> Premium Analytics Dashboard</h3>
+        <h3><i class="fas fa-analytics"></i> Market Analytics Dashboard</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1040,17 +1040,17 @@ with tab1:
 with tab2:
     st.markdown("""
     <div class='glass-card'>
-        <h2><i class="fas fa-magic"></i> Advanced BC Forecast - Premium Entry/Exit System</h2>
-        <p>Configure sophisticated bounce-rejection pairs with glassmorphism interface</p>
+        <h2><i class="fas fa-magic"></i> BC Forecast - Advanced Entry/Exit System</h2>
+        <p>Configure sophisticated bounce-rejection pairs with intuitive interface</p>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class='premium-info-box'>
-        <strong><i class="fas fa-lightbulb"></i> Premium Trading System:</strong><br>
-        • Configure elegant bounce-rejection pairs for complete projections<br>
-        • Advanced glassmorphism interface with smooth animations<br>
-        • Real-time calculations with premium visual feedback<br>
+        <strong><i class="fas fa-lightbulb"></i> Complete Trading System:</strong><br>
+        • Configure bounce-rejection pairs for complete projections<br>
+        • Advanced interface with real-time visual feedback<br>
+        • Comprehensive calculations with detailed analytics<br>
         • Time window: 3:30 PM (previous day) → 8:00 AM (projection day)
     </div>
     """, unsafe_allow_html=True)
@@ -1067,11 +1067,11 @@ with tab2:
     bounce_display = [f"{dt.strftime('%a %m/%d %H:%M')} CT" for dt in tmp_slots]
 
     # Premium form with glassmorphism
-    with st.form("premium_bc_form", clear_on_submit=False):
+    with st.form("bc_form", clear_on_submit=False):
         
         st.markdown("""
         <div class='premium-form'>
-            <h3><i class="fas fa-cogs"></i> Premium Bounce-Rejection Configuration</h3>
+            <h3><i class="fas fa-cogs"></i> Bounce-Rejection Configuration</h3>
             <p>Set up sophisticated trading pairs with advanced analytics</p>
         """, unsafe_allow_html=True)
         
@@ -1178,11 +1178,11 @@ with tab2:
 
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            submitted = st.form_submit_button("🚀 Generate Premium Forecast")
+            submitted = st.form_submit_button("🚀 Generate Complete Forecast")
 
     if submitted:
         # Show loading animation
-        with st.spinner("🔮 Calculating Premium Entry/Exit Forecast..."):
+        with st.spinner("🔮 Calculating Complete Entry/Exit Forecast..."):
             try:
                 b1_dt = fmt_ct(datetime.strptime(bounce_slots[b1_idx], "%Y-%m-%d %H:%M"))
                 b2_dt = fmt_ct(datetime.strptime(bounce_slots[b2_idx], "%Y-%m-%d %H:%M"))
@@ -1281,16 +1281,16 @@ with tab2:
                         out_df = pd.DataFrame(rows)
                         
                         # Success message
-                        success_msg = "🎉 Premium Entry/Exit Forecast Generated!"
+                        success_msg = "🎉 Complete Entry/Exit Forecast Generated!"
                         if rejection_data:
-                            success_msg += " Complete entry and exit projections calculated."
+                            success_msg += " Both entry and exit projections calculated."
                         else:
                             success_msg += " Entry projections calculated."
                         
                         st.markdown(f"""
                         <div class='premium-success-box'>
                             <strong><i class="fas fa-check-circle"></i> {success_msg}</strong><br>
-                            Review your premium glassmorphism projections below.
+                            Review your comprehensive projections below.
                         </div>
                         """, unsafe_allow_html=True)
                         
@@ -1358,7 +1358,7 @@ with tab2:
                                 """, unsafe_allow_html=True)
                         
                         # Main table
-                        st.markdown("### 📊 Premium RTH Projections")
+                        st.markdown("### 📊 Complete RTH Projections")
                         st.dataframe(out_df, use_container_width=True, hide_index=True)
                         
                         # Store results
@@ -1378,7 +1378,7 @@ with tab2:
                         st.markdown("""
                         <div class='premium-success-box'>
                             <strong><i class="fas fa-sync-alt"></i> System Updated!</strong><br>
-                            Check other tabs for enhanced projections with your premium data.
+                            Check other tabs for enhanced projections with your complete forecast data.
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -1396,23 +1396,23 @@ with tab2:
 with tab3:
     st.markdown("""
     <div class='glass-card'>
-        <h2><i class="fas fa-chess"></i> Premium Trading Plan - Complete Strategy</h2>
-        <p>Your advanced glassmorphism trading dashboard ready by 8:00 AM</p>
+        <h2><i class="fas fa-chess"></i> Trading Plan - Complete Strategy Dashboard</h2>
+        <p>Your comprehensive trading dashboard ready by 8:00 AM</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Status check with premium styling
+    # Status check with professional styling
     current_ct = fmt_ct(datetime.now())
     plan_ready_time = fmt_ct(datetime.combine(proj_day, time(8, 0)))
     
     if current_ct >= plan_ready_time:
-        status_msg = "🟢 Plan Active - Ready for premium trading"
+        status_msg = "🟢 Plan Active - Ready for trading session"
         status_class = "premium-success-box"
     elif current_ct >= plan_ready_time - timedelta(hours=1):
-        status_msg = "🟡 Plan Preparation - Final premium setup"
+        status_msg = "🟡 Plan Preparation - Final setup in progress"
         status_class = "premium-warning-box"
     else:
-        status_msg = "🔵 Plan Preview - Premium configuration in progress"
+        status_msg = "🔵 Plan Preview - Configuration in progress"
         status_class = "premium-info-box"
     
     st.markdown(f"""
@@ -1486,7 +1486,7 @@ with tab3:
         st.markdown(f"""
         <div class='metric-glass-card'>
             <i class="fas fa-bullseye metric-icon"></i>
-            <div class='metric-label'>Premium Action Levels</div>
+            <div class='metric-label'>Action Levels</div>
             <div class='metric-value' style='font-size: 1.4rem;'>
                 Sell: {sell_level:.2f}<br>
                 Buy: {buy_level:.2f}
@@ -1519,10 +1519,10 @@ with tab3:
         </div>
         """, unsafe_allow_html=True)
 
-    # Premium projections table
+    # Time projections table
     st.markdown("""
     <div class='glass-card'>
-        <h3><i class="fas fa-clock"></i> Premium Time Projections</h3>
+        <h3><i class="fas fa-clock"></i> Key Time Projections</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1581,10 +1581,10 @@ with tab3:
     df_plan = pd.DataFrame(proj_rows)
     st.dataframe(df_plan, use_container_width=True, hide_index=True)
     
-    # Premium trading guide
+    # Trading guide
     st.markdown("""
     <div class='glass-card'>
-        <h3><i class="fas fa-graduation-cap"></i> Premium Trading Guide</h3>
+        <h3><i class="fas fa-graduation-cap"></i> Trading Guide</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1594,9 +1594,9 @@ with tab3:
         st.markdown(f"""
         <div class='metric-glass-card'>
             <i class="fas fa-sign-in-alt metric-icon"></i>
-            <div class='metric-label'>Entry Excellence</div>
+            <div class='metric-label'>Entry Strategy</div>
             <div class='metric-sub' style='margin-top: 0;'>
-                • Wait for premium levels<br>
+                • Wait for optimal levels<br>
                 • Confirm with volume<br>
                 • Enter on pullbacks<br>
                 • Use limit orders<br>
@@ -1610,7 +1610,7 @@ with tab3:
         st.markdown(f"""
         <div class='metric-glass-card'>
             <i class="fas fa-sign-out-alt metric-icon"></i>
-            <div class='metric-label'>Exit Mastery</div>
+            <div class='metric-label'>Exit Strategy</div>
             <div class='metric-sub' style='margin-top: 0;'>
                 • Monitor exit projections<br>
                 • Use rejection touches<br>
@@ -1625,7 +1625,7 @@ with tab3:
         st.markdown(f"""
         <div class='metric-glass-card'>
             <i class="fas fa-clock metric-icon"></i>
-            <div class='metric-label'>Timing Precision</div>
+            <div class='metric-label'>Timing & Risk</div>
             <div class='metric-sub' style='margin-top: 0;'>
                 • Best: 8:30-9:30, 13:00-14:30<br>
                 • Avoid: 11:30-12:30 lunch<br>
@@ -1642,9 +1642,9 @@ with tab3:
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.markdown(f"""
 <div class='glass-card' style='text-align: center; padding: 2rem;'>
-    <h4><i class="fas fa-gem"></i> SPX Prophet Premium v3.0</h4>
+    <h4><i class="fas fa-crystal-ball"></i> SPX Prophet v3.0</h4>
     <p style='margin: 0; opacity: 0.8;'>
-        Glassmorphism Trading Analytics • Last Updated: {fmt_ct(datetime.now()).strftime('%H:%M CT')}
+        Professional Trading Analytics • Last Updated: {fmt_ct(datetime.now()).strftime('%H:%M CT')}
     </p>
 </div>
 """, unsafe_allow_html=True)
