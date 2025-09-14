@@ -919,7 +919,7 @@ with tab1:
         st.markdown(f"""
         <div class='premium-success-box'>
             <strong><i class="fas fa-check-circle"></i> {status_msg}</strong><br>
-            Advanced projections below include BC-fitted slopes and rejection-based exit levels.
+            Advanced projections include BC-fitted slopes, rejection exits, and sigma trigger levels.
         </div>
         """, unsafe_allow_html=True)
 
@@ -935,9 +935,15 @@ with tab1:
             total_blocks = blocks_simple_30m(contract_ref_dt, slot_dt)
         return round(contract_ref_px + contract_slope * total_blocks, 2)
 
-    # Build enhanced tables
+    # Build enhanced tables with sigma levels and contract conversions
     rows_close = []
     key_times = ["08:30", "10:00", "12:00", "13:30", "14:30"]
+    
+    # Calculate sigma levels at anchor for reference
+    sigma_1_upper = anchor_close + sigma1  # +8.25
+    sigma_1_lower = anchor_close - sigma1  # -8.25  
+    sigma_2_upper = anchor_close + sigma2  # +16.5
+    sigma_2_lower = anchor_close - sigma2  # -16.5
     
     for slot in rth_slots_ct(proj_day):
         tlabel = slot.strftime("%H:%M")
@@ -953,6 +959,7 @@ with tab1:
 
         c_proj = contract_proj_for_slot(slot)
         
+        # Contract exit projection
         c_exit = ""
         if rejection_result:
             c_exit_val = calculate_rejection_exit(
@@ -962,6 +969,7 @@ with tab1:
             if c_exit_val:
                 c_exit = f"{c_exit_val:.2f}"
         
+        # Calculate entry/exit spread
         entry_exit_spread = ""
         if c_exit and c_exit != "":
             try:
@@ -970,19 +978,48 @@ with tab1:
             except:
                 entry_exit_spread = "—"
         
+        # Convert contract to SPX levels (contract entry: SPX - 9.24, contract exit: SPX + 9.24)
+        spx_from_contract_entry = ""
+        spx_from_contract_exit = ""
+        if c_proj:
+            spx_from_contract_entry = f"{c_proj - 9.24:.2f}"
+        if c_exit and c_exit != "":
+            spx_from_contract_exit = f"{float(c_exit) + 9.24:.2f}"
+        
+        # Special markers for sigma levels
+        sigma_marker = ""
+        if tlabel == "08:30":
+            if abs(top - sigma_1_upper) < 0.5 or abs(bot - sigma_1_lower) < 0.5:
+                sigma_marker = "1σ"
+            elif abs(top - sigma_2_upper) < 0.5 or abs(bot - sigma_2_lower) < 0.5:
+                sigma_marker = "2σ"
+        
         rows_close.append({
             "🎯": "🎯" if is_key else ("⭐" if tlabel=="08:30" else ""),
             "Time": tlabel,
             "Top Level": f"{top:.2f}",
             "Bottom Level": f"{bot:.2f}",
-            "SPX Entry": f"{spx_proj_val:.2f}" if spx_proj_val else "—",
+            "1σ Trigger": f"±{sigma1:.2f}" if tlabel=="08:30" else "—",
+            "2σ Target": f"±{sigma2:.2f}" if tlabel=="08:30" else "—", 
+            "SPX Entry": f"{spx_proj_val:.2f}" if spx_proj_val else spx_from_contract_entry if spx_from_contract_entry else "—",
             "Contract Entry": f"{c_proj:.2f}",
             "Contract Exit": c_exit if c_exit else "—",
-            "Profit Spread": entry_exit_spread if entry_exit_spread else "—",
-            "Range Width": f"{top - bot:.2f}"
+            "SPX Exit": spx_from_contract_exit if spx_from_contract_exit else "—",
+            "Entry/Exit Spread": entry_exit_spread if entry_exit_spread else "—"
         })
 
-    st.markdown("### 📈 Complete Projections")
+    st.markdown("### 📈 Complete Projections with Sigma Triggers")
+    
+    # Add explanation for sigma levels
+    st.markdown(f"""
+    <div class='premium-info-box'>
+        <strong><i class="fas fa-info-circle"></i> Key Levels Explained:</strong><br>
+        • <strong>1σ Trigger (±{sigma1:.2f}):</strong> If market opens beyond these levels from anchor, expect 2σ move<br>
+        • <strong>2σ Target (±{sigma2:.2f}):</strong> Full statistical move from anchor close<br>
+        • <strong>SPX-Contract Conversion:</strong> Entry (Contract - 9.24) | Exit (Contract + 9.24)
+    </div>
+    """, unsafe_allow_html=True)
+    
     df_close = pd.DataFrame(rows_close)
     st.dataframe(df_close, use_container_width=True, hide_index=True)
     
@@ -1240,7 +1277,7 @@ with tab2:
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                        # Build projection table
+                        # Build projection table with sigma levels and conversions
                         rows = []
                         anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
                         
@@ -1253,6 +1290,8 @@ with tab2:
                             c_exit = ""
                             spx_exit = ""
                             entry_exit_spread = ""
+                            spx_from_contract_entry = f"{c_proj - 9.24:.2f}"
+                            spx_from_contract_exit = ""
                             
                             if rejection_data:
                                 c_exit_val = calculate_rejection_exit(
@@ -1262,6 +1301,7 @@ with tab2:
                                 if c_exit_val:
                                     c_exit = f"{c_exit_val:.2f}"
                                     entry_exit_spread = f"{c_proj - c_exit_val:.2f}"
+                                    spx_from_contract_exit = f"{c_exit_val + 9.24:.2f}"
                                 
                                 exit_blocks = blocks_simple_30m(rejection_data['r2_dt'], slot)
                                 spx_exit = round(rejection_data['spx_r2'] + rejection_data['spx_rej_slope'] * exit_blocks, 2)
@@ -1271,9 +1311,10 @@ with tab2:
                                 "Time": slot.strftime("%H:%M"),
                                 "Top": top, 
                                 "Bottom": bot,
+                                "1σ Trigger": f"±{sigma1:.2f}" if slot.strftime("%H:%M")=="08:30" else "—",
                                 "SPX Entry": spx_proj,
                                 "Contract Entry": c_proj,
-                                "SPX Exit": spx_exit if spx_exit else "—",
+                                "SPX Exit": spx_exit if spx_exit else spx_from_contract_exit if spx_from_contract_exit else "—",
                                 "Contract Exit": c_exit if c_exit else "—",
                                 "Entry/Exit Spread": entry_exit_spread if entry_exit_spread else "—"
                             })
