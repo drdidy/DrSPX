@@ -735,7 +735,7 @@ st.markdown("""
     <i class="fas fa-crystal-ball hero-icon icon-2"></i>
     <i class="fas fa-rocket hero-icon icon-3"></i>
     <div class='hero-title'>🔮 SPX Prophet</div>
-    <div class='hero-subtitle'>Premium Trading Analytics with Glassmorphism Design</div>
+    <div class='hero-subtitle'>Premium Trading Analytics</div>
 </div>
 """, unsafe_allow_html=True)
 
