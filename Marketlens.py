@@ -25,6 +25,8 @@ st.set_page_config(
 # Initialize session state
 if 'bc_result' not in st.session_state:
     st.session_state.bc_result = None
+if 'rejection_result' not in st.session_state:
+    st.session_state.rejection_result = None
 if 'show_help' not in st.session_state:
     st.session_state.show_help = False
 
@@ -383,6 +385,25 @@ def sigma_bands_at_830(anchor_close: float, anchor_day: date) -> Tuple[float, fl
     move = SLOPE_SPX * blocks_830
     return round(move, 2), round(2*move, 2), blocks_830  # ±move, ±2*move
 
+def calculate_rejection_exit(rejection_dt1: datetime, rejection_dt2: datetime, 
+                           contract_r1: float, contract_r2: float, target_dt: datetime) -> float:
+    """Calculate contract exit level based on rejection line extended to target time"""
+    if rejection_dt2 <= rejection_dt1:
+        return 0.0
+    
+    # Calculate rejection slope using simple 30m blocks (overnight rejections)
+    rejection_blocks = blocks_simple_30m(rejection_dt1, rejection_dt2)
+    if rejection_blocks <= 0:
+        return 0.0
+    
+    rejection_slope = (contract_r2 - contract_r1) / rejection_blocks
+    
+    # Project from second rejection point to target time
+    target_blocks = blocks_simple_30m(rejection_dt2, target_dt)
+    exit_level = contract_r2 + (rejection_slope * target_blocks)
+    
+    return round(exit_level, 2)
+
 # ───────────────────────────────────────────────────────────────────────────────
 # MAIN HEADER
 # ───────────────────────────────────────────────────────────────────────────────
@@ -407,6 +428,7 @@ with st.sidebar:
     with col2:
         if st.button("🔄 Reset", key="reset_data"):
             st.session_state.bc_result = None
+            st.session_state.rejection_result = None
             st.rerun()
     
     if st.session_state.show_help:
@@ -415,8 +437,8 @@ with st.sidebar:
             <strong>Quick Guide:</strong><br>
             • Set previous trading day close (SPX Anchor)<br>
             • Configure PDH/PDL levels<br>
-            • Use BC Forecast for 2-bounce projection<br>
-            • Review Plan Card for session strategy
+            • Use BC Forecast for bounce + rejection projections<br>
+            • Review Plan Card for complete entry/exit strategy
         </div>
         """, unsafe_allow_html=True)
     
@@ -522,12 +544,13 @@ with col3:
     """, unsafe_allow_html=True)
 
 with col4:
+    rejection_status = "✅ Active" if st.session_state.get("rejection_result") else "⚪ Not Set"
     on_text = f"ONH/ONL: {onh:.2f}/{onl:.2f}" if use_on else "ONH/ONL: Not tracked"
     st.markdown(f"""
     <div class='metric-card'>
         <div class='metric-label'>Key Levels</div>
         <div class='metric-value'>{pdh:.2f} / {pdl:.2f}</div>
-        <div class='metric-sub'>PDH / PDL • {on_text}</div>
+        <div class='metric-sub'>{on_text} • Exits: {rejection_status}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -549,6 +572,8 @@ with tab1:
 
     # Use BC result if available
     bc = st.session_state.get("bc_result", None)
+    rejection_result = st.session_state.get("rejection_result", None)
+    
     contract_slope = SLOPE_CONTRACT_DEFAULT
     contract_ref_dt = fmt_ct(datetime.combine(prev_day, time(15, 0)))
     contract_ref_px = float(contract_3pm)
@@ -558,10 +583,14 @@ with tab1:
         contract_ref_dt = bc["contract"]["ref_dt"]
         contract_ref_px = float(bc["contract"]["ref_price"])
         
-        st.markdown("""
+        status_msg = "✅ BC Forecast Active"
+        if rejection_result:
+            status_msg += " + Exit Projections Enabled"
+        
+        st.markdown(f"""
         <div class='success-box'>
-            <strong>✅ BC Forecast Active</strong><br>
-            Projections below include BC-fitted slope and reference points.
+            <strong>{status_msg}</strong><br>
+            Projections below include BC-fitted slopes and reference points.
         </div>
         """, unsafe_allow_html=True)
 
@@ -578,7 +607,7 @@ with tab1:
             total_blocks = blocks_simple_30m(contract_ref_dt, slot_dt)
         return round(contract_ref_px + contract_slope * total_blocks, 2)
 
-    # Build tables with enhanced formatting
+    # Build tables with enhanced formatting including exits
     rows_close, rows_high, rows_low = [], [], []
     key_times = ["08:30", "10:00", "12:00", "13:30", "14:30"]
     
@@ -587,14 +616,35 @@ with tab1:
         top, bot = fan_levels_for_slot(anchor_close, anchor_time, slot)
         is_key = tlabel in key_times
         
+        # SPX projection from BC
         spx_proj_val = ""
         if bc and "table" in bc:
             try:
-                spx_proj_val = float(bc["table"].loc[bc["table"]["Time"]==tlabel, "SPX Proj"].iloc[0])
+                spx_proj_val = float(bc["table"].loc[bc["table"]["Time"]==tlabel, "SPX Entry"].iloc[0])
             except Exception:
                 spx_proj_val = ""
 
+        # Contract entry projection
         c_proj = contract_proj_for_slot(slot)
+        
+        # Contract exit projection
+        c_exit = ""
+        if rejection_result:
+            c_exit = calculate_rejection_exit(
+                rejection_result['r1_dt'], rejection_result['r2_dt'],
+                rejection_result['c_r1'], rejection_result['c_r2'], slot
+            )
+            if c_exit:
+                c_exit = f"{c_exit:.2f}"
+        
+        # Calculate entry/exit spread
+        entry_exit_spread = ""
+        if c_exit and c_exit != "":
+            try:
+                spread = c_proj - float(c_exit)
+                entry_exit_spread = f"{spread:.2f}"
+            except:
+                entry_exit_spread = "—"
         
         # Enhanced row data
         row_base = {
@@ -602,14 +652,21 @@ with tab1:
             "Time": tlabel,
             "Top": f"{top:.2f}",
             "Bottom": f"{bot:.2f}",
-            "SPX Proj": f"{spx_proj_val:.2f}" if spx_proj_val else "—",
-            "Contract": f"{c_proj:.2f}",
+            "SPX Entry": f"{spx_proj_val:.2f}" if spx_proj_val else "—",
+            "Contract Entry": f"{c_proj:.2f}",
+            "Contract Exit": c_exit if c_exit else "—",
+            "Entry/Exit Spread": entry_exit_spread if entry_exit_spread else "—",
             "Range": f"{top - bot:.2f}"
         }
         
         rows_close.append(row_base.copy())
-        rows_high.append({k: v for k, v in row_base.items() if k not in ["Bottom", "Range"]})
-        rows_low.append({k: v for k, v in row_base.items() if k not in ["Top", "Range"]})
+        
+        # For high/low tables, remove irrelevant columns
+        high_row = {k: v for k, v in row_base.items() if k not in ["Bottom"]}
+        low_row = {k: v for k, v in row_base.items() if k not in ["Top"]}
+        
+        rows_high.append(high_row)
+        rows_low.append(low_row)
 
     # Display tables with better organization
     tab_col1, tab_col2, tab_col3 = st.tabs(["📈 Close Levels", "⬆️ High Levels", "⬇️ Low Levels"])
@@ -949,22 +1006,46 @@ with tab3:
     key_times = ["08:30", "09:00", "10:00", "11:00", "12:00", "13:00", "13:30", "14:30"]
     proj_rows = []
     
+    # Get both BC and rejection results
+    bc = st.session_state.get("bc_result", None)
+    rejection_result = st.session_state.get("rejection_result", None)
+    
     for time_str in key_times:
         slot_time = fmt_ct(datetime.combine(proj_day, datetime.strptime(time_str, "%H:%M").time()))
         top, bot = fan_levels_for_slot(anchor_close, anchor_time, slot_time)
         
         # Get BC projection if available
-        spx_proj = ""
-        contract_proj = ""
+        spx_entry = ""
+        contract_entry = ""
+        spx_exit = ""
+        contract_exit = ""
         
         if bc and "table" in bc:
             try:
                 bc_row = bc["table"][bc["table"]["Time"] == time_str]
                 if not bc_row.empty:
-                    spx_proj = f"{float(bc_row.iloc[0]['SPX Proj']):.2f}"
-                    contract_proj = f"{float(bc_row.iloc[0]['Contract Proj']):.2f}"
+                    spx_entry = f"{float(bc_row.iloc[0]['SPX Entry']):.2f}"
+                    contract_entry = f"{float(bc_row.iloc[0]['Contract Entry']):.2f}"
+                    
+                    # Get exit data if available
+                    exit_val = bc_row.iloc[0]['Contract Exit']
+                    if exit_val != "—" and exit_val:
+                        contract_exit = f"{float(exit_val):.2f}"
+                    
+                    spx_exit_val = bc_row.iloc[0]['SPX Exit']
+                    if spx_exit_val != "—" and spx_exit_val:
+                        spx_exit = f"{float(spx_exit_val):.2f}"
             except:
                 pass
+        
+        # Calculate entry/exit spread
+        spread = ""
+        if contract_entry and contract_exit:
+            try:
+                spread_val = float(contract_entry) - float(contract_exit)
+                spread = f"{spread_val:.2f}"
+            except:
+                spread = "—"
         
         # Market session context
         session_context = ""
@@ -983,44 +1064,49 @@ with tab3:
             "Session": session_context,
             "Top": f"{top:.2f}",
             "Bottom": f"{bot:.2f}",
-            "Range": f"{top - bot:.2f}",
-            "SPX Proj": spx_proj or "—",
-            "Contract": contract_proj or "—"
+            "SPX Entry": spx_entry or "—",
+            "Contract Entry": contract_entry or "—",
+            "Contract Exit": contract_exit or "—",
+            "Entry/Exit Spread": spread or "—"
         })
     
     df_plan = pd.DataFrame(proj_rows)
     st.dataframe(df_plan, use_container_width=True, hide_index=True)
     
-    # Final trading reminders
-    st.markdown("### 💡 Session Reminders")
+    # Final trading reminders with exit system
+    st.markdown("### 💡 Complete Trading System Guide")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
         st.markdown("""
         **🎯 Entry Rules**
-        - Wait for price to reach levels
+        - Wait for price to reach entry levels
         - Confirm with volume/momentum
         - Enter on pullbacks, not breakouts
         - Use limit orders near levels
+        - Size based on stop distance
         """)
     
     with col2:
-        st.markdown("""
-        **⚡ Risk Control**
-        - Set stops immediately
-        - Size based on stop distance
-        - No revenge trading
-        - Maximum 3 trades per session
+        exit_status = "Exit levels available" if st.session_state.get("rejection_result") else "Configure rejections for exits"
+        st.markdown(f"""
+        **🚪 Exit Strategy**
+        - Monitor contract exit projections
+        - Exit on rejection line touches
+        - Scale out at resistance levels
+        - **Status:** {exit_status}
+        - Use trailing stops in trending moves
         """)
     
     with col3:
         st.markdown("""
-        **⏰ Time Management**
-        - Best: First hour (8:30-9:30)
-        - Avoid: Lunch time (11:30-12:30)
-        - Close: Last 30 minutes (14:00-14:30)
-        - Review: After close for next day
+        **⚡ Risk & Time Management**
+        - Set stops immediately on entry
+        - Maximum 3 trades per session
+        - Best hours: 8:30-9:30, 13:00-14:30
+        - Avoid: 11:30-12:30 lunch chop
+        - Review performance after close
         """)
 
 # ───────────────────────────────────────────────────────────────────────────────
