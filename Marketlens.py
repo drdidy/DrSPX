@@ -8,6 +8,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pytz
+import yfinance as yf
 from datetime import datetime, date, time, timedelta
 from typing import List, Tuple
 
@@ -28,10 +29,12 @@ if 'rejection_result' not in st.session_state:
     st.session_state.rejection_result = None
 if 'show_help' not in st.session_state:
     st.session_state.show_help = False
+if 'manual_data' not in st.session_state:
+    st.session_state.manual_data = {}
 
 CT = pytz.timezone("America/Chicago")
 
-SLOPE_SPX = 0.25                 
+SLOPE_SPX = 0.26                 # Updated from 0.25 to 0.26
 SLOPE_CONTRACT_DEFAULT = -0.33   
 
 RTH_START = time(8, 30)
@@ -41,7 +44,33 @@ DEFAULT_ANCHOR = 6400.00
 DEFAULT_CONTRACT_3PM = 20.00
 
 # ───────────────────────────────────────────────────────────────────────────────
-# PREMIUM GLASSMORPHISM STYLING
+# YAHOO FINANCE DATA FETCHING
+# ───────────────────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def fetch_spx_data(target_date):
+    """Fetch SPX high, low, close for given date"""
+    try:
+        # Convert date to string format for yfinance
+        start_date = target_date
+        end_date = target_date + timedelta(days=1)
+        
+        ticker = yf.Ticker("^GSPC")
+        data = ticker.history(start=start_date, end=end_date)
+        
+        if not data.empty:
+            return {
+                'high': round(float(data['High'].iloc[0]), 2),
+                'low': round(float(data['Low'].iloc[0]), 2),
+                'close': round(float(data['Close'].iloc[0]), 2)
+            }
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error fetching Yahoo Finance data: {e}")
+        return None
+
+# ───────────────────────────────────────────────────────────────────────────────
+# PREMIUM GLASSMORPHISM STYLING (Same as before but removed sigma band references)
 # ───────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -645,7 +674,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ───────────────────────────────────────────────────────────────────────────────
-# TIME / BLOCK HELPERS (Same as before)
+# TIME / BLOCK HELPERS (Updated slopes and calculations)
 # ───────────────────────────────────────────────────────────────────────────────
 def fmt_ct(dt: datetime) -> datetime:
     if dt.tzinfo is None: return CT.localize(dt)
@@ -700,16 +729,9 @@ def blocks_simple_30m(d1: datetime, d2: datetime) -> int:
 
 def fan_levels_for_slot(anchor_close: float, anchor_time: datetime, slot_dt: datetime) -> Tuple[float,float]:
     blocks = count_blocks_spx(anchor_time, slot_dt)
-    top = round(anchor_close + SLOPE_SPX * blocks, 2)
-    bot = round(anchor_close - SLOPE_SPX * blocks, 2)
+    top = round(anchor_close + SLOPE_SPX * blocks, 2)  # Now uses 0.26
+    bot = round(anchor_close - SLOPE_SPX * blocks, 2)  # Now uses 0.26
     return top, bot
-
-def sigma_bands_at_830(anchor_close: float, anchor_day: date) -> Tuple[float, float, int]:
-    anchor_3pm = fmt_ct(datetime.combine(anchor_day, time(15, 0)))
-    next_830   = fmt_ct(datetime.combine(anchor_day + timedelta(days=1), time(8, 30)))
-    blocks_830 = count_blocks_spx(anchor_3pm, next_830)
-    move = SLOPE_SPX * blocks_830
-    return round(move, 2), round(2*move, 2), blocks_830
 
 def calculate_rejection_exit(rejection_dt1: datetime, rejection_dt2: datetime, 
                            contract_r1: float, contract_r2: float, target_dt: datetime) -> float:
@@ -754,13 +776,14 @@ with st.sidebar:
         if st.button("🔄 Reset", key="reset_data"):
             st.session_state.bc_result = None
             st.session_state.rejection_result = None
+            st.session_state.manual_data = {}
             st.rerun()
     
     if st.session_state.show_help:
         st.markdown("""
         <div class='premium-info-box'>
             <strong><i class="fas fa-lightbulb"></i> Quick Guide:</strong><br>
-            • Configure SPX anchor and key levels<br>
+            • Configure SPX high/low/close data<br>
             • Use advanced BC Forecast system<br>
             • Monitor real-time analytics<br>
             • Execute with comprehensive trading plan
@@ -775,14 +798,41 @@ with st.sidebar:
     prev_day = st.date_input("Previous Trading Day", value=today_ct - timedelta(days=1))
     proj_day = st.date_input("Projection Day", value=prev_day + timedelta(days=1))
     
-    st.markdown("#### 💰 Market Data")
+    st.markdown("#### 💰 Market Data Source")
     
-    anchor_close = st.number_input(
-        "SPX Anchor (≤ 3:00 PM CT Close)", 
-        value=float(DEFAULT_ANCHOR), 
-        step=0.25, 
-        format="%.2f"
+    # Data source selection
+    data_source = st.radio(
+        "Data Source",
+        ["Auto-fetch from Yahoo Finance", "Manual Input"],
+        index=0
     )
+    
+    # Fetch or get manual data
+    spx_data = None
+    if data_source == "Auto-fetch from Yahoo Finance":
+        with st.spinner("Fetching SPX data..."):
+            spx_data = fetch_spx_data(prev_day)
+        
+        if spx_data:
+            st.success(f"✅ Data fetched for {prev_day}")
+            st.markdown(f"**High:** {spx_data['high']:.2f}")
+            st.markdown(f"**Low:** {spx_data['low']:.2f}")
+            st.markdown(f"**Close:** {spx_data['close']:.2f}")
+        else:
+            st.warning("⚠️ Could not fetch data - use manual input")
+            data_source = "Manual Input"
+    
+    if data_source == "Manual Input" or spx_data is None:
+        st.markdown("#### 📊 Manual SPX Data Entry")
+        spx_high = st.number_input("SPX High", value=DEFAULT_ANCHOR + 15.0, step=0.25, format="%.2f")
+        spx_low = st.number_input("SPX Low", value=DEFAULT_ANCHOR - 15.0, step=0.25, format="%.2f")
+        spx_close = st.number_input("SPX Close", value=DEFAULT_ANCHOR, step=0.25, format="%.2f")
+        
+        spx_data = {
+            'high': spx_high,
+            'low': spx_low,
+            'close': spx_close
+        }
     
     contract_3pm = st.number_input(
         "Contract Price @ 3:00 PM", 
@@ -790,26 +840,6 @@ with st.sidebar:
         step=0.05, 
         format="%.2f"
     )
-    
-    st.markdown("#### 📊 Key Levels")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        pdh = st.number_input("PDH", value=anchor_close + 10.0, step=0.25, format="%.2f")
-    with col2:
-        pdl = st.number_input("PDL", value=anchor_close - 10.0, step=0.25, format="%.2f")
-    
-    use_on = st.checkbox("Include Overnight High/Low", value=False)
-    
-    if use_on:
-        col1, col2 = st.columns(2)
-        with col1:
-            onh = st.number_input("ONH", value=anchor_close + 5.0, step=0.25, format="%.2f")
-        with col2:
-            onl = st.number_input("ONL", value=anchor_close - 5.0, step=0.25, format="%.2f")
-    else:
-        onh = anchor_close + 5.0
-        onl = anchor_close - 5.0
     
     # Status information
     st.markdown("---")
@@ -827,56 +857,51 @@ with st.sidebar:
     
     st.markdown(f"<span class='status-indicator {status_class}'></span>**Market:** {market_status}", unsafe_allow_html=True)
     st.markdown(f"**Time:** {current_time.strftime('%H:%M CT')}")
-    
-    sigma1, sigma2, spx_blocks_to_830 = sigma_bands_at_830(anchor_close, prev_day)
-    st.markdown(f"**Blocks to 8:30:** {spx_blocks_to_830}")
-    st.markdown(f"**Sigma Band:** ±{sigma1:.2f}")
+    st.markdown(f"**Slope:** {SLOPE_SPX:.2f} per 30min block")
 
 # ───────────────────────────────────────────────────────────────────────────────
-# PREMIUM METRIC CARDS WITH LARGE ICONS
+# PREMIUM METRIC CARDS WITH LARGE ICONS (Updated without sigma bands)
 # ───────────────────────────────────────────────────────────────────────────────
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.markdown(f"""
     <div class='metric-glass-card'>
-        <i class="fas fa-anchor metric-icon"></i>
-        <div class='metric-label'>SPX Anchor</div>
-        <div class='metric-value'>{anchor_close:.2f}</div>
-        <div class='metric-sub'>≤ 3:00 PM CT Close</div>
+        <i class="fas fa-arrow-up metric-icon"></i>
+        <div class='metric-label'>SPX High</div>
+        <div class='metric-value'>{spx_data['high']:.2f}</div>
+        <div class='metric-sub'>Daily High Level</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col2:
     st.markdown(f"""
     <div class='metric-glass-card'>
-        <i class="fas fa-wave-square metric-icon"></i>
-        <div class='metric-label'>Sigma Bands @ 8:30</div>
-        <div class='metric-value'>±{sigma1:.2f} / ±{sigma2:.2f}</div>
-        <div class='metric-sub'>{spx_blocks_to_830} blocks @ {SLOPE_SPX:.2f}/30m</div>
+        <i class="fas fa-arrow-down metric-icon"></i>
+        <div class='metric-label'>SPX Low</div>
+        <div class='metric-value'>{spx_data['low']:.2f}</div>
+        <div class='metric-sub'>Daily Low Level</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col3:
-    mag_to_830 = abs(SLOPE_CONTRACT_DEFAULT)*28
     st.markdown(f"""
     <div class='metric-glass-card'>
-        <i class="fas fa-chart-area metric-icon"></i>
-        <div class='metric-label'>Contract Projection</div>
-        <div class='metric-value'>±{mag_to_830:.2f}</div>
-        <div class='metric-sub'>28 blocks @ {SLOPE_CONTRACT_DEFAULT:.2f}/30m</div>
+        <i class="fas fa-chart-line metric-icon"></i>
+        <div class='metric-label'>SPX Close</div>
+        <div class='metric-value'>{spx_data['close']:.2f}</div>
+        <div class='metric-sub'>Settlement Price</div>
     </div>
     """, unsafe_allow_html=True)
 
 with col4:
-    rejection_status = "✅ Active" if st.session_state.get("rejection_result") else "⚪ Not Set"
-    on_text = f"ONH/ONL: {onh:.2f}/{onl:.2f}" if use_on else "Not tracked"
+    daily_range = spx_data['high'] - spx_data['low']
     st.markdown(f"""
     <div class='metric-glass-card'>
-        <i class="fas fa-layer-group metric-icon"></i>
-        <div class='metric-label'>Key Levels</div>
-        <div class='metric-value'>{pdh:.2f} / {pdl:.2f}</div>
-        <div class='metric-sub'>{on_text} • Exits: {rejection_status}</div>
+        <i class="fas fa-expand-arrows-alt metric-icon"></i>
+        <div class='metric-label'>Daily Range</div>
+        <div class='metric-value'>{daily_range:.2f}</div>
+        <div class='metric-sub'>High - Low</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -885,194 +910,138 @@ st.markdown("<br><br>", unsafe_allow_html=True)
 # ───────────────────────────────────────────────────────────────────────────────
 # PREMIUM TABS
 # ───────────────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["📊 SPX Anchors", "🎯 BC Forecast", "📋 Trading Plan"])
+tab1, tab2, tab3 = st.tabs(["📊 SPX Fan Levels", "🎯 BC Forecast", "📋 Trading Plan"])
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
-# ║ TAB 1 — Premium SPX Anchors                                                 ║
+# ║ TAB 1 — Premium SPX Fan Levels (3 Tables: High, Low, Close)                ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝
 with tab1:
     st.markdown("""
     <div class='glass-card'>
-        <h2><i class="fas fa-crosshairs"></i> SPX Anchor Levels - Complete Entry/Exit System</h2>
-        <p>Real-time anchor analytics for 30-minute intervals from 8:30 AM to 2:30 PM CT</p>
+        <h2><i class="fas fa-layer-group"></i> SPX Fan Levels - High, Low, Close Analysis</h2>
+        <p>Three separate fan projections based on daily high, low, and close levels</p>
     </div>
     """, unsafe_allow_html=True)
     
     anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
-
-    bc = st.session_state.get("bc_result", None)
-    rejection_result = st.session_state.get("rejection_result", None)
     
-    contract_slope = SLOPE_CONTRACT_DEFAULT
-    contract_ref_dt = fmt_ct(datetime.combine(prev_day, time(15, 0)))
-    contract_ref_px = float(contract_3pm)
+    def build_fan_table(anchor_value: float, anchor_name: str) -> pd.DataFrame:
+        """Build fan level table for given anchor value"""
+        rows = []
+        key_times = ["08:30", "10:00", "12:00", "13:30", "14:30"]
+        
+        for slot in rth_slots_ct(proj_day):
+            tlabel = slot.strftime("%H:%M")
+            top, bot = fan_levels_for_slot(anchor_value, anchor_time, slot)
+            is_key = tlabel in key_times
+            
+            rows.append({
+                "🎯": "🎯" if is_key else ("⭐" if tlabel=="08:30" else ""),
+                "Time": tlabel,
+                "Top Level": f"{top:.2f}",
+                "Bottom Level": f"{bot:.2f}",
+                "Range": f"{top - bot:.2f}"
+            })
+        
+        return pd.DataFrame(rows)
     
-    if bc and "contract" in bc:
-        contract_slope = float(bc["contract"]["slope"])
-        contract_ref_dt = bc["contract"]["ref_dt"]
-        contract_ref_px = float(bc["contract"]["ref_price"])
-        
-        status_msg = "✅ BC Forecast Active"
-        if rejection_result:
-            status_msg += " + Exit Projections Enabled"
-        
+    # Create three tables
+    high_table = build_fan_table(spx_data['high'], "High")
+    low_table = build_fan_table(spx_data['low'], "Low")
+    close_table = build_fan_table(spx_data['close'], "Close")
+    
+    # Display tables in tabs for better organization
+    subtab1, subtab2, subtab3 = st.tabs([f"High Fan ({spx_data['high']:.2f})", 
+                                        f"Low Fan ({spx_data['low']:.2f})", 
+                                        f"Close Fan ({spx_data['close']:.2f})"])
+    
+    with subtab1:
+        st.markdown("### 📈 High-Based Fan Levels")
         st.markdown(f"""
-        <div class='premium-success-box'>
-            <strong><i class="fas fa-check-circle"></i> {status_msg}</strong><br>
-            Advanced projections include BC-fitted slopes, rejection exits, and sigma trigger levels.
+        <div class='premium-info-box'>
+            <strong><i class="fas fa-info-circle"></i> Trading Strategy:</strong><br>
+            • <strong>Buy Signal:</strong> Price touches bottom fan level<br>
+            • <strong>Sell Target:</strong> Top fan level<br>
+            • <strong>Anchor:</strong> {spx_data['high']:.2f} (Daily High)
         </div>
         """, unsafe_allow_html=True)
-
-    def contract_proj_for_slot(slot_dt: datetime) -> float:
-        dt_830 = fmt_ct(datetime.combine(proj_day, time(8,30)))
-        if contract_ref_dt.time() == time(15,0) and contract_ref_dt.date() == prev_day:
-            base_blocks = count_blocks_contract(prev_day, min(slot_dt, dt_830))
-            if slot_dt <= dt_830:
-                total_blocks = base_blocks
-            else:
-                total_blocks = base_blocks + blocks_simple_30m(dt_830, slot_dt)
-        else:
-            total_blocks = blocks_simple_30m(contract_ref_dt, slot_dt)
-        return round(contract_ref_px + contract_slope * total_blocks, 2)
-
-    # Build enhanced tables with sigma levels and contract conversions
-    rows_close = []
-    key_times = ["08:30", "10:00", "12:00", "13:30", "14:30"]
+        st.dataframe(high_table, use_container_width=True, hide_index=True)
     
-    # Calculate sigma levels at anchor for reference
-    sigma_1_upper = anchor_close + sigma1  # +8.25
-    sigma_1_lower = anchor_close - sigma1  # -8.25  
-    sigma_2_upper = anchor_close + sigma2  # +16.5
-    sigma_2_lower = anchor_close - sigma2  # -16.5
+    with subtab2:
+        st.markdown("### 📉 Low-Based Fan Levels")
+        st.markdown(f"""
+        <div class='premium-info-box'>
+            <strong><i class="fas fa-info-circle"></i> Trading Strategy:</strong><br>
+            • <strong>Buy Signal:</strong> Price touches bottom fan level<br>
+            • <strong>Sell Target:</strong> Top fan level<br>
+            • <strong>Anchor:</strong> {spx_data['low']:.2f} (Daily Low)
+        </div>
+        """, unsafe_allow_html=True)
+        st.dataframe(low_table, use_container_width=True, hide_index=True)
     
-    for slot in rth_slots_ct(proj_day):
-        tlabel = slot.strftime("%H:%M")
-        top, bot = fan_levels_for_slot(anchor_close, anchor_time, slot)
-        is_key = tlabel in key_times
-        
-        spx_proj_val = ""
-        if bc and "table" in bc:
-            try:
-                spx_proj_val = float(bc["table"].loc[bc["table"]["Time"]==tlabel, "SPX Entry"].iloc[0])
-            except Exception:
-                spx_proj_val = ""
-
-        c_proj = contract_proj_for_slot(slot)
-        
-        # Contract exit projection
-        c_exit = ""
-        if rejection_result:
-            c_exit_val = calculate_rejection_exit(
-                rejection_result['r1_dt'], rejection_result['r2_dt'],
-                rejection_result['c_r1'], rejection_result['c_r2'], slot
-            )
-            if c_exit_val:
-                c_exit = f"{c_exit_val:.2f}"
-        
-        # Calculate entry/exit spread
-        entry_exit_spread = ""
-        if c_exit and c_exit != "":
-            try:
-                spread = c_proj - float(c_exit)
-                entry_exit_spread = f"{spread:.2f}"
-            except:
-                entry_exit_spread = "—"
-        
-        # Convert contract to SPX levels (contract entry: SPX - 9.24, contract exit: SPX + 9.24)
-        spx_from_contract_entry = ""
-        spx_from_contract_exit = ""
-        if c_proj:
-            spx_from_contract_entry = f"{c_proj - 9.24:.2f}"
-        if c_exit and c_exit != "":
-            spx_from_contract_exit = f"{float(c_exit) + 9.24:.2f}"
-        
-        # Special markers for sigma levels
-        sigma_marker = ""
-        if tlabel == "08:30":
-            if abs(top - sigma_1_upper) < 0.5 or abs(bot - sigma_1_lower) < 0.5:
-                sigma_marker = "1σ"
-            elif abs(top - sigma_2_upper) < 0.5 or abs(bot - sigma_2_lower) < 0.5:
-                sigma_marker = "2σ"
-        
-        rows_close.append({
-            "🎯": "🎯" if is_key else ("⭐" if tlabel=="08:30" else ""),
-            "Time": tlabel,
-            "Top Level": f"{top:.2f}",
-            "Bottom Level": f"{bot:.2f}",
-            "1σ Trigger": f"±{sigma1:.2f}" if tlabel=="08:30" else "—",
-            "2σ Target": f"±{sigma2:.2f}" if tlabel=="08:30" else "—", 
-            "SPX Entry": f"{spx_proj_val:.2f}" if spx_proj_val else spx_from_contract_entry if spx_from_contract_entry else "—",
-            "Contract Entry": f"{c_proj:.2f}",
-            "Contract Exit": c_exit if c_exit else "—",
-            "SPX Exit": spx_from_contract_exit if spx_from_contract_exit else "—",
-            "Entry/Exit Spread": entry_exit_spread if entry_exit_spread else "—"
-        })
-
-    st.markdown("### 📈 Complete Projections with Sigma Triggers")
-    
-    # Add explanation for sigma levels
-    st.markdown(f"""
-    <div class='premium-info-box'>
-        <strong><i class="fas fa-info-circle"></i> Key Levels Explained:</strong><br>
-        • <strong>1σ Trigger (±{sigma1:.2f}):</strong> If market opens beyond these levels from anchor, expect 2σ move<br>
-        • <strong>2σ Target (±{sigma2:.2f}):</strong> Full statistical move from anchor close<br>
-        • <strong>SPX-Contract Conversion:</strong> Entry (Contract - 9.24) | Exit (Contract + 9.24)
-    </div>
-    """, unsafe_allow_html=True)
-    
-    df_close = pd.DataFrame(rows_close)
-    st.dataframe(df_close, use_container_width=True, hide_index=True)
+    with subtab3:
+        st.markdown("### 📊 Close-Based Fan Levels")
+        st.markdown(f"""
+        <div class='premium-info-box'>
+            <strong><i class="fas fa-info-circle"></i> Trading Strategy:</strong><br>
+            • <strong>Buy Signal:</strong> Price touches bottom fan level<br>
+            • <strong>Sell Target:</strong> Top fan level<br>
+            • <strong>Anchor:</strong> {spx_data['close']:.2f} (Daily Close)
+        </div>
+        """, unsafe_allow_html=True)
+        st.dataframe(close_table, use_container_width=True, hide_index=True)
     
     # Analytics section
     st.markdown("""
     <div class='glass-card'>
-        <h3><i class="fas fa-analytics"></i> Market Analytics Dashboard</h3>
+        <h3><i class="fas fa-analytics"></i> Fan Level Analytics</h3>
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     
+    # Calculate 8:30 AM ranges for each anchor
+    slot_830 = fmt_ct(datetime.combine(proj_day, time(8, 30)))
+    
+    high_830_top, high_830_bot = fan_levels_for_slot(spx_data['high'], anchor_time, slot_830)
+    low_830_top, low_830_bot = fan_levels_for_slot(spx_data['low'], anchor_time, slot_830)
+    close_830_top, close_830_bot = fan_levels_for_slot(spx_data['close'], anchor_time, slot_830)
+    
     with col1:
-        morning_range = fan_levels_for_slot(anchor_close, anchor_time, fmt_ct(datetime.combine(proj_day, time(8, 30))))
-        morning_width = morning_range[0] - morning_range[1]
+        high_range = high_830_top - high_830_bot
         st.markdown(f"""
         <div class='metric-glass-card'>
-            <i class="fas fa-sun metric-icon"></i>
-            <div class='metric-label'>Morning Range</div>
-            <div class='metric-value'>{morning_width:.2f}</div>
-            <div class='metric-sub'>8:30 AM Width</div>
+            <i class="fas fa-arrow-up metric-icon"></i>
+            <div class='metric-label'>High Fan @ 8:30</div>
+            <div class='metric-value'>{high_range:.2f}</div>
+            <div class='metric-sub'>{high_830_top:.2f} - {high_830_bot:.2f}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
-        close_range = fan_levels_for_slot(anchor_close, anchor_time, fmt_ct(datetime.combine(proj_day, time(14, 30))))
-        close_width = close_range[0] - close_range[1]
+        low_range = low_830_top - low_830_bot
         st.markdown(f"""
         <div class='metric-glass-card'>
-            <i class="fas fa-moon metric-icon"></i>
-            <div class='metric-label'>Close Range</div>
-            <div class='metric-value'>{close_width:.2f}</div>
-            <div class='metric-sub'>2:30 PM Width</div>
+            <i class="fas fa-arrow-down metric-icon"></i>
+            <div class='metric-label'>Low Fan @ 8:30</div>
+            <div class='metric-value'>{low_range:.2f}</div>
+            <div class='metric-sub'>{low_830_top:.2f} - {low_830_bot:.2f}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
-        expansion = close_width - morning_width
-        if morning_width > 0:
-            expansion_pct = f"{(expansion/morning_width)*100:.1f}%"
-        else:
-            expansion_pct = "N/A"
+        close_range = close_830_top - close_830_bot
         st.markdown(f"""
         <div class='metric-glass-card'>
-            <i class="fas fa-expand-arrows-alt metric-icon"></i>
-            <div class='metric-label'>Range Expansion</div>
-            <div class='metric-value'>{expansion:.2f}</div>
-            <div class='metric-sub'>{expansion_pct}</div>
+            <i class="fas fa-chart-line metric-icon"></i>
+            <div class='metric-label'>Close Fan @ 8:30</div>
+            <div class='metric-value'>{close_range:.2f}</div>
+            <div class='metric-sub'>{close_830_top:.2f} - {close_830_bot:.2f}</div>
         </div>
         """, unsafe_allow_html=True)
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
-# ║ TAB 2 — Premium BC Forecast                                                 ║
+# ║ TAB 2 — Premium BC Forecast (Same as before)                               ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝
 with tab2:
     st.markdown("""
@@ -1136,7 +1105,7 @@ with tab2:
             )
             col_b1_1, col_b1_2 = st.columns(2)
             with col_b1_1:
-                spx_b1 = st.number_input("SPX Price", value=anchor_close, step=0.25, format="%.2f", key="spx_b1")
+                spx_b1 = st.number_input("SPX Price", value=spx_data['close'], step=0.25, format="%.2f", key="spx_b1")
             with col_b1_2:
                 c_b1 = st.number_input("Contract Price", value=contract_3pm, step=0.05, format="%.2f", key="c_b1")
             
@@ -1155,7 +1124,7 @@ with tab2:
             )
             col_r1_1, col_r1_2 = st.columns(2)
             with col_r1_1:
-                spx_r1 = st.number_input("SPX Price", value=anchor_close + 5.0, step=0.25, format="%.2f", key="spx_r1")
+                spx_r1 = st.number_input("SPX Price", value=spx_data['close'] + 5.0, step=0.25, format="%.2f", key="spx_r1")
             with col_r1_2:
                 c_r1 = st.number_input("Contract Price", value=contract_3pm + 2.0, step=0.05, format="%.2f", key="c_r1")
             
@@ -1184,7 +1153,7 @@ with tab2:
             )
             col_b2_1, col_b2_2 = st.columns(2)
             with col_b2_1:
-                spx_b2 = st.number_input("SPX Price", value=anchor_close, step=0.25, format="%.2f", key="spx_b2")
+                spx_b2 = st.number_input("SPX Price", value=spx_data['close'], step=0.25, format="%.2f", key="spx_b2")
             with col_b2_2:
                 c_b2 = st.number_input("Contract Price", value=contract_3pm, step=0.05, format="%.2f", key="c_b2")
             
@@ -1203,7 +1172,7 @@ with tab2:
             )
             col_r2_1, col_r2_2 = st.columns(2)
             with col_r2_1:
-                spx_r2 = st.number_input("SPX Price", value=anchor_close + 7.0, step=0.25, format="%.2f", key="spx_r2")
+                spx_r2 = st.number_input("SPX Price", value=spx_data['close'] + 7.0, step=0.25, format="%.2f", key="spx_r2")
             with col_r2_2:
                 c_r2 = st.number_input("Contract Price", value=contract_3pm + 3.0, step=0.05, format="%.2f", key="c_r2")
             
@@ -1277,21 +1246,18 @@ with tab2:
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                        # Build projection table with sigma levels and conversions
+                        # Build projection table
                         rows = []
                         anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
                         
                         for slot in rth_slots_ct(proj_day):
-                            top, bot = fan_levels_for_slot(anchor_close, anchor_time, slot)
+                            top, bot = fan_levels_for_slot(spx_data['close'], anchor_time, slot)
                             spx_proj = round(float(spx_b2) + spx_slope * count_blocks_spx(b2_dt, slot), 2)
                             blocks_from_b2 = blocks_simple_30m(b2_dt, slot)
                             c_proj = round(float(c_b2) + contract_slope * blocks_from_b2, 2)
                             
                             c_exit = ""
                             spx_exit = ""
-                            entry_exit_spread = ""
-                            spx_from_contract_entry = f"{c_proj - 9.24:.2f}"
-                            spx_from_contract_exit = ""
                             
                             if rejection_data:
                                 c_exit_val = calculate_rejection_exit(
@@ -1300,8 +1266,6 @@ with tab2:
                                 )
                                 if c_exit_val:
                                     c_exit = f"{c_exit_val:.2f}"
-                                    entry_exit_spread = f"{c_proj - c_exit_val:.2f}"
-                                    spx_from_contract_exit = f"{c_exit_val + 9.24:.2f}"
                                 
                                 exit_blocks = blocks_simple_30m(rejection_data['r2_dt'], slot)
                                 spx_exit = round(rejection_data['spx_r2'] + rejection_data['spx_rej_slope'] * exit_blocks, 2)
@@ -1311,12 +1275,10 @@ with tab2:
                                 "Time": slot.strftime("%H:%M"),
                                 "Top": top, 
                                 "Bottom": bot,
-                                "1σ Trigger": f"±{sigma1:.2f}" if slot.strftime("%H:%M")=="08:30" else "—",
                                 "SPX Entry": spx_proj,
                                 "Contract Entry": c_proj,
-                                "SPX Exit": spx_exit if spx_exit else spx_from_contract_exit if spx_from_contract_exit else "—",
-                                "Contract Exit": c_exit if c_exit else "—",
-                                "Entry/Exit Spread": entry_exit_spread if entry_exit_spread else "—"
+                                "SPX Exit": spx_exit if spx_exit else "—",
+                                "Contract Exit": c_exit if c_exit else "—"
                             })
                         
                         out_df = pd.DataFrame(rows)
@@ -1432,13 +1394,13 @@ with tab2:
                 """, unsafe_allow_html=True)
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
-# ║ TAB 3 — Premium Trading Plan                                                ║
+# ║ TAB 3 — Premium Trading Plan (Updated Strategy)                            ║
 # ╚═════════════════════════════════════════════════════════════════════════════╝
 with tab3:
     st.markdown("""
     <div class='glass-card'>
-        <h2><i class="fas fa-chess"></i> Trading Plan - Complete Strategy Dashboard</h2>
-        <p>Your comprehensive trading dashboard ready by 8:00 AM</p>
+        <h2><i class="fas fa-chess"></i> Trading Plan - Fan-Based Strategy Dashboard</h2>
+        <p>Complete strategy based on high/low/close fan levels for entries and exits</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1462,140 +1424,92 @@ with tab3:
     </div>
     """, unsafe_allow_html=True)
 
-    # Calculate key levels
-    anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
-    slot_830    = fmt_ct(datetime.combine(proj_day, time(8, 30)))
-    top_830, bot_830 = fan_levels_for_slot(anchor_close, anchor_time, slot_830)
-
-    bc = st.session_state.get("bc_result", None)
-
-    # Premium strategy cards
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        on_display = f"<br>ONH/ONL: {onh:.2f} / {onl:.2f}" if use_on else ""
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-foundation metric-icon"></i>
-            <div class='metric-label'>Market Foundation</div>
-            <div class='metric-value'>{anchor_close:.2f}</div>
-            <div class='metric-sub'>
-                8:30 Fan: {top_830:.2f} (top) • {bot_830:.2f} (bottom)<br>
-                Bands: ±{sigma1:.2f} (1σ) • ±{sigma2:.2f} (2σ)<br>
-                PDH/PDL: {pdh:.2f} / {pdl:.2f}{on_display}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        if bc and "contract" in bc:
-            c_slope = float(bc["contract"]["slope"])
-            c_ref_dt = bc["contract"]["ref_dt"]
-            c_ref_px = float(bc["contract"]["ref_price"])
-            blocks = blocks_simple_30m(c_ref_dt, slot_830)
-            c_830 = round(c_ref_px + c_slope * blocks, 2)
-            slope_used = c_slope
-            source = "BC-fitted"
-        else:
-            c_830 = round(float(contract_3pm) + SLOPE_CONTRACT_DEFAULT * 28, 2)
-            slope_used = SLOPE_CONTRACT_DEFAULT
-            source = "default"
-
-        slope_direction = "📈 Ascending" if slope_used > 0 else "📉 Descending"
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-file-contract metric-icon"></i>
-            <div class='metric-label'>Contract Analysis</div>
-            <div class='metric-value'>{float(contract_3pm):.2f} → {c_830:.2f}</div>
-            <div class='metric-sub'>
-                Slope: {slope_used:.3f}/30m ({source})<br>
-                Direction: {slope_direction}<br>
-                Change: {c_830 - float(contract_3pm):.2f}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Premium action levels
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        sell_level = max(top_830, pdh, onh if use_on else 0)
-        buy_level = min(bot_830, pdl, onl if use_on else float('inf'))
-        
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-bullseye metric-icon"></i>
-            <div class='metric-label'>Action Levels</div>
-            <div class='metric-value' style='font-size: 1.4rem;'>
-                Sell: {sell_level:.2f}<br>
-                Buy: {buy_level:.2f}
-            </div>
-            <div class='metric-sub'>
-                Stop: 2-3 points beyond<br>
-                Target: Opposite edge<br>
-                Stretch: PDH/PDL if closer
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        range_width = sell_level - buy_level
-        suggested_stop = round(range_width * 0.15, 2)
-        
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-shield-alt metric-icon"></i>
-            <div class='metric-label'>Risk Management</div>
-            <div class='metric-value' style='font-size: 1.4rem;'>
-                Range: {range_width:.2f}<br>
-                Stop: {suggested_stop:.2f}
-            </div>
-            <div class='metric-sub'>
-                Size: Based on stop<br>
-                Max Risk: 1-2% account<br>
-                Avoid: 11:30-12:30 chop
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # Time projections table
-    st.markdown("""
-    <div class='glass-card'>
-        <h3><i class="fas fa-clock"></i> Key Time Projections</h3>
+    # Strategy explanation
+    st.markdown(f"""
+    <div class='premium-info-box'>
+        <strong><i class="fas fa-lightbulb"></i> Fan-Based Trading Strategy:</strong><br>
+        • <strong>Buy Setup:</strong> Enter long when price touches bottom fan level, exit at top fan level<br>
+        • <strong>Sell Setup:</strong> Enter short when price touches top fan level, exit at bottom fan level<br>
+        • <strong>Three Anchors:</strong> High ({spx_data['high']:.2f}), Low ({spx_data['low']:.2f}), Close ({spx_data['close']:.2f})<br>
+        • <strong>Slope:</strong> {SLOPE_SPX:.2f} points per 30-minute block
     </div>
     """, unsafe_allow_html=True)
+
+    # Key trading levels for 8:30 AM
+    anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
+    slot_830 = fmt_ct(datetime.combine(proj_day, time(8, 30)))
+    
+    high_830_top, high_830_bot = fan_levels_for_slot(spx_data['high'], anchor_time, slot_830)
+    low_830_top, low_830_bot = fan_levels_for_slot(spx_data['low'], anchor_time, slot_830)
+    close_830_top, close_830_bot = fan_levels_for_slot(spx_data['close'], anchor_time, slot_830)
+    
+    # Premium strategy cards for key levels
+    st.markdown("### 🎯 Key Trading Levels @ 8:30 AM")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown(f"""
+        <div class='metric-glass-card'>
+            <i class="fas fa-arrow-up metric-icon"></i>
+            <div class='metric-label'>High Fan Strategy</div>
+            <div class='metric-value' style='font-size: 1.4rem;'>
+                Buy: {high_830_bot:.2f}<br>
+                Sell: {high_830_top:.2f}
+            </div>
+            <div class='metric-sub'>
+                Range: {high_830_top - high_830_bot:.2f} points<br>
+                Anchor: {spx_data['high']:.2f}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div class='metric-glass-card'>
+            <i class="fas fa-arrow-down metric-icon"></i>
+            <div class='metric-label'>Low Fan Strategy</div>
+            <div class='metric-value' style='font-size: 1.4rem;'>
+                Buy: {low_830_bot:.2f}<br>
+                Sell: {low_830_top:.2f}
+            </div>
+            <div class='metric-sub'>
+                Range: {low_830_top - low_830_bot:.2f} points<br>
+                Anchor: {spx_data['low']:.2f}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+        <div class='metric-glass-card'>
+            <i class="fas fa-chart-line metric-icon"></i>
+            <div class='metric-label'>Close Fan Strategy</div>
+            <div class='metric-value' style='font-size: 1.4rem;'>
+                Buy: {close_830_bot:.2f}<br>
+                Sell: {close_830_top:.2f}
+            </div>
+            <div class='metric-sub'>
+                Range: {close_830_top - close_830_bot:.2f} points<br>
+                Anchor: {spx_data['close']:.2f}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Time-based trading opportunities
+    st.markdown("### ⏰ Trading Opportunities Throughout The Day")
     
     key_times = ["08:30", "09:00", "10:00", "11:00", "12:00", "13:00", "13:30", "14:30"]
-    proj_rows = []
-    
-    bc = st.session_state.get("bc_result", None)
-    rejection_result = st.session_state.get("rejection_result", None)
+    trading_opportunities = []
     
     for time_str in key_times:
         slot_time = fmt_ct(datetime.combine(proj_day, datetime.strptime(time_str, "%H:%M").time()))
-        top, bot = fan_levels_for_slot(anchor_close, anchor_time, slot_time)
         
-        spx_entry = contract_entry = contract_exit = entry_exit_spread = ""
+        high_top, high_bot = fan_levels_for_slot(spx_data['high'], anchor_time, slot_time)
+        low_top, low_bot = fan_levels_for_slot(spx_data['low'], anchor_time, slot_time)
+        close_top, close_bot = fan_levels_for_slot(spx_data['close'], anchor_time, slot_time)
         
-        if bc and "table" in bc:
-            try:
-                bc_row = bc["table"][bc["table"]["Time"] == time_str]
-                if not bc_row.empty:
-                    spx_entry = f"{float(bc_row.iloc[0]['SPX Entry']):.2f}"
-                    contract_entry = f"{float(bc_row.iloc[0]['Contract Entry']):.2f}"
-                    
-                    exit_val = bc_row.iloc[0]['Contract Exit']
-                    if exit_val != "—" and exit_val:
-                        contract_exit = f"{float(exit_val):.2f}"
-                    
-                    spread_val = bc_row.iloc[0]['Entry/Exit Spread']
-                    if spread_val != "—" and spread_val:
-                        entry_exit_spread = spread_val
-            except:
-                pass
-        
+        # Determine session context
         hour = int(time_str.split(":")[0])
         if hour == 8:
             session_context = "🚀 Open"
@@ -1608,24 +1522,35 @@ with tab3:
         else:
             session_context = "📊 Active"
         
-        proj_rows.append({
+        # Find the tightest and widest ranges for strategy selection
+        ranges = [
+            (high_top - high_bot, "High", high_bot, high_top),
+            (low_top - low_bot, "Low", low_bot, low_top),
+            (close_top - close_bot, "Close", close_bot, close_top)
+        ]
+        ranges.sort()  # Sort by range width
+        
+        tightest = ranges[0]  # Smallest range
+        widest = ranges[2]    # Largest range
+        
+        trading_opportunities.append({
             "Time": time_str,
             "Session": session_context,
-            "Top": f"{top:.2f}",
-            "Bottom": f"{bot:.2f}",
-            "SPX Entry": spx_entry or "—",
-            "Contract Entry": contract_entry or "—",
-            "Contract Exit": contract_exit or "—",
-            "Profit Spread": entry_exit_spread or "—"
+            "Tightest Range": f"{tightest[1]} ({tightest[0]:.2f})",
+            "Buy Level": f"{tightest[2]:.2f}",
+            "Sell Level": f"{tightest[3]:.2f}",
+            "Widest Range": f"{widest[1]} ({widest[0]:.2f})",
+            "Alt Buy": f"{widest[2]:.2f}",
+            "Alt Sell": f"{widest[3]:.2f}"
         })
     
-    df_plan = pd.DataFrame(proj_rows)
-    st.dataframe(df_plan, use_container_width=True, hide_index=True)
+    df_opportunities = pd.DataFrame(trading_opportunities)
+    st.dataframe(df_opportunities, use_container_width=True, hide_index=True)
     
     # Trading guide
     st.markdown("""
     <div class='glass-card'>
-        <h3><i class="fas fa-graduation-cap"></i> Trading Guide</h3>
+        <h3><i class="fas fa-graduation-cap"></i> Execution Guide</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1635,44 +1560,46 @@ with tab3:
         st.markdown(f"""
         <div class='metric-glass-card'>
             <i class="fas fa-sign-in-alt metric-icon"></i>
-            <div class='metric-label'>Entry Strategy</div>
+            <div class='metric-label'>Entry Rules</div>
             <div class='metric-sub' style='margin-top: 0;'>
-                • Wait for optimal levels<br>
-                • Confirm with volume<br>
-                • Enter on pullbacks<br>
-                • Use limit orders<br>
-                • Size based on stops
+                • Price must touch fan level<br>
+                • Confirm with volume spike<br>
+                • Use limit orders at levels<br>
+                • Enter on pullbacks to level<br>
+                • Size based on range width
             </div>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
-        exit_status = "Available" if st.session_state.get("rejection_result") else "Configure rejections"
         st.markdown(f"""
         <div class='metric-glass-card'>
             <i class="fas fa-sign-out-alt metric-icon"></i>
-            <div class='metric-label'>Exit Strategy</div>
+            <div class='metric-label'>Exit Rules</div>
             <div class='metric-sub' style='margin-top: 0;'>
-                • Monitor exit projections<br>
-                • Use rejection touches<br>
-                • Scale at resistance<br>
-                • Status: {exit_status}<br>
-                • Trail trending moves
+                • Target opposite fan level<br>
+                • Scale out at 50% target<br>
+                • Stop 2-3 points beyond entry<br>
+                • Time stop at lunch<br>
+                • Trail profitable moves
             </div>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
+        avg_range = (high_830_top - high_830_bot + low_830_top - low_830_bot + close_830_top - close_830_bot) / 3
+        suggested_size = max(1, int(100 / avg_range))  # Simple position sizing
+        
         st.markdown(f"""
         <div class='metric-glass-card'>
-            <i class="fas fa-clock metric-icon"></i>
-            <div class='metric-label'>Timing & Risk</div>
+            <i class="fas fa-calculator metric-icon"></i>
+            <div class='metric-label'>Risk Management</div>
             <div class='metric-sub' style='margin-top: 0;'>
-                • Best: 8:30-9:30, 13:00-14:30<br>
-                • Avoid: 11:30-12:30 lunch<br>
-                • Maximum: 3 trades/session<br>
-                • Review after close<br>
-                • Plan next session
+                • Avg Range: {avg_range:.2f} points<br>
+                • Suggested Size: {suggested_size} contracts<br>
+                • Max Risk: 1-2% of account<br>
+                • Best Times: Open & Close<br>
+                • Avoid: 11:30-12:30 lunch
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1683,9 +1610,9 @@ with tab3:
 st.markdown("<br><br>", unsafe_allow_html=True)
 st.markdown(f"""
 <div class='glass-card' style='text-align: center; padding: 2rem;'>
-    <h4><i class="fas fa-crystal-ball"></i> SPX Prophet v3.0</h4>
+    <h4><i class="fas fa-crystal-ball"></i> SPX Prophet v3.1</h4>
     <p style='margin: 0; opacity: 0.8;'>
-        Professional Trading Analytics • Last Updated: {fmt_ct(datetime.now()).strftime('%H:%M CT')}
+        Professional Trading Analytics • Slope: {SLOPE_SPX:.2f}/30min • Last Updated: {fmt_ct(datetime.now()).strftime('%H:%M CT')}
     </p>
 </div>
 """, unsafe_allow_html=True)
