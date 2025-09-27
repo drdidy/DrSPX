@@ -34,7 +34,7 @@ if 'manual_data' not in st.session_state:
 
 CT = pytz.timezone("America/Chicago")
 
-SLOPE_SPX = 0.26                 # Updated from 0.25 to 0.26
+SLOPE_SPX = 0.25                 # SPX slope per 30-minute block
 SLOPE_CONTRACT_DEFAULT = -0.33   
 
 RTH_START = time(8, 30)
@@ -204,12 +204,12 @@ st.markdown("""
     }
     
     .metric-icon {
-        font-size: 3rem;
+        font-size: 2rem;
         background: linear-gradient(135deg, var(--primary), var(--secondary));
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
-        margin-bottom: 1rem;
+        margin-bottom: 0.8rem;
         display: block;
         text-align: center;
         animation: iconFloat 3s ease-in-out infinite;
@@ -221,16 +221,17 @@ st.markdown("""
     }
     
     .metric-value {
-        font-size: 2.2rem;
+        font-size: 1.6rem;
         font-weight: 800;
         color: var(--text-primary);
         text-align: center;
-        margin: 1rem 0;
+        margin: 0.8rem 0;
         background: linear-gradient(135deg, var(--primary), var(--primary-dark));
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
         animation: textGlow 2s ease-in-out infinite alternate;
+        line-height: 1.2;
     }
     
     @keyframes textGlow {
@@ -239,21 +240,21 @@ st.markdown("""
     }
     
     .metric-label {
-        font-size: 0.875rem;
+        font-size: 0.75rem;
         font-weight: 600;
         color: var(--text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.1em;
         text-align: center;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.4rem;
     }
     
     .metric-sub {
-        font-size: 0.8rem;
+        font-size: 0.7rem;
         color: var(--text-muted);
         text-align: center;
-        line-height: 1.6;
-        margin-top: 1rem;
+        line-height: 1.4;
+        margin-top: 0.8rem;
     }
     
     /* Hero Header with Floating Elements */
@@ -303,7 +304,7 @@ st.markdown("""
     }
     
     .hero-title {
-        font-size: 4rem;
+        font-size: 3rem;
         font-weight: 900;
         color: var(--text-light);
         margin-bottom: 1rem;
@@ -631,10 +632,37 @@ st.markdown("""
     
     /* Responsive Design */
     @media (max-width: 768px) {
-        .hero-title { font-size: 2.5rem; }
-        .metric-glass-card { padding: 1.5rem; }
-        .glass-card { padding: 1.5rem; }
-        .premium-form { padding: 1.5rem; }
+        .hero-title { font-size: 2rem; }
+        .hero-subtitle { font-size: 1.1rem; }
+        .metric-glass-card { 
+            padding: 1.2rem; 
+            margin: 0.5rem 0;
+        }
+        .metric-icon { font-size: 1.5rem; }
+        .metric-value { font-size: 1.3rem; }
+        .metric-label { font-size: 0.7rem; }
+        .metric-sub { font-size: 0.65rem; }
+        .glass-card { padding: 1.2rem; }
+        .premium-form { padding: 1.2rem; }
+    }
+    
+    @media (max-width: 480px) {
+        .hero-title { font-size: 1.8rem; }
+        .hero-subtitle { font-size: 1rem; }
+        .metric-glass-card { 
+            padding: 1rem; 
+            margin: 0.4rem 0;
+        }
+        .metric-icon { font-size: 1.3rem; }
+        .metric-value { 
+            font-size: 1.1rem; 
+            line-height: 1.1;
+        }
+        .metric-label { font-size: 0.65rem; }
+        .metric-sub { 
+            font-size: 0.6rem; 
+            line-height: 1.3;
+        }
     }
     
     /* Loading Animation */
@@ -1453,7 +1481,7 @@ with tab3:
         <div class='metric-glass-card'>
             <i class="fas fa-arrow-up metric-icon"></i>
             <div class='metric-label'>High Fan Strategy</div>
-            <div class='metric-value' style='font-size: 1.4rem;'>
+            <div class='metric-value'>
                 Buy: {high_830_bot:.2f}<br>
                 Sell: {high_830_top:.2f}
             </div>
@@ -1469,7 +1497,7 @@ with tab3:
         <div class='metric-glass-card'>
             <i class="fas fa-arrow-down metric-icon"></i>
             <div class='metric-label'>Low Fan Strategy</div>
-            <div class='metric-value' style='font-size: 1.4rem;'>
+            <div class='metric-value'>
                 Buy: {low_830_bot:.2f}<br>
                 Sell: {low_830_top:.2f}
             </div>
@@ -1485,7 +1513,7 @@ with tab3:
         <div class='metric-glass-card'>
             <i class="fas fa-chart-line metric-icon"></i>
             <div class='metric-label'>Close Fan Strategy</div>
-            <div class='metric-value' style='font-size: 1.4rem;'>
+            <div class='metric-value'>
                 Buy: {close_830_bot:.2f}<br>
                 Sell: {close_830_top:.2f}
             </div>
