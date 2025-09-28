@@ -862,6 +862,28 @@ with st.sidebar:
             'close': spx_close
         }
     
+    # Additional Manual Anchors
+    st.markdown("#### 🎯 Additional Anchor Points")
+    st.markdown("*Optional: Add up to 2 additional swing levels you identify*")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        anchor_4 = st.number_input("Additional Anchor 1", value=0.0, step=0.25, format="%.2f", help="Leave as 0.0 to skip")
+    with col2:
+        anchor_5 = st.number_input("Additional Anchor 2", value=0.0, step=0.25, format="%.2f", help="Leave as 0.0 to skip")
+    
+    # Compile all anchors
+    all_anchors = {
+        'High': spx_data['high'],
+        'Low': spx_data['low'], 
+        'Close': spx_data['close']
+    }
+    
+    if anchor_4 > 0:
+        all_anchors['Anchor 1'] = anchor_4
+    if anchor_5 > 0:
+        all_anchors['Anchor 2'] = anchor_5
+    
     contract_3pm = st.number_input(
         "Contract Price @ 3:00 PM", 
         value=float(DEFAULT_CONTRACT_3PM), 
@@ -890,7 +912,7 @@ with st.sidebar:
 # ───────────────────────────────────────────────────────────────────────────────
 # PREMIUM METRIC CARDS WITH LARGE ICONS (Updated without sigma bands)
 # ───────────────────────────────────────────────────────────────────────────────
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown(f"""
@@ -922,16 +944,43 @@ with col3:
     </div>
     """, unsafe_allow_html=True)
 
-with col4:
-    daily_range = spx_data['high'] - spx_data['low']
-    st.markdown(f"""
-    <div class='metric-glass-card'>
-        <i class="fas fa-expand-arrows-alt metric-icon"></i>
-        <div class='metric-label'>Daily Range</div>
-        <div class='metric-value'>{daily_range:.2f}</div>
-        <div class='metric-sub'>High - Low</div>
-    </div>
-    """, unsafe_allow_html=True)
+# Additional anchor cards if they exist
+if len(all_anchors) > 3:
+    additional_cols = st.columns(len(all_anchors) - 3)
+    idx = 0
+    if anchor_4 > 0:
+        with additional_cols[idx]:
+            st.markdown(f"""
+            <div class='metric-glass-card'>
+                <i class="fas fa-crosshairs metric-icon"></i>
+                <div class='metric-label'>Additional Anchor 1</div>
+                <div class='metric-value'>{anchor_4:.2f}</div>
+                <div class='metric-sub'>Custom Level</div>
+            </div>
+            """, unsafe_allow_html=True)
+        idx += 1
+    
+    if anchor_5 > 0:
+        with additional_cols[idx]:
+            st.markdown(f"""
+            <div class='metric-glass-card'>
+                <i class="fas fa-plus-circle metric-icon"></i>
+                <div class='metric-label'>Additional Anchor 2</div>
+                <div class='metric-value'>{anchor_5:.2f}</div>
+                <div class='metric-sub'>Custom Level</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+# Summary card
+daily_range = spx_data['high'] - spx_data['low']
+st.markdown(f"""
+<div class='metric-glass-card' style='margin-top: 1rem;'>
+    <i class="fas fa-layer-group metric-icon"></i>
+    <div class='metric-label'>Anchor Summary</div>
+    <div class='metric-value'>{len(all_anchors)} Active Anchors</div>
+    <div class='metric-sub'>Daily Range: {daily_range:.2f} • Ready for Fan Analysis</div>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
@@ -946,8 +995,8 @@ tab1, tab2, tab3 = st.tabs(["📊 SPX Fan Levels", "🎯 BC Forecast", "📋 Tra
 with tab1:
     st.markdown("""
     <div class='glass-card'>
-        <h2><i class="fas fa-layer-group"></i> SPX Fan Levels - High, Low, Close Analysis</h2>
-        <p>Three separate fan projections based on daily high, low, and close levels</p>
+        <h2><i class="fas fa-layer-group"></i> SPX Fan Levels - Multiple Anchor Analysis</h2>
+        <p>Fan projections for each identified anchor point with bullish and bearish setups</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -968,105 +1017,88 @@ with tab1:
                 "Time": tlabel,
                 "Top Level": f"{top:.2f}",
                 "Bottom Level": f"{bot:.2f}",
-                "Range": f"{top - bot:.2f}"
+                "Range": f"{top - bot:.2f}",
+                "Bullish Setup": f"Buy: {bot:.2f} → Sell: {top:.2f}",
+                "Bearish Setup": f"Sell: {top:.2f} → Cover: {bot:.2f}"
             })
         
         return pd.DataFrame(rows)
     
-    # Create three tables
-    high_table = build_fan_table(spx_data['high'], "High")
-    low_table = build_fan_table(spx_data['low'], "Low")
-    close_table = build_fan_table(spx_data['close'], "Close")
-    
-    # Display tables in tabs for better organization
-    subtab1, subtab2, subtab3 = st.tabs([f"High Fan ({spx_data['high']:.2f})", 
-                                        f"Low Fan ({spx_data['low']:.2f})", 
-                                        f"Close Fan ({spx_data['close']:.2f})"])
-    
-    with subtab1:
-        st.markdown("### 📈 High-Based Fan Levels")
+    # Create tables for each anchor
+    for anchor_name, anchor_value in all_anchors.items():
+        
+        # Color coding for different anchor types
+        if anchor_name == "High":
+            icon = "fas fa-arrow-up"
+            color_class = "premium-success-box"
+        elif anchor_name == "Low":
+            icon = "fas fa-arrow-down" 
+            color_class = "premium-info-box"
+        elif anchor_name == "Close":
+            icon = "fas fa-chart-line"
+            color_class = "premium-warning-box"
+        else:
+            icon = "fas fa-crosshairs"
+            color_class = "premium-info-box"
+        
         st.markdown(f"""
-        <div class='premium-info-box'>
-            <strong><i class="fas fa-info-circle"></i> Trading Strategy:</strong><br>
-            • <strong>Buy Signal:</strong> Price touches bottom fan level<br>
-            • <strong>Sell Target:</strong> Top fan level<br>
-            • <strong>Anchor:</strong> {spx_data['high']:.2f} (Daily High)
+        <div class='{color_class}'>
+            <strong><i class="{icon}"></i> {anchor_name} Fan Analysis (Anchor: {anchor_value:.2f})</strong><br>
+            • <strong>Bullish Strategy:</strong> Buy bottom level, sell top level<br>
+            • <strong>Bearish Strategy:</strong> Sell top level, cover bottom level
         </div>
         """, unsafe_allow_html=True)
-        st.dataframe(high_table, use_container_width=True, hide_index=True)
-    
-    with subtab2:
-        st.markdown("### 📉 Low-Based Fan Levels")
-        st.markdown(f"""
-        <div class='premium-info-box'>
-            <strong><i class="fas fa-info-circle"></i> Trading Strategy:</strong><br>
-            • <strong>Buy Signal:</strong> Price touches bottom fan level<br>
-            • <strong>Sell Target:</strong> Top fan level<br>
-            • <strong>Anchor:</strong> {spx_data['low']:.2f} (Daily Low)
-        </div>
-        """, unsafe_allow_html=True)
-        st.dataframe(low_table, use_container_width=True, hide_index=True)
-    
-    with subtab3:
-        st.markdown("### 📊 Close-Based Fan Levels")
-        st.markdown(f"""
-        <div class='premium-info-box'>
-            <strong><i class="fas fa-info-circle"></i> Trading Strategy:</strong><br>
-            • <strong>Buy Signal:</strong> Price touches bottom fan level<br>
-            • <strong>Sell Target:</strong> Top fan level<br>
-            • <strong>Anchor:</strong> {spx_data['close']:.2f} (Daily Close)
-        </div>
-        """, unsafe_allow_html=True)
-        st.dataframe(close_table, use_container_width=True, hide_index=True)
+        
+        fan_table = build_fan_table(anchor_value, anchor_name)
+        st.dataframe(fan_table, use_container_width=True, hide_index=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
     
     # Analytics section
     st.markdown("""
     <div class='glass-card'>
-        <h3><i class="fas fa-analytics"></i> Fan Level Analytics</h3>
+        <h3><i class="fas fa-analytics"></i> Multi-Anchor Analytics</h3>
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    
     # Calculate 8:30 AM ranges for each anchor
     slot_830 = fmt_ct(datetime.combine(proj_day, time(8, 30)))
+    anchor_analytics = []
     
-    high_830_top, high_830_bot = fan_levels_for_slot(spx_data['high'], anchor_time, slot_830)
-    low_830_top, low_830_bot = fan_levels_for_slot(spx_data['low'], anchor_time, slot_830)
-    close_830_top, close_830_bot = fan_levels_for_slot(spx_data['close'], anchor_time, slot_830)
+    for anchor_name, anchor_value in all_anchors.items():
+        top_830, bot_830 = fan_levels_for_slot(anchor_value, anchor_time, slot_830)
+        range_830 = top_830 - bot_830
+        anchor_analytics.append({
+            'name': anchor_name,
+            'value': anchor_value,
+            'top': top_830,
+            'bottom': bot_830,
+            'range': range_830
+        })
     
-    with col1:
-        high_range = high_830_top - high_830_bot
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-arrow-up metric-icon"></i>
-            <div class='metric-label'>High Fan @ 8:30</div>
-            <div class='metric-value'>{high_range:.2f}</div>
-            <div class='metric-sub'>{high_830_top:.2f} - {high_830_bot:.2f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Display analytics in columns
+    num_anchors = len(anchor_analytics)
+    cols = st.columns(num_anchors)
     
-    with col2:
-        low_range = low_830_top - low_830_bot
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-arrow-down metric-icon"></i>
-            <div class='metric-label'>Low Fan @ 8:30</div>
-            <div class='metric-value'>{low_range:.2f}</div>
-            <div class='metric-sub'>{low_830_top:.2f} - {low_830_bot:.2f}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        close_range = close_830_top - close_830_bot
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-chart-line metric-icon"></i>
-            <div class='metric-label'>Close Fan @ 8:30</div>
-            <div class='metric-value'>{close_range:.2f}</div>
-            <div class='metric-sub'>{close_830_top:.2f} - {close_830_bot:.2f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    for i, analytics in enumerate(anchor_analytics):
+        with cols[i]:
+            if analytics['name'] == "High":
+                icon = "fas fa-arrow-up"
+            elif analytics['name'] == "Low":
+                icon = "fas fa-arrow-down"
+            elif analytics['name'] == "Close":
+                icon = "fas fa-chart-line"
+            else:
+                icon = "fas fa-crosshairs"
+                
+            st.markdown(f"""
+            <div class='metric-glass-card'>
+                <i class="{icon} metric-icon"></i>
+                <div class='metric-label'>{analytics['name']} @ 8:30</div>
+                <div class='metric-value'>{analytics['range']:.2f}</div>
+                <div class='metric-sub'>{analytics['top']:.2f} - {analytics['bottom']:.2f}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ╔═════════════════════════════════════════════════════════════════════════════╗
 # ║ TAB 2 — Premium BC Forecast (Same as before)                               ║
@@ -1427,8 +1459,8 @@ with tab2:
 with tab3:
     st.markdown("""
     <div class='glass-card'>
-        <h2><i class="fas fa-chess"></i> Trading Plan - Fan-Based Strategy Dashboard</h2>
-        <p>Complete strategy based on high/low/close fan levels for entries and exits</p>
+        <h2><i class="fas fa-chess"></i> Trading Plan - Multi-Anchor Strategy Dashboard</h2>
+        <p>Complete strategy based on all anchor fan levels for both bullish and bearish setups</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1455,87 +1487,63 @@ with tab3:
     # Strategy explanation
     st.markdown(f"""
     <div class='premium-info-box'>
-        <strong><i class="fas fa-lightbulb"></i> Fan-Based Trading Strategy:</strong><br>
-        • <strong>Buy Setup:</strong> Enter long when price touches bottom fan level, exit at top fan level<br>
-        • <strong>Sell Setup:</strong> Enter short when price touches top fan level, exit at bottom fan level<br>
-        • <strong>Three Anchors:</strong> High ({spx_data['high']:.2f}), Low ({spx_data['low']:.2f}), Close ({spx_data['close']:.2f})<br>
+        <strong><i class="fas fa-lightbulb"></i> Multi-Anchor Fan Strategy:</strong><br>
+        • <strong>Bullish Setup:</strong> Enter long when price touches bottom fan level, exit at top fan level<br>
+        • <strong>Bearish Setup:</strong> Enter short when price touches top fan level, exit at bottom fan level<br>
+        • <strong>Active Anchors:</strong> {len(all_anchors)} levels identified<br>
         • <strong>Slope:</strong> {SLOPE_SPX:.2f} points per 30-minute block
     </div>
     """, unsafe_allow_html=True)
 
-    # Key trading levels for 8:30 AM
+    # Key trading levels for 8:30 AM for each anchor
     anchor_time = fmt_ct(datetime.combine(prev_day, time(15, 0)))
     slot_830 = fmt_ct(datetime.combine(proj_day, time(8, 30)))
     
-    high_830_top, high_830_bot = fan_levels_for_slot(spx_data['high'], anchor_time, slot_830)
-    low_830_top, low_830_bot = fan_levels_for_slot(spx_data['low'], anchor_time, slot_830)
-    close_830_top, close_830_bot = fan_levels_for_slot(spx_data['close'], anchor_time, slot_830)
-    
-    # Premium strategy cards for key levels
     st.markdown("### 🎯 Key Trading Levels @ 8:30 AM")
     
-    col1, col2, col3 = st.columns(3)
+    # Create columns for each anchor
+    num_anchors = len(all_anchors)
+    cols = st.columns(num_anchors)
     
-    with col1:
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-arrow-up metric-icon"></i>
-            <div class='metric-label'>High Fan Strategy</div>
-            <div class='metric-value'>
-                Buy: {high_830_bot:.2f}<br>
-                Sell: {high_830_top:.2f}
-            </div>
-            <div class='metric-sub'>
-                Range: {high_830_top - high_830_bot:.2f} points<br>
-                Anchor: {spx_data['high']:.2f}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    anchor_830_data = {}
     
-    with col2:
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-arrow-down metric-icon"></i>
-            <div class='metric-label'>Low Fan Strategy</div>
-            <div class='metric-value'>
-                Buy: {low_830_bot:.2f}<br>
-                Sell: {low_830_top:.2f}
+    for i, (anchor_name, anchor_value) in enumerate(all_anchors.items()):
+        top_830, bot_830 = fan_levels_for_slot(anchor_value, anchor_time, slot_830)
+        anchor_830_data[anchor_name] = {'top': top_830, 'bottom': bot_830, 'value': anchor_value}
+        
+        with cols[i]:
+            if anchor_name == "High":
+                icon = "fas fa-arrow-up"
+            elif anchor_name == "Low":
+                icon = "fas fa-arrow-down"
+            elif anchor_name == "Close":
+                icon = "fas fa-chart-line"
+            else:
+                icon = "fas fa-crosshairs"
+                
+            st.markdown(f"""
+            <div class='metric-glass-card'>
+                <i class="{icon} metric-icon"></i>
+                <div class='metric-label'>{anchor_name} Fan Strategy</div>
+                <div class='metric-value'>
+                    Long: {bot_830:.2f}<br>
+                    Short: {top_830:.2f}
+                </div>
+                <div class='metric-sub'>
+                    Range: {top_830 - bot_830:.2f} points<br>
+                    Anchor: {anchor_value:.2f}
+                </div>
             </div>
-            <div class='metric-sub'>
-                Range: {low_830_top - low_830_bot:.2f} points<br>
-                Anchor: {spx_data['low']:.2f}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(f"""
-        <div class='metric-glass-card'>
-            <i class="fas fa-chart-line metric-icon"></i>
-            <div class='metric-label'>Close Fan Strategy</div>
-            <div class='metric-value'>
-                Buy: {close_830_bot:.2f}<br>
-                Sell: {close_830_top:.2f}
-            </div>
-            <div class='metric-sub'>
-                Range: {close_830_top - close_830_bot:.2f} points<br>
-                Anchor: {spx_data['close']:.2f}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    # Time-based trading opportunities
-    st.markdown("### ⏰ Trading Opportunities Throughout The Day")
+    # Time-based trading opportunities for all anchors
+    st.markdown("### ⏰ Multi-Anchor Trading Opportunities")
     
     key_times = ["08:30", "09:00", "10:00", "11:00", "12:00", "13:00", "13:30", "14:30"]
     trading_opportunities = []
     
     for time_str in key_times:
         slot_time = fmt_ct(datetime.combine(proj_day, datetime.strptime(time_str, "%H:%M").time()))
-        
-        high_top, high_bot = fan_levels_for_slot(spx_data['high'], anchor_time, slot_time)
-        low_top, low_bot = fan_levels_for_slot(spx_data['low'], anchor_time, slot_time)
-        close_top, close_bot = fan_levels_for_slot(spx_data['close'], anchor_time, slot_time)
         
         # Determine session context
         hour = int(time_str.split(":")[0])
@@ -1550,35 +1558,43 @@ with tab3:
         else:
             session_context = "📊 Active"
         
-        # Find the tightest and widest ranges for strategy selection
-        ranges = [
-            (high_top - high_bot, "High", high_bot, high_top),
-            (low_top - low_bot, "Low", low_bot, low_top),
-            (close_top - close_bot, "Close", close_bot, close_top)
-        ]
+        # Calculate levels for each anchor
+        anchor_levels = {}
+        for anchor_name, anchor_value in all_anchors.items():
+            top, bot = fan_levels_for_slot(anchor_value, anchor_time, slot_time)
+            anchor_levels[anchor_name] = {'top': top, 'bottom': bot, 'range': top - bot}
+        
+        # Find tightest and widest ranges
+        ranges = [(data['range'], name, data['bottom'], data['top']) for name, data in anchor_levels.items()]
         ranges.sort()  # Sort by range width
         
         tightest = ranges[0]  # Smallest range
-        widest = ranges[2]    # Largest range
+        widest = ranges[-1]   # Largest range
         
-        trading_opportunities.append({
+        opportunity_row = {
             "Time": time_str,
             "Session": session_context,
             "Tightest Range": f"{tightest[1]} ({tightest[0]:.2f})",
-            "Buy Level": f"{tightest[2]:.2f}",
-            "Sell Level": f"{tightest[3]:.2f}",
+            "Long Entry": f"{tightest[2]:.2f}",
+            "Short Entry": f"{tightest[3]:.2f}",
             "Widest Range": f"{widest[1]} ({widest[0]:.2f})",
-            "Alt Buy": f"{widest[2]:.2f}",
-            "Alt Sell": f"{widest[3]:.2f}"
-        })
+            "Alt Long": f"{widest[2]:.2f}",
+            "Alt Short": f"{widest[3]:.2f}"
+        }
+        
+        # Add all anchor levels as additional columns
+        for anchor_name, data in anchor_levels.items():
+            opportunity_row[f"{anchor_name} L/S"] = f"{data['bottom']:.2f}/{data['top']:.2f}"
+        
+        trading_opportunities.append(opportunity_row)
     
     df_opportunities = pd.DataFrame(trading_opportunities)
     st.dataframe(df_opportunities, use_container_width=True, hide_index=True)
     
-    # Trading guide
+    # Enhanced trading guide
     st.markdown("""
     <div class='glass-card'>
-        <h3><i class="fas fa-graduation-cap"></i> Execution Guide</h3>
+        <h3><i class="fas fa-graduation-cap"></i> Multi-Anchor Execution Guide</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1588,12 +1604,12 @@ with tab3:
         st.markdown(f"""
         <div class='metric-glass-card'>
             <i class="fas fa-sign-in-alt metric-icon"></i>
-            <div class='metric-label'>Entry Rules</div>
+            <div class='metric-label'>Entry Strategy</div>
             <div class='metric-sub' style='margin-top: 0;'>
-                • Price must touch fan level<br>
+                • Watch multiple anchor levels<br>
+                • Priority: Tightest ranges first<br>
                 • Confirm with volume spike<br>
                 • Use limit orders at levels<br>
-                • Enter on pullbacks to level<br>
                 • Size based on range width
             </div>
         </div>
@@ -1603,20 +1619,23 @@ with tab3:
         st.markdown(f"""
         <div class='metric-glass-card'>
             <i class="fas fa-sign-out-alt metric-icon"></i>
-            <div class='metric-label'>Exit Rules</div>
+            <div class='metric-label'>Exit Strategy</div>
             <div class='metric-sub' style='margin-top: 0;'>
                 • Target opposite fan level<br>
-                • Scale out at 50% target<br>
+                • Scale at multiple anchors<br>
                 • Stop 2-3 points beyond entry<br>
-                • Time stop at lunch<br>
-                • Trail profitable moves
+                • Watch for anchor confluence<br>
+                • Trail on breakouts
             </div>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
-        avg_range = (high_830_top - high_830_bot + low_830_top - low_830_bot + close_830_top - close_830_bot) / 3
-        suggested_size = max(1, int(100 / avg_range))  # Simple position sizing
+        # Calculate average range across all anchors
+        all_ranges_830 = [anchor_830_data[name]['top'] - anchor_830_data[name]['bottom'] for name in anchor_830_data]
+        avg_range = sum(all_ranges_830) / len(all_ranges_830)
+        tightest_range = min(all_ranges_830)
+        widest_range = max(all_ranges_830)
         
         st.markdown(f"""
         <div class='metric-glass-card'>
@@ -1624,10 +1643,10 @@ with tab3:
             <div class='metric-label'>Risk Management</div>
             <div class='metric-sub' style='margin-top: 0;'>
                 • Avg Range: {avg_range:.2f} points<br>
-                • Suggested Size: {suggested_size} contracts<br>
-                • Max Risk: 1-2% of account<br>
-                • Best Times: Open & Close<br>
-                • Avoid: 11:30-12:30 lunch
+                • Tight/Wide: {tightest_range:.2f}/{widest_range:.2f}<br>
+                • Max Risk: 1-2% account<br>
+                • Focus: Confluence zones<br>
+                • Avoid: Lunch chop period
             </div>
         </div>
         """, unsafe_allow_html=True)
