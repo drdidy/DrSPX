@@ -1,5 +1,5 @@
 # app.py
-# MarketLens Pro — SPX Anchor Edition (Streamlit-only, no external data)
+# Spx Prophet — Enterprise SPX Projection Platform
 # Inputs: Skyline/Baseline anchors (time + price). Fixed slopes: +0.52 / -0.52 per 30m.
 # Output: 08:30–14:30 CT projections as tables + CSV downloads.
 
@@ -9,10 +9,11 @@ from datetime import datetime, timedelta, time as dtime, date
 import pytz
 from typing import List
 
-APP_NAME = "MarketLens Pro — SPX Anchor Edition"
+APP_NAME = "Spx Prophet"
+APP_TAGLINE = "Enterprise SPX Projection Platform"
 
 # ===============================
-# THEME — Glassmorphism (Dark/Light)
+# THEME — Enterprise Glassmorphism
 # ===============================
 
 def theme_css(mode: str):
@@ -29,63 +30,282 @@ def theme_css(mode: str):
         "glow": "0 0 90px rgba(124,200,255,0.12), 0 0 130px rgba(124,246,197,0.08)"
     }
     light = {
-        "bg": "#f5f8ff",
-        "panel": "rgba(255,255,255,0.78)",
+        "bg": "#f8faff",
+        "panel": "rgba(255,255,255,0.85)",
         "panelSolid": "#ffffff",
-        "text": "#0b1020",
-        "muted": "#5d6474",
-        "accent": "#0b6cff",
-        "accent2": "#0f9d58",
-        "border": "rgba(9,16,32,0.12)",
-        "shadow": "0 16px 48px rgba(6,11,20,0.14)",
-        "glow": "0 0 80px rgba(11,108,255,0.10), 0 0 120px rgba(15,157,88,0.08)"
+        "text": "#1a2332",
+        "muted": "#64748b",
+        "accent": "#2563eb",
+        "accent2": "#0891b2",
+        "border": "rgba(15,23,42,0.08)",
+        "shadow": "0 20px 50px rgba(15,23,42,0.08), 0 4px 16px rgba(15,23,42,0.04)",
+        "glow": "0 0 100px rgba(37,99,235,0.08), 0 0 140px rgba(8,145,178,0.06)"
     }
     p = dark if mode == "Dark" else light
-    grad = (
-        "radial-gradient(1100px 700px at 15% 5%, rgba(124,200,255,0.10), transparent 55%),"
-        "radial-gradient(900px 600px at 85% 15%, rgba(124,246,197,0.10), transparent 60%),"
-        f"linear-gradient(160deg, {p['bg']} 0%, {p['bg']} 100%)"
-    )
-    particles = (
-        "radial-gradient(3px 3px at 30% 25%, rgba(255,255,255,0.06), transparent 60%),"
-        "radial-gradient(2px 2px at 65% 35%, rgba(255,255,255,0.05), transparent 60%)"
-    )
+    
+    if mode == "Light":
+        grad = (
+            "radial-gradient(1400px 900px at 20% 8%, rgba(37,99,235,0.06), transparent 70%),"
+            "radial-gradient(1200px 800px at 80% 12%, rgba(8,145,178,0.05), transparent 65%),"
+            f"linear-gradient(135deg, {p['bg']} 0%, #ffffff 100%)"
+        )
+        particles = (
+            "radial-gradient(2px 2px at 25% 20%, rgba(37,99,235,0.08), transparent 50%),"
+            "radial-gradient(3px 3px at 70% 40%, rgba(8,145,178,0.06), transparent 55%),"
+            "radial-gradient(2px 2px at 50% 80%, rgba(37,99,235,0.05), transparent 50%)"
+        )
+    else:
+        grad = (
+            "radial-gradient(1100px 700px at 15% 5%, rgba(124,200,255,0.10), transparent 55%),"
+            "radial-gradient(900px 600px at 85% 15%, rgba(124,246,197,0.10), transparent 60%),"
+            f"linear-gradient(160deg, {p['bg']} 0%, {p['bg']} 100%)"
+        )
+        particles = (
+            "radial-gradient(3px 3px at 30% 25%, rgba(255,255,255,0.06), transparent 60%),"
+            "radial-gradient(2px 2px at 65% 35%, rgba(255,255,255,0.05), transparent 60%)"
+        )
+    
     return f"""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    
     html, body, [data-testid="stAppViewContainer"] {{
       background: {grad}, {particles};
       background-attachment: fixed;
+      font-family: 'Inter', -apple-system, system-ui, sans-serif;
     }}
+    
     [data-testid="stSidebar"] {{
       background: {p['panel']};
       border-right: 1px solid {p['border']};
-      backdrop-filter: blur(12px);
+      backdrop-filter: blur(20px) saturate(180%);
+      box-shadow: {p['shadow']};
     }}
+    
+    [data-testid="stSidebar"] .block-container {{
+      padding-top: 2rem;
+    }}
+    
     .ml-card {{
       background: {p['panel']};
       border: 1px solid {p['border']};
-      border-radius: 20px;
+      border-radius: 24px;
       box-shadow: {p['shadow']};
-      padding: 18px 20px;
-      transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+      padding: 32px 36px;
+      transition: all .3s cubic-bezier(0.4, 0, 0.2, 1);
+      backdrop-filter: blur(16px) saturate(180%);
+      position: relative;
+      overflow: hidden;
+    }}
+    
+    .ml-card::before {{
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, {p['accent']}40, transparent);
+      opacity: 0;
+      transition: opacity .3s ease;
+    }}
+    
+    .ml-card:hover {{ 
+      transform: translateY(-4px); 
+      border-color: {p['accent']}60; 
+      box-shadow: {p['glow']};
+    }}
+    
+    .ml-card:hover::before {{
+      opacity: 1;
+    }}
+    
+    .ml-header {{
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 8px;
+    }}
+    
+    .ml-icon {{
+      font-size: 56px;
+      line-height: 1;
+      filter: drop-shadow(0 4px 12px {p['accent']}30);
+    }}
+    
+    .ml-badge {{
+      display: inline-flex; 
+      align-items: center; 
+      gap: 8px; 
+      padding: 8px 18px; 
+      border-radius: 999px;
+      border: 1px solid {p['border']}; 
+      background: linear-gradient(135deg, {p['accent']}15, {p['accent2']}10); 
+      font-weight: 700; 
+      font-size: .95rem; 
+      color: {p['accent']};
+      box-shadow: 0 4px 12px {p['accent']}10;
       backdrop-filter: blur(10px);
     }}
-    .ml-card:hover {{ transform: translateY(-2px); border-color: {p['accent']}; box-shadow: {p['glow']}; }}
-    .ml-pill {{
-      display:inline-flex; align-items:center; gap:.45rem; padding: 4px 12px; border-radius: 999px;
-      border: 1px solid {p['border']}; background: {p['panelSolid']}; font-weight: 700; font-size: .85rem; color: {p['text']};
+    
+    .ml-badge-icon {{
+      font-size: 1.2rem;
     }}
-    .ml-sub {{ color: {p['muted']}; font-size: .95rem; }}
-    .ml-row {{ display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }}
-    h1,h2,h3,h4,h5,h6,label,p,span,div {{ color:{p['text']}; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }}
-    .stDataFrame div[data-testid="StyledTable"] {{ font-variant-numeric: tabular-nums; }}
-    .stDownloadButton button, .stButton>button {{
-      background: linear-gradient(90deg, {p['accent']}, {p['accent2']});
-      color: {'#071222' if mode=='Dark' else '#ffffff'}; border: 0; border-radius: 14px; padding: 10px 16px; font-weight: 800;
+    
+    .ml-title {{
+      font-size: 2.8rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, {p['accent']}, {p['accent2']});
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin: 0;
+      letter-spacing: -0.02em;
+    }}
+    
+    .ml-subtitle {{
+      color: {p['muted']}; 
+      font-size: 1.1rem; 
+      font-weight: 500;
+      margin-top: 4px;
+    }}
+    
+    .ml-section-title {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: {p['text']};
+      margin: 0 0 16px 0;
+    }}
+    
+    .ml-section-icon {{
+      font-size: 1.8rem;
+    }}
+    
+    .input-icon {{
+      font-size: 1.5rem;
+      margin-right: 8px;
+    }}
+    
+    h1,h2,h3,h4,h5,h6,label,p,span,div {{ 
+      color: {p['text']}; 
+      font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    }}
+    
+    .stDataFrame div[data-testid="StyledTable"] {{ 
+      font-variant-numeric: tabular-nums;
+      border-radius: 16px;
+      overflow: hidden;
       box-shadow: {p['shadow']};
     }}
-    .stButton>button:hover, .stDownloadButton>button:hover {{ filter:brightness(1.05); transform: translateY(-1px); }}
-    .muted {{ color:{p['muted']}; }}
+    
+    .stDownloadButton button, .stButton>button {{
+      background: linear-gradient(135deg, {p['accent']}, {p['accent2']});
+      color: #ffffff; 
+      border: 0; 
+      border-radius: 16px; 
+      padding: 14px 28px; 
+      font-weight: 700;
+      font-size: 1rem;
+      box-shadow: 0 8px 24px {p['accent']}30;
+      transition: all .3s cubic-bezier(0.4, 0, 0.2, 1);
+      font-family: 'Inter', sans-serif;
+    }}
+    
+    .stButton>button:hover, .stDownloadButton>button:hover {{ 
+      transform: translateY(-2px); 
+      box-shadow: 0 12px 32px {p['accent']}40;
+    }}
+    
+    .muted {{ 
+      color: {p['muted']}; 
+      font-size: .95rem;
+    }}
+    
+    .info-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin: 20px 0;
+    }}
+    
+    .info-box {{
+      background: {p['panelSolid']};
+      border: 1px solid {p['border']};
+      border-radius: 16px;
+      padding: 20px;
+      text-align: center;
+      backdrop-filter: blur(10px);
+    }}
+    
+    .info-box-icon {{
+      font-size: 2.5rem;
+      margin-bottom: 8px;
+    }}
+    
+    .info-box-label {{
+      font-size: .85rem;
+      color: {p['muted']};
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }}
+    
+    .info-box-value {{
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: {p['accent']};
+      margin-top: 4px;
+    }}
+    
+    /* Enhanced sidebar styling */
+    [data-testid="stSidebar"] h3 {{
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-top: 24px;
+      margin-bottom: 12px;
+    }}
+    
+    [data-testid="stSidebar"] .stRadio > label {{
+      font-weight: 600;
+      font-size: 1rem;
+    }}
+    
+    /* Input field enhancements */
+    .stNumberInput > div > div > input,
+    .stDateInput > div > div > input,
+    .stTimeInput > div > div > input {{
+      border-radius: 12px;
+      border: 1px solid {p['border']};
+      padding: 12px;
+      font-size: 1rem;
+      font-weight: 500;
+      transition: all .2s ease;
+    }}
+    
+    .stNumberInput > div > div > input:focus,
+    .stDateInput > div > div > input:focus,
+    .stTimeInput > div > div > input:focus {{
+      border-color: {p['accent']};
+      box-shadow: 0 0 0 3px {p['accent']}20;
+    }}
+    
+    /* Footer */
+    .footer {{
+      text-align: center;
+      padding: 32px;
+      margin-top: 48px;
+      border-top: 1px solid {p['border']};
+      color: {p['muted']};
+      font-size: .9rem;
+    }}
+    
+    .footer-icon {{
+      font-size: 1.2rem;
+      margin: 0 4px;
+    }}
     </style>
     """
 
@@ -127,14 +347,27 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block:
 # UI primitive
 # ===============================
 
-def card(title, sub=None, body_fn=None, badge=None):
+def card(title, sub=None, body_fn=None, badge=None, icon=None):
     st.markdown('<div class="ml-card">', unsafe_allow_html=True)
-    if badge:
-        st.markdown(f"<div class='ml-pill'>{badge}</div>", unsafe_allow_html=True)
-    st.markdown(f"<h4 style='margin:6px 0 2px 0'>{title}</h4>", unsafe_allow_html=True)
-    if sub: st.markdown(f"<div class='ml-sub'>{sub}</div>", unsafe_allow_html=True)
+    
+    if badge or icon:
+        st.markdown('<div class="ml-header">', unsafe_allow_html=True)
+        if icon:
+            st.markdown(f"<div class='ml-icon'>{icon}</div>", unsafe_allow_html=True)
+        st.markdown('<div>', unsafe_allow_html=True)
+        if badge:
+            st.markdown(f"<div class='ml-badge'><span class='ml-badge-icon'>📊</span>{badge}</div>", unsafe_allow_html=True)
+        st.markdown(f"<h4 style='margin:8px 0 2px 0; font-size: 1.6rem; font-weight: 700;'>{title}</h4>", unsafe_allow_html=True)
+        if sub: 
+            st.markdown(f"<div class='ml-subtitle'>{sub}</div>", unsafe_allow_html=True)
+        st.markdown('</div></div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f"<h4 style='margin:6px 0 2px 0; font-size: 1.6rem; font-weight: 700;'>{title}</h4>", unsafe_allow_html=True)
+        if sub: 
+            st.markdown(f"<div class='ml-subtitle'>{sub}</div>", unsafe_allow_html=True)
+    
     if body_fn:
-        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
         body_fn()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -143,34 +376,108 @@ def card(title, sub=None, body_fn=None, badge=None):
 # ===============================
 
 def main():
-    st.set_page_config(page_title=APP_NAME, page_icon="📈", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(
+        page_title=APP_NAME, 
+        page_icon="📈", 
+        layout="wide", 
+        initial_sidebar_state="expanded"
+    )
 
     # Sidebar
     with st.sidebar:
-        mode = st.radio("Theme", ["Dark", "Light"], index=0, key="ui_theme")
+        st.markdown(f"<h1 class='ml-title' style='font-size: 2rem;'>⚡ {APP_NAME}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p class='ml-subtitle' style='margin-bottom: 24px;'>{APP_TAGLINE}</p>", unsafe_allow_html=True)
+        
+        mode = st.radio("🎨 Theme", ["Light", "Dark"], index=0, key="ui_theme")
         inject_theme(mode)
-        st.markdown("### Slopes (per 30-min)")
-        st.write(f"**Ascending (Skyline): +{ASC_SLOPE:.2f}**")
-        st.write(f"**Descending (Baseline): {DESC_SLOPE:.2f}**")
-        st.caption("Slopes are fixed for this edition.")
+        
+        st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
+        st.markdown("### ⚙️ Configuration")
+        
+        st.markdown("<div class='info-box'>", unsafe_allow_html=True)
+        st.markdown("<div class='info-box-icon'>📈</div>", unsafe_allow_html=True)
+        st.markdown("<div class='info-box-label'>Ascending Slope</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='info-box-value'>+{ASC_SLOPE:.2f}</div>", unsafe_allow_html=True)
+        st.markdown("<div class='muted' style='font-size: 0.8rem; margin-top: 4px;'>per 30-min block</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        st.markdown("<div style='height: 12px'></div>", unsafe_allow_html=True)
+        
+        st.markdown("<div class='info-box'>", unsafe_allow_html=True)
+        st.markdown("<div class='info-box-icon'>📉</div>", unsafe_allow_html=True)
+        st.markdown("<div class='info-box-label'>Descending Slope</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='info-box-value'>{DESC_SLOPE:.2f}</div>", unsafe_allow_html=True)
+        st.markdown("<div class='muted' style='font-size: 0.8rem; margin-top: 4px;'>per 30-min block</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        st.markdown("<div style='height: 24px'></div>", unsafe_allow_html=True)
+        st.caption("🔒 Slopes are fixed for this edition")
 
-    st.markdown(f"## {APP_NAME}")
-    st.caption("All inputs and outputs use **Central Time (CT)**. Projections are 30-minute blocks from **08:30 to 14:30 CT**.")
+    # Header
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"<h1 class='ml-title'>📈 {APP_NAME}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p class='ml-subtitle'>{APP_TAGLINE}</p>", unsafe_allow_html=True)
+    
+    st.markdown("<div style='height: 16px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='background: rgba(37,99,235,0.08); border-left: 4px solid #2563eb; padding: 16px 20px; border-radius: 12px; margin-bottom: 32px;'>"
+        "<span style='font-size: 1.3rem; margin-right: 8px;'>🕐</span>"
+        "<strong>Central Time (CT)</strong> — All inputs and outputs use CT timezone. "
+        "Projections span <strong>08:30 to 14:30 CT</strong> in 30-minute intervals."
+        "</div>",
+        unsafe_allow_html=True
+    )
 
     # Single SPX Anchor Tool
     def body():
-        # Inputs
-        proj_day = st.date_input("Projection Day (CT)", value=datetime.now(CT).date(), key="spx_proj_day")
+        # Projection Day
+        st.markdown("<div class='ml-section-title'><span class='ml-section-icon'>📅</span>Projection Date</div>", unsafe_allow_html=True)
+        proj_day = st.date_input(
+            "Select projection day (Central Time)", 
+            value=datetime.now(CT).date(), 
+            key="spx_proj_day",
+            label_visibility="collapsed"
+        )
 
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("#### Skyline Anchor (Ascending)")
-            sky_price = st.number_input("Skyline Anchor Price", value=5000.00, step=0.25, key="sky_price")
-            sky_time  = st.time_input("Skyline Anchor Time (CT)", value=dtime(17, 0), step=1800, key="sky_time")
-        with c2:
-            st.markdown("#### Baseline Anchor (Descending)")
-            base_price = st.number_input("Baseline Anchor Price", value=4900.00, step=0.25, key="base_price")
-            base_time  = st.time_input("Baseline Anchor Time (CT)", value=dtime(17, 0), step=1800, key="base_time")
+        st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
+
+        # Anchor Inputs
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown(
+                "<div style='background: linear-gradient(135deg, rgba(37,99,235,0.1), rgba(8,145,178,0.08)); "
+                "border: 1px solid rgba(37,99,235,0.2); border-radius: 16px; padding: 24px; margin-bottom: 16px;'>",
+                unsafe_allow_html=True
+            )
+            st.markdown(
+                "<div class='ml-section-title' style='margin-bottom: 20px;'>"
+                "<span class='ml-section-icon'>📈</span>Skyline Anchor</div>",
+                unsafe_allow_html=True
+            )
+            st.markdown("<div class='muted' style='margin-bottom: 16px;'>Ascending projection (+0.52 per 30-min)</div>", unsafe_allow_html=True)
+            sky_price = st.number_input("💰 Anchor Price", value=5000.00, step=0.25, key="sky_price")
+            sky_time  = st.time_input("🕐 Anchor Time (CT)", value=dtime(17, 0), step=1800, key="sky_time")
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown(
+                "<div style='background: linear-gradient(135deg, rgba(8,145,178,0.1), rgba(37,99,235,0.08)); "
+                "border: 1px solid rgba(8,145,178,0.2); border-radius: 16px; padding: 24px; margin-bottom: 16px;'>",
+                unsafe_allow_html=True
+            )
+            st.markdown(
+                "<div class='ml-section-title' style='margin-bottom: 20px;'>"
+                "<span class='ml-section-icon'>📉</span>Baseline Anchor</div>",
+                unsafe_allow_html=True
+            )
+            st.markdown("<div class='muted' style='margin-bottom: 16px;'>Descending projection (−0.52 per 30-min)</div>", unsafe_allow_html=True)
+            base_price = st.number_input("💰 Anchor Price", value=4900.00, step=0.25, key="base_price")
+            base_time  = st.time_input("🕐 Anchor Time (CT)", value=dtime(17, 0), step=1800, key="base_time")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
 
         # Build slot index
         slots = rth_slots_ct_dt(proj_day, "08:30", "14:30")
@@ -188,32 +495,58 @@ def main():
         merged = merged.merge(df_sky.rename(columns={"Price":"Skyline (+0.52)"}), on="Time (CT)", how="left")
         merged = merged.merge(df_base.rename(columns={"Price":"Baseline (−0.52)"}), on="Time (CT)", how="left")
 
-        st.markdown("### Projections")
+        st.markdown("<div class='ml-section-title'><span class='ml-section-icon'>📊</span>Projection Results</div>", unsafe_allow_html=True)
         st.dataframe(merged, use_container_width=True, hide_index=True)
 
-        c3, c4 = st.columns(2)
-        with c3:
+        st.markdown("<div style='height: 24px'></div>", unsafe_allow_html=True)
+
+        col3, col4 = st.columns(2)
+        with col3:
             st.download_button(
-                "Download Skyline CSV",
+                "📥 Download Skyline CSV",
                 df_sky.to_csv(index=False).encode(),
-                "spx_skyline.csv",
+                "spx_skyline_projection.csv",
                 "text/csv",
-                key="dl_sky"
+                key="dl_sky",
+                use_container_width=True
             )
-        with c4:
+        with col4:
             st.download_button(
-                "Download Baseline CSV",
+                "📥 Download Baseline CSV",
                 df_base.to_csv(index=False).encode(),
-                "spx_baseline.csv",
+                "spx_baseline_projection.csv",
                 "text/csv",
-                key="dl_base"
+                key="dl_base",
+                use_container_width=True
             )
 
-        st.markdown("<div class='muted'>Anchors are aligned to the nearest 30-minute mark before projecting.</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 16px'></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div style='background: rgba(100,116,139,0.08); border-radius: 12px; padding: 16px; text-align: center;'>"
+            "<span style='font-size: 1.2rem; margin-right: 8px;'>ℹ️</span>"
+            "<span class='muted'>Anchors are automatically aligned to the nearest 30-minute mark before projection calculation</span>"
+            "</div>",
+            unsafe_allow_html=True
+        )
 
-    card("SPX Anchor Projection", "Input your Skyline/Baseline anchors and generate RTH projections (08:30–14:30 CT).", body_fn=body, badge="SPX")
+    card(
+        "SPX Anchor Projection Tool", 
+        "Configure your Skyline and Baseline anchors to generate precise RTH projections",
+        body_fn=body, 
+        badge="SPX Analysis",
+        icon="🎯"
+    )
 
-    st.markdown("<div class='muted' style='margin-top:12px'>© 2025 MarketLens Pro • SPX-only edition • Fixed slopes (+0.52 / −0.52) per 30-minute block.</div>", unsafe_allow_html=True)
+    # Footer
+    st.markdown(
+        "<div class='footer'>"
+        "<span class='footer-icon'>⚡</span> "
+        f"<strong>{APP_NAME}</strong> © 2025 • Enterprise Edition • "
+        "Fixed slopes: +0.52 / −0.52 per 30-minute block "
+        "<span class='footer-icon'>📊</span>"
+        "</div>",
+        unsafe_allow_html=True
+    )
 
 if __name__ == "__main__":
     main()
