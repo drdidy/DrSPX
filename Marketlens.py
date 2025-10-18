@@ -2,6 +2,7 @@
 # Spx Prophet — Enterprise SPX Projection Platform
 # Inputs: Skyline/Baseline anchors (time + price). Fixed slopes: +0.52 / -0.52 per 30m.
 # Output: 08:30–14:30 CT projections as tables + CSV downloads.
+# Handles overnight anchors and skips 4pm-5pm maintenance window (no 4:00pm or 4:30pm candles)
 
 import streamlit as st
 import pandas as pd
@@ -333,14 +334,39 @@ def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:30") -> List[datetim
 ASC_SLOPE = 0.52   # per 30-min block
 DESC_SLOPE = -0.52 # per 30-min block
 
+def count_blocks_with_maintenance_skip(start_dt: datetime, end_dt: datetime) -> int:
+    """
+    Count 30-minute blocks from start_dt to end_dt, SKIPPING 4pm-5pm CT maintenance (2 candles).
+    The maintenance window is 4pm-5pm CT, so both 4:00pm and 4:30pm candles don't exist.
+    """
+    blocks = 0
+    current = start_dt
+    
+    while current < end_dt:
+        # Skip BOTH 4:00pm and 4:30pm slots (maintenance window)
+        if current.hour == 16 and current.minute in [0, 30]:
+            current += timedelta(minutes=30)
+            continue
+        
+        blocks += 1
+        current += timedelta(minutes=30)
+    
+    return blocks
+
 def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block: float, rth_slots_ct: List[datetime]) -> pd.DataFrame:
-    """Align anchor to nearest 30-min boundary and project across RTH slots."""
+    """
+    Align anchor to nearest 30-min boundary and project across RTH slots.
+    Properly handles overnight anchors and skips 4:00pm & 4:30pm maintenance slots.
+    """
     minute = 0 if anchor_time_ct.minute < 30 else 30
     anchor_aligned = anchor_time_ct.replace(minute=minute, second=0, microsecond=0)
+    
     rows = []
     for dt in rth_slots_ct:
-        blocks = int(round((dt - anchor_aligned).total_seconds() / 1800.0))
-        rows.append({"Time (CT)": dt.strftime("%H:%M"), "Price": round(anchor_price + slope_per_block * blocks, 4)})
+        blocks = count_blocks_with_maintenance_skip(anchor_aligned, dt)
+        price = anchor_price + (slope_per_block * blocks)
+        rows.append({"Time (CT)": dt.strftime("%H:%M"), "Price": round(price, 4)})
+    
     return pd.DataFrame(rows)
 
 # ===============================
@@ -412,6 +438,7 @@ def main():
         
         st.markdown("<div style='height: 24px'></div>", unsafe_allow_html=True)
         st.caption("🔒 Slopes are fixed for this edition")
+        st.caption("⚠️ 4pm-5pm maintenance: 4:00pm & 4:30pm candles skipped in calculations")
 
     # Header
     col1, col2 = st.columns([3, 1])
@@ -424,7 +451,9 @@ def main():
         "<div style='background: rgba(37,99,235,0.08); border-left: 4px solid #2563eb; padding: 16px 20px; border-radius: 12px; margin-bottom: 32px;'>"
         "<span style='font-size: 1.3rem; margin-right: 8px;'>🕐</span>"
         "<strong>Central Time (CT)</strong> — All inputs and outputs use CT timezone. "
-        "Projections span <strong>08:30 to 14:30 CT</strong> in 30-minute intervals."
+        "Projections span <strong>08:30 to 14:30 CT</strong> in 30-minute intervals. "
+        "<br><span style='font-size: 1.1rem; margin-right: 8px;'>⚠️</span>"
+        "<em>Anchors typically from previous day. Maintenance window (4pm-5pm) automatically skipped.</em>"
         "</div>",
         unsafe_allow_html=True
     )
@@ -457,6 +486,13 @@ def main():
                 unsafe_allow_html=True
             )
             st.markdown("<div class='muted' style='margin-bottom: 16px;'>Ascending projection (+0.52 per 30-min)</div>", unsafe_allow_html=True)
+            
+            # Anchor date for Skyline
+            sky_anchor_date = st.date_input(
+                "Anchor Date (typically previous day)", 
+                value=datetime.now(CT).date() - timedelta(days=1), 
+                key="sky_anchor_date"
+            )
             sky_price = st.number_input("💰 Anchor Price", value=5000.00, step=0.25, key="sky_price")
             sky_time  = st.time_input("🕐 Anchor Time (CT)", value=dtime(17, 0), step=1800, key="sky_time")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -473,18 +509,25 @@ def main():
                 unsafe_allow_html=True
             )
             st.markdown("<div class='muted' style='margin-bottom: 16px;'>Descending projection (−0.52 per 30-min)</div>", unsafe_allow_html=True)
+            
+            # Anchor date for Baseline
+            base_anchor_date = st.date_input(
+                "Anchor Date (typically previous day)", 
+                value=datetime.now(CT).date() - timedelta(days=1), 
+                key="base_anchor_date"
+            )
             base_price = st.number_input("💰 Anchor Price", value=4900.00, step=0.25, key="base_price")
             base_time  = st.time_input("🕐 Anchor Time (CT)", value=dtime(17, 0), step=1800, key="base_time")
             st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
 
-        # Build slot index
+        # Build slot index for projection day
         slots = rth_slots_ct_dt(proj_day, "08:30", "14:30")
 
-        # Compose CT datetimes for anchors
-        sky_dt  = CT.localize(datetime.combine(proj_day, sky_time))
-        base_dt = CT.localize(datetime.combine(proj_day, base_time))
+        # Compose CT datetimes for anchors (using their respective anchor dates)
+        sky_dt  = CT.localize(datetime.combine(sky_anchor_date, sky_time))
+        base_dt = CT.localize(datetime.combine(base_anchor_date, base_time))
 
         # Projections
         df_sky  = project_line(sky_price,  sky_dt,  ASC_SLOPE,  slots)
@@ -524,7 +567,8 @@ def main():
         st.markdown(
             "<div style='background: rgba(100,116,139,0.08); border-radius: 12px; padding: 16px; text-align: center;'>"
             "<span style='font-size: 1.2rem; margin-right: 8px;'>ℹ️</span>"
-            "<span class='muted'>Anchors are automatically aligned to the nearest 30-minute mark before projection calculation</span>"
+            "<span class='muted'>Anchors are automatically aligned to the nearest 30-minute mark. "
+            "Block counting skips 4:00pm & 4:30pm maintenance window.</span>"
             "</div>",
             unsafe_allow_html=True
         )
