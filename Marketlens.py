@@ -1,6 +1,6 @@
 # app.py
-# Spx Prophet — Enterprise SPX Projection Platform
-# Inputs: Skyline/Baseline anchors (time + price). Fixed slopes: +0.52 / -0.52 per 30m.
+# SPX Prophet — Enterprise-Grade SPX Projection Platform
+# Inputs: Skyline/Baseline anchors (time + price). Fixed slopes: +0.54 / -0.54 per 30m.
 # Output: 08:30–14:30 CT projections as tables + CSV downloads.
 # Handles overnight anchors and skips 4pm-5pm maintenance window (no 4:00pm or 4:30pm candles)
 
@@ -10,302 +10,486 @@ from datetime import datetime, timedelta, time as dtime, date
 import pytz
 from typing import List
 
-APP_NAME = "Spx Prophet"
-APP_TAGLINE = "Enterprise SPX Projection Platform"
+APP_NAME = "SPX Prophet"
+APP_TAGLINE = "Enterprise-Grade Market Projection Platform"
 
 # ===============================
-# THEME — Enterprise Glassmorphism
+# THEME — Premium Enterprise Design
 # ===============================
 
 def theme_css(mode: str):
     dark = {
-        "bg": "#0a0f1c",
-        "panel": "rgba(16,22,39,0.6)",
-        "panelSolid": "#0f1627",
-        "text": "#E9EEF7",
-        "muted": "#AAB4C8",
-        "accent": "#7cc8ff",
-        "accent2": "#7cf6c5",
-        "border": "rgba(255,255,255,0.12)",
-        "shadow": "0 20px 60px rgba(0,0,0,0.55)",
-        "glow": "0 0 90px rgba(124,200,255,0.12), 0 0 130px rgba(124,246,197,0.08)"
+        "bg": "#0a0e1a",
+        "panel": "rgba(20,26,44,0.75)",
+        "panelSolid": "#141a2c",
+        "cardBg": "rgba(25,32,52,0.85)",
+        "text": "#f0f4f8",
+        "textSecondary": "#c5cfe0",
+        "muted": "#8994a8",
+        "accent": "#3b82f6",
+        "accentLight": "#60a5fa",
+        "accent2": "#06b6d4",
+        "success": "#10b981",
+        "warning": "#f59e0b",
+        "border": "rgba(99,132,186,0.15)",
+        "borderLight": "rgba(99,132,186,0.08)",
+        "shadow": "0 25px 70px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.4)",
+        "shadowSm": "0 10px 30px rgba(0,0,0,0.4)",
+        "glow": "0 0 120px rgba(59,130,246,0.15), 0 0 80px rgba(6,182,212,0.1)",
+        "glowHover": "0 0 140px rgba(59,130,246,0.25), 0 0 100px rgba(6,182,212,0.15)"
     }
     light = {
-        "bg": "#f8faff",
-        "panel": "rgba(255,255,255,0.85)",
+        "bg": "#f8faffc",
+        "panel": "rgba(255,255,255,0.92)",
         "panelSolid": "#ffffff",
-        "text": "#1a2332",
+        "cardBg": "rgba(255,255,255,0.95)",
+        "text": "#0f172a",
+        "textSecondary": "#334155",
         "muted": "#64748b",
         "accent": "#2563eb",
+        "accentLight": "#3b82f6",
         "accent2": "#0891b2",
-        "border": "rgba(15,23,42,0.08)",
-        "shadow": "0 20px 50px rgba(15,23,42,0.08), 0 4px 16px rgba(15,23,42,0.04)",
-        "glow": "0 0 100px rgba(37,99,235,0.08), 0 0 140px rgba(8,145,178,0.06)"
+        "success": "#059669",
+        "warning": "#d97706",
+        "border": "rgba(15,23,42,0.12)",
+        "borderLight": "rgba(15,23,42,0.06)",
+        "shadow": "0 25px 60px rgba(15,23,42,0.12), 0 8px 24px rgba(15,23,42,0.08)",
+        "shadowSm": "0 8px 24px rgba(15,23,42,0.06)",
+        "glow": "0 0 120px rgba(37,99,235,0.12), 0 0 80px rgba(8,145,178,0.08)",
+        "glowHover": "0 0 140px rgba(37,99,235,0.2), 0 0 100px rgba(8,145,178,0.12)"
     }
     p = dark if mode == "Dark" else light
     
     if mode == "Light":
         grad = (
-            "radial-gradient(1400px 900px at 20% 8%, rgba(37,99,235,0.06), transparent 70%),"
-            "radial-gradient(1200px 800px at 80% 12%, rgba(8,145,178,0.05), transparent 65%),"
-            f"linear-gradient(135deg, {p['bg']} 0%, #ffffff 100%)"
-        )
-        particles = (
-            "radial-gradient(2px 2px at 25% 20%, rgba(37,99,235,0.08), transparent 50%),"
-            "radial-gradient(3px 3px at 70% 40%, rgba(8,145,178,0.06), transparent 55%),"
-            "radial-gradient(2px 2px at 50% 80%, rgba(37,99,235,0.05), transparent 50%)"
+            "radial-gradient(1600px 1000px at 15% 5%, rgba(37,99,235,0.08), transparent 75%),"
+            "radial-gradient(1400px 900px at 85% 10%, rgba(8,145,178,0.06), transparent 70%),"
+            f"linear-gradient(180deg, #ffffff 0%, {p['bg']} 100%)"
         )
     else:
         grad = (
-            "radial-gradient(1100px 700px at 15% 5%, rgba(124,200,255,0.10), transparent 55%),"
-            "radial-gradient(900px 600px at 85% 15%, rgba(124,246,197,0.10), transparent 60%),"
-            f"linear-gradient(160deg, {p['bg']} 0%, {p['bg']} 100%)"
-        )
-        particles = (
-            "radial-gradient(3px 3px at 30% 25%, rgba(255,255,255,0.06), transparent 60%),"
-            "radial-gradient(2px 2px at 65% 35%, rgba(255,255,255,0.05), transparent 60%)"
+            "radial-gradient(1400px 900px at 12% 8%, rgba(59,130,246,0.12), transparent 60%),"
+            "radial-gradient(1200px 800px at 88% 12%, rgba(6,182,212,0.1), transparent 65%),"
+            f"linear-gradient(165deg, {p['bg']} 0%, #050810 100%)"
         )
     
     return f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap');
     
     html, body, [data-testid="stAppViewContainer"] {{
-      background: {grad}, {particles};
+      background: {grad};
       background-attachment: fixed;
-      font-family: 'Inter', -apple-system, system-ui, sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      color: {p['text']};
     }}
     
+    /* ========== SIDEBAR ========== */
     [data-testid="stSidebar"] {{
       background: {p['panel']};
       border-right: 1px solid {p['border']};
-      backdrop-filter: blur(20px) saturate(180%);
-      box-shadow: {p['shadow']};
+      backdrop-filter: blur(24px) saturate(180%);
+      box-shadow: {p['shadowSm']};
     }}
     
     [data-testid="stSidebar"] .block-container {{
-      padding-top: 2rem;
+      padding-top: 1.5rem;
     }}
     
-    .ml-card {{
-      background: {p['panel']};
+    /* ========== CARDS ========== */
+    .spx-card {{
+      background: {p['cardBg']};
       border: 1px solid {p['border']};
-      border-radius: 24px;
+      border-radius: 28px;
       box-shadow: {p['shadow']};
-      padding: 32px 36px;
-      transition: all .3s cubic-bezier(0.4, 0, 0.2, 1);
-      backdrop-filter: blur(16px) saturate(180%);
+      padding: 40px 44px;
+      transition: all .4s cubic-bezier(0.22, 0.61, 0.36, 1);
+      backdrop-filter: blur(24px) saturate(180%);
       position: relative;
       overflow: hidden;
     }}
     
-    .ml-card::before {{
+    .spx-card::before {{
       content: '';
       position: absolute;
       top: 0;
       left: 0;
       right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, {p['accent']}40, transparent);
+      height: 2px;
+      background: linear-gradient(90deg, transparent, {p['accent']}, {p['accent2']}, transparent);
       opacity: 0;
-      transition: opacity .3s ease;
+      transition: opacity .4s ease;
     }}
     
-    .ml-card:hover {{ 
-      transform: translateY(-4px); 
-      border-color: {p['accent']}60; 
-      box-shadow: {p['glow']};
+    .spx-card:hover {{ 
+      transform: translateY(-6px) scale(1.002); 
+      border-color: {p['accent']}50; 
+      box-shadow: {p['glowHover']};
     }}
     
-    .ml-card:hover::before {{
+    .spx-card:hover::before {{
       opacity: 1;
     }}
     
-    .ml-header {{
+    /* ========== HEADER ========== */
+    .spx-header {{
       display: flex;
-      align-items: center;
-      gap: 20px;
-      margin-bottom: 8px;
+      align-items: flex-start;
+      gap: 28px;
+      margin-bottom: 16px;
     }}
     
-    .ml-icon {{
-      font-size: 56px;
+    .spx-hero-icon {{
+      font-size: 72px;
       line-height: 1;
-      filter: drop-shadow(0 4px 12px {p['accent']}30);
+      filter: drop-shadow(0 8px 20px {p['accent']}40);
+      animation: float 3s ease-in-out infinite;
     }}
     
-    .ml-badge {{
+    @keyframes float {{
+      0%, 100% {{ transform: translateY(0px); }}
+      50% {{ transform: translateY(-8px); }}
+    }}
+    
+    .spx-badge {{
       display: inline-flex; 
       align-items: center; 
-      gap: 8px; 
-      padding: 8px 18px; 
+      gap: 10px; 
+      padding: 10px 22px; 
       border-radius: 999px;
       border: 1px solid {p['border']}; 
-      background: linear-gradient(135deg, {p['accent']}15, {p['accent2']}10); 
-      font-weight: 700; 
-      font-size: .95rem; 
+      background: linear-gradient(135deg, {p['accent']}18, {p['accent2']}12); 
+      font-weight: 800; 
+      font-size: 1rem; 
       color: {p['accent']};
-      box-shadow: 0 4px 12px {p['accent']}10;
-      backdrop-filter: blur(10px);
+      box-shadow: 0 6px 16px {p['accent']}15, inset 0 1px 0 rgba(255,255,255,0.1);
+      backdrop-filter: blur(12px);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
     }}
     
-    .ml-badge-icon {{
-      font-size: 1.2rem;
+    .spx-badge-icon {{
+      font-size: 1.4rem;
+      animation: pulse 2s ease-in-out infinite;
     }}
     
-    .ml-title {{
-      font-size: 2.8rem;
-      font-weight: 800;
+    @keyframes pulse {{
+      0%, 100% {{ transform: scale(1); }}
+      50% {{ transform: scale(1.15); }}
+    }}
+    
+    .spx-title {{
+      font-size: 3.5rem;
+      font-weight: 900;
       background: linear-gradient(135deg, {p['accent']}, {p['accent2']});
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
       margin: 0;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }}
+    
+    .spx-subtitle {{
+      color: {p['textSecondary']}; 
+      font-size: 1.25rem; 
+      font-weight: 600;
+      margin-top: 8px;
+      letter-spacing: -0.01em;
+    }}
+    
+    /* ========== SECTION TITLES ========== */
+    .spx-section {{
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: {p['text']};
+      margin: 0 0 20px 0;
       letter-spacing: -0.02em;
     }}
     
-    .ml-subtitle {{
-      color: {p['muted']}; 
-      font-size: 1.1rem; 
-      font-weight: 500;
-      margin-top: 4px;
+    .spx-section-icon {{
+      font-size: 2.2rem;
+      filter: drop-shadow(0 2px 8px {p['accent']}30);
     }}
     
-    .ml-section-title {{
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 1.4rem;
-      font-weight: 700;
-      color: {p['text']};
-      margin: 0 0 16px 0;
-    }}
-    
-    .ml-section-icon {{
-      font-size: 1.8rem;
-    }}
-    
-    .input-icon {{
-      font-size: 1.5rem;
-      margin-right: 8px;
-    }}
-    
+    /* ========== TYPOGRAPHY ========== */
     h1,h2,h3,h4,h5,h6,label,p,span,div {{ 
       color: {p['text']}; 
       font-family: 'Inter', -apple-system, system-ui, sans-serif;
     }}
     
-    .stDataFrame div[data-testid="StyledTable"] {{ 
-      font-variant-numeric: tabular-nums;
-      border-radius: 16px;
+    /* ========== INFO STATS ========== */
+    .stat-box {{
+      background: linear-gradient(135deg, {p['cardBg']}, {p['panelSolid']});
+      border: 1px solid {p['borderLight']};
+      border-radius: 20px;
+      padding: 28px 24px;
+      text-align: center;
+      backdrop-filter: blur(16px);
+      box-shadow: {p['shadowSm']};
+      transition: all .3s cubic-bezier(0.22, 0.61, 0.36, 1);
+      position: relative;
       overflow: hidden;
-      box-shadow: {p['shadow']};
     }}
     
+    .stat-box::after {{
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, {p['accent']}, {p['accent2']});
+      opacity: 0.7;
+    }}
+    
+    .stat-box:hover {{
+      transform: translateY(-4px);
+      box-shadow: 0 16px 40px rgba(59,130,246,0.15);
+      border-color: {p['accent']}30;
+    }}
+    
+    .stat-icon {{
+      font-size: 3.5rem;
+      margin-bottom: 12px;
+      filter: drop-shadow(0 4px 12px {p['accent']}25);
+    }}
+    
+    .stat-label {{
+      font-size: .9rem;
+      color: {p['muted']};
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+    }}
+    
+    .stat-value {{
+      font-size: 2.2rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, {p['accent']}, {p['accent2']});
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-family: 'JetBrains Mono', monospace;
+    }}
+    
+    /* ========== ANCHOR PANELS ========== */
+    .anchor-panel {{
+      background: linear-gradient(135deg, {p['cardBg']}, {p['panelSolid']});
+      border: 2px solid {p['borderLight']};
+      border-radius: 24px;
+      padding: 32px 28px;
+      margin-bottom: 20px;
+      box-shadow: {p['shadowSm']};
+      backdrop-filter: blur(16px);
+      transition: all .35s cubic-bezier(0.22, 0.61, 0.36, 1);
+      position: relative;
+      overflow: hidden;
+    }}
+    
+    .anchor-panel.skyline {{
+      border-left: 4px solid {p['success']};
+      background: linear-gradient(135deg, rgba(16,185,129,0.08), {p['cardBg']});
+    }}
+    
+    .anchor-panel.baseline {{
+      border-left: 4px solid {p['warning']};
+      background: linear-gradient(135deg, rgba(245,158,11,0.08), {p['cardBg']});
+    }}
+    
+    .anchor-panel:hover {{
+      transform: translateX(4px);
+      box-shadow: -8px 0 24px rgba(59,130,246,0.12);
+    }}
+    
+    .anchor-header {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }}
+    
+    .anchor-icon {{
+      font-size: 2.8rem;
+      filter: drop-shadow(0 4px 12px rgba(59,130,246,0.3));
+    }}
+    
+    .anchor-title {{
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }}
+    
+    .anchor-desc {{
+      color: {p['muted']};
+      font-size: 1rem;
+      font-weight: 500;
+      margin-bottom: 24px;
+      padding-left: 3.6rem;
+    }}
+    
+    /* ========== DATA TABLE ========== */
+    .stDataFrame div[data-testid="StyledTable"] {{ 
+      font-variant-numeric: tabular-nums;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: {p['shadow']};
+      border: 1px solid {p['borderLight']};
+    }}
+    
+    .stDataFrame [data-testid="StyledTable"] thead tr th {{
+      background: linear-gradient(180deg, {p['accent']}15, {p['accent']}08);
+      color: {p['text']};
+      font-weight: 800;
+      font-size: 1rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 16px 20px;
+      border-bottom: 2px solid {p['accent']}30;
+    }}
+    
+    .stDataFrame [data-testid="StyledTable"] tbody tr td {{
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 1.05rem;
+      padding: 14px 20px;
+    }}
+    
+    /* ========== BUTTONS ========== */
     .stDownloadButton button, .stButton>button {{
       background: linear-gradient(135deg, {p['accent']}, {p['accent2']});
       color: #ffffff; 
       border: 0; 
-      border-radius: 16px; 
-      padding: 14px 28px; 
-      font-weight: 700;
-      font-size: 1rem;
-      box-shadow: 0 8px 24px {p['accent']}30;
-      transition: all .3s cubic-bezier(0.4, 0, 0.2, 1);
+      border-radius: 18px; 
+      padding: 16px 32px; 
+      font-weight: 800;
+      font-size: 1.05rem;
+      box-shadow: 0 12px 32px {p['accent']}35, inset 0 1px 0 rgba(255,255,255,0.2);
+      transition: all .35s cubic-bezier(0.22, 0.61, 0.36, 1);
       font-family: 'Inter', sans-serif;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
     }}
     
     .stButton>button:hover, .stDownloadButton>button:hover {{ 
-      transform: translateY(-2px); 
-      box-shadow: 0 12px 32px {p['accent']}40;
+      transform: translateY(-3px) scale(1.02); 
+      box-shadow: 0 16px 48px {p['accent']}45;
+      filter: brightness(1.1);
     }}
     
-    .muted {{ 
-      color: {p['muted']}; 
-      font-size: .95rem;
-    }}
-    
-    .info-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin: 20px 0;
-    }}
-    
-    .info-box {{
-      background: {p['panelSolid']};
-      border: 1px solid {p['border']};
-      border-radius: 16px;
-      padding: 20px;
-      text-align: center;
-      backdrop-filter: blur(10px);
-    }}
-    
-    .info-box-icon {{
-      font-size: 2.5rem;
-      margin-bottom: 8px;
-    }}
-    
-    .info-box-label {{
-      font-size: .85rem;
-      color: {p['muted']};
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }}
-    
-    .info-box-value {{
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: {p['accent']};
-      margin-top: 4px;
-    }}
-    
-    /* Enhanced sidebar styling */
-    [data-testid="stSidebar"] h3 {{
-      font-size: 1.1rem;
-      font-weight: 700;
-      margin-top: 24px;
-      margin-bottom: 12px;
-    }}
-    
-    [data-testid="stSidebar"] .stRadio > label {{
-      font-weight: 600;
-      font-size: 1rem;
-    }}
-    
-    /* Input field enhancements */
+    /* ========== INPUTS ========== */
     .stNumberInput > div > div > input,
     .stDateInput > div > div > input,
     .stTimeInput > div > div > input {{
-      border-radius: 12px;
-      border: 1px solid {p['border']};
-      padding: 12px;
-      font-size: 1rem;
-      font-weight: 500;
-      transition: all .2s ease;
+      border-radius: 14px;
+      border: 2px solid {p['borderLight']};
+      padding: 14px 16px;
+      font-size: 1.05rem;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+      transition: all .25s ease;
+      background: {p['panelSolid']};
+      color: {p['text']};
     }}
     
     .stNumberInput > div > div > input:focus,
     .stDateInput > div > div > input:focus,
     .stTimeInput > div > div > input:focus {{
       border-color: {p['accent']};
-      box-shadow: 0 0 0 3px {p['accent']}20;
+      box-shadow: 0 0 0 4px {p['accent']}20, 0 4px 16px {p['accent']}15;
+      background: {p['cardBg']};
     }}
     
-    /* Footer */
+    .stNumberInput label, .stDateInput label, .stTimeInput label {{
+      font-weight: 700;
+      font-size: 0.95rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: {p['textSecondary']};
+      margin-bottom: 8px;
+    }}
+    
+    /* ========== ALERT BOX ========== */
+    .alert-box {{
+      background: linear-gradient(135deg, {p['accent']}12, {p['accent2']}08);
+      border-left: 5px solid {p['accent']};
+      border-radius: 16px;
+      padding: 24px 28px;
+      margin: 32px 0;
+      box-shadow: {p['shadowSm']};
+      backdrop-filter: blur(12px);
+    }}
+    
+    .alert-icon {{
+      font-size: 1.8rem;
+      margin-right: 12px;
+    }}
+    
+    .info-note {{
+      background: {p['cardBg']};
+      border: 1px solid {p['borderLight']};
+      border-radius: 16px;
+      padding: 20px 24px;
+      text-align: center;
+      margin-top: 24px;
+      box-shadow: {p['shadowSm']};
+    }}
+    
+    .info-icon {{
+      font-size: 1.6rem;
+      margin-right: 10px;
+    }}
+    
+    /* ========== FOOTER ========== */
     .footer {{
       text-align: center;
-      padding: 32px;
-      margin-top: 48px;
+      padding: 40px 20px;
+      margin-top: 60px;
       border-top: 1px solid {p['border']};
       color: {p['muted']};
-      font-size: .9rem;
+      font-size: 1rem;
+      font-weight: 500;
     }}
     
-    .footer-icon {{
-      font-size: 1.2rem;
-      margin: 0 4px;
+    .footer-highlight {{
+      color: {p['accent']};
+      font-weight: 800;
+    }}
+    
+    /* ========== SIDEBAR ENHANCEMENTS ========== */
+    [data-testid="stSidebar"] h1 {{
+      font-size: 2.2rem;
+      font-weight: 900;
+      margin-bottom: 8px;
+    }}
+    
+    [data-testid="stSidebar"] h3 {{
+      font-size: 1.15rem;
+      font-weight: 800;
+      margin-top: 32px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }}
+    
+    [data-testid="stSidebar"] .stRadio > label {{
+      font-weight: 700;
+      font-size: 1.05rem;
+    }}
+    
+    /* ========== MISC ========== */
+    .muted {{ 
+      color: {p['muted']}; 
+      font-size: 1rem;
+      font-weight: 500;
+    }}
+    
+    .mono {{
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
     }}
     </style>
     """
@@ -331,8 +515,8 @@ def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:30") -> List[datetim
 # Projection logic
 # ===============================
 
-ASC_SLOPE = 0.52   # per 30-min block
-DESC_SLOPE = -0.52 # per 30-min block
+ASC_SLOPE = 0.54   # per 30-min block
+DESC_SLOPE = -0.54 # per 30-min block
 
 def count_blocks_with_maintenance_skip(start_dt: datetime, end_dt: datetime) -> int:
     """
@@ -370,30 +554,30 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block:
     return pd.DataFrame(rows)
 
 # ===============================
-# UI primitive
+# UI Components
 # ===============================
 
 def card(title, sub=None, body_fn=None, badge=None, icon=None):
-    st.markdown('<div class="ml-card">', unsafe_allow_html=True)
+    st.markdown('<div class="spx-card">', unsafe_allow_html=True)
     
     if badge or icon:
-        st.markdown('<div class="ml-header">', unsafe_allow_html=True)
+        st.markdown('<div class="spx-header">', unsafe_allow_html=True)
         if icon:
-            st.markdown(f"<div class='ml-icon'>{icon}</div>", unsafe_allow_html=True)
-        st.markdown('<div>', unsafe_allow_html=True)
+            st.markdown(f"<div class='spx-hero-icon'>{icon}</div>", unsafe_allow_html=True)
+        st.markdown('<div style="flex:1">', unsafe_allow_html=True)
         if badge:
-            st.markdown(f"<div class='ml-badge'><span class='ml-badge-icon'>📊</span>{badge}</div>", unsafe_allow_html=True)
-        st.markdown(f"<h4 style='margin:8px 0 2px 0; font-size: 1.6rem; font-weight: 700;'>{title}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<div class='spx-badge'><span class='spx-badge-icon'>📊</span>{badge}</div>", unsafe_allow_html=True)
+        st.markdown(f"<h4 style='margin:12px 0 4px 0; font-size: 1.8rem; font-weight: 800;'>{title}</h4>", unsafe_allow_html=True)
         if sub: 
-            st.markdown(f"<div class='ml-subtitle'>{sub}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='spx-subtitle'>{sub}</div>", unsafe_allow_html=True)
         st.markdown('</div></div>', unsafe_allow_html=True)
     else:
-        st.markdown(f"<h4 style='margin:6px 0 2px 0; font-size: 1.6rem; font-weight: 700;'>{title}</h4>", unsafe_allow_html=True)
+        st.markdown(f"<h4 style='margin:6px 0 4px 0; font-size: 1.8rem; font-weight: 800;'>{title}</h4>", unsafe_allow_html=True)
         if sub: 
-            st.markdown(f"<div class='ml-subtitle'>{sub}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='spx-subtitle'>{sub}</div>", unsafe_allow_html=True)
     
     if body_fn:
-        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
         body_fn()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -404,190 +588,179 @@ def card(title, sub=None, body_fn=None, badge=None, icon=None):
 def main():
     st.set_page_config(
         page_title=APP_NAME, 
-        page_icon="📈", 
+        page_icon="🔮", 
         layout="wide", 
         initial_sidebar_state="expanded"
     )
 
     # Sidebar
     with st.sidebar:
-        st.markdown(f"<h1 class='ml-title' style='font-size: 2rem;'>⚡ {APP_NAME}</h1>", unsafe_allow_html=True)
-        st.markdown(f"<p class='ml-subtitle' style='margin-bottom: 24px;'>{APP_TAGLINE}</p>", unsafe_allow_html=True)
+        st.markdown(f"<h1 class='spx-title' style='font-size: 2.4rem;'>🔮 {APP_NAME}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p class='spx-subtitle' style='margin-bottom: 32px; font-size: 1rem;'>{APP_TAGLINE}</p>", unsafe_allow_html=True)
         
-        mode = st.radio("🎨 Theme", ["Light", "Dark"], index=0, key="ui_theme")
+        mode = st.radio("🎨 Theme Mode", ["Light", "Dark"], index=0, key="ui_theme")
         inject_theme(mode)
         
+        st.markdown("<div style='height: 40px'></div>", unsafe_allow_html=True)
+        st.markdown("### ⚙️ System Configuration")
+        
+        st.markdown("<div class='stat-box'>", unsafe_allow_html=True)
+        st.markdown("<div class='stat-icon'>📈</div>", unsafe_allow_html=True)
+        st.markdown("<div class='stat-label'>Skyline Slope</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='stat-value'>+{ASC_SLOPE:.2f}</div>", unsafe_allow_html=True)
+        st.markdown("<div class='muted' style='font-size: 0.85rem; margin-top: 8px;'>points per 30-min</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        st.markdown("<div style='height: 16px'></div>", unsafe_allow_html=True)
+        
+        st.markdown("<div class='stat-box'>", unsafe_allow_html=True)
+        st.markdown("<div class='stat-icon'>📉</div>", unsafe_allow_html=True)
+        st.markdown("<div class='stat-label'>Baseline Slope</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='stat-value'>{DESC_SLOPE:.2f}</div>", unsafe_allow_html=True)
+        st.markdown("<div class='muted' style='font-size: 0.85rem; margin-top: 8px;'>points per 30-min</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
         st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
-        st.markdown("### ⚙️ Configuration")
-        
-        st.markdown("<div class='info-box'>", unsafe_allow_html=True)
-        st.markdown("<div class='info-box-icon'>📈</div>", unsafe_allow_html=True)
-        st.markdown("<div class='info-box-label'>Ascending Slope</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='info-box-value'>+{ASC_SLOPE:.2f}</div>", unsafe_allow_html=True)
-        st.markdown("<div class='muted' style='font-size: 0.8rem; margin-top: 4px;'>per 30-min block</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.markdown("<div style='height: 12px'></div>", unsafe_allow_html=True)
-        
-        st.markdown("<div class='info-box'>", unsafe_allow_html=True)
-        st.markdown("<div class='info-box-icon'>📉</div>", unsafe_allow_html=True)
-        st.markdown("<div class='info-box-label'>Descending Slope</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='info-box-value'>{DESC_SLOPE:.2f}</div>", unsafe_allow_html=True)
-        st.markdown("<div class='muted' style='font-size: 0.8rem; margin-top: 4px;'>per 30-min block</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.markdown("<div style='height: 24px'></div>", unsafe_allow_html=True)
-        st.caption("🔒 Slopes are fixed for this edition")
-        st.caption("⚠️ 4pm-5pm maintenance: 4:00pm & 4:30pm candles skipped in calculations")
+        st.caption("🔒 Fixed slope configuration")
+        st.caption("⚠️ Maintenance: 4:00pm & 4:30pm auto-skip")
 
     # Header
-    col1, col2 = st.columns([3, 1])
+    col1, col2 = st.columns([4, 1])
     with col1:
-        st.markdown(f"<h1 class='ml-title'>📈 {APP_NAME}</h1>", unsafe_allow_html=True)
-        st.markdown(f"<p class='ml-subtitle'>{APP_TAGLINE}</p>", unsafe_allow_html=True)
+        st.markdown(f"<h1 class='spx-title'>🔮 {APP_NAME}</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p class='spx-subtitle'>{APP_TAGLINE}</p>", unsafe_allow_html=True)
     
-    st.markdown("<div style='height: 16px'></div>", unsafe_allow_html=True)
     st.markdown(
-        "<div style='background: rgba(37,99,235,0.08); border-left: 4px solid #2563eb; padding: 16px 20px; border-radius: 12px; margin-bottom: 32px;'>"
-        "<span style='font-size: 1.3rem; margin-right: 8px;'>🕐</span>"
-        "<strong>Central Time (CT)</strong> — All inputs and outputs use CT timezone. "
-        "Projections span <strong>08:30 to 14:30 CT</strong> in 30-minute intervals. "
-        "<br><span style='font-size: 1.1rem; margin-right: 8px;'>⚠️</span>"
-        "<em>Anchors typically from previous day. Maintenance window (4pm-5pm) automatically skipped.</em>"
+        "<div class='alert-box'>"
+        "<span class='alert-icon'>🕐</span>"
+        "<strong style='font-size: 1.15rem;'>Central Time (CT) Operations</strong>"
+        "<div style='margin-top: 8px; line-height: 1.6;'>"
+        "All timestamps use <strong>Central Time (CT)</strong> timezone. "
+        "RTH projections cover <strong>08:30–14:30 CT</strong> in 30-minute intervals. "
+        "Anchors typically set on previous day. System automatically excludes 4pm-5pm maintenance window."
+        "</div>"
         "</div>",
         unsafe_allow_html=True
     )
 
-    # Single SPX Anchor Tool
+    # Main Projection Tool
     def body():
-        # Projection Day
-        st.markdown("<div class='ml-section-title'><span class='ml-section-icon'>📅</span>Projection Date</div>", unsafe_allow_html=True)
+        # Projection Date
+        st.markdown("<div class='spx-section'><span class='spx-section-icon'>📅</span>Projection Date Configuration</div>", unsafe_allow_html=True)
         proj_day = st.date_input(
-            "Select projection day (Central Time)", 
+            "Target Projection Date (CT)", 
             value=datetime.now(CT).date(), 
-            key="spx_proj_day",
-            label_visibility="collapsed"
+            key="spx_proj_day"
         )
 
-        st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 40px'></div>", unsafe_allow_html=True)
 
-        # Anchor Inputs
-        col1, col2 = st.columns(2)
+        # Anchor Configurations
+        col1, col2 = st.columns(2, gap="large")
         
         with col1:
+            st.markdown("<div class='anchor-panel skyline'>", unsafe_allow_html=True)
             st.markdown(
-                "<div style='background: linear-gradient(135deg, rgba(37,99,235,0.1), rgba(8,145,178,0.08)); "
-                "border: 1px solid rgba(37,99,235,0.2); border-radius: 16px; padding: 24px; margin-bottom: 16px;'>",
+                "<div class='anchor-header'>"
+                "<span class='anchor-icon'>📈</span>"
+                "<div class='anchor-title'>Skyline Anchor</div>"
+                "</div>",
                 unsafe_allow_html=True
             )
-            st.markdown(
-                "<div class='ml-section-title' style='margin-bottom: 20px;'>"
-                "<span class='ml-section-icon'>📈</span>Skyline Anchor</div>",
-                unsafe_allow_html=True
-            )
-            st.markdown("<div class='muted' style='margin-bottom: 16px;'>Ascending projection (+0.52 per 30-min)</div>", unsafe_allow_html=True)
+            st.markdown("<div class='anchor-desc'>Ascending projection trajectory (+0.54 points per 30-minute interval)</div>", unsafe_allow_html=True)
             
-            # Anchor date for Skyline
             sky_anchor_date = st.date_input(
-                "Anchor Date (typically previous day)", 
+                "📆 Anchor Date", 
                 value=datetime.now(CT).date() - timedelta(days=1), 
                 key="sky_anchor_date"
             )
-            sky_price = st.number_input("💰 Anchor Price", value=5000.00, step=0.25, key="sky_price")
-            sky_time  = st.time_input("🕐 Anchor Time (CT)", value=dtime(17, 0), step=1800, key="sky_time")
+            sky_price = st.number_input("💰 Anchor Price Level", value=6634.70, step=0.25, key="sky_price", format="%.2f")
+            sky_time  = st.time_input("⏰ Anchor Time (CT)", value=dtime(14, 30), step=1800, key="sky_time")
             st.markdown("</div>", unsafe_allow_html=True)
             
         with col2:
+            st.markdown("<div class='anchor-panel baseline'>", unsafe_allow_html=True)
             st.markdown(
-                "<div style='background: linear-gradient(135deg, rgba(8,145,178,0.1), rgba(37,99,235,0.08)); "
-                "border: 1px solid rgba(8,145,178,0.2); border-radius: 16px; padding: 24px; margin-bottom: 16px;'>",
+                "<div class='anchor-header'>"
+                "<span class='anchor-icon'>📉</span>"
+                "<div class='anchor-title'>Baseline Anchor</div>"
+                "</div>",
                 unsafe_allow_html=True
             )
-            st.markdown(
-                "<div class='ml-section-title' style='margin-bottom: 20px;'>"
-                "<span class='ml-section-icon'>📉</span>Baseline Anchor</div>",
-                unsafe_allow_html=True
-            )
-            st.markdown("<div class='muted' style='margin-bottom: 16px;'>Descending projection (−0.52 per 30-min)</div>", unsafe_allow_html=True)
+            st.markdown("<div class='anchor-desc'>Descending projection trajectory (−0.54 points per 30-minute interval)</div>", unsafe_allow_html=True)
             
-            # Anchor date for Baseline
             base_anchor_date = st.date_input(
-                "Anchor Date (typically previous day)", 
+                "📆 Anchor Date", 
                 value=datetime.now(CT).date() - timedelta(days=1), 
                 key="base_anchor_date"
             )
-            base_price = st.number_input("💰 Anchor Price", value=4900.00, step=0.25, key="base_price")
-            base_time  = st.time_input("🕐 Anchor Time (CT)", value=dtime(17, 0), step=1800, key="base_time")
+            base_price = st.number_input("💰 Anchor Price Level", value=6634.70, step=0.25, key="base_price", format="%.2f")
+            base_time  = st.time_input("⏰ Anchor Time (CT)", value=dtime(14, 30), step=1800, key="base_time")
             st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 48px'></div>", unsafe_allow_html=True)
 
-        # Build slot index for projection day
+        # Generate Projections
         slots = rth_slots_ct_dt(proj_day, "08:30", "14:30")
-
-        # Compose CT datetimes for anchors (using their respective anchor dates)
         sky_dt  = CT.localize(datetime.combine(sky_anchor_date, sky_time))
         base_dt = CT.localize(datetime.combine(base_anchor_date, base_time))
 
-        # Projections
         df_sky  = project_line(sky_price,  sky_dt,  ASC_SLOPE,  slots)
         df_base = project_line(base_price, base_dt, DESC_SLOPE, slots)
 
-        # Merge view
+        # Merge & Display
         merged = pd.DataFrame({"Time (CT)": [dt.strftime("%H:%M") for dt in slots]})
-        merged = merged.merge(df_sky.rename(columns={"Price":"Skyline (+0.52)"}), on="Time (CT)", how="left")
-        merged = merged.merge(df_base.rename(columns={"Price":"Baseline (−0.52)"}), on="Time (CT)", how="left")
+        merged = merged.merge(df_sky.rename(columns={"Price":"Skyline (+0.54)"}), on="Time (CT)", how="left")
+        merged = merged.merge(df_base.rename(columns={"Price":"Baseline (−0.54)"}), on="Time (CT)", how="left")
 
-        st.markdown("<div class='ml-section-title'><span class='ml-section-icon'>📊</span>Projection Results</div>", unsafe_allow_html=True)
-        st.dataframe(merged, use_container_width=True, hide_index=True)
+        st.markdown("<div class='spx-section'><span class='spx-section-icon'>📊</span>RTH Projection Results</div>", unsafe_allow_html=True)
+        st.dataframe(merged, use_container_width=True, hide_index=True, height=500)
 
-        st.markdown("<div style='height: 24px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
 
-        col3, col4 = st.columns(2)
+        # Download Buttons
+        col3, col4 = st.columns(2, gap="large")
         with col3:
             st.download_button(
-                "📥 Download Skyline CSV",
+                "📥 Export Skyline Data",
                 df_sky.to_csv(index=False).encode(),
-                "spx_skyline_projection.csv",
+                f"spx_prophet_skyline_{proj_day}.csv",
                 "text/csv",
                 key="dl_sky",
                 use_container_width=True
             )
         with col4:
             st.download_button(
-                "📥 Download Baseline CSV",
+                "📥 Export Baseline Data",
                 df_base.to_csv(index=False).encode(),
-                "spx_baseline_projection.csv",
+                f"spx_prophet_baseline_{proj_day}.csv",
                 "text/csv",
                 key="dl_base",
                 use_container_width=True
             )
 
-        st.markdown("<div style='height: 16px'></div>", unsafe_allow_html=True)
         st.markdown(
-            "<div style='background: rgba(100,116,139,0.08); border-radius: 12px; padding: 16px; text-align: center;'>"
-            "<span style='font-size: 1.2rem; margin-right: 8px;'>ℹ️</span>"
-            "<span class='muted'>Anchors are automatically aligned to the nearest 30-minute mark. "
-            "Block counting skips 4:00pm & 4:30pm maintenance window.</span>"
+            "<div class='info-note'>"
+            "<span class='info-icon'>ℹ️</span>"
+            "<span class='muted'><strong>System Note:</strong> Anchor timestamps auto-aligned to nearest 30-minute boundary. "
+            "Block calculations automatically exclude 4:00pm and 4:30pm maintenance periods.</span>"
             "</div>",
             unsafe_allow_html=True
         )
 
     card(
-        "SPX Anchor Projection Tool", 
-        "Configure your Skyline and Baseline anchors to generate precise RTH projections",
+        "Advanced SPX Projection Engine", 
+        "Configure anchor points and generate precision RTH market projections",
         body_fn=body, 
-        badge="SPX Analysis",
+        badge="Market Intelligence",
         icon="🎯"
     )
 
     # Footer
     st.markdown(
         "<div class='footer'>"
-        "<span class='footer-icon'>⚡</span> "
-        f"<strong>{APP_NAME}</strong> © 2025 • Enterprise Edition • "
-        "Fixed slopes: +0.52 / −0.52 per 30-minute block "
-        "<span class='footer-icon'>📊</span>"
+        "⚡ <span class='footer-highlight'>SPX Prophet</span> © 2025 • Enterprise-Grade Platform • "
+        "Precision Slopes: <span class='mono'>+0.54 / −0.54</span> per 30-min block 📊"
         "</div>",
         unsafe_allow_html=True
     )
