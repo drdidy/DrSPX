@@ -1,763 +1,30 @@
 # app.py
-# SPX PROPHET — Institutional-Grade Market Projection Platform
-# Premium dual-anchor projection system with advanced analytics
-# Precision: ±0.5412 per 30-min block | RTH: 08:30-14:00 CT
+# SPX PROPHET — Ultimate Institutional Trading Platform
+# Advanced dual-anchor projection system with professional analytics
+# Built for serious traders who demand precision and profitability
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta, time as dtime, date
 import pytz
-from typing import List, Tuple
+from typing import List, Dict, Tuple
+import numpy as np
 
 APP_NAME = "SPX PROPHET"
-APP_VERSION = "Professional Edition 2.0"
-APP_TAGLINE = "Institutional Market Projection Platform"
+APP_VERSION = "Ultimate Edition 3.0"
+APP_TAGLINE = "Institutional Market Intelligence Platform"
 
 # ===============================
-# THEME — Ultra Premium
-# ===============================
-
-def theme_css(mode: str):
-    if mode == "Dark":
-        p = {
-            "bg": "#000000",
-            "bgPattern": "radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.03) 0%, transparent 50%), radial-gradient(circle at 80% 50%, rgba(0, 212, 255, 0.03) 0%, transparent 50%)",
-            "surface": "#0a0a0a",
-            "surfaceElevated": "#141414",
-            "surfaceHover": "#1a1a1a",
-            "text": "#ffffff",
-            "textPrimary": "#f5f5f5",
-            "textSecondary": "#a3a3a3",
-            "textTertiary": "#737373",
-            "textMuted": "#525252",
-            "primary": "#00ff88",
-            "primaryDark": "#00cc6a",
-            "primaryLight": "#33ffaa",
-            "accent": "#00d4ff",
-            "accentDark": "#00a8cc",
-            "accentLight": "#33ddff",
-            "border": "#1f1f1f",
-            "borderLight": "#2a2a2a",
-            "borderAccent": "#333333",
-            "success": "#10b981",
-            "error": "#ef4444",
-            "warning": "#f59e0b",
-            "info": "#3b82f6",
-        }
-    else:
-        p = {
-            "bg": "#ffffff",
-            "bgPattern": "radial-gradient(circle at 20% 50%, rgba(0, 179, 102, 0.02) 0%, transparent 50%), radial-gradient(circle at 80% 50%, rgba(0, 153, 204, 0.02) 0%, transparent 50%)",
-            "surface": "#fafafa",
-            "surfaceElevated": "#ffffff",
-            "surfaceHover": "#f5f5f5",
-            "text": "#0a0a0a",
-            "textPrimary": "#171717",
-            "textSecondary": "#525252",
-            "textTertiary": "#737373",
-            "textMuted": "#a3a3a3",
-            "primary": "#00b366",
-            "primaryDark": "#008f51",
-            "primaryLight": "#00d47a",
-            "accent": "#0099cc",
-            "accentDark": "#007aa3",
-            "accentLight": "#00b8e6",
-            "border": "#e5e5e5",
-            "borderLight": "#f0f0f0",
-            "borderAccent": "#d4d4d4",
-            "success": "#10b981",
-            "error": "#ef4444",
-            "warning": "#f59e0b",
-            "info": "#3b82f6",
-        }
-    
-    return f"""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
-    
-    * {{
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-    }}
-    
-    html, body, [data-testid="stAppViewContainer"] {{
-        background: {p['bg']};
-        background-image: {p['bgPattern']};
-        color: {p['text']};
-        font-size: 16px;
-    }}
-    
-    #MainMenu, footer, header {{visibility: hidden;}}
-    
-    /* ==================== SIDEBAR ==================== */
-    [data-testid="stSidebar"] {{
-        background: {p['surface']};
-        border-right: 1px solid {p['border']};
-        box-shadow: 8px 0 40px rgba(0, 0, 0, 0.04);
-    }}
-    
-    [data-testid="stSidebar"] > div {{
-        padding: 2.5rem 1.5rem;
-    }}
-    
-    .sidebar-brand {{
-        text-align: center;
-        padding: 0 0 2rem 0;
-        border-bottom: 1px solid {p['border']};
-        margin-bottom: 2rem;
-    }}
-    
-    .sidebar-logo {{
-        font-size: 1.75rem;
-        font-weight: 900;
-        background: linear-gradient(135deg, {p['primary']}, {p['accent']});
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        letter-spacing: 0.02em;
-    }}
-    
-    .sidebar-version {{
-        font-size: 0.625rem;
-        color: {p['textMuted']};
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        margin-top: 0.5rem;
-    }}
-    
-    .sidebar-divider {{
-        height: 1px;
-        background: linear-gradient(90deg, transparent, {p['border']}, transparent);
-        margin: 1.5rem 0;
-    }}
-    
-    .sidebar-section {{
-        margin-bottom: 2rem;
-    }}
-    
-    .sidebar-heading {{
-        font-size: 0.688rem;
-        font-weight: 800;
-        color: {p['textTertiary']};
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        margin-bottom: 1rem;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }}
-    
-    .metric-card {{
-        background: {p['surfaceElevated']};
-        border: 1px solid {p['border']};
-        border-radius: 12px;
-        padding: 1.25rem;
-        margin-bottom: 0.75rem;
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }}
-    
-    .metric-card:hover {{
-        border-color: {p['primary']};
-        box-shadow: 0 0 0 3px {p['primary']}15;
-        transform: translateY(-1px);
-    }}
-    
-    .metric-header {{
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
-    }}
-    
-    .metric-icon {{
-        font-size: 1.5rem;
-    }}
-    
-    .metric-label {{
-        font-size: 0.688rem;
-        font-weight: 700;
-        color: {p['textTertiary']};
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }}
-    
-    .metric-value {{
-        font-size: 1.875rem;
-        font-weight: 900;
-        font-family: 'JetBrains Mono', monospace;
-        line-height: 1;
-        background: linear-gradient(135deg, {p['primary']}, {p['accent']});
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }}
-    
-    .metric-sublabel {{
-        font-size: 0.625rem;
-        color: {p['textMuted']};
-        margin-top: 0.375rem;
-        font-weight: 500;
-    }}
-    
-    .info-item {{
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.625rem 0;
-        font-size: 0.75rem;
-        color: {p['textSecondary']};
-        border-bottom: 1px solid {p['borderLight']};
-    }}
-    
-    .info-item:last-child {{
-        border-bottom: none;
-    }}
-    
-    .info-icon {{
-        font-size: 1rem;
-    }}
-    
-    /* ==================== HEADER ==================== */
-    .app-header {{
-        text-align: center;
-        padding: 4rem 0 3rem 0;
-        position: relative;
-        overflow: hidden;
-    }}
-    
-    .app-header::before {{
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 100%;
-        height: 100%;
-        background: radial-gradient(ellipse at center, {p['primary']}08 0%, transparent 70%);
-        pointer-events: none;
-    }}
-    
-    .app-logo {{
-        font-size: 4.5rem;
-        font-weight: 900;
-        letter-spacing: 0.08em;
-        background: linear-gradient(135deg, {p['primary']} 0%, {p['accent']} 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-        line-height: 1;
-        position: relative;
-        z-index: 1;
-    }}
-    
-    .app-separator {{
-        width: 140px;
-        height: 4px;
-        background: linear-gradient(90deg, transparent, {p['primary']}, {p['accent']}, transparent);
-        margin: 1.5rem auto;
-        border-radius: 2px;
-    }}
-    
-    .app-tagline {{
-        font-size: 1.125rem;
-        color: {p['textSecondary']};
-        font-weight: 500;
-        letter-spacing: 0.02em;
-    }}
-    
-    .app-version-badge {{
-        display: inline-block;
-        margin-top: 1rem;
-        padding: 0.5rem 1.25rem;
-        background: {p['surfaceElevated']};
-        border: 1px solid {p['border']};
-        border-radius: 100px;
-        font-size: 0.688rem;
-        font-weight: 700;
-        color: {p['textTertiary']};
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-    }}
-    
-    /* ==================== CARDS ==================== */
-    .premium-card {{
-        background: {p['surfaceElevated']};
-        border: 1px solid {p['border']};
-        border-radius: 20px;
-        margin-bottom: 2rem;
-        overflow: hidden;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.02);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }}
-    
-    .premium-card:hover {{
-        box-shadow: 0 8px 48px rgba(0, 0, 0, 0.06);
-        transform: translateY(-2px);
-    }}
-    
-    .card-header {{
-        background: {p['surface']};
-        border-bottom: 1px solid {p['border']};
-        padding: 1.75rem 2rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }}
-    
-    .card-title {{
-        font-size: 1.5rem;
-        font-weight: 800;
-        color: {p['textPrimary']};
-        display: flex;
-        align-items: center;
-        gap: 0.875rem;
-    }}
-    
-    .card-icon {{
-        font-size: 2rem;
-        filter: grayscale(30%);
-    }}
-    
-    .card-badge {{
-        display: inline-flex;
-        align-items: center;
-        gap: 0.625rem;
-        padding: 0.625rem 1.25rem;
-        background: linear-gradient(135deg, {p['primary']}12, {p['accent']}12);
-        border: 1px solid {p['borderAccent']};
-        border-radius: 100px;
-        font-size: 0.75rem;
-        font-weight: 800;
-        color: {p['primary']};
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }}
-    
-    .card-body {{
-        padding: 2rem;
-    }}
-    
-    /* ==================== ANCHOR INPUTS ==================== */
-    .anchor-container {{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2rem;
-        margin-bottom: 2rem;
-    }}
-    
-    .anchor-box {{
-        background: {p['surface']};
-        border: 2px solid {p['border']};
-        border-radius: 16px;
-        padding: 2rem;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
-        overflow: hidden;
-    }}
-    
-    .anchor-box::before {{
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 4px;
-        background: linear-gradient(90deg, {p['primary']}, {p['accent']});
-        opacity: 0;
-        transition: opacity 0.3s ease;
-    }}
-    
-    .anchor-box:hover {{
-        border-color: {p['primary']};
-        box-shadow: 0 0 0 4px {p['primary']}12, 0 8px 32px rgba(0, 0, 0, 0.08);
-        transform: translateY(-2px);
-    }}
-    
-    .anchor-box:hover::before {{
-        opacity: 1;
-    }}
-    
-    .anchor-header {{
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        margin-bottom: 1.75rem;
-        padding-bottom: 1.25rem;
-        border-bottom: 1px solid {p['borderLight']};
-    }}
-    
-    .anchor-number {{
-        width: 56px;
-        height: 56px;
-        border-radius: 14px;
-        background: linear-gradient(135deg, {p['primary']}, {p['accent']});
-        color: #000000;
-        font-size: 1.75rem;
-        font-weight: 900;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 4px 16px {p['primary']}30;
-    }}
-    
-    .anchor-info {{
-        flex: 1;
-    }}
-    
-    .anchor-title {{
-        font-size: 1.375rem;
-        font-weight: 800;
-        color: {p['textPrimary']};
-        margin: 0 0 0.25rem 0;
-    }}
-    
-    .anchor-subtitle {{
-        font-size: 0.813rem;
-        color: {p['textSecondary']};
-        font-weight: 500;
-    }}
-    
-    .projection-badges {{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.75rem;
-        margin-top: 1.5rem;
-        padding-top: 1.5rem;
-        border-top: 1px solid {p['borderLight']};
-    }}
-    
-    .proj-badge {{
-        padding: 0.875rem 1rem;
-        border-radius: 10px;
-        font-size: 0.813rem;
-        font-weight: 700;
-        text-align: center;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-    }}
-    
-    .proj-badge.up {{
-        background: linear-gradient(135deg, {p['success']}15, {p['success']}08);
-        color: {p['success']};
-        border: 1px solid {p['success']}30;
-    }}
-    
-    .proj-badge.down {{
-        background: linear-gradient(135deg, {p['error']}15, {p['error']}08);
-        color: {p['error']};
-        border: 1px solid {p['error']}30;
-    }}
-    
-    /* ==================== INPUTS ==================== */
-    .stNumberInput > div > div > input,
-    .stDateInput > div > div > input,
-    .stTimeInput > div > div > input {{
-        background: {p['surfaceElevated']};
-        border: 1.5px solid {p['border']};
-        border-radius: 10px;
-        padding: 1rem 1.125rem;
-        font-size: 1.063rem;
-        font-weight: 700;
-        font-family: 'JetBrains Mono', monospace;
-        color: {p['textPrimary']};
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }}
-    
-    .stNumberInput > div > div > input:hover,
-    .stDateInput > div > div > input:hover,
-    .stTimeInput > div > div > input:hover {{
-        border-color: {p['borderAccent']};
-        background: {p['surfaceHover']};
-    }}
-    
-    .stNumberInput > div > div > input:focus,
-    .stDateInput > div > div > input:focus,
-    .stTimeInput > div > div > input:focus {{
-        border-color: {p['primary']};
-        box-shadow: 0 0 0 3px {p['primary']}15;
-        outline: none;
-        background: {p['surfaceElevated']};
-    }}
-    
-    .stNumberInput label,
-    .stDateInput label,
-    .stTimeInput label {{
-        font-size: 0.75rem;
-        font-weight: 800;
-        color: {p['textTertiary']};
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        margin-bottom: 0.625rem;
-    }}
-    
-    /* ==================== BUTTONS ==================== */
-    .stButton > button,
-    .stDownloadButton > button {{
-        background: linear-gradient(135deg, {p['primary']}, {p['accent']});
-        color: #000000;
-        border: none;
-        border-radius: 12px;
-        padding: 1.125rem 2rem;
-        font-weight: 900;
-        font-size: 0.938rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        width: 100%;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 4px 16px {p['primary']}25;
-        cursor: pointer;
-    }}
-    
-    .stButton > button:hover,
-    .stDownloadButton > button:hover {{
-        transform: translateY(-2px);
-        box-shadow: 0 8px 32px {p['primary']}35, 0 0 64px {p['primary']}20;
-    }}
-    
-    .stButton > button:active,
-    .stDownloadButton > button:active {{
-        transform: translateY(0);
-    }}
-    
-    /* ==================== ALERT BANNER ==================== */
-    .alert-banner {{
-        background: linear-gradient(135deg, {p['primary']}08, {p['accent']}08);
-        border: 1px solid {p['borderAccent']};
-        border-left: 4px solid {p['primary']};
-        border-radius: 14px;
-        padding: 1.5rem 2rem;
-        margin-bottom: 3rem;
-        display: flex;
-        align-items: flex-start;
-        gap: 1.25rem;
-    }}
-    
-    .alert-icon {{
-        font-size: 1.75rem;
-        margin-top: 0.125rem;
-    }}
-    
-    .alert-content {{
-        flex: 1;
-    }}
-    
-    .alert-title {{
-        font-weight: 800;
-        font-size: 1.063rem;
-        color: {p['textPrimary']};
-        margin-bottom: 0.5rem;
-    }}
-    
-    .alert-text {{
-        font-size: 0.938rem;
-        color: {p['textSecondary']};
-        line-height: 1.7;
-    }}
-    
-    /* ==================== SUMMARY STATS ==================== */
-    .stats-grid {{
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 1.25rem;
-        margin-bottom: 2rem;
-    }}
-    
-    .stat-box {{
-        background: {p['surface']};
-        border: 1px solid {p['border']};
-        border-radius: 14px;
-        padding: 1.5rem;
-        text-align: center;
-        transition: all 0.2s ease;
-    }}
-    
-    .stat-box:hover {{
-        border-color: {p['borderAccent']};
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
-        transform: translateY(-1px);
-    }}
-    
-    .stat-label {{
-        font-size: 0.688rem;
-        font-weight: 800;
-        color: {p['textTertiary']};
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        margin-bottom: 0.75rem;
-    }}
-    
-    .stat-value {{
-        font-size: 1.875rem;
-        font-weight: 900;
-        font-family: 'JetBrains Mono', monospace;
-        color: {p['textPrimary']};
-        line-height: 1;
-        margin-bottom: 0.5rem;
-    }}
-    
-    .stat-change {{
-        font-size: 0.813rem;
-        font-weight: 700;
-        font-family: 'JetBrains Mono', monospace;
-    }}
-    
-    .stat-change.positive {{
-        color: {p['success']};
-    }}
-    
-    .stat-change.negative {{
-        color: {p['error']};
-    }}
-    
-    /* ==================== DATA TABLE ==================== */
-    .table-wrapper {{
-        border: 1px solid {p['border']};
-        border-radius: 14px;
-        overflow: hidden;
-        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
-    }}
-    
-    .stDataFrame {{
-        font-family: 'JetBrains Mono', monospace;
-    }}
-    
-    .stDataFrame [data-testid="StyledTable"] {{
-        font-variant-numeric: tabular-nums;
-    }}
-    
-    .stDataFrame thead tr th {{
-        background: {p['surface']};
-        color: {p['textTertiary']};
-        font-weight: 900;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        padding: 1.25rem 1.5rem;
-        border-bottom: 2px solid {p['border']};
-        position: sticky;
-        top: 0;
-        z-index: 10;
-    }}
-    
-    .stDataFrame tbody tr td {{
-        padding: 1.125rem 1.5rem;
-        font-weight: 600;
-        font-size: 1rem;
-        border-bottom: 1px solid {p['borderLight']};
-        transition: background 0.15s ease;
-    }}
-    
-    .stDataFrame tbody tr:hover td {{
-        background: {p['surfaceHover']};
-    }}
-    
-    .stDataFrame tbody tr:last-child td {{
-        border-bottom: none;
-    }}
-    
-    /* ==================== FOOTER ==================== */
-    .app-footer {{
-        text-align: center;
-        padding: 3.5rem 0;
-        margin-top: 5rem;
-        border-top: 1px solid {p['border']};
-        color: {p['textMuted']};
-        font-size: 0.813rem;
-    }}
-    
-    .footer-brand {{
-        font-weight: 800;
-        color: {p['textPrimary']};
-        font-size: 0.938rem;
-    }}
-    
-    .footer-divider {{
-        display: inline-block;
-        margin: 0 0.75rem;
-        color: {p['textMuted']};
-    }}
-    
-    /* ==================== RADIO BUTTONS ==================== */
-    [data-testid="stSidebar"] .stRadio > label {{
-        font-size: 0.75rem;
-        font-weight: 800;
-        color: {p['textTertiary']};
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }}
-    
-    /* ==================== SPACING ==================== */
-    .block-container {{
-        padding: 2.5rem 3rem;
-        max-width: 1600px;
-    }}
-    
-    /* ==================== RESPONSIVE ==================== */
-    @media (max-width: 1200px) {{
-        .stats-grid {{
-            grid-template-columns: repeat(2, 1fr);
-        }}
-        
-        .anchor-container {{
-            grid-template-columns: 1fr;
-        }}
-    }}
-    
-    @media (max-width: 768px) {{
-        .app-logo {{
-            font-size: 3rem;
-        }}
-        
-        .stats-grid {{
-            grid-template-columns: 1fr;
-        }}
-    }}
-    
-    /* ==================== ANIMATIONS ==================== */
-    @keyframes fadeInUp {{
-        from {{
-            opacity: 0;
-            transform: translateY(20px);
-        }}
-        to {{
-            opacity: 1;
-            transform: translateY(0);
-        }}
-    }}
-    
-    .premium-card {{
-        animation: fadeInUp 0.5s ease-out;
-    }}
-    
-    /* ==================== UTILITIES ==================== */
-    .gradient-text {{
-        background: linear-gradient(135deg, {p['primary']}, {p['accent']});
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }}
-    
-    .text-mono {{
-        font-family: 'JetBrains Mono', monospace;
-    }}
-    </style>
-    """
-
-def inject_theme(mode: str):
-    st.markdown(theme_css(mode), unsafe_allow_html=True)
-
-# ===============================
-# TIME & CALCULATIONS
+# CONFIGURATION
 # ===============================
 
 CT = pytz.timezone("America/Chicago")
 ASC_SLOPE = 0.5412
 DESC_SLOPE = -0.5412
+
+# ===============================
+# CORE CALCULATIONS
+# ===============================
 
 def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetime]:
     h1, m1 = map(int, start.split(":"))
@@ -788,8 +55,575 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block:
         rows.append({"Time": dt.strftime("%I:%M %p"), "Price": round(price, 2)})
     return pd.DataFrame(rows)
 
+def calculate_analytics(df: pd.DataFrame, anchor_names: Dict) -> Dict:
+    """Calculate advanced trading analytics"""
+    analytics = {}
+    
+    # Get all projection columns
+    proj_cols = [col for col in df.columns if col != "Time (CT)"]
+    
+    # Price range analysis
+    all_prices = df[proj_cols].values.flatten()
+    analytics['overall_range'] = {
+        'high': float(np.max(all_prices)),
+        'low': float(np.min(all_prices)),
+        'mid': float(np.mean(all_prices)),
+        'range': float(np.max(all_prices) - np.min(all_prices))
+    }
+    
+    # Opening analysis (8:30 AM)
+    open_row = df[df["Time (CT)"] == "08:30 AM"]
+    if not open_row.empty:
+        analytics['market_open'] = {
+            col: float(open_row[col].iloc[0]) for col in proj_cols
+        }
+        open_prices = [float(open_row[col].iloc[0]) for col in proj_cols]
+        analytics['open_range'] = {
+            'high': max(open_prices),
+            'low': min(open_prices),
+            'spread': max(open_prices) - min(open_prices)
+        }
+    
+    # Closing analysis (2:00 PM)
+    close_row = df[df["Time (CT)"] == "02:00 PM"]
+    if not close_row.empty:
+        analytics['market_close'] = {
+            col: float(close_row[col].iloc[0]) for col in proj_cols
+        }
+        close_prices = [float(close_row[col].iloc[0]) for col in proj_cols]
+        analytics['close_range'] = {
+            'high': max(close_prices),
+            'low': min(close_prices),
+            'spread': max(close_prices) - min(close_prices)
+        }
+    
+    # Key levels (psychological levels, round numbers)
+    min_price = int(analytics['overall_range']['low'] / 10) * 10
+    max_price = int(analytics['overall_range']['high'] / 10) * 10 + 10
+    analytics['key_levels'] = list(range(min_price, max_price + 1, 10))
+    
+    # Confluence zones (where projections are close)
+    confluence_zones = []
+    for idx, row in df.iterrows():
+        prices = [row[col] for col in proj_cols]
+        # Check if any two prices are within 5 points
+        for i in range(len(prices)):
+            for j in range(i+1, len(prices)):
+                if abs(prices[i] - prices[j]) <= 5:
+                    confluence_zones.append({
+                        'time': row["Time (CT)"],
+                        'price': (prices[i] + prices[j]) / 2,
+                        'lines': [proj_cols[i], proj_cols[j]]
+                    })
+    analytics['confluence_zones'] = confluence_zones
+    
+    return analytics
+
 # ===============================
-# MAIN APPLICATION
+# THEME
+# ===============================
+
+def get_theme_css(mode: str) -> str:
+    if mode == "🌙 Dark Mode":
+        colors = {
+            "bg": "#000000",
+            "bg_secondary": "#0a0a0a",
+            "surface": "#0f0f0f",
+            "surface_elevated": "#1a1a1a",
+            "surface_hover": "#252525",
+            "text": "#ffffff",
+            "text_secondary": "#a3a3a3",
+            "text_muted": "#666666",
+            "primary": "#00ff88",
+            "primary_hover": "#00cc6a",
+            "accent": "#00d4ff",
+            "accent_hover": "#00a8cc",
+            "success": "#10b981",
+            "error": "#ef4444",
+            "warning": "#f59e0b",
+            "border": "#1f1f1f",
+            "border_accent": "#333333",
+        }
+    else:
+        colors = {
+            "bg": "#ffffff",
+            "bg_secondary": "#fafafa",
+            "surface": "#f5f5f5",
+            "surface_elevated": "#ffffff",
+            "surface_hover": "#f0f0f0",
+            "text": "#0a0a0a",
+            "text_secondary": "#525252",
+            "text_muted": "#a3a3a3",
+            "primary": "#00b366",
+            "primary_hover": "#008f51",
+            "accent": "#0099cc",
+            "accent_hover": "#007aa3",
+            "success": "#10b981",
+            "error": "#ef4444",
+            "warning": "#f59e0b",
+            "border": "#e5e5e5",
+            "border_accent": "#d4d4d4",
+        }
+    
+    return f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+    
+    :root {{
+        --bg: {colors['bg']};
+        --surface: {colors['surface']};
+        --text: {colors['text']};
+        --primary: {colors['primary']};
+        --accent: {colors['accent']};
+    }}
+    
+    * {{
+        font-family: 'Inter', -apple-system, sans-serif;
+    }}
+    
+    html, body, [class*="st-"] {{
+        background: {colors['bg']} !important;
+        color: {colors['text']} !important;
+    }}
+    
+    /* Sidebar visible and styled */
+    section[data-testid="stSidebar"] {{
+        background: {colors['surface']} !important;
+        border-right: 1px solid {colors['border']} !important;
+        padding: 2rem 1.5rem !important;
+    }}
+    
+    section[data-testid="stSidebar"] > div {{
+        background: {colors['surface']} !important;
+    }}
+    
+    /* Make sidebar controls visible */
+    section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
+        gap: 1.5rem;
+    }}
+    
+    section[data-testid="stSidebar"] label {{
+        color: {colors['text_secondary']} !important;
+        font-weight: 700 !important;
+        font-size: 0.75rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+    }}
+    
+    section[data-testid="stSidebar"] .stRadio > div {{
+        background: {colors['surface_elevated']} !important;
+        border: 1px solid {colors['border']} !important;
+        border-radius: 12px !important;
+        padding: 1rem !important;
+    }}
+    
+    /* Header */
+    .app-header {{
+        text-align: center;
+        padding: 4rem 0 3rem 0;
+        background: radial-gradient(ellipse at center, {colors['primary']}08 0%, transparent 70%);
+    }}
+    
+    .app-logo {{
+        font-size: 5rem;
+        font-weight: 900;
+        letter-spacing: 0.1em;
+        background: linear-gradient(135deg, {colors['primary']}, {colors['accent']});
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin: 0;
+        line-height: 1;
+    }}
+    
+    .app-separator {{
+        width: 150px;
+        height: 4px;
+        background: linear-gradient(90deg, transparent, {colors['primary']}, {colors['accent']}, transparent);
+        margin: 1.5rem auto;
+        border-radius: 2px;
+    }}
+    
+    .app-tagline {{
+        font-size: 1.25rem;
+        color: {colors['text_secondary']};
+        font-weight: 500;
+    }}
+    
+    /* Cards */
+    .premium-card {{
+        background: {colors['surface_elevated']};
+        border: 1px solid {colors['border']};
+        border-radius: 20px;
+        margin: 2rem 0;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+        transition: all 0.3s ease;
+    }}
+    
+    .premium-card:hover {{
+        box-shadow: 0 8px 40px rgba(0,0,0,0.08);
+        transform: translateY(-2px);
+    }}
+    
+    .card-header {{
+        background: {colors['surface']};
+        border-bottom: 1px solid {colors['border']};
+        padding: 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }}
+    
+    .card-title {{
+        font-size: 1.75rem;
+        font-weight: 800;
+        color: {colors['text']};
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }}
+    
+    .card-icon {{
+        font-size: 2.25rem;
+    }}
+    
+    .card-badge {{
+        padding: 0.75rem 1.5rem;
+        background: linear-gradient(135deg, {colors['primary']}15, {colors['accent']}15);
+        border: 1px solid {colors['border_accent']};
+        border-radius: 100px;
+        font-size: 0.75rem;
+        font-weight: 800;
+        color: {colors['primary']};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }}
+    
+    .card-body {{
+        padding: 2.5rem;
+    }}
+    
+    /* Anchor boxes */
+    .anchor-grid {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2rem;
+        margin: 2rem 0;
+    }}
+    
+    .anchor-box {{
+        background: {colors['surface']};
+        border: 2px solid {colors['border']};
+        border-radius: 16px;
+        padding: 2rem;
+        transition: all 0.3s ease;
+        position: relative;
+    }}
+    
+    .anchor-box::before {{
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, {colors['primary']}, {colors['accent']});
+        opacity: 0;
+        transition: opacity 0.3s;
+    }}
+    
+    .anchor-box:hover {{
+        border-color: {colors['primary']};
+        box-shadow: 0 0 0 4px {colors['primary']}15;
+    }}
+    
+    .anchor-box:hover::before {{
+        opacity: 1;
+    }}
+    
+    .anchor-header {{
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid {colors['border']};
+    }}
+    
+    .anchor-badge {{
+        width: 60px;
+        height: 60px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, {colors['primary']}, {colors['accent']});
+        color: #000;
+        font-size: 2rem;
+        font-weight: 900;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 16px {colors['primary']}40;
+    }}
+    
+    .anchor-name {{
+        flex: 1;
+    }}
+    
+    .anchor-label {{
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: {colors['text_muted']};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }}
+    
+    .anchor-title {{
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: {colors['text']};
+        margin-top: 0.25rem;
+    }}
+    
+    .projection-tags {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid {colors['border']};
+    }}
+    
+    .proj-tag {{
+        padding: 1rem;
+        border-radius: 10px;
+        font-size: 0.875rem;
+        font-weight: 700;
+        text-align: center;
+    }}
+    
+    .proj-tag.bull {{
+        background: linear-gradient(135deg, {colors['success']}18, {colors['success']}08);
+        color: {colors['success']};
+        border: 1px solid {colors['success']}40;
+    }}
+    
+    .proj-tag.bear {{
+        background: linear-gradient(135deg, {colors['error']}18, {colors['error']}08);
+        color: {colors['error']};
+        border: 1px solid {colors['error']}40;
+    }}
+    
+    /* Stats grid */
+    .stats-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.5rem;
+        margin: 2rem 0;
+    }}
+    
+    .stat-card {{
+        background: {colors['surface']};
+        border: 1px solid {colors['border']};
+        border-radius: 14px;
+        padding: 1.75rem;
+        text-align: center;
+        transition: all 0.2s;
+    }}
+    
+    .stat-card:hover {{
+        border-color: {colors['primary']};
+        box-shadow: 0 4px 20px {colors['primary']}15;
+        transform: translateY(-2px);
+    }}
+    
+    .stat-label {{
+        font-size: 0.7rem;
+        font-weight: 800;
+        color: {colors['text_muted']};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.75rem;
+    }}
+    
+    .stat-value {{
+        font-size: 2rem;
+        font-weight: 900;
+        font-family: 'JetBrains Mono', monospace;
+        color: {colors['text']};
+        margin-bottom: 0.5rem;
+    }}
+    
+    .stat-change {{
+        font-size: 0.875rem;
+        font-weight: 700;
+        font-family: 'JetBrains Mono', monospace;
+    }}
+    
+    .positive {{ color: {colors['success']}; }}
+    .negative {{ color: {colors['error']}; }}
+    
+    /* Analytics sections */
+    .analytics-section {{
+        background: {colors['surface']};
+        border: 1px solid {colors['border']};
+        border-radius: 14px;
+        padding: 2rem;
+        margin: 1.5rem 0;
+    }}
+    
+    .section-title {{
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: {colors['text']};
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }}
+    
+    .level-badge {{
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        background: {colors['surface_elevated']};
+        border: 1px solid {colors['border']};
+        border-radius: 8px;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 700;
+        font-size: 0.938rem;
+        margin: 0.5rem;
+    }}
+    
+    .confluence-item {{
+        background: {colors['surface_elevated']};
+        border-left: 3px solid {colors['warning']};
+        padding: 1rem 1.5rem;
+        margin: 0.75rem 0;
+        border-radius: 8px;
+    }}
+    
+    /* Table styling */
+    .stDataFrame {{
+        border: 1px solid {colors['border']};
+        border-radius: 14px;
+        overflow: hidden;
+    }}
+    
+    .stDataFrame table {{
+        font-family: 'JetBrains Mono', monospace !important;
+    }}
+    
+    .stDataFrame thead th {{
+        background: {colors['surface']} !important;
+        color: {colors['text_muted']} !important;
+        font-weight: 900 !important;
+        font-size: 0.75rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.1em !important;
+        padding: 1.25rem 1.5rem !important;
+        border-bottom: 2px solid {colors['border']} !important;
+    }}
+    
+    .stDataFrame tbody td {{
+        padding: 1.125rem 1.5rem !important;
+        font-weight: 600 !important;
+        border-bottom: 1px solid {colors['border']} !important;
+    }}
+    
+    /* Input fields */
+    .stNumberInput input,
+    .stDateInput input,
+    .stTimeInput input,
+    .stTextInput input {{
+        background: {colors['surface_elevated']} !important;
+        border: 1.5px solid {colors['border']} !important;
+        border-radius: 10px !important;
+        padding: 1rem 1.125rem !important;
+        font-size: 1.063rem !important;
+        font-weight: 700 !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        color: {colors['text']} !important;
+    }}
+    
+    .stNumberInput input:focus,
+    .stDateInput input:focus,
+    .stTimeInput input:focus,
+    .stTextInput input:focus {{
+        border-color: {colors['primary']} !important;
+        box-shadow: 0 0 0 3px {colors['primary']}20 !important;
+    }}
+    
+    /* Buttons */
+    .stButton button,
+    .stDownloadButton button {{
+        background: linear-gradient(135deg, {colors['primary']}, {colors['accent']}) !important;
+        color: #000 !important;
+        border: none !important;
+        border-radius: 12px !important;
+        padding: 1.125rem 2rem !important;
+        font-weight: 900 !important;
+        font-size: 0.938rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+        transition: all 0.3s !important;
+    }}
+    
+    .stButton button:hover,
+    .stDownloadButton button:hover {{
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 32px {colors['primary']}40 !important;
+    }}
+    
+    /* Alert banner */
+    .alert-banner {{
+        background: linear-gradient(135deg, {colors['primary']}10, {colors['accent']}10);
+        border: 1px solid {colors['border']};
+        border-left: 4px solid {colors['primary']};
+        border-radius: 14px;
+        padding: 1.75rem 2.25rem;
+        margin: 2.5rem 0;
+        display: flex;
+        gap: 1.5rem;
+    }}
+    
+    .alert-icon {{
+        font-size: 2rem;
+    }}
+    
+    .alert-title {{
+        font-weight: 800;
+        font-size: 1.125rem;
+        color: {colors['text']};
+        margin-bottom: 0.5rem;
+    }}
+    
+    .alert-text {{
+        color: {colors['text_secondary']};
+        line-height: 1.7;
+    }}
+    
+    /* Footer */
+    .app-footer {{
+        text-align: center;
+        padding: 3.5rem 0;
+        margin-top: 5rem;
+        border-top: 1px solid {colors['border']};
+        color: {colors['text_muted']};
+        font-size: 0.875rem;
+    }}
+    
+    /* Utilities */
+    .gradient-text {{
+        background: linear-gradient(135deg, {colors['primary']}, {colors['accent']});
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }}
+    
+    .mono {{ font-family: 'JetBrains Mono', monospace; }}
+    
+    </style>
+    """
+
+# ===============================
+# MAIN APP
 # ===============================
 
 def main():
@@ -799,87 +633,64 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded"
     )
-
-    # ========== SIDEBAR ==========
+    
+    # Sidebar configuration
     with st.sidebar:
-        st.markdown(f"""
-            <div class="sidebar-brand">
-                <div class="sidebar-logo">{APP_NAME}</div>
-                <div class="sidebar-version">{APP_VERSION}</div>
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown("### ⚙️ Settings")
+        theme_mode = st.radio(
+            "Display Mode",
+            ["☀️ Light Mode", "🌙 Dark Mode"],
+            index=0,
+            key="theme_selector"
+        )
         
-        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-        st.markdown('<div class="sidebar-heading">⚙️ THEME</div>', unsafe_allow_html=True)
-        mode = st.radio("", ["Light", "Dark"], index=0, key="theme_mode", label_visibility="collapsed")
-        inject_theme(mode)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("---")
+        st.markdown("### 📊 Slope Configuration")
+        st.info(f"**Ascending:** +{ASC_SLOPE}")
+        st.info(f"**Descending:** {DESC_SLOPE}")
         
-        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
+        st.markdown("---")
+        st.markdown("### ℹ️ System Info")
+        st.caption("🕐 Central Time (CT)")
+        st.caption("📊 RTH: 8:30 AM - 2:00 PM")
+        st.caption("⚠️ Excludes 4:00-5:00 PM maintenance")
+        st.caption("🎯 Dual anchor system")
+        st.caption("📈 4 projection lines")
         
-        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-        st.markdown('<div class="sidebar-heading">📊 SLOPE VALUES</div>', unsafe_allow_html=True)
-        
-        st.markdown(f"""
-            <div class='metric-card'>
-                <div class='metric-header'>
-                    <div class='metric-icon'>📈</div>
-                    <div class='metric-label'>Ascending</div>
-                </div>
-                <div class='metric-value'>+{ASC_SLOPE}</div>
-                <div class='metric-sublabel'>per 30-minute block</div>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-            <div class='metric-card'>
-                <div class='metric-header'>
-                    <div class='metric-icon'>📉</div>
-                    <div class='metric-label'>Descending</div>
-                </div>
-                <div class='metric-value'>{DESC_SLOPE}</div>
-                <div class='metric-sublabel'>per 30-minute block</div>
-            </div>
-        """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-        st.markdown('<div class="sidebar-heading">ℹ️ SYSTEM INFO</div>', unsafe_allow_html=True)
-        st.markdown("""
-            <div class='info-item'><span class='info-icon'>🕐</span> Central Time (CT) timezone</div>
-            <div class='info-item'><span class='info-icon'>📊</span> RTH: 8:30 AM - 2:00 PM</div>
-            <div class='info-item'><span class='info-icon'>⚠️</span> Excludes 4:00-5:00 PM maintenance</div>
-            <div class='info-item'><span class='info-icon'>🎯</span> Dual anchor projection system</div>
-            <div class='info-item'><span class='info-icon'>📈</span> 4 simultaneous projections</div>
-        """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # ========== HEADER ==========
+        st.markdown("---")
+        st.markdown("### 📖 Quick Guide")
+        st.caption("1. Set projection date")
+        st.caption("2. Configure Skyline anchor")
+        st.caption("3. Configure Baseline anchor")
+        st.caption("4. Review analytics & projections")
+        st.caption("5. Export data as needed")
+    
+    # Apply theme
+    st.markdown(get_theme_css(theme_mode), unsafe_allow_html=True)
+    
+    # Header
     st.markdown(f"""
         <div class="app-header">
             <div class="app-logo">{APP_NAME}</div>
             <div class="app-separator"></div>
             <div class="app-tagline">{APP_TAGLINE}</div>
-            <div class="app-version-badge">{APP_VERSION}</div>
         </div>
     """, unsafe_allow_html=True)
     
-    # ========== ALERT BANNER ==========
+    # Alert banner
     st.markdown("""
         <div class="alert-banner">
-            <div class="alert-icon">💡</div>
-            <div class="alert-content">
-                <div class="alert-title">Dual Anchor Projection System</div>
+            <div class="alert-icon">🎯</div>
+            <div>
+                <div class="alert-title">Advanced Dual-Anchor Projection System</div>
                 <div class="alert-text">
-                    Configure two independent anchor points from the previous trading session. Each anchor automatically generates both ascending (+0.5412) and descending (−0.5412) projections across the RTH session (8:30 AM - 2:00 PM CT). The system intelligently excludes the 4:00-5:00 PM maintenance window from all calculations, ensuring precision accuracy.
+                    Configure two independent anchor points (Skyline & Baseline) from the previous trading session. Each anchor automatically generates both bullish and bearish projections across the RTH session. The platform provides comprehensive analytics including confluence zones, key price levels, and risk analysis to maximize your trading edge.
                 </div>
             </div>
         </div>
     """, unsafe_allow_html=True)
-
-    # ========== CONFIGURATION CARD ==========
+    
+    # Configuration Card
     st.markdown('<div class="premium-card">', unsafe_allow_html=True)
     st.markdown("""
         <div class="card-header">
@@ -887,68 +698,68 @@ def main():
                 <span class="card-icon">⚙️</span>
                 <span>Anchor Configuration</span>
             </div>
-            <div class="card-badge">
-                <span>⚡</span>
-                <span>Dual System</span>
-            </div>
+            <div class="card-badge">⚡ Dual System</div>
         </div>
     """, unsafe_allow_html=True)
     
     st.markdown('<div class="card-body">', unsafe_allow_html=True)
     
-    # Projection Date
-    st.markdown("<div style='margin-bottom: 2.5rem;'>", unsafe_allow_html=True)
-    st.markdown("<div style='font-size: 0.75rem; font-weight: 800; color: #737373; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1rem;'>📅 PROJECTION DATE</div>", unsafe_allow_html=True)
-    proj_day = st.date_input("", value=datetime.now(CT).date(), key="proj_date", label_visibility="collapsed")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Anchors
-    st.markdown('<div class="anchor-container">', unsafe_allow_html=True)
+    # Projection date
+    proj_day = st.date_input(
+        "📅 Projection Date (CT)",
+        value=datetime.now(CT).date(),
+        key="proj_date"
+    )
     
-    # Anchor 1
+    # Anchor inputs
+    st.markdown('<div class="anchor-grid">', unsafe_allow_html=True)
+    
+    # Skyline Anchor
     st.markdown("""
-        <div class='anchor-box'>
-            <div class='anchor-header'>
-                <div class='anchor-number'>1</div>
-                <div class='anchor-info'>
-                    <div class='anchor-title'>Primary Anchor</div>
-                    <div class='anchor-subtitle'>Generates bidirectional projections</div>
+        <div class="anchor-box">
+            <div class="anchor-header">
+                <div class="anchor-badge">☁️</div>
+                <div class="anchor-name">
+                    <div class="anchor-label">Upper Resistance</div>
+                    <div class="anchor-title">SKYLINE</div>
                 </div>
             </div>
     """, unsafe_allow_html=True)
     
-    a1_date = st.date_input("Anchor Date", value=datetime.now(CT).date() - timedelta(days=1), key="a1_date")
-    a1_price = st.number_input("Anchor Price ($)", value=6634.70, step=0.01, key="a1_price", format="%.2f")
-    a1_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="a1_time")
+    skyline_name = st.text_input("Custom Name (Optional)", value="Skyline", key="skyline_name")
+    skyline_date = st.date_input("Anchor Date", value=datetime.now(CT).date() - timedelta(days=1), key="skyline_date")
+    skyline_price = st.number_input("Anchor Price ($)", value=6634.70, step=0.01, key="skyline_price", format="%.2f")
+    skyline_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="skyline_time")
     
     st.markdown("""
-            <div class='projection-badges'>
-                <div class='proj-badge up'>↗ +0.5412</div>
-                <div class='proj-badge down'>↘ −0.5412</div>
+            <div class="projection-tags">
+                <div class="proj-tag bull">📈 Bull Projection</div>
+                <div class="proj-tag bear">📉 Bear Projection</div>
             </div>
         </div>
     """, unsafe_allow_html=True)
     
-    # Anchor 2
+    # Baseline Anchor
     st.markdown("""
-        <div class='anchor-box'>
-            <div class='anchor-header'>
-                <div class='anchor-number'>2</div>
-                <div class='anchor-info'>
-                    <div class='anchor-title'>Secondary Anchor</div>
-                    <div class='anchor-subtitle'>Generates bidirectional projections</div>
+        <div class="anchor-box">
+            <div class="anchor-header">
+                <div class="anchor-badge">⚓</div>
+                <div class="anchor-name">
+                    <div class="anchor-label">Lower Support</div>
+                    <div class="anchor-title">BASELINE</div>
                 </div>
             </div>
     """, unsafe_allow_html=True)
     
-    a2_date = st.date_input("Anchor Date", value=datetime.now(CT).date() - timedelta(days=1), key="a2_date")
-    a2_price = st.number_input("Anchor Price ($)", value=6600.00, step=0.01, key="a2_price", format="%.2f")
-    a2_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="a2_time")
+    baseline_name = st.text_input("Custom Name (Optional)", value="Baseline", key="baseline_name")
+    baseline_date = st.date_input("Anchor Date", value=datetime.now(CT).date() - timedelta(days=1), key="baseline_date")
+    baseline_price = st.number_input("Anchor Price ($)", value=6600.00, step=0.01, key="baseline_price", format="%.2f")
+    baseline_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="baseline_time")
     
     st.markdown("""
-            <div class='projection-badges'>
-                <div class='proj-badge up'>↗ +0.5412</div>
-                <div class='proj-badge down'>↘ −0.5412</div>
+            <div class="projection-tags">
+                <div class="proj-tag bull">📈 Bull Projection</div>
+                <div class="proj-tag bear">📉 Bear Projection</div>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -956,66 +767,130 @@ def main():
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # ========== CALCULATE PROJECTIONS ==========
+    
+    # Calculate projections
     slots = rth_slots_ct_dt(proj_day, "08:30", "14:00")
     
-    a1_dt = CT.localize(datetime.combine(a1_date, a1_time))
-    a2_dt = CT.localize(datetime.combine(a2_date, a2_time))
+    skyline_dt = CT.localize(datetime.combine(skyline_date, skyline_time))
+    baseline_dt = CT.localize(datetime.combine(baseline_date, baseline_time))
     
-    df_a1_asc = project_line(a1_price, a1_dt, ASC_SLOPE, slots)
-    df_a1_desc = project_line(a1_price, a1_dt, DESC_SLOPE, slots)
-    df_a2_asc = project_line(a2_price, a2_dt, ASC_SLOPE, slots)
-    df_a2_desc = project_line(a2_price, a2_dt, DESC_SLOPE, slots)
+    df_sky_bull = project_line(skyline_price, skyline_dt, ASC_SLOPE, slots)
+    df_sky_bear = project_line(skyline_price, skyline_dt, DESC_SLOPE, slots)
+    df_base_bull = project_line(baseline_price, baseline_dt, ASC_SLOPE, slots)
+    df_base_bear = project_line(baseline_price, baseline_dt, DESC_SLOPE, slots)
     
+    # Create merged dataframe with custom names
     merged = pd.DataFrame({"Time (CT)": [dt.strftime("%I:%M %p") for dt in slots]})
-    merged["Anchor 1 ↗"] = df_a1_asc["Price"]
-    merged["Anchor 1 ↘"] = df_a1_desc["Price"]
-    merged["Anchor 2 ↗"] = df_a2_asc["Price"]
-    merged["Anchor 2 ↘"] = df_a2_desc["Price"]
-
-    # ========== MARKET OPEN SUMMARY ==========
+    merged[f"{skyline_name} Bull 📈"] = df_sky_bull["Price"]
+    merged[f"{skyline_name} Bear 📉"] = df_sky_bear["Price"]
+    merged[f"{baseline_name} Bull 📈"] = df_base_bull["Price"]
+    merged[f"{baseline_name} Bear 📉"] = df_base_bear["Price"]
+    
+    # Calculate analytics
+    anchor_names = {
+        f"{skyline_name} Bull 📈": "skyline_bull",
+        f"{skyline_name} Bear 📉": "skyline_bear",
+        f"{baseline_name} Bull 📈": "baseline_bull",
+        f"{baseline_name} Bear 📉": "baseline_bear"
+    }
+    analytics = calculate_analytics(merged, anchor_names)
+    
+    # Market Open Summary
     st.markdown('<div class="premium-card">', unsafe_allow_html=True)
     st.markdown("""
         <div class="card-header">
             <div class="card-title">
                 <span class="card-icon">📈</span>
-                <span>Market Open Summary</span>
+                <span>Market Open Analysis</span>
             </div>
-            <div class="card-badge">
-                <span>🕐</span>
-                <span>8:30 AM CT</span>
-            </div>
+            <div class="card-badge">🕐 8:30 AM CT</div>
         </div>
     """, unsafe_allow_html=True)
     
     st.markdown('<div class="card-body">', unsafe_allow_html=True)
     st.markdown('<div class="stats-grid">', unsafe_allow_html=True)
     
-    open_row = merged[merged["Time (CT)"] == "08:30 AM"].iloc[0]
+    if 'market_open' in analytics:
+        for col_name in merged.columns[1:]:
+            val = analytics['market_open'][col_name]
+            anchor_price = skyline_price if skyline_name in col_name else baseline_price
+            change = val - anchor_price
+            change_class = "positive" if change > 0 else "negative"
+            change_symbol = "+" if change > 0 else ""
+            
+            st.markdown(f"""
+                <div class='stat-card'>
+                    <div class='stat-label'>{col_name}</div>
+                    <div class='stat-value'>${val:.2f}</div>
+                    <div class='stat-change {change_class}'>{change_symbol}{change:.2f}</div>
+                </div>
+            """, unsafe_allow_html=True)
     
-    for col, label, anchor_price in [
-        ("Anchor 1 ↗", "Anchor 1 Ascending", a1_price),
-        ("Anchor 1 ↘", "Anchor 1 Descending", a1_price),
-        ("Anchor 2 ↗", "Anchor 2 Ascending", a2_price),
-        ("Anchor 2 ↘", "Anchor 2 Descending", a2_price)
-    ]:
-        val = open_row[col]
-        change = val - anchor_price
-        change_class = "positive" if change > 0 else "negative"
-        change_symbol = "+" if change > 0 else ""
-        
-        st.markdown(f"""
-            <div class='stat-box'>
-                <div class='stat-label'>{label}</div>
-                <div class='stat-value'>${val:.2f}</div>
-                <div class='stat-change {change_class}'>{change_symbol}{change:.2f}</div>
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Open range analysis
+    if 'open_range' in analytics:
+        st.markdown("### 🎯 Opening Range Metrics")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Open High", f"${analytics['open_range']['high']:.2f}")
+        with col2:
+            st.metric("Open Low", f"${analytics['open_range']['low']:.2f}")
+        with col3:
+            st.metric("Open Spread", f"${analytics['open_range']['spread']:.2f}")
+    
+    st.markdown('</div></div>', unsafe_allow_html=True)
+    
+    # Advanced Analytics
+    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+    st.markdown("""
+        <div class="card-header">
+            <div class="card-title">
+                <span class="card-icon">🧠</span>
+                <span>Advanced Market Intelligence</span>
             </div>
-        """, unsafe_allow_html=True)
+            <div class="card-badge">💡 AI Analytics</div>
+        </div>
+    """, unsafe_allow_html=True)
     
-    st.markdown('</div></div></div>', unsafe_allow_html=True)
-
-    # ========== RESULTS TABLE ==========
+    st.markdown('<div class="card-body">', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown('<div class="analytics-section">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🎯 Key Price Levels</div>', unsafe_allow_html=True)
+        st.markdown("Round number psychological levels within projection range:")
+        for level in analytics['key_levels'][:10]:
+            st.markdown(f'<span class="level-badge">${level}</span>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="analytics-section">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📊 Range Analysis</div>', unsafe_allow_html=True)
+        st.metric("Overall High", f"${analytics['overall_range']['high']:.2f}")
+        st.metric("Overall Low", f"${analytics['overall_range']['low']:.2f}")
+        st.metric("Total Range", f"${analytics['overall_range']['range']:.2f}")
+        st.metric("Midpoint", f"${analytics['overall_range']['mid']:.2f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Confluence zones
+    if analytics['confluence_zones']:
+        st.markdown('<div class="analytics-section">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">⚡ Confluence Zones (High Probability Areas)</div>', unsafe_allow_html=True)
+        st.markdown("Times when multiple projections converge (within $5):")
+        for zone in analytics['confluence_zones'][:5]:
+            st.markdown(f"""
+                <div class="confluence-item">
+                    <strong>{zone['time']}</strong> — Price: ${zone['price']:.2f}<br>
+                    <small>Converging: {', '.join(zone['lines'])}</small>
+                </div>
+            """, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('</div></div>', unsafe_allow_html=True)
+    
+    # Results table
     st.markdown('<div class="premium-card">', unsafe_allow_html=True)
     st.markdown("""
         <div class="card-header">
@@ -1023,24 +898,18 @@ def main():
                 <span class="card-icon">📊</span>
                 <span>Complete Projection Matrix</span>
             </div>
-            <div class="card-badge">
-                <span>📋</span>
-                <span>RTH Session</span>
-            </div>
+            <div class="card-badge">📋 RTH Session</div>
         </div>
     """, unsafe_allow_html=True)
     
     st.markdown('<div class="card-body">', unsafe_allow_html=True)
-    st.markdown('<div class="table-wrapper">', unsafe_allow_html=True)
     st.dataframe(merged, use_container_width=True, hide_index=True, height=550)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown("<div style='height: 2.5rem'></div>", unsafe_allow_html=True)
-
-    # Export Buttons
-    st.markdown("<div style='font-size: 0.75rem; font-weight: 800; color: #737373; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1.25rem;'>📥 EXPORT OPTIONS</div>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3, gap="large")
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Export buttons
+    st.markdown("### 📥 Export Options")
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.download_button(
@@ -1048,44 +917,59 @@ def main():
             merged.to_csv(index=False).encode(),
             "spx_prophet_complete.csv",
             "text/csv",
-            key="dl_complete",
             use_container_width=True
         )
     
     with col2:
-        a1_data = merged[["Time (CT)", "Anchor 1 ↗", "Anchor 1 ↘"]]
+        skyline_data = merged[["Time (CT)", f"{skyline_name} Bull 📈", f"{skyline_name} Bear 📉"]]
         st.download_button(
-            "📊 Anchor 1 Data",
-            a1_data.to_csv(index=False).encode(),
-            "spx_prophet_anchor1.csv",
+            f"☁️ {skyline_name} Data",
+            skyline_data.to_csv(index=False).encode(),
+            f"spx_prophet_{skyline_name.lower()}.csv",
             "text/csv",
-            key="dl_a1",
             use_container_width=True
         )
     
     with col3:
-        a2_data = merged[["Time (CT)", "Anchor 2 ↗", "Anchor 2 ↘"]]
+        baseline_data = merged[["Time (CT)", f"{baseline_name} Bull 📈", f"{baseline_name} Bear 📉"]]
         st.download_button(
-            "📊 Anchor 2 Data",
-            a2_data.to_csv(index=False).encode(),
-            "spx_prophet_anchor2.csv",
+            f"⚓ {baseline_name} Data",
+            baseline_data.to_csv(index=False).encode(),
+            f"spx_prophet_{baseline_name.lower()}.csv",
             "text/csv",
-            key="dl_a2",
             use_container_width=True
         )
-
+    
+    with col4:
+        # Analytics export
+        analytics_df = pd.DataFrame({
+            'Metric': ['Overall High', 'Overall Low', 'Total Range', 'Midpoint', 'Open High', 'Open Low', 'Open Spread'],
+            'Value': [
+                analytics['overall_range']['high'],
+                analytics['overall_range']['low'],
+                analytics['overall_range']['range'],
+                analytics['overall_range']['mid'],
+                analytics.get('open_range', {}).get('high', 0),
+                analytics.get('open_range', {}).get('low', 0),
+                analytics.get('open_range', {}).get('spread', 0)
+            ]
+        })
+        st.download_button(
+            "🧠 Analytics Report",
+            analytics_df.to_csv(index=False).encode(),
+            "spx_prophet_analytics.csv",
+            "text/csv",
+            use_container_width=True
+        )
+    
     st.markdown('</div></div>', unsafe_allow_html=True)
-
-    # ========== FOOTER ==========
+    
+    # Footer
     st.markdown(f"""
         <div class="app-footer">
-            <span class="footer-brand">{APP_NAME}</span>
-            <span class="footer-divider">·</span>
-            <span>{APP_VERSION}</span>
-            <span class="footer-divider">·</span>
-            <span>Institutional-Grade Market Projection Platform</span>
-            <span class="footer-divider">·</span>
-            <span>© 2025</span>
+            <strong>{APP_NAME}</strong> · {APP_VERSION}<br>
+            {APP_TAGLINE} · © 2025<br>
+            Built for serious traders who demand precision and profitability
         </div>
     """, unsafe_allow_html=True)
 
