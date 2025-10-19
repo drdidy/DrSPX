@@ -1,403 +1,625 @@
 # app.py
-# SPX Prophet — Institutional-Grade SPX Projection Platform
-# Dual anchor system with bidirectional projections
-# Slopes: ±0.5412 per 30-min block
+# SPX PROPHET — Institutional-Grade Market Projection Platform
+# Premium dual-anchor projection system with advanced analytics
+# Precision: ±0.5412 per 30-min block | RTH: 08:30-14:00 CT
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta, time as dtime, date
 import pytz
-from typing import List
+from typing import List, Tuple
 
 APP_NAME = "SPX PROPHET"
-APP_VERSION = "Professional Edition v2.0"
+APP_VERSION = "Professional Edition 2.0"
+APP_TAGLINE = "Institutional Market Projection Platform"
 
 # ===============================
-# THEME — Institutional Grade
+# THEME — Ultra Premium
 # ===============================
 
 def theme_css(mode: str):
     if mode == "Dark":
         p = {
             "bg": "#000000",
-            "bgGradient": "linear-gradient(180deg, #000000 0%, #0a0a0a 100%)",
-            "surface": "#0f0f0f",
-            "surfaceElevated": "#1a1a1a",
+            "bgPattern": "radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.03) 0%, transparent 50%), radial-gradient(circle at 80% 50%, rgba(0, 212, 255, 0.03) 0%, transparent 50%)",
+            "surface": "#0a0a0a",
+            "surfaceElevated": "#141414",
+            "surfaceHover": "#1a1a1a",
             "text": "#ffffff",
-            "textPrimary": "#f0f0f0",
-            "textSecondary": "#999999",
-            "textMuted": "#666666",
+            "textPrimary": "#f5f5f5",
+            "textSecondary": "#a3a3a3",
+            "textTertiary": "#737373",
+            "textMuted": "#525252",
             "primary": "#00ff88",
-            "primaryGlow": "rgba(0, 255, 136, 0.2)",
+            "primaryDark": "#00cc6a",
+            "primaryLight": "#33ffaa",
             "accent": "#00d4ff",
-            "accentGlow": "rgba(0, 212, 255, 0.2)",
-            "border": "#222222",
-            "borderSubtle": "#1a1a1a",
-            "success": "#00ff88",
-            "error": "#ff3366",
-            "warning": "#ffaa00",
-            "chart1": "#00ff88",
-            "chart2": "#00d4ff",
-            "chart3": "#ff3366",
-            "chart4": "#ffaa00",
+            "accentDark": "#00a8cc",
+            "accentLight": "#33ddff",
+            "border": "#1f1f1f",
+            "borderLight": "#2a2a2a",
+            "borderAccent": "#333333",
+            "success": "#10b981",
+            "error": "#ef4444",
+            "warning": "#f59e0b",
+            "info": "#3b82f6",
         }
     else:
         p = {
-            "bg": "#fafbfc",
-            "bgGradient": "linear-gradient(180deg, #ffffff 0%, #f5f7fa 100%)",
-            "surface": "#ffffff",
+            "bg": "#ffffff",
+            "bgPattern": "radial-gradient(circle at 20% 50%, rgba(0, 179, 102, 0.02) 0%, transparent 50%), radial-gradient(circle at 80% 50%, rgba(0, 153, 204, 0.02) 0%, transparent 50%)",
+            "surface": "#fafafa",
             "surfaceElevated": "#ffffff",
+            "surfaceHover": "#f5f5f5",
             "text": "#0a0a0a",
-            "textPrimary": "#1a1a1a",
-            "textSecondary": "#4a5568",
-            "textMuted": "#718096",
+            "textPrimary": "#171717",
+            "textSecondary": "#525252",
+            "textTertiary": "#737373",
+            "textMuted": "#a3a3a3",
             "primary": "#00b366",
-            "primaryGlow": "rgba(0, 179, 102, 0.15)",
+            "primaryDark": "#008f51",
+            "primaryLight": "#00d47a",
             "accent": "#0099cc",
-            "accentGlow": "rgba(0, 153, 204, 0.15)",
-            "border": "#e2e8f0",
-            "borderSubtle": "#edf2f7",
-            "success": "#00b366",
-            "error": "#e53e3e",
-            "warning": "#dd6b20",
-            "chart1": "#00b366",
-            "chart2": "#0099cc",
-            "chart3": "#e53e3e",
-            "chart4": "#dd6b20",
+            "accentDark": "#007aa3",
+            "accentLight": "#00b8e6",
+            "border": "#e5e5e5",
+            "borderLight": "#f0f0f0",
+            "borderAccent": "#d4d4d4",
+            "success": "#10b981",
+            "error": "#ef4444",
+            "warning": "#f59e0b",
+            "info": "#3b82f6",
         }
     
     return f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
     
     * {{
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
     }}
     
     html, body, [data-testid="stAppViewContainer"] {{
-        background: {p['bgGradient']};
+        background: {p['bg']};
+        background-image: {p['bgPattern']};
         color: {p['text']};
+        font-size: 16px;
     }}
     
-    /* Hide Streamlit elements */
     #MainMenu, footer, header {{visibility: hidden;}}
     
-    /* Sidebar */
+    /* ==================== SIDEBAR ==================== */
     [data-testid="stSidebar"] {{
         background: {p['surface']};
         border-right: 1px solid {p['border']};
-        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.03);
+        box-shadow: 8px 0 40px rgba(0, 0, 0, 0.04);
     }}
     
     [data-testid="stSidebar"] > div {{
-        padding-top: 2rem;
+        padding: 2.5rem 1.5rem;
     }}
     
-    /* Main Header */
-    .prophet-masthead {{
+    .sidebar-brand {{
         text-align: center;
-        padding: 60px 0 48px 0;
-        margin-bottom: 48px;
-        border-bottom: 2px solid {p['border']};
-        position: relative;
+        padding: 0 0 2rem 0;
+        border-bottom: 1px solid {p['border']};
+        margin-bottom: 2rem;
     }}
     
-    .prophet-logo {{
-        font-size: 4rem;
+    .sidebar-logo {{
+        font-size: 1.75rem;
         font-weight: 900;
-        letter-spacing: 0.05em;
-        background: linear-gradient(135deg, {p['primary']} 0%, {p['accent']} 100%);
+        background: linear-gradient(135deg, {p['primary']}, {p['accent']});
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        background-clip: text;
-        margin: 0;
-        line-height: 1;
-        text-transform: uppercase;
+        letter-spacing: 0.02em;
     }}
     
-    .prophet-version {{
-        font-size: 0.75rem;
+    .sidebar-version {{
+        font-size: 0.625rem;
         color: {p['textMuted']};
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.15em;
-        margin-top: 12px;
+        letter-spacing: 0.1em;
+        margin-top: 0.5rem;
     }}
     
-    .prophet-separator {{
-        width: 120px;
-        height: 3px;
-        background: linear-gradient(90deg, transparent, {p['primary']}, transparent);
-        margin: 20px auto;
+    .sidebar-divider {{
+        height: 1px;
+        background: linear-gradient(90deg, transparent, {p['border']}, transparent);
+        margin: 1.5rem 0;
     }}
     
-    /* Cards */
-    .prophet-card {{
-        background: {p['surface']};
+    .sidebar-section {{
+        margin-bottom: 2rem;
+    }}
+    
+    .sidebar-heading {{
+        font-size: 0.688rem;
+        font-weight: 800;
+        color: {p['textTertiary']};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }}
+    
+    .metric-card {{
+        background: {p['surfaceElevated']};
+        border: 1px solid {p['border']};
+        border-radius: 12px;
+        padding: 1.25rem;
+        margin-bottom: 0.75rem;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }}
+    
+    .metric-card:hover {{
+        border-color: {p['primary']};
+        box-shadow: 0 0 0 3px {p['primary']}15;
+        transform: translateY(-1px);
+    }}
+    
+    .metric-header {{
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }}
+    
+    .metric-icon {{
+        font-size: 1.5rem;
+    }}
+    
+    .metric-label {{
+        font-size: 0.688rem;
+        font-weight: 700;
+        color: {p['textTertiary']};
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }}
+    
+    .metric-value {{
+        font-size: 1.875rem;
+        font-weight: 900;
+        font-family: 'JetBrains Mono', monospace;
+        line-height: 1;
+        background: linear-gradient(135deg, {p['primary']}, {p['accent']});
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }}
+    
+    .metric-sublabel {{
+        font-size: 0.625rem;
+        color: {p['textMuted']};
+        margin-top: 0.375rem;
+        font-weight: 500;
+    }}
+    
+    .info-item {{
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.625rem 0;
+        font-size: 0.75rem;
+        color: {p['textSecondary']};
+        border-bottom: 1px solid {p['borderLight']};
+    }}
+    
+    .info-item:last-child {{
+        border-bottom: none;
+    }}
+    
+    .info-icon {{
+        font-size: 1rem;
+    }}
+    
+    /* ==================== HEADER ==================== */
+    .app-header {{
+        text-align: center;
+        padding: 4rem 0 3rem 0;
+        position: relative;
+        overflow: hidden;
+    }}
+    
+    .app-header::before {{
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(ellipse at center, {p['primary']}08 0%, transparent 70%);
+        pointer-events: none;
+    }}
+    
+    .app-logo {{
+        font-size: 4.5rem;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        background: linear-gradient(135deg, {p['primary']} 0%, {p['accent']} 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin: 0;
+        line-height: 1;
+        position: relative;
+        z-index: 1;
+    }}
+    
+    .app-separator {{
+        width: 140px;
+        height: 4px;
+        background: linear-gradient(90deg, transparent, {p['primary']}, {p['accent']}, transparent);
+        margin: 1.5rem auto;
+        border-radius: 2px;
+    }}
+    
+    .app-tagline {{
+        font-size: 1.125rem;
+        color: {p['textSecondary']};
+        font-weight: 500;
+        letter-spacing: 0.02em;
+    }}
+    
+    .app-version-badge {{
+        display: inline-block;
+        margin-top: 1rem;
+        padding: 0.5rem 1.25rem;
+        background: {p['surfaceElevated']};
+        border: 1px solid {p['border']};
+        border-radius: 100px;
+        font-size: 0.688rem;
+        font-weight: 700;
+        color: {p['textTertiary']};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }}
+    
+    /* ==================== CARDS ==================== */
+    .premium-card {{
+        background: {p['surfaceElevated']};
         border: 1px solid {p['border']};
         border-radius: 20px;
-        padding: 0;
-        margin-bottom: 32px;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+        margin-bottom: 2rem;
         overflow: hidden;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.02);
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }}
     
-    .prophet-card:hover {{
-        box-shadow: 0 8px 40px rgba(0, 0, 0, 0.08);
+    .premium-card:hover {{
+        box-shadow: 0 8px 48px rgba(0, 0, 0, 0.06);
         transform: translateY(-2px);
     }}
     
     .card-header {{
-        background: {p['surfaceElevated']};
+        background: {p['surface']};
         border-bottom: 1px solid {p['border']};
-        padding: 24px 32px;
+        padding: 1.75rem 2rem;
         display: flex;
         align-items: center;
         justify-content: space-between;
     }}
     
     .card-title {{
-        font-size: 1.375rem;
-        font-weight: 700;
+        font-size: 1.5rem;
+        font-weight: 800;
         color: {p['textPrimary']};
-        margin: 0;
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 0.875rem;
     }}
     
     .card-icon {{
-        font-size: 1.75rem;
+        font-size: 2rem;
+        filter: grayscale(30%);
     }}
     
     .card-badge {{
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        padding: 8px 16px;
-        background: {p['bg']};
-        border: 1px solid {p['border']};
+        gap: 0.625rem;
+        padding: 0.625rem 1.25rem;
+        background: linear-gradient(135deg, {p['primary']}12, {p['accent']}12);
+        border: 1px solid {p['borderAccent']};
         border-radius: 100px;
         font-size: 0.75rem;
-        font-weight: 700;
+        font-weight: 800;
         color: {p['primary']};
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }}
     
     .card-body {{
-        padding: 32px;
+        padding: 2rem;
     }}
     
-    /* Anchor Input Sections */
-    .anchor-section {{
-        background: {p['surfaceElevated']};
+    /* ==================== ANCHOR INPUTS ==================== */
+    .anchor-container {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2rem;
+        margin-bottom: 2rem;
+    }}
+    
+    .anchor-box {{
+        background: {p['surface']};
         border: 2px solid {p['border']};
         border-radius: 16px;
-        padding: 28px;
-        margin-bottom: 24px;
-        transition: all 0.3s ease;
+        padding: 2rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         position: relative;
+        overflow: hidden;
     }}
     
-    .anchor-section:hover {{
+    .anchor-box::before {{
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 4px;
+        background: linear-gradient(90deg, {p['primary']}, {p['accent']});
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }}
+    
+    .anchor-box:hover {{
         border-color: {p['primary']};
-        box-shadow: 0 0 0 4px {p['primaryGlow']};
+        box-shadow: 0 0 0 4px {p['primary']}12, 0 8px 32px rgba(0, 0, 0, 0.08);
+        transform: translateY(-2px);
     }}
     
-    .anchor-section.accent:hover {{
-        border-color: {p['accent']};
-        box-shadow: 0 0 0 4px {p['accentGlow']};
+    .anchor-box:hover::before {{
+        opacity: 1;
     }}
     
     .anchor-header {{
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 24px;
-        padding-bottom: 16px;
-        border-bottom: 1px solid {p['borderSubtle']};
+        gap: 1rem;
+        margin-bottom: 1.75rem;
+        padding-bottom: 1.25rem;
+        border-bottom: 1px solid {p['borderLight']};
     }}
     
     .anchor-number {{
-        width: 48px;
-        height: 48px;
-        border-radius: 12px;
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
         background: linear-gradient(135deg, {p['primary']}, {p['accent']});
         color: #000000;
-        font-size: 1.5rem;
+        font-size: 1.75rem;
         font-weight: 900;
         display: flex;
         align-items: center;
         justify-content: center;
+        box-shadow: 0 4px 16px {p['primary']}30;
+    }}
+    
+    .anchor-info {{
+        flex: 1;
     }}
     
     .anchor-title {{
-        font-size: 1.25rem;
-        font-weight: 700;
+        font-size: 1.375rem;
+        font-weight: 800;
         color: {p['textPrimary']};
-        margin: 0;
+        margin: 0 0 0.25rem 0;
     }}
     
     .anchor-subtitle {{
-        font-size: 0.875rem;
+        font-size: 0.813rem;
         color: {p['textSecondary']};
-        margin-top: 4px;
+        font-weight: 500;
     }}
     
-    .projection-info {{
+    .projection-badges {{
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 12px;
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid {p['borderSubtle']};
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid {p['borderLight']};
     }}
     
-    .projection-badge {{
-        padding: 10px 16px;
+    .proj-badge {{
+        padding: 0.875rem 1rem;
         border-radius: 10px;
         font-size: 0.813rem;
-        font-weight: 600;
+        font-weight: 700;
         text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
     }}
     
-    .projection-badge.ascending {{
+    .proj-badge.up {{
         background: linear-gradient(135deg, {p['success']}15, {p['success']}08);
         color: {p['success']};
         border: 1px solid {p['success']}30;
     }}
     
-    .projection-badge.descending {{
+    .proj-badge.down {{
         background: linear-gradient(135deg, {p['error']}15, {p['error']}08);
         color: {p['error']};
         border: 1px solid {p['error']}30;
     }}
     
-    /* Stat Grid */
-    .stat-grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 16px;
-        margin-bottom: 32px;
-    }}
-    
-    .stat-card {{
-        background: {p['surfaceElevated']};
-        border: 1px solid {p['border']};
-        border-radius: 12px;
-        padding: 20px;
-        text-align: center;
-        transition: all 0.2s ease;
-    }}
-    
-    .stat-card:hover {{
-        border-color: {p['primary']};
-        box-shadow: 0 4px 16px {p['primaryGlow']};
-    }}
-    
-    .stat-icon {{
-        font-size: 2rem;
-        margin-bottom: 8px;
-        filter: grayscale(20%);
-    }}
-    
-    .stat-value {{
-        font-size: 1.75rem;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', monospace;
-        margin: 8px 0 4px 0;
-        line-height: 1;
-    }}
-    
-    .stat-value.primary {{
-        color: {p['primary']};
-    }}
-    
-    .stat-value.accent {{
-        color: {p['accent']};
-    }}
-    
-    .stat-label {{
-        font-size: 0.688rem;
-        font-weight: 700;
-        color: {p['textMuted']};
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }}
-    
-    .stat-sublabel {{
-        font-size: 0.625rem;
-        color: {p['textSecondary']};
-        margin-top: 4px;
-    }}
-    
-    /* Input Fields */
+    /* ==================== INPUTS ==================== */
     .stNumberInput > div > div > input,
     .stDateInput > div > div > input,
     .stTimeInput > div > div > input {{
-        background: {p['bg']};
+        background: {p['surfaceElevated']};
         border: 1.5px solid {p['border']};
         border-radius: 10px;
-        padding: 14px 16px;
-        font-size: 1rem;
-        font-weight: 600;
+        padding: 1rem 1.125rem;
+        font-size: 1.063rem;
+        font-weight: 700;
         font-family: 'JetBrains Mono', monospace;
         color: {p['textPrimary']};
-        transition: all 0.2s ease;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }}
+    
+    .stNumberInput > div > div > input:hover,
+    .stDateInput > div > div > input:hover,
+    .stTimeInput > div > div > input:hover {{
+        border-color: {p['borderAccent']};
+        background: {p['surfaceHover']};
     }}
     
     .stNumberInput > div > div > input:focus,
     .stDateInput > div > div > input:focus,
     .stTimeInput > div > div > input:focus {{
         border-color: {p['primary']};
-        box-shadow: 0 0 0 3px {p['primaryGlow']};
+        box-shadow: 0 0 0 3px {p['primary']}15;
         outline: none;
+        background: {p['surfaceElevated']};
     }}
     
     .stNumberInput label,
     .stDateInput label,
     .stTimeInput label {{
         font-size: 0.75rem;
-        font-weight: 700;
-        color: {p['textMuted']};
+        font-weight: 800;
+        color: {p['textTertiary']};
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        margin-bottom: 8px;
+        margin-bottom: 0.625rem;
     }}
     
-    /* Buttons */
+    /* ==================== BUTTONS ==================== */
     .stButton > button,
     .stDownloadButton > button {{
         background: linear-gradient(135deg, {p['primary']}, {p['accent']});
         color: #000000;
         border: none;
         border-radius: 12px;
-        padding: 16px 32px;
-        font-weight: 800;
+        padding: 1.125rem 2rem;
+        font-weight: 900;
         font-size: 0.938rem;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.08em;
         width: 100%;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 0 4px 16px {p['primaryGlow']};
+        box-shadow: 0 4px 16px {p['primary']}25;
+        cursor: pointer;
     }}
     
     .stButton > button:hover,
     .stDownloadButton > button:hover {{
         transform: translateY(-2px);
-        box-shadow: 0 8px 24px {p['primaryGlow']}, 0 0 48px {p['primaryGlow']};
+        box-shadow: 0 8px 32px {p['primary']}35, 0 0 64px {p['primary']}20;
     }}
     
-    /* Data Table */
-    .dataframe-container {{
+    .stButton > button:active,
+    .stDownloadButton > button:active {{
+        transform: translateY(0);
+    }}
+    
+    /* ==================== ALERT BANNER ==================== */
+    .alert-banner {{
+        background: linear-gradient(135deg, {p['primary']}08, {p['accent']}08);
+        border: 1px solid {p['borderAccent']};
+        border-left: 4px solid {p['primary']};
+        border-radius: 14px;
+        padding: 1.5rem 2rem;
+        margin-bottom: 3rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 1.25rem;
+    }}
+    
+    .alert-icon {{
+        font-size: 1.75rem;
+        margin-top: 0.125rem;
+    }}
+    
+    .alert-content {{
+        flex: 1;
+    }}
+    
+    .alert-title {{
+        font-weight: 800;
+        font-size: 1.063rem;
+        color: {p['textPrimary']};
+        margin-bottom: 0.5rem;
+    }}
+    
+    .alert-text {{
+        font-size: 0.938rem;
+        color: {p['textSecondary']};
+        line-height: 1.7;
+    }}
+    
+    /* ==================== SUMMARY STATS ==================== */
+    .stats-grid {{
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1.25rem;
+        margin-bottom: 2rem;
+    }}
+    
+    .stat-box {{
+        background: {p['surface']};
         border: 1px solid {p['border']};
-        border-radius: 12px;
+        border-radius: 14px;
+        padding: 1.5rem;
+        text-align: center;
+        transition: all 0.2s ease;
+    }}
+    
+    .stat-box:hover {{
+        border-color: {p['borderAccent']};
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+        transform: translateY(-1px);
+    }}
+    
+    .stat-label {{
+        font-size: 0.688rem;
+        font-weight: 800;
+        color: {p['textTertiary']};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.75rem;
+    }}
+    
+    .stat-value {{
+        font-size: 1.875rem;
+        font-weight: 900;
+        font-family: 'JetBrains Mono', monospace;
+        color: {p['textPrimary']};
+        line-height: 1;
+        margin-bottom: 0.5rem;
+    }}
+    
+    .stat-change {{
+        font-size: 0.813rem;
+        font-weight: 700;
+        font-family: 'JetBrains Mono', monospace;
+    }}
+    
+    .stat-change.positive {{
+        color: {p['success']};
+    }}
+    
+    .stat-change.negative {{
+        color: {p['error']};
+    }}
+    
+    /* ==================== DATA TABLE ==================== */
+    .table-wrapper {{
+        border: 1px solid {p['border']};
+        border-radius: 14px;
         overflow: hidden;
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.03);
     }}
     
     .stDataFrame {{
@@ -409,167 +631,119 @@ def theme_css(mode: str):
     }}
     
     .stDataFrame thead tr th {{
-        background: {p['surfaceElevated']};
-        color: {p['textMuted']};
-        font-weight: 800;
+        background: {p['surface']};
+        color: {p['textTertiary']};
+        font-weight: 900;
         font-size: 0.75rem;
         text-transform: uppercase;
-        letter-spacing: 0.1em;
-        padding: 16px 20px;
+        letter-spacing: 0.12em;
+        padding: 1.25rem 1.5rem;
         border-bottom: 2px solid {p['border']};
+        position: sticky;
+        top: 0;
+        z-index: 10;
     }}
     
     .stDataFrame tbody tr td {{
-        padding: 14px 20px;
+        padding: 1.125rem 1.5rem;
         font-weight: 600;
-        font-size: 0.938rem;
-        border-bottom: 1px solid {p['borderSubtle']};
+        font-size: 1rem;
+        border-bottom: 1px solid {p['borderLight']};
+        transition: background 0.15s ease;
     }}
     
     .stDataFrame tbody tr:hover td {{
-        background: {p['surfaceElevated']};
+        background: {p['surfaceHover']};
     }}
     
     .stDataFrame tbody tr:last-child td {{
         border-bottom: none;
     }}
     
-    /* Alert Box */
-    .info-banner {{
-        background: linear-gradient(135deg, {p['primary']}10, {p['accent']}10);
-        border: 1px solid {p['border']};
-        border-left: 4px solid {p['primary']};
-        border-radius: 12px;
-        padding: 20px 28px;
-        margin-bottom: 40px;
-        display: flex;
-        align-items: flex-start;
-        gap: 16px;
-    }}
-    
-    .info-icon {{
-        font-size: 1.5rem;
-        margin-top: 2px;
-    }}
-    
-    .info-content {{
-        flex: 1;
-    }}
-    
-    .info-title {{
-        font-weight: 700;
-        font-size: 1rem;
-        color: {p['textPrimary']};
-        margin-bottom: 6px;
-    }}
-    
-    .info-text {{
-        font-size: 0.875rem;
-        color: {p['textSecondary']};
-        line-height: 1.6;
-    }}
-    
-    /* Sidebar Styling */
-    .sidebar-section {{
-        margin-bottom: 32px;
-    }}
-    
-    .sidebar-title {{
-        font-size: 0.75rem;
-        font-weight: 800;
-        color: {p['textMuted']};
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        margin-bottom: 16px;
-        padding-bottom: 8px;
-        border-bottom: 1px solid {p['border']};
-    }}
-    
-    [data-testid="stSidebar"] .stRadio > label {{
-        font-size: 0.75rem;
-        font-weight: 700;
-        color: {p['textMuted']};
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }}
-    
-    /* Results Section */
-    .results-summary {{
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 16px;
-        margin-bottom: 32px;
-    }}
-    
-    .summary-card {{
-        background: {p['surfaceElevated']};
-        border: 1px solid {p['border']};
-        border-radius: 12px;
-        padding: 20px;
+    /* ==================== FOOTER ==================== */
+    .app-footer {{
         text-align: center;
-    }}
-    
-    .summary-label {{
-        font-size: 0.688rem;
-        font-weight: 700;
-        color: {p['textMuted']};
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        margin-bottom: 8px;
-    }}
-    
-    .summary-value {{
-        font-size: 1.5rem;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', monospace;
-        color: {p['textPrimary']};
-    }}
-    
-    .summary-change {{
-        font-size: 0.75rem;
-        font-weight: 600;
-        margin-top: 4px;
-    }}
-    
-    .summary-change.positive {{
-        color: {p['success']};
-    }}
-    
-    .summary-change.negative {{
-        color: {p['error']};
-    }}
-    
-    /* Color coding for columns */
-    .col-anchor1-asc {{ color: {p['chart1']}; }}
-    .col-anchor1-desc {{ color: {p['chart2']}; }}
-    .col-anchor2-asc {{ color: {p['chart3']}; }}
-    .col-anchor2-desc {{ color: {p['chart4']}; }}
-    
-    /* Footer */
-    .prophet-footer {{
-        text-align: center;
-        padding: 48px 0;
-        margin-top: 80px;
+        padding: 3.5rem 0;
+        margin-top: 5rem;
         border-top: 1px solid {p['border']};
         color: {p['textMuted']};
         font-size: 0.813rem;
     }}
     
     .footer-brand {{
-        font-weight: 700;
+        font-weight: 800;
         color: {p['textPrimary']};
+        font-size: 0.938rem;
     }}
     
-    /* Spacing */
+    .footer-divider {{
+        display: inline-block;
+        margin: 0 0.75rem;
+        color: {p['textMuted']};
+    }}
+    
+    /* ==================== RADIO BUTTONS ==================== */
+    [data-testid="stSidebar"] .stRadio > label {{
+        font-size: 0.75rem;
+        font-weight: 800;
+        color: {p['textTertiary']};
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }}
+    
+    /* ==================== SPACING ==================== */
     .block-container {{
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        max-width: 1400px;
+        padding: 2.5rem 3rem;
+        max-width: 1600px;
     }}
     
-    /* Smooth scrolling */
-    html {{
-        scroll-behavior: smooth;
+    /* ==================== RESPONSIVE ==================== */
+    @media (max-width: 1200px) {{
+        .stats-grid {{
+            grid-template-columns: repeat(2, 1fr);
+        }}
+        
+        .anchor-container {{
+            grid-template-columns: 1fr;
+        }}
+    }}
+    
+    @media (max-width: 768px) {{
+        .app-logo {{
+            font-size: 3rem;
+        }}
+        
+        .stats-grid {{
+            grid-template-columns: 1fr;
+        }}
+    }}
+    
+    /* ==================== ANIMATIONS ==================== */
+    @keyframes fadeInUp {{
+        from {{
+            opacity: 0;
+            transform: translateY(20px);
+        }}
+        to {{
+            opacity: 1;
+            transform: translateY(0);
+        }}
+    }}
+    
+    .premium-card {{
+        animation: fadeInUp 0.5s ease-out;
+    }}
+    
+    /* ==================== UTILITIES ==================== */
+    .gradient-text {{
+        background: linear-gradient(135deg, {p['primary']}, {p['accent']});
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }}
+    
+    .text-mono {{
+        font-family: 'JetBrains Mono', monospace;
     }}
     </style>
     """
@@ -578,25 +752,20 @@ def inject_theme(mode: str):
     st.markdown(theme_css(mode), unsafe_allow_html=True)
 
 # ===============================
-# TIME — CT helpers & slots
+# TIME & CALCULATIONS
 # ===============================
 
 CT = pytz.timezone("America/Chicago")
+ASC_SLOPE = 0.5412
+DESC_SLOPE = -0.5412
 
 def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetime]:
     h1, m1 = map(int, start.split(":"))
     h2, m2 = map(int, end.split(":"))
     start_dt = CT.localize(datetime.combine(proj_date, dtime(h1, m1)))
-    end_dt   = CT.localize(datetime.combine(proj_date, dtime(h2, m2)))
+    end_dt = CT.localize(datetime.combine(proj_date, dtime(h2, m2)))
     idx = pd.date_range(start=start_dt, end=end_dt, freq="30min", tz=CT)
     return list(idx.to_pydatetime())
-
-# ===============================
-# Projection logic
-# ===============================
-
-ASC_SLOPE = 0.5412
-DESC_SLOPE = -0.5412
 
 def count_blocks_with_maintenance_skip(start_dt: datetime, end_dt: datetime) -> int:
     blocks = 0
@@ -616,85 +785,102 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block:
     for dt in rth_slots_ct:
         blocks = count_blocks_with_maintenance_skip(anchor_aligned, dt)
         price = anchor_price + (slope_per_block * blocks)
-        rows.append({"Time (CT)": dt.strftime("%I:%M %p"), "Price": round(price, 2)})
+        rows.append({"Time": dt.strftime("%I:%M %p"), "Price": round(price, 2)})
     return pd.DataFrame(rows)
 
 # ===============================
-# Main App
+# MAIN APPLICATION
 # ===============================
 
 def main():
     st.set_page_config(
-        page_title=APP_NAME, 
-        page_icon="📊", 
-        layout="wide", 
+        page_title=APP_NAME,
+        page_icon="📊",
+        layout="wide",
         initial_sidebar_state="expanded"
     )
 
-    # Sidebar
+    # ========== SIDEBAR ==========
     with st.sidebar:
+        st.markdown(f"""
+            <div class="sidebar-brand">
+                <div class="sidebar-logo">{APP_NAME}</div>
+                <div class="sidebar-version">{APP_VERSION}</div>
+            </div>
+        """, unsafe_allow_html=True)
+        
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-        st.markdown('<div class="sidebar-title">⚙️ Settings</div>', unsafe_allow_html=True)
-        mode = st.radio("Theme", ["Light", "Dark"], index=0, key="ui_theme")
+        st.markdown('<div class="sidebar-heading">⚙️ THEME</div>', unsafe_allow_html=True)
+        mode = st.radio("", ["Light", "Dark"], index=0, key="theme_mode", label_visibility="collapsed")
         inject_theme(mode)
         st.markdown('</div>', unsafe_allow_html=True)
         
+        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
+        
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-        st.markdown('<div class="sidebar-title">📊 Slope Configuration</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sidebar-heading">📊 SLOPE VALUES</div>', unsafe_allow_html=True)
         
         st.markdown(f"""
-            <div class='stat-card'>
-                <div class='stat-icon'>📈</div>
-                <div class='stat-label'>Ascending</div>
-                <div class='stat-value primary'>+{ASC_SLOPE}</div>
-                <div class='stat-sublabel'>per 30-min block</div>
+            <div class='metric-card'>
+                <div class='metric-header'>
+                    <div class='metric-icon'>📈</div>
+                    <div class='metric-label'>Ascending</div>
+                </div>
+                <div class='metric-value'>+{ASC_SLOPE}</div>
+                <div class='metric-sublabel'>per 30-minute block</div>
             </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<div style='height: 12px'></div>", unsafe_allow_html=True)
-        
         st.markdown(f"""
-            <div class='stat-card'>
-                <div class='stat-icon'>📉</div>
-                <div class='stat-label'>Descending</div>
-                <div class='stat-value accent'>{DESC_SLOPE}</div>
-                <div class='stat-sublabel'>per 30-min block</div>
+            <div class='metric-card'>
+                <div class='metric-header'>
+                    <div class='metric-icon'>📉</div>
+                    <div class='metric-label'>Descending</div>
+                </div>
+                <div class='metric-value'>{DESC_SLOPE}</div>
+                <div class='metric-sublabel'>per 30-minute block</div>
             </div>
         """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
+        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
+        
         st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
-        st.markdown('<div class="sidebar-title">ℹ️ Information</div>', unsafe_allow_html=True)
-        st.caption("🕐 All times in Central Time (CT)")
-        st.caption("⚠️ Excludes 4:00pm & 4:30pm maintenance")
-        st.caption("📊 RTH Session: 8:30am - 2:00pm")
-        st.caption("🎯 Each anchor generates ±0.5412 projections")
+        st.markdown('<div class="sidebar-heading">ℹ️ SYSTEM INFO</div>', unsafe_allow_html=True)
+        st.markdown("""
+            <div class='info-item'><span class='info-icon'>🕐</span> Central Time (CT) timezone</div>
+            <div class='info-item'><span class='info-icon'>📊</span> RTH: 8:30 AM - 2:00 PM</div>
+            <div class='info-item'><span class='info-icon'>⚠️</span> Excludes 4:00-5:00 PM maintenance</div>
+            <div class='info-item'><span class='info-icon'>🎯</span> Dual anchor projection system</div>
+            <div class='info-item'><span class='info-icon'>📈</span> 4 simultaneous projections</div>
+        """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Header
+    # ========== HEADER ==========
     st.markdown(f"""
-        <div class="prophet-masthead">
-            <div class="prophet-logo">{APP_NAME}</div>
-            <div class="prophet-separator"></div>
-            <div class="prophet-version">{APP_VERSION}</div>
+        <div class="app-header">
+            <div class="app-logo">{APP_NAME}</div>
+            <div class="app-separator"></div>
+            <div class="app-tagline">{APP_TAGLINE}</div>
+            <div class="app-version-badge">{APP_VERSION}</div>
         </div>
     """, unsafe_allow_html=True)
     
-    # Info Banner
+    # ========== ALERT BANNER ==========
     st.markdown("""
-        <div class="info-banner">
-            <div class="info-icon">💡</div>
-            <div class="info-content">
-                <div class="info-title">Dual Anchor Projection System</div>
-                <div class="info-text">
-                    Configure two anchor points from the previous trading session. Each anchor automatically generates both ascending (+0.5412) and descending (−0.5412) projections for the RTH session (8:30 AM - 2:00 PM CT). Maintenance window automatically excluded from calculations.
+        <div class="alert-banner">
+            <div class="alert-icon">💡</div>
+            <div class="alert-content">
+                <div class="alert-title">Dual Anchor Projection System</div>
+                <div class="alert-text">
+                    Configure two independent anchor points from the previous trading session. Each anchor automatically generates both ascending (+0.5412) and descending (−0.5412) projections across the RTH session (8:30 AM - 2:00 PM CT). The system intelligently excludes the 4:00-5:00 PM maintenance window from all calculations, ensuring precision accuracy.
                 </div>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # Configuration Card
-    st.markdown('<div class="prophet-card">', unsafe_allow_html=True)
+    # ========== CONFIGURATION CARD ==========
+    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
     st.markdown("""
         <div class="card-header">
             <div class="card-title">
@@ -710,102 +896,86 @@ def main():
     
     st.markdown('<div class="card-body">', unsafe_allow_html=True)
     
-    # Projection Day
-    st.markdown("<div style='margin-bottom: 32px;'>", unsafe_allow_html=True)
-    st.markdown("<div class='stat-label' style='margin-bottom: 12px;'>📅 PROJECTION DATE</div>", unsafe_allow_html=True)
-    proj_day = st.date_input(
-        "projection_date", 
-        value=datetime.now(CT).date(), 
-        key="spx_proj_day",
-        label_visibility="collapsed"
-    )
+    # Projection Date
+    st.markdown("<div style='margin-bottom: 2.5rem;'>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size: 0.75rem; font-weight: 800; color: #737373; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1rem;'>📅 PROJECTION DATE</div>", unsafe_allow_html=True)
+    proj_day = st.date_input("", value=datetime.now(CT).date(), key="proj_date", label_visibility="collapsed")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Anchor inputs
-    col1, col2 = st.columns(2, gap="large")
+    # Anchors
+    st.markdown('<div class="anchor-container">', unsafe_allow_html=True)
     
-    with col1:
-        st.markdown("""
-            <div class='anchor-section'>
-                <div class='anchor-header'>
-                    <div class='anchor-number'>1</div>
-                    <div>
-                        <div class='anchor-title'>Primary Anchor</div>
-                        <div class='anchor-subtitle'>Generates ascending & descending projections</div>
-                    </div>
-                </div>
-        """, unsafe_allow_html=True)
-        
-        anchor1_date = st.date_input(
-            "Anchor Date", 
-            value=datetime.now(CT).date() - timedelta(days=1), 
-            key="anchor1_date"
-        )
-        anchor1_price = st.number_input("Anchor Price ($)", value=6634.70, step=0.01, key="anchor1_price", format="%.2f")
-        anchor1_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="anchor1_time")
-        
-        st.markdown("""
-                <div class='projection-info'>
-                    <div class='projection-badge ascending'>↗ Ascending +0.5412</div>
-                    <div class='projection-badge descending'>↘ Descending −0.5412</div>
+    # Anchor 1
+    st.markdown("""
+        <div class='anchor-box'>
+            <div class='anchor-header'>
+                <div class='anchor-number'>1</div>
+                <div class='anchor-info'>
+                    <div class='anchor-title'>Primary Anchor</div>
+                    <div class='anchor-subtitle'>Generates bidirectional projections</div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
-        
-    with col2:
-        st.markdown("""
-            <div class='anchor-section accent'>
-                <div class='anchor-header'>
-                    <div class='anchor-number'>2</div>
-                    <div>
-                        <div class='anchor-title'>Secondary Anchor</div>
-                        <div class='anchor-subtitle'>Generates ascending & descending projections</div>
-                    </div>
-                </div>
-        """, unsafe_allow_html=True)
-        
-        anchor2_date = st.date_input(
-            "Anchor Date", 
-            value=datetime.now(CT).date() - timedelta(days=1), 
-            key="anchor2_date"
-        )
-        anchor2_price = st.number_input("Anchor Price ($)", value=6600.00, step=0.01, key="anchor2_price", format="%.2f")
-        anchor2_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="anchor2_time")
-        
-        st.markdown("""
-                <div class='projection-info'>
-                    <div class='projection-badge ascending'>↗ Ascending +0.5412</div>
-                    <div class='projection-badge descending'>↘ Descending −0.5412</div>
+    """, unsafe_allow_html=True)
+    
+    a1_date = st.date_input("Anchor Date", value=datetime.now(CT).date() - timedelta(days=1), key="a1_date")
+    a1_price = st.number_input("Anchor Price ($)", value=6634.70, step=0.01, key="a1_price", format="%.2f")
+    a1_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="a1_time")
+    
+    st.markdown("""
+            <div class='projection-badges'>
+                <div class='proj-badge up'>↗ +0.5412</div>
+                <div class='proj-badge down'>↘ −0.5412</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Anchor 2
+    st.markdown("""
+        <div class='anchor-box'>
+            <div class='anchor-header'>
+                <div class='anchor-number'>2</div>
+                <div class='anchor-info'>
+                    <div class='anchor-title'>Secondary Anchor</div>
+                    <div class='anchor-subtitle'>Generates bidirectional projections</div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
     
-    st.markdown("<div style='height: 40px'></div>", unsafe_allow_html=True)
+    a2_date = st.date_input("Anchor Date", value=datetime.now(CT).date() - timedelta(days=1), key="a2_date")
+    a2_price = st.number_input("Anchor Price ($)", value=6600.00, step=0.01, key="a2_price", format="%.2f")
+    a2_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="a2_time")
+    
+    st.markdown("""
+            <div class='projection-badges'>
+                <div class='proj-badge up'>↗ +0.5412</div>
+                <div class='proj-badge down'>↘ −0.5412</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # Calculate projections
+    # ========== CALCULATE PROJECTIONS ==========
     slots = rth_slots_ct_dt(proj_day, "08:30", "14:00")
     
-    anchor1_dt = CT.localize(datetime.combine(anchor1_date, anchor1_time))
-    anchor2_dt = CT.localize(datetime.combine(anchor2_date, anchor2_time))
+    a1_dt = CT.localize(datetime.combine(a1_date, a1_time))
+    a2_dt = CT.localize(datetime.combine(a2_date, a2_time))
     
-    # Generate 4 projections
-    df_a1_asc = project_line(anchor1_price, anchor1_dt, ASC_SLOPE, slots)
-    df_a1_desc = project_line(anchor1_price, anchor1_dt, DESC_SLOPE, slots)
-    df_a2_asc = project_line(anchor2_price, anchor2_dt, ASC_SLOPE, slots)
-    df_a2_desc = project_line(anchor2_price, anchor2_dt, DESC_SLOPE, slots)
+    df_a1_asc = project_line(a1_price, a1_dt, ASC_SLOPE, slots)
+    df_a1_desc = project_line(a1_price, a1_dt, DESC_SLOPE, slots)
+    df_a2_asc = project_line(a2_price, a2_dt, ASC_SLOPE, slots)
+    df_a2_desc = project_line(a2_price, a2_dt, DESC_SLOPE, slots)
     
-    # Merge all projections
     merged = pd.DataFrame({"Time (CT)": [dt.strftime("%I:%M %p") for dt in slots]})
-    merged = merged.merge(df_a1_asc.rename(columns={"Price": "Anchor 1 ↗"}), on="Time (CT)", how="left")
-    merged = merged.merge(df_a1_desc.rename(columns={"Price": "Anchor 1 ↘"}), on="Time (CT)", how="left")
-    merged = merged.merge(df_a2_asc.rename(columns={"Price": "Anchor 2 ↗"}), on="Time (CT)", how="left")
-    merged = merged.merge(df_a2_desc.rename(columns={"Price": "Anchor 2 ↘"}), on="Time (CT)", how="left")
+    merged["Anchor 1 ↗"] = df_a1_asc["Price"]
+    merged["Anchor 1 ↘"] = df_a1_desc["Price"]
+    merged["Anchor 2 ↗"] = df_a2_asc["Price"]
+    merged["Anchor 2 ↘"] = df_a2_desc["Price"]
 
-    # Summary stats
-    st.markdown('<div class="prophet-card">', unsafe_allow_html=True)
+    # ========== MARKET OPEN SUMMARY ==========
+    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
     st.markdown("""
         <div class="card-header">
             <div class="card-title">
@@ -820,41 +990,38 @@ def main():
     """, unsafe_allow_html=True)
     
     st.markdown('<div class="card-body">', unsafe_allow_html=True)
-    st.markdown('<div class="results-summary">', unsafe_allow_html=True)
+    st.markdown('<div class="stats-grid">', unsafe_allow_html=True)
     
-    # Get 8:30am values
-    open_vals = merged[merged["Time (CT)"] == "08:30 AM"].iloc[0]
+    open_row = merged[merged["Time (CT)"] == "08:30 AM"].iloc[0]
     
-    for col_name, label in [
-        ("Anchor 1 ↗", "Anchor 1 Ascending"),
-        ("Anchor 1 ↘", "Anchor 1 Descending"),
-        ("Anchor 2 ↗", "Anchor 2 Ascending"),
-        ("Anchor 2 ↘", "Anchor 2 Descending")
+    for col, label, anchor_price in [
+        ("Anchor 1 ↗", "Anchor 1 Ascending", a1_price),
+        ("Anchor 1 ↘", "Anchor 1 Descending", a1_price),
+        ("Anchor 2 ↗", "Anchor 2 Ascending", a2_price),
+        ("Anchor 2 ↘", "Anchor 2 Descending", a2_price)
     ]:
-        val = open_vals[col_name]
-        change = val - (anchor1_price if "Anchor 1" in col_name else anchor2_price)
+        val = open_row[col]
+        change = val - anchor_price
         change_class = "positive" if change > 0 else "negative"
         change_symbol = "+" if change > 0 else ""
         
         st.markdown(f"""
-            <div class='summary-card'>
-                <div class='summary-label'>{label}</div>
-                <div class='summary-value'>${val:.2f}</div>
-                <div class='summary-change {change_class}'>{change_symbol}{change:.2f}</div>
+            <div class='stat-box'>
+                <div class='stat-label'>{label}</div>
+                <div class='stat-value'>${val:.2f}</div>
+                <div class='stat-change {change_class}'>{change_symbol}{change:.2f}</div>
             </div>
         """, unsafe_allow_html=True)
     
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div></div></div>', unsafe_allow_html=True)
 
-    # Results Table
-    st.markdown('<div class="prophet-card">', unsafe_allow_html=True)
+    # ========== RESULTS TABLE ==========
+    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
     st.markdown("""
         <div class="card-header">
             <div class="card-title">
                 <span class="card-icon">📊</span>
-                <span>Complete Projection Results</span>
+                <span>Complete Projection Matrix</span>
             </div>
             <div class="card-badge">
                 <span>📋</span>
@@ -864,31 +1031,32 @@ def main():
     """, unsafe_allow_html=True)
     
     st.markdown('<div class="card-body">', unsafe_allow_html=True)
-    st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-    st.dataframe(merged, use_container_width=True, hide_index=True, height=500)
+    st.markdown('<div class="table-wrapper">', unsafe_allow_html=True)
+    st.dataframe(merged, use_container_width=True, hide_index=True, height=550)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("<div style='height: 32px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 2.5rem'></div>", unsafe_allow_html=True)
 
-    # Export buttons
-    st.markdown("<div class='stat-label' style='margin-bottom: 16px;'>📥 EXPORT DATA</div>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3, gap="medium")
+    # Export Buttons
+    st.markdown("<div style='font-size: 0.75rem; font-weight: 800; color: #737373; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1.25rem;'>📥 EXPORT OPTIONS</div>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3, gap="large")
     
     with col1:
         st.download_button(
-            "💾 Download Complete Dataset",
+            "💾 Complete Dataset",
             merged.to_csv(index=False).encode(),
-            "spx_prophet_complete_projections.csv",
+            "spx_prophet_complete.csv",
             "text/csv",
-            key="dl_all",
+            key="dl_complete",
             use_container_width=True
         )
     
     with col2:
-        anchor1_data = merged[["Time (CT)", "Anchor 1 ↗", "Anchor 1 ↘"]]
+        a1_data = merged[["Time (CT)", "Anchor 1 ↗", "Anchor 1 ↘"]]
         st.download_button(
-            "📊 Download Anchor 1 Data",
-            anchor1_data.to_csv(index=False).encode(),
+            "📊 Anchor 1 Data",
+            a1_data.to_csv(index=False).encode(),
             "spx_prophet_anchor1.csv",
             "text/csv",
             key="dl_a1",
@@ -896,24 +1064,28 @@ def main():
         )
     
     with col3:
-        anchor2_data = merged[["Time (CT)", "Anchor 2 ↗", "Anchor 2 ↘"]]
+        a2_data = merged[["Time (CT)", "Anchor 2 ↗", "Anchor 2 ↘"]]
         st.download_button(
-            "📊 Download Anchor 2 Data",
-            anchor2_data.to_csv(index=False).encode(),
+            "📊 Anchor 2 Data",
+            a2_data.to_csv(index=False).encode(),
             "spx_prophet_anchor2.csv",
             "text/csv",
             key="dl_a2",
             use_container_width=True
         )
 
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
-    # Footer
+    # ========== FOOTER ==========
     st.markdown(f"""
-        <div class="prophet-footer">
-            <span class="footer-brand">{APP_NAME}</span> · {APP_VERSION}<br>
-            Institutional-Grade Market Projection Platform · © 2025
+        <div class="app-footer">
+            <span class="footer-brand">{APP_NAME}</span>
+            <span class="footer-divider">·</span>
+            <span>{APP_VERSION}</span>
+            <span class="footer-divider">·</span>
+            <span>Institutional-Grade Market Projection Platform</span>
+            <span class="footer-divider">·</span>
+            <span>© 2025</span>
         </div>
     """, unsafe_allow_html=True)
 
