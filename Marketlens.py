@@ -99,16 +99,6 @@ def get_previous_day_ohlc(reference_date: date) -> Optional[Dict]:
 # TIME & CALCULATIONS
 # ===============================
 
-def is_weekend_gap(dt: datetime) -> bool:
-    """Check if datetime falls in weekend gap (Friday 3:30pm - Sunday 5:00pm CT)"""
-    if dt.weekday() == 4:  # Friday
-        return dt.hour >= 15 and dt.minute >= 30
-    elif dt.weekday() == 5:  # Saturday
-        return True
-    elif dt.weekday() == 6:  # Sunday
-        return dt.hour < 17
-    return False
-
 def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetime]:
     h1, m1 = map(int, start.split(":"))
     h2, m2 = map(int, end.split(":"))
@@ -117,19 +107,14 @@ def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetim
     idx = pd.date_range(start=start_dt, end=end_dt, freq="30min", tz=CT)
     return list(idx.to_pydatetime())
 
-def count_blocks_with_gaps(start_dt: datetime, end_dt: datetime) -> int:
-    """Count blocks skipping maintenance (4:00-5:00pm) and weekend gaps"""
+def count_blocks_with_maintenance_skip(start_dt: datetime, end_dt: datetime) -> int:
+    """Count 30-minute blocks from start to end, skipping 4:00pm and 4:30pm maintenance"""
     blocks = 0
     current = start_dt
     
     while current < end_dt:
-        # Skip maintenance window
+        # Skip BOTH 4:00pm and 4:30pm slots (maintenance window)
         if current.hour == 16 and current.minute in [0, 30]:
-            current += timedelta(minutes=30)
-            continue
-        
-        # Skip weekend gap
-        if is_weekend_gap(current):
             current += timedelta(minutes=30)
             continue
         
@@ -139,11 +124,12 @@ def count_blocks_with_gaps(start_dt: datetime, end_dt: datetime) -> int:
     return blocks
 
 def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block: float, rth_slots_ct: List[datetime]) -> pd.DataFrame:
+    """Project prices from anchor point across RTH slots"""
     minute = 0 if anchor_time_ct.minute < 30 else 30
     anchor_aligned = anchor_time_ct.replace(minute=minute, second=0, microsecond=0)
     rows = []
     for dt in rth_slots_ct:
-        blocks = count_blocks_with_gaps(anchor_aligned, dt)
+        blocks = count_blocks_with_maintenance_skip(anchor_aligned, dt)
         price = anchor_price + (slope_per_block * blocks)
         rows.append({"Time": dt.strftime("%I:%M %p"), "Price": round(price, 2)})
     return pd.DataFrame(rows)
