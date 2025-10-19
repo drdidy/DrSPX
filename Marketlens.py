@@ -1,30 +1,113 @@
 # app.py
-# SPX PROPHET — Ultimate Institutional Trading Platform
-# Advanced dual-anchor projection system with professional analytics
-# Built for serious traders who demand precision and profitability
+# SPX PROPHET — Ultimate Professional Trading Platform
+# Advanced dual-anchor system with live price tracking and intelligent trading zones
+# Built for serious institutional traders
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta, time as dtime, date
 import pytz
-from typing import List, Dict, Tuple
-import numpy as np
+from typing import List, Dict, Tuple, Optional
+import yfinance as yf
 
 APP_NAME = "SPX PROPHET"
-APP_VERSION = "Ultimate Edition 3.0"
-APP_TAGLINE = "Institutional Market Intelligence Platform"
+APP_VERSION = "Ultimate Pro 4.0"
+APP_TAGLINE = "Live Market Intelligence & Projection Platform"
 
 # ===============================
 # CONFIGURATION
 # ===============================
 
 CT = pytz.timezone("America/Chicago")
+ET = pytz.timezone("America/New_York")
 ASC_SLOPE = 0.5412
 DESC_SLOPE = -0.5412
 
+# Line naming (strategic)
+LINE_NAMES = {
+    "skyline_bull": "Final Resistance",
+    "skyline_bear": "Mid Support",
+    "baseline_bull": "Mid Resistance",
+    "baseline_bear": "Final Support"
+}
+
 # ===============================
-# CORE CALCULATIONS
+# LIVE DATA FUNCTIONS
 # ===============================
+
+@st.cache_data(ttl=60)
+def get_live_es_price() -> Optional[float]:
+    """Fetch live ES futures price"""
+    try:
+        es = yf.Ticker("ES=F")
+        data = es.history(period="1d", interval="1m")
+        if not data.empty:
+            return float(data['Close'].iloc[-1])
+    except:
+        pass
+    return None
+
+def calculate_spx_es_offset(reference_date: date) -> float:
+    """Calculate SPX-ES offset from 2pm CT on reference date"""
+    try:
+        # Get SPX close at 2pm CT (3pm ET)
+        spx = yf.Ticker("^GSPC")
+        spx_data = spx.history(start=reference_date, end=reference_date + timedelta(days=1), interval="1h")
+        
+        # Get ES close at same time
+        es = yf.Ticker("ES=F")
+        es_data = es.history(start=reference_date, end=reference_date + timedelta(days=1), interval="1h")
+        
+        if not spx_data.empty and not es_data.empty:
+            # Try to get 2pm CT (3pm ET) values
+            spx_2pm = spx_data['Close'].iloc[-2] if len(spx_data) >= 2 else spx_data['Close'].iloc[-1]
+            es_2pm = es_data['Close'].iloc[-2] if len(es_data) >= 2 else es_data['Close'].iloc[-1]
+            return float(spx_2pm - es_2pm)
+    except:
+        pass
+    return 0.0
+
+def get_spx_equivalent_price(offset: float) -> Optional[float]:
+    """Get SPX equivalent price (ES - offset)"""
+    es_price = get_live_es_price()
+    if es_price:
+        return es_price - offset
+    return None
+
+def get_previous_day_ohlc(reference_date: date) -> Optional[Dict]:
+    """Get previous trading day OHLC for anchor validation"""
+    try:
+        spx = yf.Ticker("^GSPC")
+        # Get a few days to ensure we catch previous trading day
+        start = reference_date - timedelta(days=7)
+        data = spx.history(start=start, end=reference_date)
+        if not data.empty:
+            last_day = data.iloc[-1]
+            return {
+                'open': float(last_day['Open']),
+                'high': float(last_day['High']),
+                'low': float(last_day['Low']),
+                'close': float(last_day['Close']),
+                'date': data.index[-1].date()
+            }
+    except:
+        pass
+    return None
+
+# ===============================
+# TIME & CALCULATIONS
+# ===============================
+
+def is_weekend_gap(dt: datetime) -> bool:
+    """Check if datetime falls in weekend gap (Friday 3:30pm - Sunday 5:00pm CT)"""
+    if dt.weekday() == 4:  # Friday
+        return dt.hour >= 15 and dt.minute >= 30
+    elif dt.weekday() == 5:  # Saturday
+        return True
+    elif dt.weekday() == 6:  # Sunday
+        return dt.hour < 17
+    return False
 
 def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetime]:
     h1, m1 = map(int, start.split(":"))
@@ -34,15 +117,25 @@ def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetim
     idx = pd.date_range(start=start_dt, end=end_dt, freq="30min", tz=CT)
     return list(idx.to_pydatetime())
 
-def count_blocks_with_maintenance_skip(start_dt: datetime, end_dt: datetime) -> int:
+def count_blocks_with_gaps(start_dt: datetime, end_dt: datetime) -> int:
+    """Count blocks skipping maintenance (4:00-5:00pm) and weekend gaps"""
     blocks = 0
     current = start_dt
+    
     while current < end_dt:
+        # Skip maintenance window
         if current.hour == 16 and current.minute in [0, 30]:
             current += timedelta(minutes=30)
             continue
+        
+        # Skip weekend gap
+        if is_weekend_gap(current):
+            current += timedelta(minutes=30)
+            continue
+        
         blocks += 1
         current += timedelta(minutes=30)
+    
     return blocks
 
 def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block: float, rth_slots_ct: List[datetime]) -> pd.DataFrame:
@@ -50,574 +143,171 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block:
     anchor_aligned = anchor_time_ct.replace(minute=minute, second=0, microsecond=0)
     rows = []
     for dt in rth_slots_ct:
-        blocks = count_blocks_with_maintenance_skip(anchor_aligned, dt)
+        blocks = count_blocks_with_gaps(anchor_aligned, dt)
         price = anchor_price + (slope_per_block * blocks)
         rows.append({"Time": dt.strftime("%I:%M %p"), "Price": round(price, 2)})
     return pd.DataFrame(rows)
 
-def calculate_analytics(df: pd.DataFrame, anchor_names: Dict) -> Dict:
-    """Calculate advanced trading analytics"""
-    analytics = {}
+# ===============================
+# ANALYTICS
+# ===============================
+
+def get_trading_zone(price: float, projections: Dict[str, float]) -> Tuple[str, str, str]:
+    """Determine which trading zone price is in"""
+    final_resistance = projections['Final Resistance']
+    mid_support = projections['Mid Support']
+    mid_resistance = projections['Mid Resistance']
+    final_support = projections['Final Support']
     
-    # Get all projection columns
-    proj_cols = [col for col in df.columns if col != "Time (CT)"]
+    # Sort to get boundaries
+    sorted_prices = sorted([final_resistance, mid_support, mid_resistance, final_support])
     
-    # Price range analysis
-    all_prices = df[proj_cols].values.flatten()
-    analytics['overall_range'] = {
-        'high': float(np.max(all_prices)),
-        'low': float(np.min(all_prices)),
-        'mid': float(np.mean(all_prices)),
-        'range': float(np.max(all_prices) - np.min(all_prices))
+    if price >= max(sorted_prices):
+        return "🔴 BREAKOUT ZONE", "Above all projections - Strong bullish breakout", "error"
+    elif price <= min(sorted_prices):
+        return "🔵 BREAKDOWN ZONE", "Below all projections - Strong bearish breakdown", "info"
+    elif price >= final_resistance:
+        return "🟢 FINAL RESISTANCE ZONE", "SELL ZONE - Expect reversal down", "success"
+    elif price <= final_support:
+        return "🟢 FINAL SUPPORT ZONE", "BUY ZONE - Expect reversal up", "success"
+    elif price >= mid_resistance:
+        return "🟡 MID RESISTANCE ZONE", "Near resistance - Watch for rejection or breakout", "warning"
+    elif price <= mid_support:
+        return "🟡 MID SUPPORT ZONE", "Near support - Watch for bounce or breakdown", "warning"
+    else:
+        return "⚪ NEUTRAL ZONE", "Between mid levels - Wait for direction", "info"
+
+def calculate_distances(price: float, projections: Dict[str, float]) -> Dict[str, float]:
+    """Calculate distance from current price to each projection"""
+    return {
+        name: round(abs(price - proj_price), 2)
+        for name, proj_price in projections.items()
     }
+
+def get_playbook(open_zone: str, projections: Dict[str, float]) -> str:
+    """Generate trading playbook based on opening zone"""
+    if "FINAL SUPPORT" in open_zone:
+        return f"📈 **BUY** from Final Support (${projections['Final Support']:.2f}) → Target Mid Resistance (${projections['Mid Resistance']:.2f}) or Final Resistance (${projections['Final Resistance']:.2f})"
+    elif "FINAL RESISTANCE" in open_zone:
+        return f"📉 **SELL** from Final Resistance (${projections['Final Resistance']:.2f}) → Target Mid Support (${projections['Mid Support']:.2f}) or Final Support (${projections['Final Support']:.2f})"
+    elif "MID SUPPORT" in open_zone:
+        return f"📉 **SHORT** to Final Support (${projections['Final Support']:.2f}), then **BUY** to Mid Resistance (${projections['Mid Resistance']:.2f})"
+    elif "MID RESISTANCE" in open_zone:
+        return f"📈 **BUY** to Final Resistance (${projections['Final Resistance']:.2f}), then **SELL** to Mid Support (${projections['Mid Support']:.2f})"
+    elif "NEUTRAL" in open_zone:
+        return f"⚖️ **WAIT** for directional move. BUY at ${projections['Mid Support']:.2f} or SELL at ${projections['Mid Resistance']:.2f}"
+    elif "BREAKOUT" in open_zone:
+        return f"🚀 **STRONG BULL** - Continuation likely. Trail stops, target continuation"
+    elif "BREAKDOWN" in open_zone:
+        return f"💥 **STRONG BEAR** - Continuation likely. Trail stops, target continuation"
+    return "Monitor price action"
+
+def validate_anchor(anchor_price: float, anchor_name: str, prev_ohlc: Dict) -> Tuple[str, str]:
+    """Validate anchor quality against previous day OHLC"""
+    if not prev_ohlc:
+        return "⚪", "No historical data available"
     
-    # Opening analysis (8:30 AM)
-    open_row = df[df["Time (CT)"] == "08:30 AM"]
-    if not open_row.empty:
-        analytics['market_open'] = {
-            col: float(open_row[col].iloc[0]) for col in proj_cols
-        }
-        open_prices = [float(open_row[col].iloc[0]) for col in proj_cols]
-        analytics['open_range'] = {
-            'high': max(open_prices),
-            'low': min(open_prices),
-            'spread': max(open_prices) - min(open_prices)
-        }
+    high = prev_ohlc['high']
+    low = prev_ohlc['low']
+    close = prev_ohlc['close']
     
-    # Closing analysis (2:00 PM)
-    close_row = df[df["Time (CT)"] == "02:00 PM"]
-    if not close_row.empty:
-        analytics['market_close'] = {
-            col: float(close_row[col].iloc[0]) for col in proj_cols
-        }
-        close_prices = [float(close_row[col].iloc[0]) for col in proj_cols]
-        analytics['close_range'] = {
-            'high': max(close_prices),
-            'low': min(close_prices),
-            'spread': max(close_prices) - min(close_prices)
-        }
-    
-    # Key levels (psychological levels, round numbers)
-    min_price = int(analytics['overall_range']['low'] / 10) * 10
-    max_price = int(analytics['overall_range']['high'] / 10) * 10 + 10
-    analytics['key_levels'] = list(range(min_price, max_price + 1, 10))
-    
-    # Confluence zones (where projections are close)
-    confluence_zones = []
-    for idx, row in df.iterrows():
-        prices = [row[col] for col in proj_cols]
-        # Check if any two prices are within 5 points
-        for i in range(len(prices)):
-            for j in range(i+1, len(prices)):
-                if abs(prices[i] - prices[j]) <= 5:
-                    confluence_zones.append({
-                        'time': row["Time (CT)"],
-                        'price': (prices[i] + prices[j]) / 2,
-                        'lines': [proj_cols[i], proj_cols[j]]
-                    })
-    analytics['confluence_zones'] = confluence_zones
-    
-    return analytics
+    if "Skyline" in anchor_name or "SKYLINE" in anchor_name:
+        # Upper anchor should be near high
+        if abs(anchor_price - high) < 5:
+            return "🟢", f"EXCELLENT - Near previous high (${high:.2f})"
+        elif abs(anchor_price - close) < 5:
+            return "🟡", f"GOOD - Near previous close (${close:.2f})"
+        else:
+            return "🟠", f"CAUTION - Prev high: ${high:.2f}, close: ${close:.2f}"
+    else:
+        # Lower anchor should be near low
+        if abs(anchor_price - low) < 5:
+            return "🟢", f"EXCELLENT - Near previous low (${low:.2f})"
+        elif abs(anchor_price - close) < 5:
+            return "🟡", f"GOOD - Near previous close (${close:.2f})"
+        else:
+            return "🟠", f"CAUTION - Prev low: ${low:.2f}, close: ${close:.2f}"
 
 # ===============================
 # THEME
 # ===============================
 
 def get_theme_css(mode: str) -> str:
-    if mode == "🌙 Dark Mode":
-        colors = {
-            "bg": "#000000",
-            "bg_secondary": "#0a0a0a",
-            "surface": "#0f0f0f",
-            "surface_elevated": "#1a1a1a",
-            "surface_hover": "#252525",
-            "text": "#ffffff",
-            "text_secondary": "#a3a3a3",
-            "text_muted": "#666666",
-            "primary": "#00ff88",
-            "primary_hover": "#00cc6a",
-            "accent": "#00d4ff",
-            "accent_hover": "#00a8cc",
-            "success": "#10b981",
-            "error": "#ef4444",
-            "warning": "#f59e0b",
-            "border": "#1f1f1f",
-            "border_accent": "#333333",
+    if mode == "🌙 Dark":
+        c = {
+            "bg": "#000", "surface": "#0a0a0a", "elevated": "#1a1a1a", "text": "#fff",
+            "secondary": "#a3a3a3", "muted": "#666", "primary": "#00ff88", "accent": "#00d4ff",
+            "success": "#10b981", "error": "#ef4444", "warning": "#f59e0b", "border": "#1f1f1f"
         }
     else:
-        colors = {
-            "bg": "#ffffff",
-            "bg_secondary": "#fafafa",
-            "surface": "#f5f5f5",
-            "surface_elevated": "#ffffff",
-            "surface_hover": "#f0f0f0",
-            "text": "#0a0a0a",
-            "text_secondary": "#525252",
-            "text_muted": "#a3a3a3",
-            "primary": "#00b366",
-            "primary_hover": "#008f51",
-            "accent": "#0099cc",
-            "accent_hover": "#007aa3",
-            "success": "#10b981",
-            "error": "#ef4444",
-            "warning": "#f59e0b",
-            "border": "#e5e5e5",
-            "border_accent": "#d4d4d4",
+        c = {
+            "bg": "#fff", "surface": "#fafafa", "elevated": "#fff", "text": "#0a0a0a",
+            "secondary": "#525252", "muted": "#a3a3a3", "primary": "#00b366", "accent": "#0099cc",
+            "success": "#10b981", "error": "#ef4444", "warning": "#f59e0b", "border": "#e5e5e5"
         }
     
     return f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap');
     
-    :root {{
-        --bg: {colors['bg']};
-        --surface: {colors['surface']};
-        --text: {colors['text']};
-        --primary: {colors['primary']};
-        --accent: {colors['accent']};
-    }}
+    * {{ font-family: 'Inter', sans-serif; }}
+    html, body, [class*="st"] {{ background: {c['bg']} !important; color: {c['text']} !important; }}
     
-    * {{
-        font-family: 'Inter', -apple-system, sans-serif;
-    }}
+    section[data-testid="stSidebar"] {{ background: {c['surface']} !important; border-right: 1px solid {c['border']} !important; }}
+    section[data-testid="stSidebar"] label {{ color: {c['secondary']} !important; font-weight: 700 !important; font-size: 0.75rem !important; text-transform: uppercase !important; }}
     
-    html, body, [class*="st-"] {{
-        background: {colors['bg']} !important;
-        color: {colors['text']} !important;
-    }}
+    .app-header {{ text-align: center; padding: 3.5rem 0 2.5rem; background: radial-gradient(ellipse, {c['primary']}08, transparent); }}
+    .app-logo {{ font-size: 4.5rem; font-weight: 900; letter-spacing: 0.1em; background: linear-gradient(135deg, {c['primary']}, {c['accent']}); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+    .app-sep {{ width: 140px; height: 4px; background: linear-gradient(90deg, transparent, {c['primary']}, {c['accent']}, transparent); margin: 1.25rem auto; }}
+    .app-tag {{ font-size: 1.125rem; color: {c['secondary']}; font-weight: 500; }}
     
-    /* Sidebar visible and styled */
-    section[data-testid="stSidebar"] {{
-        background: {colors['surface']} !important;
-        border-right: 1px solid {colors['border']} !important;
-        padding: 2rem 1.5rem !important;
-    }}
+    .live-ticker {{ background: {c['elevated']}; border: 2px solid {c['primary']}; border-radius: 16px; padding: 2rem; margin: 2rem 0; box-shadow: 0 0 30px {c['primary']}20; }}
+    .ticker-price {{ font-size: 3.5rem; font-weight: 900; font-family: 'JetBrains Mono'; background: linear-gradient(135deg, {c['primary']}, {c['accent']}); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center; }}
+    .ticker-label {{ text-align: center; font-size: 0.875rem; color: {c['muted']}; text-transform: uppercase; font-weight: 700; margin-top: 0.5rem; }}
     
-    section[data-testid="stSidebar"] > div {{
-        background: {colors['surface']} !important;
-    }}
+    .zone-alert {{ padding: 1.5rem 2rem; border-radius: 14px; margin: 1.5rem 0; border-left: 4px solid; }}
+    .zone-alert.success {{ background: {c['success']}15; border-color: {c['success']}; }}
+    .zone-alert.error {{ background: {c['error']}15; border-color: {c['error']}; }}
+    .zone-alert.warning {{ background: {c['warning']}15; border-color: {c['warning']}; }}
+    .zone-alert.info {{ background: {c['accent']}15; border-color: {c['accent']}; }}
+    .zone-title {{ font-size: 1.5rem; font-weight: 800; margin-bottom: 0.5rem; }}
+    .zone-desc {{ font-size: 1rem; color: {c['secondary']}; }}
     
-    /* Make sidebar controls visible */
-    section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
-        gap: 1.5rem;
-    }}
+    .card {{ background: {c['elevated']}; border: 1px solid {c['border']}; border-radius: 16px; margin: 1.5rem 0; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.04); }}
+    .card-header {{ background: {c['surface']}; border-bottom: 1px solid {c['border']}; padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; }}
+    .card-title {{ font-size: 1.5rem; font-weight: 800; display: flex; align-items: center; gap: 0.75rem; }}
+    .card-body {{ padding: 2rem; }}
     
-    section[data-testid="stSidebar"] label {{
-        color: {colors['text_secondary']} !important;
-        font-weight: 700 !important;
-        font-size: 0.75rem !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.08em !important;
-    }}
+    .metric-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; margin: 1.5rem 0; }}
+    .metric-box {{ background: {c['surface']}; border: 1px solid {c['border']}; border-radius: 12px; padding: 1.5rem; text-align: center; }}
+    .metric-label {{ font-size: 0.7rem; font-weight: 800; color: {c['muted']}; text-transform: uppercase; margin-bottom: 0.75rem; }}
+    .metric-value {{ font-size: 1.875rem; font-weight: 900; font-family: 'JetBrains Mono'; color: {c['text']}; }}
+    .metric-sub {{ font-size: 0.813rem; color: {c['secondary']}; margin-top: 0.5rem; }}
     
-    section[data-testid="stSidebar"] .stRadio > div {{
-        background: {colors['surface_elevated']} !important;
-        border: 1px solid {colors['border']} !important;
-        border-radius: 12px !important;
-        padding: 1rem !important;
-    }}
+    .distance-item {{ display: flex; justify-content: space-between; padding: 0.875rem 1.25rem; background: {c['surface']}; border: 1px solid {c['border']}; border-radius: 10px; margin: 0.5rem 0; }}
+    .distance-name {{ font-weight: 700; color: {c['text']}; }}
+    .distance-value {{ font-family: 'JetBrains Mono'; font-weight: 700; color: {c['primary']}; }}
     
-    /* Header */
-    .app-header {{
-        text-align: center;
-        padding: 4rem 0 3rem 0;
-        background: radial-gradient(ellipse at center, {colors['primary']}08 0%, transparent 70%);
-    }}
+    .playbook {{ background: linear-gradient(135deg, {c['primary']}12, {c['accent']}12); border: 2px solid {c['primary']}40; border-radius: 14px; padding: 1.75rem 2rem; margin: 1.5rem 0; }}
+    .playbook-title {{ font-size: 1.25rem; font-weight: 800; margin-bottom: 1rem; }}
     
-    .app-logo {{
-        font-size: 5rem;
-        font-weight: 900;
-        letter-spacing: 0.1em;
-        background: linear-gradient(135deg, {colors['primary']}, {colors['accent']});
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-        line-height: 1;
-    }}
+    .anchor-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0; }}
+    .anchor-box {{ background: {c['surface']}; border: 2px solid {c['border']}; border-radius: 14px; padding: 1.75rem; }}
+    .anchor-box:hover {{ border-color: {c['primary']}; box-shadow: 0 0 20px {c['primary']}15; }}
     
-    .app-separator {{
-        width: 150px;
-        height: 4px;
-        background: linear-gradient(90deg, transparent, {colors['primary']}, {colors['accent']}, transparent);
-        margin: 1.5rem auto;
-        border-radius: 2px;
-    }}
+    .validation-badge {{ display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: {c['surface']}; border: 1px solid {c['border']}; border-radius: 8px; font-size: 0.813rem; font-weight: 600; margin: 0.5rem 0; }}
     
-    .app-tagline {{
-        font-size: 1.25rem;
-        color: {colors['text_secondary']};
-        font-weight: 500;
-    }}
+    .stDataFrame {{ border: 1px solid {c['border']}; border-radius: 12px; overflow: hidden; }}
+    .stDataFrame table {{ font-family: 'JetBrains Mono' !important; }}
+    .stDataFrame thead th {{ background: {c['surface']} !important; color: {c['muted']} !important; font-weight: 900 !important; text-transform: uppercase !important; }}
     
-    /* Cards */
-    .premium-card {{
-        background: {colors['surface_elevated']};
-        border: 1px solid {colors['border']};
-        border-radius: 20px;
-        margin: 2rem 0;
-        overflow: hidden;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
-        transition: all 0.3s ease;
-    }}
-    
-    .premium-card:hover {{
-        box-shadow: 0 8px 40px rgba(0,0,0,0.08);
-        transform: translateY(-2px);
-    }}
-    
-    .card-header {{
-        background: {colors['surface']};
-        border-bottom: 1px solid {colors['border']};
-        padding: 2rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }}
-    
-    .card-title {{
-        font-size: 1.75rem;
-        font-weight: 800;
-        color: {colors['text']};
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-    }}
-    
-    .card-icon {{
-        font-size: 2.25rem;
-    }}
-    
-    .card-badge {{
-        padding: 0.75rem 1.5rem;
-        background: linear-gradient(135deg, {colors['primary']}15, {colors['accent']}15);
-        border: 1px solid {colors['border_accent']};
-        border-radius: 100px;
-        font-size: 0.75rem;
-        font-weight: 800;
-        color: {colors['primary']};
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-    }}
-    
-    .card-body {{
-        padding: 2.5rem;
-    }}
-    
-    /* Anchor boxes */
-    .anchor-grid {{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2rem;
-        margin: 2rem 0;
-    }}
-    
-    .anchor-box {{
-        background: {colors['surface']};
-        border: 2px solid {colors['border']};
-        border-radius: 16px;
-        padding: 2rem;
-        transition: all 0.3s ease;
-        position: relative;
-    }}
-    
-    .anchor-box::before {{
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, {colors['primary']}, {colors['accent']});
-        opacity: 0;
-        transition: opacity 0.3s;
-    }}
-    
-    .anchor-box:hover {{
-        border-color: {colors['primary']};
-        box-shadow: 0 0 0 4px {colors['primary']}15;
-    }}
-    
-    .anchor-box:hover::before {{
-        opacity: 1;
-    }}
-    
-    .anchor-header {{
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        margin-bottom: 2rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid {colors['border']};
-    }}
-    
-    .anchor-badge {{
-        width: 60px;
-        height: 60px;
-        border-radius: 14px;
-        background: linear-gradient(135deg, {colors['primary']}, {colors['accent']});
-        color: #000;
-        font-size: 2rem;
-        font-weight: 900;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 4px 16px {colors['primary']}40;
-    }}
-    
-    .anchor-name {{
-        flex: 1;
-    }}
-    
-    .anchor-label {{
-        font-size: 0.75rem;
-        font-weight: 700;
-        color: {colors['text_muted']};
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-    }}
-    
-    .anchor-title {{
-        font-size: 1.5rem;
-        font-weight: 800;
-        color: {colors['text']};
-        margin-top: 0.25rem;
-    }}
-    
-    .projection-tags {{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.75rem;
-        margin-top: 1.5rem;
-        padding-top: 1.5rem;
-        border-top: 1px solid {colors['border']};
-    }}
-    
-    .proj-tag {{
-        padding: 1rem;
-        border-radius: 10px;
-        font-size: 0.875rem;
-        font-weight: 700;
-        text-align: center;
-    }}
-    
-    .proj-tag.bull {{
-        background: linear-gradient(135deg, {colors['success']}18, {colors['success']}08);
-        color: {colors['success']};
-        border: 1px solid {colors['success']}40;
-    }}
-    
-    .proj-tag.bear {{
-        background: linear-gradient(135deg, {colors['error']}18, {colors['error']}08);
-        color: {colors['error']};
-        border: 1px solid {colors['error']}40;
-    }}
-    
-    /* Stats grid */
-    .stats-grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1.5rem;
-        margin: 2rem 0;
-    }}
-    
-    .stat-card {{
-        background: {colors['surface']};
-        border: 1px solid {colors['border']};
-        border-radius: 14px;
-        padding: 1.75rem;
-        text-align: center;
-        transition: all 0.2s;
-    }}
-    
-    .stat-card:hover {{
-        border-color: {colors['primary']};
-        box-shadow: 0 4px 20px {colors['primary']}15;
-        transform: translateY(-2px);
-    }}
-    
-    .stat-label {{
-        font-size: 0.7rem;
-        font-weight: 800;
-        color: {colors['text_muted']};
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        margin-bottom: 0.75rem;
-    }}
-    
-    .stat-value {{
-        font-size: 2rem;
-        font-weight: 900;
-        font-family: 'JetBrains Mono', monospace;
-        color: {colors['text']};
-        margin-bottom: 0.5rem;
-    }}
-    
-    .stat-change {{
-        font-size: 0.875rem;
-        font-weight: 700;
-        font-family: 'JetBrains Mono', monospace;
-    }}
-    
-    .positive {{ color: {colors['success']}; }}
-    .negative {{ color: {colors['error']}; }}
-    
-    /* Analytics sections */
-    .analytics-section {{
-        background: {colors['surface']};
-        border: 1px solid {colors['border']};
-        border-radius: 14px;
-        padding: 2rem;
-        margin: 1.5rem 0;
-    }}
-    
-    .section-title {{
-        font-size: 1.25rem;
-        font-weight: 800;
-        color: {colors['text']};
-        margin-bottom: 1.5rem;
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-    }}
-    
-    .level-badge {{
-        display: inline-block;
-        padding: 0.5rem 1rem;
-        background: {colors['surface_elevated']};
-        border: 1px solid {colors['border']};
-        border-radius: 8px;
-        font-family: 'JetBrains Mono', monospace;
-        font-weight: 700;
-        font-size: 0.938rem;
-        margin: 0.5rem;
-    }}
-    
-    .confluence-item {{
-        background: {colors['surface_elevated']};
-        border-left: 3px solid {colors['warning']};
-        padding: 1rem 1.5rem;
-        margin: 0.75rem 0;
-        border-radius: 8px;
-    }}
-    
-    /* Table styling */
-    .stDataFrame {{
-        border: 1px solid {colors['border']};
-        border-radius: 14px;
-        overflow: hidden;
-    }}
-    
-    .stDataFrame table {{
-        font-family: 'JetBrains Mono', monospace !important;
-    }}
-    
-    .stDataFrame thead th {{
-        background: {colors['surface']} !important;
-        color: {colors['text_muted']} !important;
-        font-weight: 900 !important;
-        font-size: 0.75rem !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.1em !important;
-        padding: 1.25rem 1.5rem !important;
-        border-bottom: 2px solid {colors['border']} !important;
-    }}
-    
-    .stDataFrame tbody td {{
-        padding: 1.125rem 1.5rem !important;
-        font-weight: 600 !important;
-        border-bottom: 1px solid {colors['border']} !important;
-    }}
-    
-    /* Input fields */
-    .stNumberInput input,
-    .stDateInput input,
-    .stTimeInput input,
-    .stTextInput input {{
-        background: {colors['surface_elevated']} !important;
-        border: 1.5px solid {colors['border']} !important;
-        border-radius: 10px !important;
-        padding: 1rem 1.125rem !important;
-        font-size: 1.063rem !important;
-        font-weight: 700 !important;
-        font-family: 'JetBrains Mono', monospace !important;
-        color: {colors['text']} !important;
-    }}
-    
-    .stNumberInput input:focus,
-    .stDateInput input:focus,
-    .stTimeInput input:focus,
-    .stTextInput input:focus {{
-        border-color: {colors['primary']} !important;
-        box-shadow: 0 0 0 3px {colors['primary']}20 !important;
-    }}
-    
-    /* Buttons */
-    .stButton button,
-    .stDownloadButton button {{
-        background: linear-gradient(135deg, {colors['primary']}, {colors['accent']}) !important;
-        color: #000 !important;
-        border: none !important;
-        border-radius: 12px !important;
-        padding: 1.125rem 2rem !important;
-        font-weight: 900 !important;
-        font-size: 0.938rem !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.08em !important;
-        transition: all 0.3s !important;
-    }}
-    
-    .stButton button:hover,
-    .stDownloadButton button:hover {{
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 32px {colors['primary']}40 !important;
-    }}
-    
-    /* Alert banner */
-    .alert-banner {{
-        background: linear-gradient(135deg, {colors['primary']}10, {colors['accent']}10);
-        border: 1px solid {colors['border']};
-        border-left: 4px solid {colors['primary']};
-        border-radius: 14px;
-        padding: 1.75rem 2.25rem;
-        margin: 2.5rem 0;
-        display: flex;
-        gap: 1.5rem;
-    }}
-    
-    .alert-icon {{
-        font-size: 2rem;
-    }}
-    
-    .alert-title {{
-        font-weight: 800;
-        font-size: 1.125rem;
-        color: {colors['text']};
-        margin-bottom: 0.5rem;
-    }}
-    
-    .alert-text {{
-        color: {colors['text_secondary']};
-        line-height: 1.7;
-    }}
-    
-    /* Footer */
-    .app-footer {{
-        text-align: center;
-        padding: 3.5rem 0;
-        margin-top: 5rem;
-        border-top: 1px solid {colors['border']};
-        color: {colors['text_muted']};
-        font-size: 0.875rem;
-    }}
-    
-    /* Utilities */
-    .gradient-text {{
-        background: linear-gradient(135deg, {colors['primary']}, {colors['accent']});
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }}
-    
-    .mono {{ font-family: 'JetBrains Mono', monospace; }}
+    .performance-row {{ display: flex; justify-content: space-between; padding: 0.75rem 1.25rem; background: {c['surface']}; border-radius: 8px; margin: 0.5rem 0; }}
+    .perf-time {{ font-weight: 700; font-family: 'JetBrains Mono'; }}
+    .perf-expected {{ color: {c['muted']}; font-family: 'JetBrains Mono'; }}
+    .perf-actual {{ font-weight: 700; font-family: 'JetBrains Mono'; }}
+    .perf-status {{ font-weight: 700; }}
+    .perf-status.hit {{ color: {c['success']}; }}
+    .perf-status.miss {{ color: {c['error']}; }}
     
     </style>
     """
@@ -627,349 +317,247 @@ def get_theme_css(mode: str) -> str:
 # ===============================
 
 def main():
-    st.set_page_config(
-        page_title=APP_NAME,
-        page_icon="📊",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+    st.set_page_config(page_title=APP_NAME, page_icon="📊", layout="wide", initial_sidebar_state="expanded")
     
-    # Sidebar configuration
+    # Sidebar
     with st.sidebar:
         st.markdown("### ⚙️ Settings")
-        theme_mode = st.radio(
-            "Display Mode",
-            ["☀️ Light Mode", "🌙 Dark Mode"],
-            index=0,
-            key="theme_selector"
-        )
+        theme_mode = st.radio("Theme", ["☀️ Light", "🌙 Dark"], index=0)
         
         st.markdown("---")
-        st.markdown("### 📊 Slope Configuration")
+        st.markdown("### 📊 Configuration")
         st.info(f"**Ascending:** +{ASC_SLOPE}")
         st.info(f"**Descending:** {DESC_SLOPE}")
         
         st.markdown("---")
-        st.markdown("### ℹ️ System Info")
+        st.markdown("### ℹ️ System")
         st.caption("🕐 Central Time (CT)")
         st.caption("📊 RTH: 8:30 AM - 2:00 PM")
-        st.caption("⚠️ Excludes 4:00-5:00 PM maintenance")
-        st.caption("🎯 Dual anchor system")
-        st.caption("📈 4 projection lines")
+        st.caption("⚠️ Excludes 4-5 PM maintenance")
+        st.caption("📅 Weekend gap handling")
+        st.caption("📡 Live ES futures data")
         
         st.markdown("---")
-        st.markdown("### 📖 Quick Guide")
-        st.caption("1. Set projection date")
-        st.caption("2. Configure Skyline anchor")
-        st.caption("3. Configure Baseline anchor")
-        st.caption("4. Review analytics & projections")
-        st.caption("5. Export data as needed")
+        auto_refresh = st.checkbox("🔄 Auto-refresh (60s)", value=False)
+        if auto_refresh:
+            st_autorefresh = st.empty()
+            import time
+            time.sleep(60)
+            st.rerun()
     
-    # Apply theme
     st.markdown(get_theme_css(theme_mode), unsafe_allow_html=True)
     
     # Header
     st.markdown(f"""
         <div class="app-header">
             <div class="app-logo">{APP_NAME}</div>
-            <div class="app-separator"></div>
-            <div class="app-tagline">{APP_TAGLINE}</div>
+            <div class="app-sep"></div>
+            <div class="app-tag">{APP_TAGLINE}</div>
         </div>
     """, unsafe_allow_html=True)
     
-    # Alert banner
-    st.markdown("""
-        <div class="alert-banner">
-            <div class="alert-icon">🎯</div>
-            <div>
-                <div class="alert-title">Advanced Dual-Anchor Projection System</div>
-                <div class="alert-text">
-                    Configure two independent anchor points (Skyline & Baseline) from the previous trading session. Each anchor automatically generates both bullish and bearish projections across the RTH session. The platform provides comprehensive analytics including confluence zones, key price levels, and risk analysis to maximize your trading edge.
-                </div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+    # Configuration
+    st.markdown('<div class="card"><div class="card-header"><div class="card-title"><span>⚙️</span> Configuration</div></div><div class="card-body">', unsafe_allow_html=True)
     
-    # Configuration Card
-    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-    st.markdown("""
-        <div class="card-header">
-            <div class="card-title">
-                <span class="card-icon">⚙️</span>
-                <span>Anchor Configuration</span>
-            </div>
-            <div class="card-badge">⚡ Dual System</div>
-        </div>
-    """, unsafe_allow_html=True)
+    proj_day = st.date_input("📅 Projection Date", value=datetime.now(CT).date())
     
-    st.markdown('<div class="card-body">', unsafe_allow_html=True)
+    # Get previous day OHLC for validation
+    prev_ohlc = get_previous_day_ohlc(proj_day)
+    if prev_ohlc:
+        st.info(f"📊 Previous Session ({prev_ohlc['date']}): High ${prev_ohlc['high']:.2f} | Low ${prev_ohlc['low']:.2f} | Close ${prev_ohlc['close']:.2f}")
     
-    # Projection date
-    proj_day = st.date_input(
-        "📅 Projection Date (CT)",
-        value=datetime.now(CT).date(),
-        key="proj_date"
-    )
-    
-    # Anchor inputs
     st.markdown('<div class="anchor-grid">', unsafe_allow_html=True)
     
-    # Skyline Anchor
-    st.markdown("""
-        <div class="anchor-box">
-            <div class="anchor-header">
-                <div class="anchor-badge">☁️</div>
-                <div class="anchor-name">
-                    <div class="anchor-label">Upper Resistance</div>
-                    <div class="anchor-title">SKYLINE</div>
-                </div>
-            </div>
-    """, unsafe_allow_html=True)
+    # Skyline
+    st.markdown('<div class="anchor-box">', unsafe_allow_html=True)
+    st.markdown("#### ☁️ SKYLINE (Upper Anchor)")
+    skyline_name = st.text_input("Custom Name", value="Skyline", key="sky_name")
+    skyline_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="sky_date")
+    skyline_price = st.number_input("Price ($)", value=6634.70, step=0.01, key="sky_price", format="%.2f")
+    skyline_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="sky_time")
     
-    skyline_name = st.text_input("Custom Name (Optional)", value="Skyline", key="skyline_name")
-    skyline_date = st.date_input("Anchor Date", value=datetime.now(CT).date() - timedelta(days=1), key="skyline_date")
-    skyline_price = st.number_input("Anchor Price ($)", value=6634.70, step=0.01, key="skyline_price", format="%.2f")
-    skyline_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="skyline_time")
-    
-    st.markdown("""
-            <div class="projection-tags">
-                <div class="proj-tag bull">📈 Bull Projection</div>
-                <div class="proj-tag bear">📉 Bear Projection</div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # Baseline Anchor
-    st.markdown("""
-        <div class="anchor-box">
-            <div class="anchor-header">
-                <div class="anchor-badge">⚓</div>
-                <div class="anchor-name">
-                    <div class="anchor-label">Lower Support</div>
-                    <div class="anchor-title">BASELINE</div>
-                </div>
-            </div>
-    """, unsafe_allow_html=True)
-    
-    baseline_name = st.text_input("Custom Name (Optional)", value="Baseline", key="baseline_name")
-    baseline_date = st.date_input("Anchor Date", value=datetime.now(CT).date() - timedelta(days=1), key="baseline_date")
-    baseline_price = st.number_input("Anchor Price ($)", value=6600.00, step=0.01, key="baseline_price", format="%.2f")
-    baseline_time = st.time_input("Anchor Time (CT)", value=dtime(14, 30), step=1800, key="baseline_time")
-    
-    st.markdown("""
-            <div class="projection-tags">
-                <div class="proj-tag bull">📈 Bull Projection</div>
-                <div class="proj-tag bear">📉 Bear Projection</div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-    
+    # Validate
+    val_status, val_msg = validate_anchor(skyline_price, skyline_name, prev_ohlc)
+    st.markdown(f'<div class="validation-badge">{val_status} {val_msg}</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Baseline
+    st.markdown('<div class="anchor-box">', unsafe_allow_html=True)
+    st.markdown("#### ⚓ BASELINE (Lower Anchor)")
+    baseline_name = st.text_input("Custom Name", value="Baseline", key="base_name")
+    baseline_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="base_date")
+    baseline_price = st.number_input("Price ($)", value=6600.00, step=0.01, key="base_price", format="%.2f")
+    baseline_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="base_time")
+    
+    val_status, val_msg = validate_anchor(baseline_price, baseline_name, prev_ohlc)
+    st.markdown(f'<div class="validation-badge">{val_status} {val_msg}</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('</div></div></div>', unsafe_allow_html=True)
     
     # Calculate projections
     slots = rth_slots_ct_dt(proj_day, "08:30", "14:00")
     
-    skyline_dt = CT.localize(datetime.combine(skyline_date, skyline_time))
-    baseline_dt = CT.localize(datetime.combine(baseline_date, baseline_time))
+    sky_dt = CT.localize(datetime.combine(skyline_date, skyline_time))
+    base_dt = CT.localize(datetime.combine(baseline_date, baseline_time))
     
-    df_sky_bull = project_line(skyline_price, skyline_dt, ASC_SLOPE, slots)
-    df_sky_bear = project_line(skyline_price, skyline_dt, DESC_SLOPE, slots)
-    df_base_bull = project_line(baseline_price, baseline_dt, ASC_SLOPE, slots)
-    df_base_bear = project_line(baseline_price, baseline_dt, DESC_SLOPE, slots)
+    df_sky_bull = project_line(skyline_price, sky_dt, ASC_SLOPE, slots)
+    df_sky_bear = project_line(skyline_price, sky_dt, DESC_SLOPE, slots)
+    df_base_bull = project_line(baseline_price, base_dt, ASC_SLOPE, slots)
+    df_base_bear = project_line(baseline_price, base_dt, DESC_SLOPE, slots)
     
-    # Create merged dataframe with custom names
     merged = pd.DataFrame({"Time (CT)": [dt.strftime("%I:%M %p") for dt in slots]})
-    merged[f"{skyline_name} Bull 📈"] = df_sky_bull["Price"]
-    merged[f"{skyline_name} Bear 📉"] = df_sky_bear["Price"]
-    merged[f"{baseline_name} Bull 📈"] = df_base_bull["Price"]
-    merged[f"{baseline_name} Bear 📉"] = df_base_bear["Price"]
+    merged["Final Resistance"] = df_sky_bull["Price"]
+    merged["Mid Support"] = df_sky_bear["Price"]
+    merged["Mid Resistance"] = df_base_bull["Price"]
+    merged["Final Support"] = df_base_bear["Price"]
     
-    # Calculate analytics
-    anchor_names = {
-        f"{skyline_name} Bull 📈": "skyline_bull",
-        f"{skyline_name} Bear 📉": "skyline_bear",
-        f"{baseline_name} Bull 📈": "baseline_bull",
-        f"{baseline_name} Bear 📉": "baseline_bear"
-    }
-    analytics = calculate_analytics(merged, anchor_names)
+    # Live Price Section
+    spx_es_offset = calculate_spx_es_offset(skyline_date)
+    live_spx = get_spx_equivalent_price(spx_es_offset)
     
-    # Market Open Summary
-    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-    st.markdown("""
-        <div class="card-header">
-            <div class="card-title">
-                <span class="card-icon">📈</span>
-                <span>Market Open Analysis</span>
+    if live_spx:
+        st.markdown(f"""
+            <div class="live-ticker">
+                <div class="ticker-label">📡 LIVE SPX EQUIVALENT PRICE</div>
+                <div class="ticker-price">${live_spx:.2f}</div>
+                <div class="ticker-label">ES Offset: {spx_es_offset:+.2f} | Updated: {datetime.now(CT).strftime('%I:%M:%S %p CT')}</div>
             </div>
-            <div class="card-badge">🕐 8:30 AM CT</div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+        
+        # Get current projections (find closest time or use opening)
+        current_time = datetime.now(CT).strftime("%I:%M %p")
+        if current_time in merged["Time (CT)"].values:
+            current_row = merged[merged["Time (CT)"] == current_time].iloc[0]
+        else:
+            current_row = merged.iloc[0]  # Use market open
+        
+        current_projections = {
+            "Final Resistance": current_row["Final Resistance"],
+            "Mid Support": current_row["Mid Support"],
+            "Mid Resistance": current_row["Mid Resistance"],
+            "Final Support": current_row["Final Support"]
+        }
+        
+        # Trading zone
+        zone_name, zone_desc, zone_type = get_trading_zone(live_spx, current_projections)
+        st.markdown(f"""
+            <div class="zone-alert {zone_type}">
+                <div class="zone-title">{zone_name}</div>
+                <div class="zone-desc">{zone_desc}</div>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Distances
+        st.markdown('<div class="card"><div class="card-header"><div class="card-title"><span>📏</span> Distance to Key Levels</div></div><div class="card-body">', unsafe_allow_html=True)
+        distances = calculate_distances(live_spx, current_projections)
+        for name, dist in sorted(distances.items(), key=lambda x: x[1]):
+            st.markdown(f'<div class="distance-item"><span class="distance-name">{name}</span><span class="distance-value">{dist:.2f} pts</span></div>', unsafe_allow_html=True)
+        st.markdown('</div></div>', unsafe_allow_html=True)
+        
+        # Playbook
+        playbook = get_playbook(zone_name, current_projections)
+        st.markdown(f"""
+            <div class="playbook">
+                <div class="playbook-title">📋 Trading Playbook</div>
+                <div>{playbook}</div>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Deviation alert
+        all_proj = list(current_projections.values())
+        if live_spx > max(all_proj):
+            deviation = live_spx - max(all_proj)
+            st.error(f"🚨 **BREAKOUT ALERT:** Price is {deviation:.2f} points ABOVE all projections!")
+        elif live_spx < min(all_proj):
+            deviation = min(all_proj) - live_spx
+            st.error(f"🚨 **BREAKDOWN ALERT:** Price is {deviation:.2f} points BELOW all projections!")
     
-    st.markdown('<div class="card-body">', unsafe_allow_html=True)
-    st.markdown('<div class="stats-grid">', unsafe_allow_html=True)
+    # Opening Gap Analysis
+    st.markdown('<div class="card"><div class="card-header"><div class="card-title"><span>📊</span> Opening Gap Analysis</div></div><div class="card-body">', unsafe_allow_html=True)
     
-    if 'market_open' in analytics:
-        for col_name in merged.columns[1:]:
-            val = analytics['market_open'][col_name]
-            anchor_price = skyline_price if skyline_name in col_name else baseline_price
-            change = val - anchor_price
-            change_class = "positive" if change > 0 else "negative"
-            change_symbol = "+" if change > 0 else ""
-            
-            st.markdown(f"""
-                <div class='stat-card'>
-                    <div class='stat-label'>{col_name}</div>
-                    <div class='stat-value'>${val:.2f}</div>
-                    <div class='stat-change {change_class}'>{change_symbol}{change:.2f}</div>
-                </div>
-            """, unsafe_allow_html=True)
+    open_row = merged[merged["Time (CT)"] == "08:30 AM"].iloc[0]
+    open_projections = {
+        "Final Resistance": open_row["Final Resistance"],
+        "Mid Support": open_row["Mid Support"],
+        "Mid Resistance": open_row["Mid Resistance"],
+        "Final Support": open_row["Final Support"]
+    }
     
+    st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
+    for name, price in open_projections.items():
+        st.markdown(f"""
+            <div class="metric-box">
+                <div class="metric-label">{name}</div>
+                <div class="metric-value">${price:.2f}</div>
+            </div>
+        """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Open range analysis
-    if 'open_range' in analytics:
-        st.markdown("### 🎯 Opening Range Metrics")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Open High", f"${analytics['open_range']['high']:.2f}")
-        with col2:
-            st.metric("Open Low", f"${analytics['open_range']['low']:.2f}")
-        with col3:
-            st.metric("Open Spread", f"${analytics['open_range']['spread']:.2f}")
+    if live_spx:
+        open_zone, _, _ = get_trading_zone(live_spx, open_projections)
+        st.info(f"**Market opened in:** {open_zone}")
     
     st.markdown('</div></div>', unsafe_allow_html=True)
     
-    # Advanced Analytics
-    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-    st.markdown("""
-        <div class="card-header">
-            <div class="card-title">
-                <span class="card-icon">🧠</span>
-                <span>Advanced Market Intelligence</span>
-            </div>
-            <div class="card-badge">💡 AI Analytics</div>
-        </div>
-    """, unsafe_allow_html=True)
+    # Expected Trading Range
+    st.markdown('<div class="card"><div class="card-header"><div class="card-title"><span>📈</span> Expected Trading Range</div></div><div class="card-body">', unsafe_allow_html=True)
     
-    st.markdown('<div class="card-body">', unsafe_allow_html=True)
+    all_prices = merged[["Final Resistance", "Mid Support", "Mid Resistance", "Final Support"]].values.flatten()
+    expected_high = np.max(all_prices)
+    expected_low = np.min(all_prices)
+    expected_range = expected_high - expected_low
+    expected_mid = (expected_high + expected_low) / 2
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown('<div class="analytics-section">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">🎯 Key Price Levels</div>', unsafe_allow_html=True)
-        st.markdown("Round number psychological levels within projection range:")
-        for level in analytics['key_levels'][:10]:
-            st.markdown(f'<span class="level-badge">${level}</span>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="analytics-section">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">📊 Range Analysis</div>', unsafe_allow_html=True)
-        st.metric("Overall High", f"${analytics['overall_range']['high']:.2f}")
-        st.metric("Overall Low", f"${analytics['overall_range']['low']:.2f}")
-        st.metric("Total Range", f"${analytics['overall_range']['range']:.2f}")
-        st.metric("Midpoint", f"${analytics['overall_range']['mid']:.2f}")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Confluence zones
-    if analytics['confluence_zones']:
-        st.markdown('<div class="analytics-section">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">⚡ Confluence Zones (High Probability Areas)</div>', unsafe_allow_html=True)
-        st.markdown("Times when multiple projections converge (within $5):")
-        for zone in analytics['confluence_zones'][:5]:
-            st.markdown(f"""
-                <div class="confluence-item">
-                    <strong>{zone['time']}</strong> — Price: ${zone['price']:.2f}<br>
-                    <small>Converging: {', '.join(zone['lines'])}</small>
-                </div>
-            """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Expected High", f"${expected_high:.2f}")
+    col2.metric("Expected Low", f"${expected_low:.2f}")
+    col3.metric("Range", f"${expected_range:.2f}")
+    col4.metric("Midpoint", f"${expected_mid:.2f}")
     
     st.markdown('</div></div>', unsafe_allow_html=True)
     
-    # Results table
-    st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-    st.markdown("""
-        <div class="card-header">
-            <div class="card-title">
-                <span class="card-icon">📊</span>
-                <span>Complete Projection Matrix</span>
-            </div>
-            <div class="card-badge">📋 RTH Session</div>
-        </div>
-    """, unsafe_allow_html=True)
+    # Session Breakdown
+    st.markdown('<div class="card"><div class="card-header"><div class="card-title"><span>⏰</span> Session Breakdown</div></div><div class="card-body">', unsafe_allow_html=True)
     
-    st.markdown('<div class="card-body">', unsafe_allow_html=True)
-    st.dataframe(merged, use_container_width=True, hide_index=True, height=550)
+    st.markdown("#### 🌙 Pre-Market (Previous Day 2:00 PM - Today 8:30 AM)")
+    st.caption("Anchors set during this period. Weekend gaps automatically handled.")
+    
+    st.markdown("#### 🔔 RTH Session (8:30 AM - 2:00 PM CT)")
+    st.caption("Primary trading window. All projections displayed below.")
+    
+    st.markdown("#### 🌆 After Hours (2:00 PM - 4:00 PM CT)")
+    st.caption("Extended session. Projections end at 2:00 PM.")
+    
+    st.markdown('</div></div>', unsafe_allow_html=True)
+    
+    # Results Table
+    st.markdown('<div class="card"><div class="card-header"><div class="card-title"><span>📊</span> Complete Projection Matrix</div></div><div class="card-body">', unsafe_allow_html=True)
+    st.dataframe(merged, use_container_width=True, hide_index=True, height=500)
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Export buttons
-    st.markdown("### 📥 Export Options")
+    # Export
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
-        st.download_button(
-            "💾 Complete Dataset",
-            merged.to_csv(index=False).encode(),
-            "spx_prophet_complete.csv",
-            "text/csv",
-            use_container_width=True
-        )
-    
+        st.download_button("💾 Complete", merged.to_csv(index=False).encode(), "spx_prophet_complete.csv", "text/csv", use_container_width=True)
     with col2:
-        skyline_data = merged[["Time (CT)", f"{skyline_name} Bull 📈", f"{skyline_name} Bear 📉"]]
-        st.download_button(
-            f"☁️ {skyline_name} Data",
-            skyline_data.to_csv(index=False).encode(),
-            f"spx_prophet_{skyline_name.lower()}.csv",
-            "text/csv",
-            use_container_width=True
-        )
-    
+        st.download_button(f"☁️ {skyline_name}", merged[["Time (CT)", "Final Resistance", "Mid Support"]].to_csv(index=False).encode(), f"{skyline_name.lower()}.csv", "text/csv", use_container_width=True)
     with col3:
-        baseline_data = merged[["Time (CT)", f"{baseline_name} Bull 📈", f"{baseline_name} Bear 📉"]]
-        st.download_button(
-            f"⚓ {baseline_name} Data",
-            baseline_data.to_csv(index=False).encode(),
-            f"spx_prophet_{baseline_name.lower()}.csv",
-            "text/csv",
-            use_container_width=True
-        )
-    
+        st.download_button(f"⚓ {baseline_name}", merged[["Time (CT)", "Mid Resistance", "Final Support"]].to_csv(index=False).encode(), f"{baseline_name.lower()}.csv", "text/csv", use_container_width=True)
     with col4:
-        # Analytics export
-        analytics_df = pd.DataFrame({
-            'Metric': ['Overall High', 'Overall Low', 'Total Range', 'Midpoint', 'Open High', 'Open Low', 'Open Spread'],
-            'Value': [
-                analytics['overall_range']['high'],
-                analytics['overall_range']['low'],
-                analytics['overall_range']['range'],
-                analytics['overall_range']['mid'],
-                analytics.get('open_range', {}).get('high', 0),
-                analytics.get('open_range', {}).get('low', 0),
-                analytics.get('open_range', {}).get('spread', 0)
-            ]
+        analytics_export = pd.DataFrame({
+            'Metric': ['Expected High', 'Expected Low', 'Range', 'Midpoint'],
+            'Value': [expected_high, expected_low, expected_range, expected_mid]
         })
-        st.download_button(
-            "🧠 Analytics Report",
-            analytics_df.to_csv(index=False).encode(),
-            "spx_prophet_analytics.csv",
-            "text/csv",
-            use_container_width=True
-        )
+        st.download_button("📊 Analytics", analytics_export.to_csv(index=False).encode(), "analytics.csv", "text/csv", use_container_width=True)
     
     st.markdown('</div></div>', unsafe_allow_html=True)
     
-    # Footer
     st.markdown(f"""
-        <div class="app-footer">
-            <strong>{APP_NAME}</strong> · {APP_VERSION}<br>
-            {APP_TAGLINE} · © 2025<br>
-            Built for serious traders who demand precision and profitability
+        <div style="text-align: center; padding: 3rem 0; margin-top: 3rem; border-top: 1px solid #333; color: #666;">
+            <strong>{APP_NAME}</strong> · {APP_VERSION} · © 2025<br>
+            Built for institutional traders who demand precision
         </div>
     """, unsafe_allow_html=True)
 
