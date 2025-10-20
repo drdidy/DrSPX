@@ -11,8 +11,8 @@ from typing import List, Dict, Tuple
 APP_NAME = "SPX PROPHET"
 
 CT = pytz.timezone("America/Chicago")
-ASC_SLOPE = 0.5
-DESC_SLOPE = -0.5
+ASC_SLOPE = 0.41
+DESC_SLOPE = -0.41
 
 # ===============================
 # CALCULATIONS
