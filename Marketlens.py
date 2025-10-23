@@ -1,5 +1,5 @@
 # app.py
-# SPX PROPHET — Clean, functional trading platform that WORKS
+# SPX PROPHET — Clean, functional trading platform with Fibonacci tools
 
 import streamlit as st
 import pandas as pd
@@ -11,8 +11,8 @@ from typing import List, Dict, Tuple
 APP_NAME = "SPX PROPHET"
 
 CT = pytz.timezone("America/Chicago")
-ASC_SLOPE = 0.48
-DESC_SLOPE = -0.48
+ASC_SLOPE = 0.493
+DESC_SLOPE = -0.493
 
 # ===============================
 # CALCULATIONS
@@ -47,31 +47,16 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope_per_block:
         rows.append({"Time": dt.strftime("%I:%M %p"), "Price": round(price, 2)})
     return pd.DataFrame(rows)
 
-def get_trading_zone(price: float, projections: Dict[str, float]) -> Tuple[str, str]:
-    final_resistance = projections['Final Resistance']
-    mid_support = projections['Mid Support']
-    mid_resistance = projections['Mid Resistance']
-    final_support = projections['Final Support']
-    
-    sorted_prices = sorted([final_resistance, mid_support, mid_resistance, final_support])
-    
-    if price >= max(sorted_prices):
-        return "🚀 BREAKOUT", "Above all projections - Strong bull"
-    elif price <= min(sorted_prices):
-        return "💥 BREAKDOWN", "Below all projections - Strong bear"
-    elif price >= final_resistance - 2:
-        return "🔴 FINAL RESISTANCE", "SELL ZONE - Expect reversal"
-    elif price <= final_support + 2:
-        return "🟢 FINAL SUPPORT", "BUY ZONE - Expect reversal"
-    elif price >= mid_resistance - 2:
-        return "🟠 MID RESISTANCE", "Watch for rejection"
-    elif price <= mid_support + 2:
-        return "🟡 MID SUPPORT", "Watch for bounce"
-    else:
-        return "⚪ NEUTRAL", "Between levels - Wait"
-
-def calculate_distances(price: float, projections: Dict[str, float]) -> Dict[str, float]:
-    return {name: round(price - proj_price, 2) for name, proj_price in projections.items()}
+def calculate_fibonacci_retracements(high: float, low: float) -> Dict[str, float]:
+    """Calculate Fibonacci retracement levels from contract high/low"""
+    range_size = high - low
+    return {
+        "0.618": round(high - (range_size * 0.618), 2),
+        "0.786": round(high - (range_size * 0.786), 2),
+        "0.500": round(high - (range_size * 0.500), 2),
+        "0.382": round(high - (range_size * 0.382), 2),
+        "0.236": round(high - (range_size * 0.236), 2)
+    }
 
 # ===============================
 # MAIN APP
@@ -80,7 +65,7 @@ def calculate_distances(price: float, projections: Dict[str, float]) -> Dict[str
 def main():
     st.set_page_config(page_title=APP_NAME, page_icon="📊", layout="wide")
     
-    # Simple CSS - FOCUS ON TABLE VISIBILITY
+    # Simple CSS
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap');
@@ -165,73 +150,6 @@ def main():
         margin-bottom: 20px;
     }
     
-    .price-box {
-        background: #1a1a1a;
-        border: 3px solid #00ff88;
-        border-radius: 16px;
-        padding: 40px;
-        text-align: center;
-        margin: 20px 0;
-    }
-    
-    .price-display {
-        font-size: 72px;
-        font-weight: 900;
-        font-family: 'JetBrains Mono', monospace;
-        color: #00ff88 !important;
-    }
-    
-    .zone-box {
-        background: #1a1a1a;
-        border-left: 4px solid #00ff88;
-        border-radius: 12px;
-        padding: 24px;
-        margin: 20px 0;
-    }
-    
-    .zone-title {
-        font-size: 28px;
-        font-weight: 800;
-        color: #00ff88 !important;
-        margin-bottom: 10px;
-    }
-    
-    .distance-item {
-        background: #1a1a1a;
-        border: 1px solid #333;
-        border-radius: 10px;
-        padding: 16px 24px;
-        margin: 10px 0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    
-    .distance-item:hover {
-        background: #2a2a2a;
-        border-color: #00ff88;
-    }
-    
-    .distance-name {
-        font-size: 18px;
-        font-weight: 700;
-        color: #FFFFFF !important;
-    }
-    
-    .distance-value {
-        font-size: 20px;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', monospace;
-    }
-    
-    .distance-value.above {
-        color: #00ff88 !important;
-    }
-    
-    .distance-value.below {
-        color: #ff4444 !important;
-    }
-    
     .metric-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -264,6 +182,61 @@ def main():
         font-weight: 900;
         font-family: 'JetBrains Mono', monospace;
         color: #00ff88 !important;
+    }
+    
+    .fib-result {
+        background: #1a1a1a;
+        border: 2px solid #00ff88;
+        border-radius: 12px;
+        padding: 20px 30px;
+        margin: 15px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .fib-label {
+        font-size: 18px;
+        font-weight: 700;
+        color: #FFFFFF !important;
+    }
+    
+    .fib-value {
+        font-size: 28px;
+        font-weight: 900;
+        font-family: 'JetBrains Mono', monospace;
+        color: #00ff88 !important;
+    }
+    
+    .bias-indicator {
+        background: #1a1a1a;
+        border: 3px solid;
+        border-radius: 16px;
+        padding: 30px;
+        margin: 20px 0;
+        text-align: center;
+    }
+    
+    .bias-indicator.bullish {
+        border-color: #00ff88;
+    }
+    
+    .bias-indicator.bearish {
+        border-color: #ff4444;
+    }
+    
+    .bias-title {
+        font-size: 36px;
+        font-weight: 900;
+        margin-bottom: 10px;
+    }
+    
+    .bias-title.bullish {
+        color: #00ff88 !important;
+    }
+    
+    .bias-title.bearish {
+        color: #ff4444 !important;
     }
     
     /* Input fields */
@@ -315,6 +288,26 @@ def main():
         color: #FFFFFF !important;
     }
     
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: #1a1a1a !important;
+        border: 2px solid #333 !important;
+        border-radius: 10px !important;
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
+        padding: 12px 24px !important;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: #00ff88 !important;
+        color: #000000 !important;
+        border-color: #00ff88 !important;
+    }
+    
     </style>
     """, unsafe_allow_html=True)
     
@@ -331,132 +324,214 @@ def main():
         st.caption("🕐 Central Time (CT)")
         st.caption("📊 RTH: 8:30 AM - 2:00 PM")
         st.caption("⚠️ Skips 4-5 PM maintenance")
+        st.markdown("---")
+        st.markdown("### 📖 Line Definitions")
+        st.caption("🔴 **Bull Target** = Extreme upside")
+        st.caption("🟠 **Resistance Pivot** = Key resistance")
+        st.caption("🟡 **Support Pivot** = Key support")
+        st.caption("🟢 **Bear Target** = Extreme downside")
+        st.markdown("---")
+        st.markdown("### 🎯 Bias Rules")
+        st.caption("Above both ascending lines = **BULLISH**")
+        st.caption("Below both ascending lines = **BEARISH**")
     
-    # Configuration
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-title">⚙️ Anchor Configuration</div>', unsafe_allow_html=True)
+    # Tabs
+    tab1, tab2 = st.tabs(["📊 Projection Calculator", "📐 Fibonacci Tool"])
     
-    proj_day = st.date_input("📅 Projection Date", value=datetime.now(CT).date())
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### ☁️ SKYLINE (Upper)")
-        skyline_name = st.text_input("Name", value="Skyline", key="sky_name")
-        skyline_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="sky_date")
-        skyline_price = st.number_input("Price ($)", value=6634.70, step=0.01, key="sky_price", format="%.2f")
-        skyline_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="sky_time")
-    
-    with col2:
-        st.markdown("#### ⚓ BASELINE (Lower)")
-        baseline_name = st.text_input("Name", value="Baseline", key="base_name")
-        baseline_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="base_date")
-        baseline_price = st.number_input("Price ($)", value=6600.00, step=0.01, key="base_price", format="%.2f")
-        baseline_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="base_time")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Calculate
-    slots = rth_slots_ct_dt(proj_day, "08:30", "14:00")
-    sky_dt = CT.localize(datetime.combine(skyline_date, skyline_time))
-    base_dt = CT.localize(datetime.combine(baseline_date, baseline_time))
-    
-    df_sky_bull = project_line(skyline_price, sky_dt, ASC_SLOPE, slots)
-    df_sky_bear = project_line(skyline_price, sky_dt, DESC_SLOPE, slots)
-    df_base_bull = project_line(baseline_price, base_dt, ASC_SLOPE, slots)
-    df_base_bear = project_line(baseline_price, base_dt, DESC_SLOPE, slots)
-    
-    merged = pd.DataFrame({"Time (CT)": [dt.strftime("%I:%M %p") for dt in slots]})
-    merged["🔴 Final Resistance"] = df_sky_bull["Price"]
-    merged["🟡 Mid Support"] = df_sky_bear["Price"]
-    merged["🟠 Mid Resistance"] = df_base_bull["Price"]
-    merged["🟢 Final Support"] = df_base_bear["Price"]
-    
-    # Live Price
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-title">📊 Live Price Analysis</div>', unsafe_allow_html=True)
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        live_price = st.number_input("💵 Current SPX Price", value=0.00, step=0.01, key="live_price", format="%.2f")
-    with col2:
-        current_time_str = st.selectbox("Time", merged["Time (CT)"].tolist(), index=0)
-    
-    if live_price > 0:
-        st.markdown(f'<div class="price-box"><div class="price-display">${live_price:.2f}</div><div style="margin-top: 10px; color: #999;">at {current_time_str}</div></div>', unsafe_allow_html=True)
+    with tab1:
+        # Configuration
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">⚙️ Anchor Configuration</div>', unsafe_allow_html=True)
         
-        current_row = merged[merged["Time (CT)"] == current_time_str].iloc[0]
-        current_projections = {
-            "Final Resistance": current_row["🔴 Final Resistance"],
-            "Mid Support": current_row["🟡 Mid Support"],
-            "Mid Resistance": current_row["🟠 Mid Resistance"],
-            "Final Support": current_row["🟢 Final Support"]
-        }
+        proj_day = st.date_input("📅 Projection Date", value=datetime.now(CT).date())
         
-        zone_name, zone_desc = get_trading_zone(live_price, current_projections)
-        st.markdown(f'<div class="zone-box"><div class="zone-title">{zone_name}</div><div style="color: #ccc; font-size: 18px;">{zone_desc}</div></div>', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
         
-        st.markdown("### 📏 Distance to Levels")
-        distances = calculate_distances(live_price, current_projections)
-        for name, dist in sorted(distances.items(), key=lambda x: abs(x[1])):
-            direction = "above" if dist > 0 else "below"
-            icon = "🔴" if "Final Resistance" in name else "🟡" if "Mid Support" in name else "🟠" if "Mid Resistance" in name else "🟢"
-            st.markdown(f'<div class="distance-item"><span class="distance-name">{icon} {name}</span><span class="distance-value {direction}">{dist:+.2f} pts</span></div>', unsafe_allow_html=True)
+        with col1:
+            st.markdown("#### ☁️ SKYLINE (Upper)")
+            skyline_name = st.text_input("Name", value="Skyline", key="sky_name")
+            skyline_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="sky_date")
+            skyline_price = st.number_input("Price ($)", value=6634.70, step=0.01, key="sky_price", format="%.2f")
+            skyline_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="sky_time")
+        
+        with col2:
+            st.markdown("#### ⚓ BASELINE (Lower)")
+            baseline_name = st.text_input("Name", value="Baseline", key="base_name")
+            baseline_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="base_date")
+            baseline_price = st.number_input("Price ($)", value=6600.00, step=0.01, key="base_price", format="%.2f")
+            baseline_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="base_time")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Calculate
+        slots = rth_slots_ct_dt(proj_day, "08:30", "14:00")
+        sky_dt = CT.localize(datetime.combine(skyline_date, skyline_time))
+        base_dt = CT.localize(datetime.combine(baseline_date, baseline_time))
+        
+        df_sky_bull = project_line(skyline_price, sky_dt, ASC_SLOPE, slots)
+        df_sky_bear = project_line(skyline_price, sky_dt, DESC_SLOPE, slots)
+        df_base_bull = project_line(baseline_price, base_dt, ASC_SLOPE, slots)
+        df_base_bear = project_line(baseline_price, base_dt, DESC_SLOPE, slots)
+        
+        merged = pd.DataFrame({"Time (CT)": [dt.strftime("%I:%M %p") for dt in slots]})
+        merged["🔴 Bull Target"] = df_sky_bull["Price"]
+        merged["🟡 Support Pivot"] = df_sky_bear["Price"]
+        merged["🟠 Resistance Pivot"] = df_base_bull["Price"]
+        merged["🟢 Bear Target"] = df_base_bear["Price"]
+        
+        # Market Open
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">🌅 Market Open (8:30 AM)</div>', unsafe_allow_html=True)
+        
+        open_row = merged[merged["Time (CT)"] == "08:30 AM"].iloc[0]
+        
+        st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
+        for col_name in ["🔴 Bull Target", "🟠 Resistance Pivot", "🟡 Support Pivot", "🟢 Bear Target"]:
+            price = open_row[col_name]
+            st.markdown(f'<div class="metric-card"><div class="metric-label">{col_name}</div><div class="metric-value">${price:.2f}</div></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Bias Indicator
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">🎯 Daily Bias Indicator</div>', unsafe_allow_html=True)
+        
+        st.markdown("Enter current price to determine market bias:")
+        current_price = st.number_input("💵 Current SPX Price", value=0.00, step=0.01, key="current_price", format="%.2f")
+        
+        if current_price > 0:
+            # Get the two ascending lines at current time (use market open for simplicity)
+            bull_target = open_row["🔴 Bull Target"]
+            resistance_pivot = open_row["🟠 Resistance Pivot"]
+            
+            # Check if above both ascending lines
+            if current_price > bull_target and current_price > resistance_pivot:
+                st.markdown(f'''
+                    <div class="bias-indicator bullish">
+                        <div class="bias-title bullish">🚀 BULLISH BIAS</div>
+                        <div style="color: #FFFFFF; font-size: 18px;">Price ${current_price:.2f} is ABOVE both ascending lines</div>
+                        <div style="color: #00ff88; font-size: 16px; margin-top: 10px;">Bull Target: ${bull_target:.2f} | Resistance Pivot: ${resistance_pivot:.2f}</div>
+                    </div>
+                ''', unsafe_allow_html=True)
+            elif current_price < bull_target and current_price < resistance_pivot:
+                st.markdown(f'''
+                    <div class="bias-indicator bearish">
+                        <div class="bias-title bearish">💥 BEARISH BIAS</div>
+                        <div style="color: #FFFFFF; font-size: 18px;">Price ${current_price:.2f} is BELOW both ascending lines</div>
+                        <div style="color: #ff4444; font-size: 16px; margin-top: 10px;">Bull Target: ${bull_target:.2f} | Resistance Pivot: ${resistance_pivot:.2f}</div>
+                    </div>
+                ''', unsafe_allow_html=True)
+            else:
+                st.markdown(f'''
+                    <div class="bias-indicator" style="border-color: #ffaa00;">
+                        <div class="bias-title" style="color: #ffaa00 !important;">⚠️ NEUTRAL/MIXED</div>
+                        <div style="color: #FFFFFF; font-size: 18px;">Price ${current_price:.2f} is between the ascending lines</div>
+                        <div style="color: #ffaa00; font-size: 16px; margin-top: 10px;">Bull Target: ${bull_target:.2f} | Resistance Pivot: ${resistance_pivot:.2f}</div>
+                    </div>
+                ''', unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Expected Range
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">📈 Expected Range</div>', unsafe_allow_html=True)
+        
+        all_prices = merged[["🔴 Bull Target", "🟡 Support Pivot", "🟠 Resistance Pivot", "🟢 Bear Target"]].values.flatten()
+        expected_high = np.max(all_prices)
+        expected_low = np.min(all_prices)
+        expected_range = expected_high - expected_low
+        expected_mid = (expected_high + expected_low) / 2
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("High", f"${expected_high:.2f}")
+        col2.metric("Low", f"${expected_low:.2f}")
+        col3.metric("Range", f"${expected_range:.2f}")
+        col4.metric("Mid", f"${expected_mid:.2f}")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # TABLE
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">📊 Complete Projection Matrix</div>', unsafe_allow_html=True)
+        
+        st.dataframe(merged, use_container_width=True, hide_index=True, height=500)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Export
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.download_button("💾 Complete", merged.to_csv(index=False).encode(), "spx_complete.csv", "text/csv", use_container_width=True)
+        with col2:
+            st.download_button(f"☁️ {skyline_name}", merged[["Time (CT)", "🔴 Bull Target", "🟡 Support Pivot"]].to_csv(index=False).encode(), f"{skyline_name.lower()}.csv", "text/csv", use_container_width=True)
+        with col3:
+            st.download_button(f"⚓ {baseline_name}", merged[["Time (CT)", "🟠 Resistance Pivot", "🟢 Bear Target"]].to_csv(index=False).encode(), f"{baseline_name.lower()}.csv", "text/csv", use_container_width=True)
+        with col4:
+            st.download_button("📊 Analytics", pd.DataFrame({'Metric': ['High', 'Low', 'Range', 'Mid'], 'Value': [expected_high, expected_low, expected_range, expected_mid]}).to_csv(index=False).encode(), "analytics.csv", "text/csv", use_container_width=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Market Open
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-title">🌅 Market Open (8:30 AM)</div>', unsafe_allow_html=True)
-    
-    open_row = merged[merged["Time (CT)"] == "08:30 AM"].iloc[0]
-    
-    st.markdown('<div class="metric-grid">', unsafe_allow_html=True)
-    for col_name in ["🔴 Final Resistance", "🟠 Mid Resistance", "🟡 Mid Support", "🟢 Final Support"]:
-        price = open_row[col_name]
-        st.markdown(f'<div class="metric-card"><div class="metric-label">{col_name}</div><div class="metric-value">${price:.2f}</div></div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Expected Range
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-title">📈 Expected Range</div>', unsafe_allow_html=True)
-    
-    all_prices = merged[["🔴 Final Resistance", "🟡 Mid Support", "🟠 Mid Resistance", "🟢 Final Support"]].values.flatten()
-    expected_high = np.max(all_prices)
-    expected_low = np.min(all_prices)
-    expected_range = expected_high - expected_low
-    expected_mid = (expected_high + expected_low) / 2
-    
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("High", f"${expected_high:.2f}")
-    col2.metric("Low", f"${expected_low:.2f}")
-    col3.metric("Range", f"${expected_range:.2f}")
-    col4.metric("Mid", f"${expected_mid:.2f}")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # TABLE - THE CRITICAL PART
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="card-title">📊 Complete Projection Matrix</div>', unsafe_allow_html=True)
-    
-    st.dataframe(merged, use_container_width=True, hide_index=True, height=500)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Export
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.download_button("💾 Complete", merged.to_csv(index=False).encode(), "spx_complete.csv", "text/csv", use_container_width=True)
-    with col2:
-        st.download_button(f"☁️ {skyline_name}", merged[["Time (CT)", "🔴 Final Resistance", "🟡 Mid Support"]].to_csv(index=False).encode(), f"{skyline_name.lower()}.csv", "text/csv", use_container_width=True)
-    with col3:
-        st.download_button(f"⚓ {baseline_name}", merged[["Time (CT)", "🟠 Mid Resistance", "🟢 Final Support"]].to_csv(index=False).encode(), f"{baseline_name.lower()}.csv", "text/csv", use_container_width=True)
-    with col4:
-        st.download_button("📊 Analytics", pd.DataFrame({'Metric': ['High', 'Low', 'Range', 'Mid'], 'Value': [expected_high, expected_low, expected_range, expected_mid]}).to_csv(index=False).encode(), "analytics.csv", "text/csv", use_container_width=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+    with tab2:
+        # Fibonacci Calculator
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">📐 Fibonacci Retracement Calculator</div>', unsafe_allow_html=True)
+        
+        st.markdown("Enter the contract high and low to calculate key Fibonacci retracement entry levels:")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fib_high = st.number_input("📈 Contract High ($)", value=0.00, step=0.01, key="fib_high", format="%.2f")
+        with col2:
+            fib_low = st.number_input("📉 Contract Low ($)", value=0.00, step=0.01, key="fib_low", format="%.2f")
+        
+        if fib_high > 0 and fib_low > 0 and fib_high > fib_low:
+            fib_levels = calculate_fibonacci_retracements(fib_high, fib_low)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 🎯 Key Entry Levels")
+            
+            # Highlight the main entry levels
+            st.markdown(f'''
+                <div class="fib-result" style="border-width: 3px;">
+                    <div>
+                        <div class="fib-label">🎯 0.618 Retracement (Primary Entry)</div>
+                        <div style="color: #999; font-size: 14px; margin-top: 5px;">Golden ratio - Strongest support/resistance</div>
+                    </div>
+                    <div class="fib-value">${fib_levels['0.618']}</div>
+                </div>
+            ''', unsafe_allow_html=True)
+            
+            st.markdown(f'''
+                <div class="fib-result" style="border-width: 3px;">
+                    <div>
+                        <div class="fib-label">🎯 0.786 Retracement (Secondary Entry)</div>
+                        <div style="color: #999; font-size: 14px; margin-top: 5px;">Deep retracement - Last line of defense</div>
+                    </div>
+                    <div class="fib-value">${fib_levels['0.786']}</div>
+                </div>
+            ''', unsafe_allow_html=True)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 📊 All Fibonacci Levels")
+            
+            # Show all levels
+            for level, price in fib_levels.items():
+                st.markdown(f'''
+                    <div class="fib-result">
+                        <div class="fib-label">{level} Level</div>
+                        <div class="fib-value">${price}</div>
+                    </div>
+                ''', unsafe_allow_html=True)
+            
+            # Summary
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info(f"📊 **Range:** ${fib_high:.2f} - ${fib_low:.2f} = ${fib_high - fib_low:.2f}")
+            
+        elif fib_high > 0 and fib_low > 0 and fib_high <= fib_low:
+            st.error("⚠️ Contract High must be greater than Contract Low")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
