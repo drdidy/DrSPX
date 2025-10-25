@@ -724,20 +724,26 @@ def main():
             st.markdown(f'<div class="metric-card"><div class="metric-label">{name}</div><div class="metric-value">${price:.2f}</div></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
+        # FIXED: Opening Context with user input
         st.markdown('<div class="opening-context">', unsafe_allow_html=True)
         st.markdown('<div class="context-title">📍 Opening Context</div>', unsafe_allow_html=True)
-        opening_price = breakout
-        if opening_price > breakout:
-            context = f"Opened at ${opening_price:.2f} - Above Breakout Target (strong bullish setup)"
-        elif opening_price > bull_pivot:
-            context = f"Opened at ${opening_price:.2f} - Between Bull Pivot and Breakout (bullish bias)"
-        elif opening_price > bear_pivot:
-            context = f"Opened at ${opening_price:.2f} - Between pivots (neutral zone - key decision area)"
-        elif opening_price > breakdown:
-            context = f"Opened at ${opening_price:.2f} - Between Bear Pivot and Breakdown (bearish bias)"
+        opening_price = st.number_input("Market Opening Price (Optional)", value=0.00, step=0.01, key="opening_price", format="%.2f", min_value=0.0)
+        
+        if opening_price > 0:
+            if opening_price > breakout:
+                context = f"Opened at ${opening_price:.2f} - Above Breakout Target (strong bullish setup)"
+            elif opening_price > bull_pivot:
+                context = f"Opened at ${opening_price:.2f} - Between Bull Pivot and Breakout (bullish bias)"
+            elif opening_price > bear_pivot:
+                context = f"Opened at ${opening_price:.2f} - Between pivots (neutral zone - key decision area)"
+            elif opening_price > breakdown:
+                context = f"Opened at ${opening_price:.2f} - Between Bear Pivot and Breakdown (bearish bias)"
+            else:
+                context = f"Opened at ${opening_price:.2f} - Below Breakdown Target (strong bearish setup)"
+            st.markdown(f'<div class="context-text">{context}</div>', unsafe_allow_html=True)
         else:
-            context = f"Opened at ${opening_price:.2f} - Below Breakdown Target (strong bearish setup)"
-        st.markdown(f'<div class="context-text">{context}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="context-text" style="color: #7d8590;">Enter opening price to see context analysis</div>', unsafe_allow_html=True)
+        
         st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown('<div class="card-title" style="margin-top: 32px;">📏 Expected Move Metrics</div>', unsafe_allow_html=True)
@@ -782,7 +788,7 @@ def main():
         st.markdown('<div class="premium-card">', unsafe_allow_html=True)
         st.markdown('<div class="card-title">🎯 Live Analysis</div>', unsafe_allow_html=True)
         
-        current_price = st.number_input("Current SPX Price", value=0.00, step=0.01, key="current_price", format="%.2f")
+        current_price = st.number_input("Current SPX Price", value=0.00, step=0.01, key="current_price", format="%.2f", min_value=0.0)
         
         if current_price > 0:
             st.markdown('<div class="card-title" style="margin-top: 24px;">📏 Distance Dashboard</div>', unsafe_allow_html=True)
@@ -796,11 +802,9 @@ def main():
                 ("🔥 Capitulation Target", capitulation, current_price - capitulation)
             ]
             
-            sorted_distances = sorted(distances, key=lambda x: abs(x[2]))
-            
             for name, level, dist in distances:
-                if dist == 0:
-                    st.markdown(f'<div class="distance-item current"><div class="distance-label">🎯 CURRENT PRICE</div><div class="distance-value">${current_price:.2f}</div></div>', unsafe_allow_html=True)
+                if abs(dist) < 0.01:  # Essentially at the level
+                    st.markdown(f'<div class="distance-item current"><div class="distance-label">🎯 CURRENT PRICE AT {name}</div><div class="distance-value">${current_price:.2f}</div></div>', unsafe_allow_html=True)
                 else:
                     direction = "up" if dist < 0 else "down"
                     arrow = "⬆️" if dist < 0 else "⬇️"
@@ -860,9 +864,9 @@ def main():
         
         col1, col2 = st.columns(2)
         with col1:
-            fib_high = st.number_input("Contract High ($)", value=0.00, step=0.01, key="fib_high", format="%.2f")
+            fib_high = st.number_input("Contract High ($)", value=0.00, step=0.01, key="fib_high", format="%.2f", min_value=0.0)
         with col2:
-            fib_low = st.number_input("Contract Low ($)", value=0.00, step=0.01, key="fib_low", format="%.2f")
+            fib_low = st.number_input("Contract Low ($)", value=0.00, step=0.01, key="fib_low", format="%.2f", min_value=0.0)
         
         if fib_high > 0 and fib_low > 0 and fib_high > fib_low:
             fib_levels = calculate_fibonacci(fib_high, fib_low)
