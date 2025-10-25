@@ -1,5 +1,6 @@
 # app.py
 # SPX PROPHET - Professional Trading Platform
+# 4-Anchor Channel System
 
 import streamlit as st
 import pandas as pd
@@ -22,19 +23,12 @@ def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetim
     return list(idx.to_pydatetime())
 
 def count_blocks_with_maintenance_skip(start_dt: datetime, end_dt: datetime) -> int:
-    """
-    Count 30-minute blocks between start and end, excluding:
-    - Maintenance hours (4:00-5:00 PM daily)
-    - Weekends (Saturday and Sunday)
-    """
     blocks = 0
     current = start_dt
     while current < end_dt:
-        # Skip weekends (Saturday=5, Sunday=6)
         if current.weekday() >= 5:
             current += timedelta(minutes=30)
             continue
-        # Skip maintenance period (4:00-5:00 PM)
         if current.hour == 16 and current.minute in [0, 30]:
             current += timedelta(minutes=30)
             continue
@@ -52,15 +46,18 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope: float, sl
         rows.append({"Time": dt.strftime("%I:%M %p"), "Price": round(price, 2)})
     return pd.DataFrame(rows)
 
-def calculate_sd_targets(breakout: float, bull_pivot: float, bear_pivot: float, breakdown: float) -> Dict:
-    pivot_spread = abs(bull_pivot - bear_pivot)
-    extended_spread = 2 * pivot_spread
-    extension_target = breakout + extended_spread
-    capitulation_target = breakdown - extended_spread
+def calculate_targets(bull_pivot: float, breakout: float, bear_pivot: float, breakdown: float) -> Dict:
+    skyline_channel_width = breakout - bull_pivot
+    baseline_channel_width = bear_pivot - breakdown
+    extension = breakout + skyline_channel_width
+    capitulation = breakdown - baseline_channel_width
+    
     return {
-        "extension_target": extension_target,
-        "capitulation_target": capitulation_target,
-        "pivot_spread": pivot_spread
+        "extension": extension,
+        "capitulation": capitulation,
+        "skyline_channel": skyline_channel_width,
+        "baseline_channel": baseline_channel_width,
+        "total_range": extension - capitulation
     }
 
 def calculate_fibonacci(high: float, low: float) -> Dict[str, float]:
@@ -73,78 +70,61 @@ def calculate_fibonacci(high: float, low: float) -> Dict[str, float]:
         "0.236": round(high - (range_size * 0.236), 2)
     }
 
-def get_position_bias(price: float, breakout: float, bull_pivot: float, bear_pivot: float, breakdown: float) -> Tuple[str, str]:
-    if price > breakout:
-        return "STRONG BULL", "Above Breakout Target - continuation likely"
-    elif price > bull_pivot:
-        return "BULL ZONE", "Between Bull Pivot and Breakout - watch for extension"
-    elif price > bear_pivot:
-        return "NEUTRAL", "Between pivots - key zone, watch for direction"
-    elif price > breakdown:
-        return "BEAR ZONE", "Between Bear Pivot and Breakdown - watch for capitulation"
+def get_market_zone(price: float, levels: Dict) -> Tuple[str, str, str]:
+    if price >= levels['extension']:
+        return "🔥 EXTENSION ZONE", "Extreme bullish territory - profit taking likely", "#22c55e"
+    elif price >= levels['breakout']:
+        return "🚀 BREAKOUT ZONE", "Strong momentum - watch for extension", "#10b981"
+    elif price >= levels['bull_pivot']:
+        return "📈 BULL CHANNEL", "Bullish bias - momentum building", "#84cc16"
+    elif price >= levels['bear_pivot']:
+        return "⚖️ PIVOT ZONE", "Neutral - key decision area", "#f59e0b"
+    elif price >= levels['breakdown']:
+        return "📉 BEAR CHANNEL", "Bearish bias - pressure building", "#ef4444"
+    elif price >= levels['capitulation']:
+        return "💥 BREAKDOWN ZONE", "Strong selling - watch for capitulation", "#dc2626"
     else:
-        return "STRONG BEAR", "Below Breakdown Target - continuation likely"
+        return "🔥 CAPITULATION ZONE", "Extreme bearish territory - bounce likely", "#b91c1c"
 
-def calculate_trade_probability(price: float, extension: float, bull_pivot: float, bear_pivot: float, capitulation: float) -> Dict:
-    dist_to_extension = extension - price
-    dist_to_capitulation = price - capitulation
-    total_range = extension - capitulation
-    
-    position_pct = (price - capitulation) / total_range
-    
-    if price > bull_pivot:
-        extension_prob = min(95, 50 + (position_pct * 40))
-        capitulation_prob = 100 - extension_prob
-    elif price < bear_pivot:
-        capitulation_prob = min(95, 50 + ((1 - position_pct) * 40))
-        extension_prob = 100 - capitulation_prob
-    else:
-        if price > (bull_pivot + bear_pivot) / 2:
-            extension_prob = 55
-            capitulation_prob = 45
-        else:
-            extension_prob = 45
-            capitulation_prob = 55
-    
-    return {
-        "extension": round(extension_prob, 1),
-        "capitulation": round(capitulation_prob, 1)
-    }
+def calculate_risk_reward(entry: float, target: float, stop: float) -> float:
+    risk = abs(entry - stop)
+    reward = abs(target - entry)
+    return round(reward / risk, 2) if risk > 0 else 0
 
-def analyze_spread(current_spread: float) -> Dict:
-    # Typical pivot spread baseline for SPX (adjust based on your historical data)
-    typical_spread = 16.25
-    ratio = (current_spread / typical_spread) * 100
-    diff = current_spread - typical_spread
+def get_trade_setups(price: float, levels: Dict) -> List[Dict]:
+    setups = []
     
-    if ratio < 80:
-        status = "COMPRESSED"
-        signal = "High volatility expected - prepare for explosive move"
-        color = "warning"
-    elif ratio > 120:
-        status = "EXPANDED"
-        signal = "Mean reversion likely - expect consolidation"
-        color = "info"
-    else:
-        status = "NORMAL"
-        signal = "Standard range - normal trading conditions"
-        color = "success"
+    # Bullish setups
+    if price <= levels['bull_pivot']:
+        setups.append({
+            "type": "LONG",
+            "entry": price,
+            "target": levels['breakout'],
+            "stop": levels['bear_pivot'],
+            "rr": calculate_risk_reward(price, levels['breakout'], levels['bear_pivot']),
+            "confidence": "High" if price < levels['bull_pivot'] * 0.998 else "Medium"
+        })
     
-    return {
-        "status": status,
-        "signal": signal,
-        "color": color,
-        "ratio": ratio,
-        "diff": diff,
-        "typical_spread": typical_spread
-    }
+    # Bearish setups
+    if price >= levels['bear_pivot']:
+        setups.append({
+            "type": "SHORT",
+            "entry": price,
+            "target": levels['breakdown'],
+            "stop": levels['bull_pivot'],
+            "rr": calculate_risk_reward(price, levels['breakdown'], levels['bull_pivot']),
+            "confidence": "High" if price > levels['bear_pivot'] * 1.002 else "Medium"
+        })
+    
+    return setups
 
 def main():
-    st.set_page_config(page_title=APP_NAME, page_icon="◈", layout="wide")
+    st.set_page_config(page_title=APP_NAME, page_icon="◈", layout="wide", initial_sidebar_state="expanded")
     
+    # Enhanced CSS with animations and professional styling
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
     
     * {
         font-family: 'Outfit', sans-serif;
@@ -152,151 +132,321 @@ def main():
     }
     
     html, body, .main, .block-container {
-        background: linear-gradient(135deg, #0f1419 0%, #1a1f2e 100%);
+        background: linear-gradient(135deg, #0a0e27 0%, #1a1f2e 50%, #0f1419 100%);
         color: #e8eaed;
     }
     
     .stApp {
-        background: linear-gradient(135deg, #0f1419 0%, #1a1f2e 100%);
+        background: linear-gradient(135deg, #0a0e27 0%, #1a1f2e 50%, #0f1419 100%);
     }
     
     h1, h2, h3, h4, h5, h6, p, div, span, label {
         color: #e8eaed;
     }
     
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    @keyframes pulse {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.7;
+        }
+    }
+    
+    @keyframes shimmer {
+        0% {
+            background-position: -1000px 0;
+        }
+        100% {
+            background-position: 1000px 0;
+        }
+    }
+    
     .prophet-header {
         position: relative;
         text-align: center;
-        padding: 60px 40px 40px 40px;
+        padding: 80px 40px 60px 40px;
         margin-bottom: 40px;
-        background: linear-gradient(135deg, rgba(218, 165, 32, 0.05) 0%, rgba(100, 149, 237, 0.05) 100%);
-        border-radius: 24px;
-        border: 1px solid rgba(218, 165, 32, 0.1);
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.08) 0%, rgba(100, 149, 237, 0.08) 100%);
+        border-radius: 32px;
+        border: 2px solid rgba(218, 165, 32, 0.15);
         backdrop-filter: blur(20px);
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        animation: fadeInUp 0.8s ease-out;
+        overflow: hidden;
+    }
+    
+    .prophet-header::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: linear-gradient(45deg, transparent, rgba(218, 165, 32, 0.03), transparent);
+        animation: shimmer 3s infinite;
     }
     
     .prophet-logo {
-        font-size: 56px;
+        font-size: 72px;
         font-weight: 900;
-        background: linear-gradient(135deg, #daa520 0%, #6495ed 100%);
+        background: linear-gradient(135deg, #daa520 0%, #ffd700 50%, #6495ed 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.08em;
         margin: 0;
+        text-shadow: 0 0 40px rgba(218, 165, 32, 0.3);
+        animation: pulse 3s ease-in-out infinite;
     }
     
     .prophet-subtitle {
-        font-size: 14px;
-        font-weight: 600;
+        font-size: 16px;
+        font-weight: 700;
         color: #7d8590;
         text-transform: uppercase;
-        letter-spacing: 0.2em;
+        letter-spacing: 0.3em;
+        margin-top: 20px;
+    }
+    
+    .prophet-tagline {
+        font-size: 20px;
+        font-weight: 700;
+        background: linear-gradient(135deg, #daa520, #ffd700);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
         margin-top: 16px;
+        letter-spacing: 0.05em;
     }
     
     .premium-card {
-        background: linear-gradient(135deg, rgba(26, 31, 46, 0.8) 0%, rgba(15, 20, 25, 0.9) 100%);
-        border: 1px solid rgba(218, 165, 32, 0.15);
-        border-radius: 20px;
-        padding: 32px;
-        margin: 24px 0;
-        backdrop-filter: blur(10px);
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        background: linear-gradient(135deg, rgba(26, 31, 46, 0.9) 0%, rgba(15, 20, 25, 0.95) 100%);
+        border: 1.5px solid rgba(218, 165, 32, 0.2);
+        border-radius: 24px;
+        padding: 36px;
+        margin: 28px 0;
+        backdrop-filter: blur(20px);
+        box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        animation: fadeInUp 0.6s ease-out;
     }
     
     .premium-card:hover {
-        transform: translateY(-4px);
-        border-color: rgba(218, 165, 32, 0.3);
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(218, 165, 32, 0.15);
+        transform: translateY(-6px) scale(1.01);
+        border-color: rgba(218, 165, 32, 0.4);
+        box-shadow: 0 25px 70px rgba(0, 0, 0, 0.7), 0 0 60px rgba(218, 165, 32, 0.2);
     }
     
     .card-title {
-        font-size: 20px;
-        font-weight: 700;
+        font-size: 24px;
+        font-weight: 800;
         color: #daa520;
-        margin-bottom: 24px;
+        margin-bottom: 28px;
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .anchor-section {
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.05), rgba(100, 149, 237, 0.05));
+        border: 1px solid rgba(218, 165, 32, 0.2);
+        border-radius: 20px;
+        padding: 28px;
+        margin: 20px 0;
+    }
+    
+    .anchor-label {
+        font-size: 14px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 16px;
+        padding: 10px 16px;
+        border-radius: 8px;
+        display: inline-block;
+    }
+    
+    .anchor-label.skyline1 {
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(34, 197, 94, 0.1));
+        color: #22c55e;
+        border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    
+    .anchor-label.skyline2 {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.1));
+        color: #10b981;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    
+    .anchor-label.baseline1 {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.1));
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    
+    .anchor-label.baseline2 {
+        background: linear-gradient(135deg, rgba(220, 38, 38, 0.2), rgba(220, 38, 38, 0.1));
+        color: #dc2626;
+        border: 1px solid rgba(220, 38, 38, 0.3);
     }
     
     .metrics-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 16px;
-        margin: 24px 0;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 20px;
+        margin: 28px 0;
     }
     
     .metric-card {
-        background: linear-gradient(135deg, rgba(218, 165, 32, 0.05) 0%, rgba(100, 149, 237, 0.05) 100%);
-        border: 1px solid rgba(218, 165, 32, 0.15);
-        border-radius: 16px;
-        padding: 24px 20px;
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.08) 0%, rgba(100, 149, 237, 0.08) 100%);
+        border: 1.5px solid rgba(218, 165, 32, 0.2);
+        border-radius: 18px;
+        padding: 28px 24px;
         text-align: center;
-        backdrop-filter: blur(10px);
-        transition: all 0.3s ease;
+        backdrop-filter: blur(15px);
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .metric-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(218, 165, 32, 0.1), transparent);
+        transition: left 0.5s;
+    }
+    
+    .metric-card:hover::before {
+        left: 100%;
     }
     
     .metric-card:hover {
-        transform: translateY(-2px);
-        border-color: rgba(218, 165, 32, 0.3);
-        box-shadow: 0 8px 32px rgba(218, 165, 32, 0.15);
+        transform: translateY(-4px) scale(1.05);
+        border-color: rgba(218, 165, 32, 0.4);
+        box-shadow: 0 12px 40px rgba(218, 165, 32, 0.25);
     }
     
     .metric-label {
-        font-size: 11px;
-        font-weight: 700;
+        font-size: 12px;
+        font-weight: 800;
         color: #7d8590;
         text-transform: uppercase;
-        letter-spacing: 0.1em;
-        margin-bottom: 12px;
+        letter-spacing: 0.12em;
+        margin-bottom: 14px;
     }
     
     .metric-value {
-        font-size: 28px;
-        font-weight: 800;
+        font-size: 32px;
+        font-weight: 900;
         font-family: 'JetBrains Mono', monospace;
-        background: linear-gradient(135deg, #daa520, #6495ed);
+        background: linear-gradient(135deg, #daa520, #ffd700, #6495ed);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
     
-    .distance-item {
-        background: linear-gradient(135deg, rgba(26, 31, 46, 0.6) 0%, rgba(15, 20, 25, 0.8) 100%);
-        border: 1px solid rgba(218, 165, 32, 0.2);
-        border-radius: 12px;
-        padding: 16px 24px;
-        margin: 8px 0;
+    .channel-analysis {
+        background: linear-gradient(135deg, rgba(100, 149, 237, 0.1), rgba(100, 149, 237, 0.05));
+        border: 2px solid rgba(100, 149, 237, 0.3);
+        border-radius: 20px;
+        padding: 32px;
+        margin: 24px 0;
+    }
+    
+    .channel-title {
+        font-size: 20px;
+        font-weight: 800;
+        color: #6495ed;
+        margin-bottom: 20px;
+        text-transform: uppercase;
+    }
+    
+    .channel-metric {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        transition: all 0.3s ease;
+        padding: 16px 24px;
+        background: rgba(15, 20, 25, 0.5);
+        border-radius: 12px;
+        margin: 12px 0;
+        border: 1px solid rgba(100, 149, 237, 0.2);
+    }
+    
+    .zone-indicator {
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.15), rgba(218, 165, 32, 0.05));
+        border: 2px solid;
+        border-radius: 20px;
+        padding: 32px;
+        margin: 24px 0;
+        text-align: center;
+        backdrop-filter: blur(10px);
+        animation: fadeInUp 0.5s ease-out;
+    }
+    
+    .zone-name {
+        font-size: 36px;
+        font-weight: 900;
+        margin-bottom: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .zone-description {
+        font-size: 16px;
+        color: #cbd5e1;
+        margin-top: 12px;
+    }
+    
+    .distance-item {
+        background: linear-gradient(135deg, rgba(26, 31, 46, 0.7) 0%, rgba(15, 20, 25, 0.9) 100%);
+        border: 1.5px solid rgba(218, 165, 32, 0.25);
+        border-radius: 14px;
+        padding: 18px 28px;
+        margin: 10px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
     
     .distance-item:hover {
-        transform: translateX(4px);
-        border-color: rgba(218, 165, 32, 0.4);
-        box-shadow: 0 4px 20px rgba(218, 165, 32, 0.15);
+        transform: translateX(8px) scale(1.02);
+        border-color: rgba(218, 165, 32, 0.5);
+        box-shadow: 0 6px 25px rgba(218, 165, 32, 0.2);
     }
     
     .distance-item.current {
-        background: linear-gradient(135deg, rgba(218, 165, 32, 0.2) 0%, rgba(100, 149, 237, 0.2) 100%);
-        border: 2px solid rgba(218, 165, 32, 0.5);
-        font-size: 18px;
-        font-weight: 800;
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.25) 0%, rgba(100, 149, 237, 0.25) 100%);
+        border: 2px solid rgba(218, 165, 32, 0.6);
+        font-size: 20px;
+        font-weight: 900;
+        box-shadow: 0 8px 30px rgba(218, 165, 32, 0.3);
     }
     
     .distance-label {
-        font-size: 15px;
-        font-weight: 600;
+        font-size: 16px;
+        font-weight: 700;
         color: #e8eaed;
     }
     
     .distance-value {
-        font-size: 20px;
-        font-weight: 800;
+        font-size: 22px;
+        font-weight: 900;
         font-family: 'JetBrains Mono', monospace;
     }
     
@@ -308,240 +458,142 @@ def main():
         color: #ef4444;
     }
     
-    .probability-card {
-        background: linear-gradient(135deg, rgba(218, 165, 32, 0.1) 0%, rgba(100, 149, 237, 0.1) 100%);
-        border: 2px solid rgba(218, 165, 32, 0.3);
-        border-radius: 16px;
+    .trade-setup-card {
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));
+        border: 2px solid rgba(34, 197, 94, 0.3);
+        border-radius: 18px;
         padding: 28px;
-        margin: 20px 0;
-        backdrop-filter: blur(10px);
+        margin: 16px 0;
+        transition: all 0.4s ease;
     }
     
-    .prob-title {
-        font-size: 18px;
-        font-weight: 700;
-        color: #daa520;
-        margin-bottom: 20px;
-        text-align: center;
+    .trade-setup-card.short {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.05));
+        border-color: rgba(239, 68, 68, 0.3);
     }
     
-    .prob-bars {
+    .trade-setup-card:hover {
+        transform: scale(1.03);
+        box-shadow: 0 12px 40px rgba(34, 197, 94, 0.3);
+    }
+    
+    .setup-header {
         display: flex;
-        gap: 20px;
-        margin-top: 16px;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
     }
     
-    .prob-bar {
-        flex: 1;
-        text-align: center;
-    }
-    
-    .prob-label {
-        font-size: 13px;
-        font-weight: 700;
-        color: #7d8590;
-        text-transform: uppercase;
-        margin-bottom: 10px;
-    }
-    
-    .prob-value {
-        font-size: 40px;
+    .setup-type {
+        font-size: 24px;
         font-weight: 900;
-        font-family: 'JetBrains Mono', monospace;
-        margin-bottom: 8px;
-    }
-    
-    .prob-value.bull {
         color: #22c55e;
     }
     
-    .prob-value.bear {
+    .setup-type.short {
         color: #ef4444;
     }
     
-    .spread-analysis {
-        background: linear-gradient(135deg, rgba(26, 31, 46, 0.8) 0%, rgba(15, 20, 25, 0.9) 100%);
-        border: 2px solid rgba(218, 165, 32, 0.3);
-        border-radius: 16px;
-        padding: 28px;
-        margin: 20px 0;
-        backdrop-filter: blur(10px);
+    .confidence-badge {
+        padding: 6px 16px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
     }
     
-    .spread-analysis.compressed {
-        border-color: rgba(245, 158, 11, 0.5);
-        background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%);
-    }
-    
-    .spread-analysis.expanded {
-        border-color: rgba(59, 130, 246, 0.5);
-        background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
-    }
-    
-    .spread-title {
-        font-size: 18px;
-        font-weight: 700;
-        margin-bottom: 16px;
-    }
-    
-    .spread-status {
-        font-size: 32px;
-        font-weight: 900;
-        margin: 12px 0;
-    }
-    
-    .spread-status.compressed {
-        color: #f59e0b;
-    }
-    
-    .spread-status.expanded {
-        color: #3b82f6;
-    }
-    
-    .spread-status.normal {
+    .confidence-badge.high {
+        background: rgba(34, 197, 94, 0.2);
         color: #22c55e;
+        border: 1px solid rgba(34, 197, 94, 0.4);
     }
     
-    .spread-signal {
-        font-size: 15px;
-        color: #cbd5e1;
-        margin-top: 12px;
+    .confidence-badge.medium {
+        background: rgba(245, 158, 11, 0.2);
+        color: #f59e0b;
+        border: 1px solid rgba(245, 158, 11, 0.4);
     }
     
-    .spread-metrics {
+    .setup-details {
         display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-columns: repeat(2, 1fr);
         gap: 16px;
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid rgba(218, 165, 32, 0.2);
+        margin-top: 16px;
     }
     
-    .spread-metric {
-        text-align: center;
+    .setup-item {
+        padding: 12px;
+        background: rgba(15, 20, 25, 0.5);
+        border-radius: 10px;
+        border: 1px solid rgba(218, 165, 32, 0.2);
     }
     
-    .spread-metric-label {
+    .setup-label {
         font-size: 11px;
         font-weight: 700;
         color: #7d8590;
         text-transform: uppercase;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
     }
     
-    .spread-metric-value {
-        font-size: 24px;
+    .setup-value {
+        font-size: 20px;
         font-weight: 800;
         font-family: 'JetBrains Mono', monospace;
         color: #daa520;
     }
     
-    .bias-card {
-        background: linear-gradient(135deg, rgba(218, 165, 32, 0.1) 0%, rgba(100, 149, 237, 0.1) 100%);
-        border: 2px solid rgba(218, 165, 32, 0.3);
-        border-radius: 20px;
-        padding: 32px;
-        margin: 24px 0;
-        text-align: center;
-        backdrop-filter: blur(10px);
-    }
-    
-    .bias-title {
-        font-size: 32px;
-        font-weight: 900;
-        margin-bottom: 12px;
-    }
-    
-    .opening-context {
-        background: linear-gradient(135deg, rgba(100, 149, 237, 0.1) 0%, rgba(100, 149, 237, 0.05) 100%);
-        border: 1px solid rgba(100, 149, 237, 0.3);
-        border-radius: 16px;
-        padding: 24px;
-        margin: 20px 0;
-    }
-    
-    .context-title {
-        font-size: 16px;
-        font-weight: 700;
-        color: #6495ed;
-        margin-bottom: 12px;
-    }
-    
-    .context-text {
-        font-size: 15px;
-        color: #cbd5e1;
-        line-height: 1.6;
-    }
-    
-    .expected-moves {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
-        margin: 20px 0;
-    }
-    
-    .move-card {
-        background: linear-gradient(135deg, rgba(26, 31, 46, 0.6) 0%, rgba(15, 20, 25, 0.8) 100%);
-        border: 1px solid rgba(218, 165, 32, 0.2);
+    .rr-badge {
+        display: inline-block;
+        padding: 8px 20px;
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.2), rgba(218, 165, 32, 0.1));
+        border: 2px solid rgba(218, 165, 32, 0.4);
         border-radius: 12px;
-        padding: 20px;
-        text-align: center;
-    }
-    
-    .move-label {
-        font-size: 12px;
-        font-weight: 700;
-        color: #7d8590;
-        text-transform: uppercase;
-        margin-bottom: 10px;
-    }
-    
-    .move-value {
-        font-size: 28px;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', monospace;
+        font-size: 18px;
+        font-weight: 900;
         color: #daa520;
+        margin-top: 12px;
     }
     
     .fib-result {
-        background: linear-gradient(135deg, rgba(26, 31, 46, 0.6) 0%, rgba(15, 20, 25, 0.8) 100%);
-        border: 1px solid rgba(218, 165, 32, 0.2);
-        border-radius: 12px;
-        padding: 20px 28px;
-        margin: 12px 0;
+        background: linear-gradient(135deg, rgba(26, 31, 46, 0.7) 0%, rgba(15, 20, 25, 0.9) 100%);
+        border: 1.5px solid rgba(218, 165, 32, 0.25);
+        border-radius: 14px;
+        padding: 22px 32px;
+        margin: 14px 0;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        transition: all 0.3s ease;
+        transition: all 0.4s ease;
     }
     
     .fib-result:hover {
-        transform: translateX(4px);
-        border-color: rgba(218, 165, 32, 0.4);
+        transform: translateX(6px);
+        border-color: rgba(218, 165, 32, 0.5);
     }
     
     .fib-result.primary {
         border-width: 2px;
-        border-color: rgba(218, 165, 32, 0.4);
-        background: linear-gradient(135deg, rgba(218, 165, 32, 0.1) 0%, rgba(100, 149, 237, 0.1) 100%);
+        border-color: rgba(218, 165, 32, 0.5);
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.15) 0%, rgba(100, 149, 237, 0.15) 100%);
     }
     
     .fib-label {
-        font-size: 15px;
-        font-weight: 600;
+        font-size: 16px;
+        font-weight: 700;
         color: #e8eaed;
     }
     
     .fib-value {
-        font-size: 24px;
-        font-weight: 800;
+        font-size: 26px;
+        font-weight: 900;
         font-family: 'JetBrains Mono', monospace;
         color: #daa520;
     }
     
     .stDataFrame {
-        border: 1px solid rgba(218, 165, 32, 0.2);
-        border-radius: 16px;
+        border: 1.5px solid rgba(218, 165, 32, 0.25);
+        border-radius: 18px;
         overflow: hidden;
     }
     
@@ -550,351 +602,470 @@ def main():
     }
     
     .stDataFrame thead th {
-        background: linear-gradient(135deg, rgba(218, 165, 32, 0.15), rgba(100, 149, 237, 0.15)) !important;
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.2), rgba(100, 149, 237, 0.2)) !important;
         color: #daa520 !important;
-        font-weight: 800 !important;
-        font-size: 12px !important;
+        font-weight: 900 !important;
+        font-size: 13px !important;
         text-transform: uppercase !important;
-        letter-spacing: 0.1em !important;
-        padding: 18px 16px !important;
-        border-bottom: 2px solid rgba(218, 165, 32, 0.3) !important;
+        letter-spacing: 0.12em !important;
+        padding: 20px 18px !important;
+        border-bottom: 2px solid rgba(218, 165, 32, 0.4) !important;
     }
     
     .stDataFrame tbody td {
-        background: rgba(15, 20, 25, 0.4) !important;
+        background: rgba(15, 20, 25, 0.5) !important;
         color: #e8eaed !important;
-        font-weight: 600 !important;
-        font-size: 15px !important;
-        padding: 16px !important;
-        border-bottom: 1px solid rgba(218, 165, 32, 0.1) !important;
+        font-weight: 700 !important;
+        font-size: 16px !important;
+        padding: 18px !important;
+        border-bottom: 1px solid rgba(218, 165, 32, 0.15) !important;
     }
     
     .stDataFrame tbody tr:hover td {
-        background: rgba(218, 165, 32, 0.08) !important;
+        background: rgba(218, 165, 32, 0.12) !important;
     }
     
     .stNumberInput input, .stDateInput input, .stTimeInput input, .stTextInput input {
-        background: rgba(15, 20, 25, 0.6) !important;
-        border: 1.5px solid rgba(218, 165, 32, 0.2) !important;
-        border-radius: 10px !important;
+        background: rgba(15, 20, 25, 0.7) !important;
+        border: 2px solid rgba(218, 165, 32, 0.25) !important;
+        border-radius: 12px !important;
         color: #e8eaed !important;
-        font-weight: 600 !important;
+        font-weight: 700 !important;
         font-family: 'JetBrains Mono', monospace !important;
-        font-size: 15px !important;
-        padding: 12px 16px !important;
+        font-size: 16px !important;
+        padding: 14px 18px !important;
         transition: all 0.3s ease !important;
     }
     
     .stNumberInput input:focus, .stDateInput input:focus, .stTimeInput input:focus, .stTextInput input:focus {
-        border-color: rgba(218, 165, 32, 0.5) !important;
-        box-shadow: 0 0 0 3px rgba(218, 165, 32, 0.1) !important;
+        border-color: rgba(218, 165, 32, 0.6) !important;
+        box-shadow: 0 0 0 4px rgba(218, 165, 32, 0.15) !important;
     }
     
     .stNumberInput label, .stDateInput label, .stTimeInput label, .stTextInput label {
         color: #7d8590 !important;
-        font-weight: 700 !important;
-        font-size: 12px !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.05em !important;
-    }
-    
-    .stButton button, .stDownloadButton button {
-        background: linear-gradient(135deg, #daa520, #6495ed) !important;
-        color: #0f1419 !important;
-        border: none !important;
-        border-radius: 10px !important;
-        padding: 14px 32px !important;
         font-weight: 800 !important;
         font-size: 13px !important;
         text-transform: uppercase !important;
-        letter-spacing: 0.05em !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 6px 20px rgba(218, 165, 32, 0.3) !important;
+        letter-spacing: 0.08em !important;
+    }
+    
+    .stButton button, .stDownloadButton button {
+        background: linear-gradient(135deg, #daa520, #ffd700, #6495ed) !important;
+        color: #0a0e27 !important;
+        border: none !important;
+        border-radius: 12px !important;
+        padding: 16px 36px !important;
+        font-weight: 900 !important;
+        font-size: 14px !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+        transition: all 0.4s ease !important;
+        box-shadow: 0 8px 25px rgba(218, 165, 32, 0.4) !important;
     }
     
     .stButton button:hover, .stDownloadButton button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 30px rgba(218, 165, 32, 0.5) !important;
+        transform: translateY(-3px) scale(1.05);
+        box-shadow: 0 15px 40px rgba(218, 165, 32, 0.6) !important;
     }
     
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 12px;
         background: transparent;
-        border-bottom: 1px solid rgba(218, 165, 32, 0.2);
+        border-bottom: 2px solid rgba(218, 165, 32, 0.25);
     }
     
     .stTabs [data-baseweb="tab"] {
         background: transparent;
         border: none;
         color: #7d8590;
-        font-weight: 600;
-        padding: 12px 24px;
+        font-weight: 700;
+        font-size: 15px;
+        padding: 14px 28px;
+        transition: all 0.3s ease;
     }
     
     .stTabs [aria-selected="true"] {
         color: #daa520;
-        border-bottom: 2px solid #daa520;
+        border-bottom: 3px solid #daa520;
+        background: rgba(218, 165, 32, 0.1);
     }
     
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, rgba(15, 20, 25, 0.95) 0%, rgba(26, 31, 46, 0.95) 100%);
-        border-right: 1px solid rgba(218, 165, 32, 0.15);
-        backdrop-filter: blur(20px);
+        background: linear-gradient(180deg, rgba(10, 14, 39, 0.98) 0%, rgba(26, 31, 46, 0.98) 100%);
+        border-right: 2px solid rgba(218, 165, 32, 0.2);
+        backdrop-filter: blur(30px);
     }
     
     section[data-testid="stSidebar"] * {
         color: #e8eaed;
     }
     
+    .stats-bar {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin: 24px 0;
+    }
+    
+    .stat-item {
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.1), rgba(100, 149, 237, 0.1));
+        border: 1px solid rgba(218, 165, 32, 0.3);
+        border-radius: 14px;
+        padding: 20px;
+        text-align: center;
+    }
+    
+    .stat-label {
+        font-size: 11px;
+        font-weight: 800;
+        color: #7d8590;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+    }
+    
+    .stat-value {
+        font-size: 26px;
+        font-weight: 900;
+        font-family: 'JetBrains Mono', monospace;
+        background: linear-gradient(135deg, #daa520, #6495ed);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    
     </style>
     """, unsafe_allow_html=True)
     
     with st.sidebar:
-        st.markdown("### ⚙️ Configuration")
-        st.info(f"Ascending: +{ASC_SLOPE}")
-        st.info(f"Descending: {DESC_SLOPE}")
+        st.markdown("### ⚙️ CONFIGURATION")
+        st.info(f"**Ascending:** +{ASC_SLOPE}")
+        st.info(f"**Descending:** {DESC_SLOPE}")
         st.markdown("---")
-        st.markdown("### ℹ️ System")
-        st.caption("Central Time (CT)")
-        st.caption("RTH: 8:30 AM - 2:00 PM")
-        st.caption("Maintenance: 4-5 PM excluded")
-        st.caption("Weekends: Skipped in calculations")
+        st.markdown("### 🕐 SYSTEM INFO")
+        st.caption("**Timezone:** Central Time (CT)")
+        st.caption("**RTH Hours:** 8:30 AM - 2:00 PM")
+        st.caption("**Maintenance:** 4-5 PM (excluded)")
+        st.caption("**Weekends:** Auto-skipped")
         st.markdown("---")
-        st.markdown("### 📊 Lines")
-        st.caption("☁️ Extension Target")
-        st.caption("🚀 Breakout Target")
-        st.caption("📈 Bull Pivot")
-        st.caption("📉 Bear Pivot")
-        st.caption("💥 Breakdown Target")
-        st.caption("🔥 Capitulation Target")
+        st.markdown("### 📊 6 KEY LEVELS")
+        st.caption("☁️ **Extension Target**")
+        st.caption("🚀 **Breakout Momentum**")
+        st.caption("📈 **Bull Pivot**")
+        st.caption("📉 **Bear Pivot**")
+        st.caption("💥 **Breakdown Gravity**")
+        st.caption("🔥 **Capitulation Target**")
+        st.markdown("---")
+        st.markdown("### 📈 CHANNEL SYSTEM")
+        st.caption("**Skyline Channel:** Bull → Breakout")
+        st.caption("**Baseline Channel:** Bear → Breakdown")
+        st.markdown("---")
+        current_time_ct = datetime.now(CT)
+        st.markdown(f"### 🕐 CURRENT TIME")
+        st.caption(f"**{current_time_ct.strftime('%I:%M %p CT')}**")
+        st.caption(f"{current_time_ct.strftime('%A, %B %d, %Y')}")
     
     st.markdown("""
         <div class="prophet-header">
             <div class="prophet-logo">◈ SPX PROPHET</div>
             <div class="prophet-subtitle">Professional Trading Platform</div>
-            <div style="font-size: 16px; font-weight: 600; color: #daa520; margin-top: 12px; letter-spacing: 0.05em;">
-                Predicting Market Irrationality Accurately
-            </div>
+            <div class="prophet-tagline">Predicting Market Irrationality Accurately</div>
         </div>
     """, unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["📊 Projection System", "📐 Fibonacci Calculator"])
+    tab1, tab2, tab3 = st.tabs(["📊 PROJECTION SYSTEM", "🎯 TRADE ANALYZER", "📐 FIBONACCI CALCULATOR"])
     
     with tab1:
         st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">⚙️ Anchor Configuration</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">⚙️ 4-ANCHOR CONFIGURATION</div>', unsafe_allow_html=True)
         
-        proj_day = st.date_input("Projection Date", value=datetime.now(CT).date())
+        proj_day = st.date_input("📅 Projection Date", value=datetime.now(CT).date())
+        
+        st.markdown("---")
+        
+        # Skyline Channel
+        st.markdown('<div class="anchor-section">', unsafe_allow_html=True)
+        st.markdown("### 📈 SKYLINE CHANNEL (Ascending +0.475)")
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("#### Skyline (Upper)")
-            skyline_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="sky_date")
-            skyline_price = st.number_input("Price ($)", value=6634.70, step=0.01, key="sky_price", format="%.2f")
-            skyline_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="sky_time")
+            st.markdown('<div class="anchor-label skyline1">📈 SKYLINE 1 (Lower) → Bull Pivot</div>', unsafe_allow_html=True)
+            skyline1_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="sky1_date")
+            skyline1_price = st.number_input("Price ($)", value=6610.00, step=0.01, key="sky1_price", format="%.2f")
+            skyline1_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="sky1_time")
         
         with col2:
-            st.markdown("#### Baseline (Lower)")
-            baseline_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="base_date")
-            baseline_price = st.number_input("Price ($)", value=6600.00, step=0.01, key="base_price", format="%.2f")
-            baseline_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="base_time")
+            st.markdown('<div class="anchor-label skyline2">🚀 SKYLINE 2 (Higher) → Breakout Momentum</div>', unsafe_allow_html=True)
+            skyline2_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="sky2_date")
+            skyline2_price = st.number_input("Price ($)", value=6634.70, step=0.01, key="sky2_price", format="%.2f")
+            skyline2_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="sky2_time")
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        slots = rth_slots_ct_dt(proj_day, "08:30", "14:00")
-        sky_dt = CT.localize(datetime.combine(skyline_date, skyline_time))
-        base_dt = CT.localize(datetime.combine(baseline_date, baseline_time))
+        st.markdown("---")
         
-        # Standard projections from anchors
-        df_breakout = project_line(skyline_price, sky_dt, ASC_SLOPE, slots)
-        df_bear_pivot = project_line(skyline_price, sky_dt, DESC_SLOPE, slots)
-        df_bull_pivot = project_line(baseline_price, base_dt, ASC_SLOPE, slots)
-        df_breakdown = project_line(baseline_price, base_dt, DESC_SLOPE, slots)
+        # Baseline Channel
+        st.markdown('<div class="anchor-section">', unsafe_allow_html=True)
+        st.markdown("### 📉 BASELINE CHANNEL (Descending -0.475)")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown('<div class="anchor-label baseline1">📉 BASELINE 1 (Higher) → Bear Pivot</div>', unsafe_allow_html=True)
+            baseline1_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="base1_date")
+            baseline1_price = st.number_input("Price ($)", value=6625.00, step=0.01, key="base1_price", format="%.2f")
+            baseline1_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="base1_time")
+        
+        with col2:
+            st.markdown('<div class="anchor-label baseline2">💥 BASELINE 2 (Lower) → Breakdown Gravity</div>', unsafe_allow_html=True)
+            baseline2_date = st.date_input("Date", value=proj_day - timedelta(days=1), key="base2_date")
+            baseline2_price = st.number_input("Price ($)", value=6600.00, step=0.01, key="base2_price", format="%.2f")
+            baseline2_time = st.time_input("Time (CT)", value=dtime(14, 30), step=1800, key="base2_time")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Calculate projections
+        slots = rth_slots_ct_dt(proj_day, "08:30", "14:00")
+        
+        sky1_dt = CT.localize(datetime.combine(skyline1_date, skyline1_time))
+        sky2_dt = CT.localize(datetime.combine(skyline2_date, skyline2_time))
+        base1_dt = CT.localize(datetime.combine(baseline1_date, baseline1_time))
+        base2_dt = CT.localize(datetime.combine(baseline2_date, baseline2_time))
+        
+        df_bull_pivot = project_line(skyline1_price, sky1_dt, ASC_SLOPE, slots)
+        df_breakout = project_line(skyline2_price, sky2_dt, ASC_SLOPE, slots)
+        df_bear_pivot = project_line(baseline1_price, base1_dt, DESC_SLOPE, slots)
+        df_breakdown = project_line(baseline2_price, base2_dt, DESC_SLOPE, slots)
         
         merged = pd.DataFrame({"Time (CT)": [dt.strftime("%I:%M %p") for dt in slots]})
-        merged["🚀 Breakout Target"] = df_breakout["Price"]
         merged["📈 Bull Pivot"] = df_bull_pivot["Price"]
+        merged["🚀 Breakout Momentum"] = df_breakout["Price"]
         merged["📉 Bear Pivot"] = df_bear_pivot["Price"]
-        merged["💥 Breakdown Target"] = df_breakdown["Price"]
+        merged["💥 Breakdown Gravity"] = df_breakdown["Price"]
         
-        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">🌅 Market Open (8:30 AM)</div>', unsafe_allow_html=True)
-        
+        # Get 8:30 AM values
         open_row = merged[merged["Time (CT)"] == "08:30 AM"].iloc[0]
-        breakout = open_row["🚀 Breakout Target"]
         bull_pivot = open_row["📈 Bull Pivot"]
+        breakout = open_row["🚀 Breakout Momentum"]
         bear_pivot = open_row["📉 Bear Pivot"]
-        breakdown = open_row["💥 Breakdown Target"]
+        breakdown = open_row["💥 Breakdown Gravity"]
         
-        sd_results = calculate_sd_targets(breakout, bull_pivot, bear_pivot, breakdown)
-        extension = sd_results['extension_target']
-        capitulation = sd_results['capitulation_target']
-        pivot_spread = sd_results['pivot_spread']
+        # Calculate targets
+        targets = calculate_targets(bull_pivot, breakout, bear_pivot, breakdown)
+        extension = targets['extension']
+        capitulation = targets['capitulation']
+        skyline_channel = targets['skyline_channel']
+        baseline_channel = targets['baseline_channel']
+        total_range = targets['total_range']
+        
+        # Display Market Open Levels
+        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">🌅 MARKET OPEN (8:30 AM) - KEY LEVELS</div>', unsafe_allow_html=True)
         
         st.markdown('<div class="metrics-grid">', unsafe_allow_html=True)
         levels = [
             ("☁️ Extension Target", extension),
-            ("🚀 Breakout Target", breakout),
+            ("🚀 Breakout Momentum", breakout),
             ("📈 Bull Pivot", bull_pivot),
             ("📉 Bear Pivot", bear_pivot),
-            ("💥 Breakdown Target", breakdown),
+            ("💥 Breakdown Gravity", breakdown),
             ("🔥 Capitulation Target", capitulation)
         ]
         for name, price in levels:
             st.markdown(f'<div class="metric-card"><div class="metric-label">{name}</div><div class="metric-value">${price:.2f}</div></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Opening Context with user input
-        st.markdown('<div class="opening-context">', unsafe_allow_html=True)
-        st.markdown('<div class="context-title">📍 Opening Context</div>', unsafe_allow_html=True)
-        opening_price = st.number_input("Market Opening Price (Optional)", value=0.00, step=0.01, key="opening_price", format="%.2f", min_value=0.0)
-        
-        if opening_price > 0:
-            if opening_price > breakout:
-                context = f"Opened at ${opening_price:.2f} - Above Breakout Target (strong bullish setup)"
-            elif opening_price > bull_pivot:
-                context = f"Opened at ${opening_price:.2f} - Between Bull Pivot and Breakout (bullish bias)"
-            elif opening_price > bear_pivot:
-                context = f"Opened at ${opening_price:.2f} - Between pivots (neutral zone - key decision area)"
-            elif opening_price > breakdown:
-                context = f"Opened at ${opening_price:.2f} - Between Bear Pivot and Breakdown (bearish bias)"
-            else:
-                context = f"Opened at ${opening_price:.2f} - Below Breakdown Target (strong bearish setup)"
-            st.markdown(f'<div class="context-text">{context}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="context-text" style="color: #7d8590;">Enter opening price to see context analysis</div>', unsafe_allow_html=True)
-        
         st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown('<div class="card-title" style="margin-top: 32px;">📏 Expected Move Metrics</div>', unsafe_allow_html=True)
-        
-        max_upside = extension - bear_pivot
-        max_downside = bull_pivot - capitulation
-        
-        st.markdown('<div class="expected-moves">', unsafe_allow_html=True)
-        st.markdown(f'<div class="move-card"><div class="move-label">Max Upside</div><div class="move-value">{max_upside:.2f} pts</div><div style="font-size: 12px; color: #7d8590; margin-top: 8px;">Bear Pivot → Extension</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="move-card"><div class="move-label">Max Downside</div><div class="move-value">{max_downside:.2f} pts</div><div style="font-size: 12px; color: #7d8590; margin-top: 8px;">Bull Pivot → Capitulation</div></div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown(f'<div class="move-card" style="margin-top: 16px;"><div class="move-label">Pivot Spread</div><div class="move-value">{pivot_spread:.2f} pts</div><div style="font-size: 12px; color: #7d8590; margin-top: 8px;">|Bull Pivot - Bear Pivot|</div></div>', unsafe_allow_html=True)
-        
-        spread_analysis = analyze_spread(pivot_spread)
+        # Channel Analysis
+        st.markdown('<div class="channel-analysis">', unsafe_allow_html=True)
+        st.markdown('<div class="channel-title">📊 CHANNEL ANALYSIS</div>', unsafe_allow_html=True)
         
         st.markdown(f'''
-            <div class="spread-analysis {spread_analysis['status'].lower()}">
-                <div class="spread-title">📊 Spread Analysis</div>
-                <div class="spread-status {spread_analysis['status'].lower()}">{spread_analysis['status']}</div>
-                <div class="spread-signal">{spread_analysis['signal']}</div>
-                <div class="spread-metrics">
-                    <div class="spread-metric">
-                        <div class="spread-metric-label">Current Spread</div>
-                        <div class="spread-metric-value">{pivot_spread:.2f} pts</div>
-                    </div>
-                    <div class="spread-metric">
-                        <div class="spread-metric-label">Typical Spread</div>
-                        <div class="spread-metric-value">{spread_analysis['typical_spread']:.2f} pts</div>
-                    </div>
-                    <div class="spread-metric">
-                        <div class="spread-metric-label">Ratio</div>
-                        <div class="spread-metric-value">{spread_analysis['ratio']:.0f}%</div>
-                    </div>
-                </div>
+            <div class="channel-metric">
+                <span style="font-weight: 700; color: #22c55e;">📈 Skyline Channel Width</span>
+                <span style="font-weight: 900; font-family: 'JetBrains Mono', monospace; font-size: 24px; color: #22c55e;">{skyline_channel:.2f} pts</span>
+            </div>
+            <div class="channel-metric">
+                <span style="font-weight: 700; color: #ef4444;">📉 Baseline Channel Width</span>
+                <span style="font-weight: 900; font-family: 'JetBrains Mono', monospace; font-size: 24px; color: #ef4444;">{baseline_channel:.2f} pts</span>
+            </div>
+            <div class="channel-metric">
+                <span style="font-weight: 700; color: #daa520;">📏 Total Range (Ext → Cap)</span>
+                <span style="font-weight: 900; font-family: 'JetBrains Mono', monospace; font-size: 24px; color: #daa520;">{total_range:.2f} pts</span>
             </div>
         ''', unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">🎯 Live Analysis</div>', unsafe_allow_html=True)
+        # Stats Bar
+        st.markdown('<div class="stats-bar">', unsafe_allow_html=True)
+        st.markdown(f'<div class="stat-item"><div class="stat-label">Max Upside Potential</div><div class="stat-value">{extension - bear_pivot:.2f} pts</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="stat-item"><div class="stat-label">Max Downside Risk</div><div class="stat-value">{bull_pivot - capitulation:.2f} pts</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="stat-item"><div class="stat-label">Pivot Zone Width</div><div class="stat-value">{abs(bull_pivot - bear_pivot):.2f} pts</div></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         
-        current_price = st.number_input("Current SPX Price", value=0.00, step=0.01, key="current_price", format="%.2f", min_value=0.0)
+        # Live Price Analysis
+        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">🎯 LIVE MARKET ANALYSIS</div>', unsafe_allow_html=True)
+        
+        current_price = st.number_input("💵 Current SPX Price", value=0.00, step=0.01, key="current_price", format="%.2f", min_value=0.0)
         
         if current_price > 0:
-            st.markdown('<div class="card-title" style="margin-top: 24px;">📏 Distance Dashboard</div>', unsafe_allow_html=True)
+            levels_dict = {
+                'extension': extension,
+                'breakout': breakout,
+                'bull_pivot': bull_pivot,
+                'bear_pivot': bear_pivot,
+                'breakdown': breakdown,
+                'capitulation': capitulation
+            }
+            
+            zone_name, zone_desc, zone_color = get_market_zone(current_price, levels_dict)
+            
+            st.markdown(f'''
+                <div class="zone-indicator" style="border-color: {zone_color};">
+                    <div class="zone-name" style="color: {zone_color};">{zone_name}</div>
+                    <div class="zone-description">{zone_desc}</div>
+                    <div style="margin-top: 20px; font-size: 48px; font-weight: 900; font-family: 'JetBrains Mono', monospace; color: {zone_color};">
+                        ${current_price:.2f}
+                    </div>
+                </div>
+            ''', unsafe_allow_html=True)
+            
+            st.markdown('<div class="card-title" style="margin-top: 32px;">📏 DISTANCE TO ALL LEVELS</div>', unsafe_allow_html=True)
             
             distances = [
                 ("☁️ Extension Target", extension, current_price - extension),
-                ("🚀 Breakout Target", breakout, current_price - breakout),
+                ("🚀 Breakout Momentum", breakout, current_price - breakout),
                 ("📈 Bull Pivot", bull_pivot, current_price - bull_pivot),
                 ("📉 Bear Pivot", bear_pivot, current_price - bear_pivot),
-                ("💥 Breakdown Target", breakdown, current_price - breakdown),
+                ("💥 Breakdown Gravity", breakdown, current_price - breakdown),
                 ("🔥 Capitulation Target", capitulation, current_price - capitulation)
             ]
             
             for name, level, dist in distances:
-                if abs(dist) < 0.01:  # Essentially at the level
-                    st.markdown(f'<div class="distance-item current"><div class="distance-label">🎯 CURRENT PRICE AT {name}</div><div class="distance-value">${current_price:.2f}</div></div>', unsafe_allow_html=True)
+                if abs(dist) < 0.01:
+                    st.markdown(f'<div class="distance-item current"><div class="distance-label">🎯 AT {name}</div><div class="distance-value">${current_price:.2f}</div></div>', unsafe_allow_html=True)
                 else:
                     direction = "up" if dist < 0 else "down"
                     arrow = "⬆️" if dist < 0 else "⬇️"
                     st.markdown(f'<div class="distance-item"><div class="distance-label">{name} ${level:.2f}</div><div class="distance-value {direction}">{arrow} {abs(dist):.2f} pts</div></div>', unsafe_allow_html=True)
-            
-            bias_name, bias_desc = get_position_bias(current_price, breakout, bull_pivot, bear_pivot, breakdown)
-            st.markdown(f'''
-                <div class="bias-card">
-                    <div class="bias-title" style="color: #daa520;">{bias_name}</div>
-                    <div style="color: #cbd5e1; font-size: 16px;">{bias_desc}</div>
-                </div>
-            ''', unsafe_allow_html=True)
-            
-            probabilities = calculate_trade_probability(current_price, extension, bull_pivot, bear_pivot, capitulation)
-            
-            st.markdown(f'''
-                <div class="probability-card">
-                    <div class="prob-title">🎲 Trade Probability Analysis</div>
-                    <div style="color: #cbd5e1; font-size: 14px; text-align: center; margin-bottom: 20px;">
-                        Based on current price position at ${current_price:.2f}
-                    </div>
-                    <div class="prob-bars">
-                        <div class="prob-bar">
-                            <div class="prob-label">Extension Target</div>
-                            <div class="prob-value bull">{probabilities['extension']}%</div>
-                            <div style="font-size: 13px; color: #7d8590; margin-top: 8px;">${extension:.2f}</div>
-                        </div>
-                        <div class="prob-bar">
-                            <div class="prob-label">Capitulation Target</div>
-                            <div class="prob-value bear">{probabilities['capitulation']}%</div>
-                            <div style="font-size: 13px; color: #7d8590; margin-top: 8px;">${capitulation:.2f}</div>
-                        </div>
-                    </div>
-                </div>
-            ''', unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
         
+        # Projection Matrix
         st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">📊 Complete Projection Matrix</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">📊 COMPLETE PROJECTION MATRIX</div>', unsafe_allow_html=True)
         st.dataframe(merged, use_container_width=True, hide_index=True, height=500)
         st.markdown("<br>", unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.download_button("Complete Dataset", merged.to_csv(index=False).encode(), "spx_complete.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 COMPLETE DATASET", merged.to_csv(index=False).encode(), "spx_4anchor_complete.csv", "text/csv", use_container_width=True)
         with col2:
-            st.download_button("Skyline Data", merged[["Time (CT)", "🚀 Breakout Target", "📉 Bear Pivot"]].to_csv(index=False).encode(), "skyline.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 SKYLINE CHANNEL", merged[["Time (CT)", "📈 Bull Pivot", "🚀 Breakout Momentum"]].to_csv(index=False).encode(), "skyline_channel.csv", "text/csv", use_container_width=True)
         with col3:
-            st.download_button("Baseline Data", merged[["Time (CT)", "📈 Bull Pivot", "💥 Breakdown Target"]].to_csv(index=False).encode(), "baseline.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 BASELINE CHANNEL", merged[["Time (CT)", "📉 Bear Pivot", "💥 Breakdown Gravity"]].to_csv(index=False).encode(), "baseline_channel.csv", "text/csv", use_container_width=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
     
     with tab2:
         st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">📐 Fibonacci Retracement</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">🎯 INTELLIGENT TRADE ANALYZER</div>', unsafe_allow_html=True)
+        
+        analyze_price = st.number_input("💵 Entry Price for Analysis", value=0.00, step=0.01, key="analyze_price", format="%.2f", min_value=0.0)
+        
+        if analyze_price > 0:
+            levels_dict = {
+                'extension': extension,
+                'breakout': breakout,
+                'bull_pivot': bull_pivot,
+                'bear_pivot': bear_pivot,
+                'breakdown': breakdown,
+                'capitulation': capitulation
+            }
+            
+            zone_name, zone_desc, zone_color = get_market_zone(analyze_price, levels_dict)
+            
+            st.markdown(f'''
+                <div class="zone-indicator" style="border-color: {zone_color};">
+                    <div style="font-size: 18px; font-weight: 700; color: #7d8590; margin-bottom: 12px;">CURRENT MARKET ZONE</div>
+                    <div class="zone-name" style="color: {zone_color};">{zone_name}</div>
+                    <div class="zone-description">{zone_desc}</div>
+                </div>
+            ''', unsafe_allow_html=True)
+            
+            trade_setups = get_trade_setups(analyze_price, levels_dict)
+            
+            if trade_setups:
+                st.markdown('<div class="card-title" style="margin-top: 32px;">💡 RECOMMENDED TRADE SETUPS</div>', unsafe_allow_html=True)
+                
+                for setup in trade_setups:
+                    setup_class = "short" if setup['type'] == "SHORT" else ""
+                    st.markdown(f'<div class="trade-setup-card {setup_class}">', unsafe_allow_html=True)
+                    
+                    st.markdown(f'''
+                        <div class="setup-header">
+                            <div class="setup-type {setup_class.lower()}">{setup['type']} SETUP</div>
+                            <div class="confidence-badge {setup['confidence'].lower()}">{setup['confidence']} CONFIDENCE</div>
+                        </div>
+                    ''', unsafe_allow_html=True)
+                    
+                    st.markdown('<div class="setup-details">', unsafe_allow_html=True)
+                    st.markdown(f'''
+                        <div class="setup-item">
+                            <div class="setup-label">Entry Price</div>
+                            <div class="setup-value">${setup['entry']:.2f}</div>
+                        </div>
+                        <div class="setup-item">
+                            <div class="setup-label">Target Price</div>
+                            <div class="setup-value">${setup['target']:.2f}</div>
+                        </div>
+                        <div class="setup-item">
+                            <div class="setup-label">Stop Loss</div>
+                            <div class="setup-value">${setup['stop']:.2f}</div>
+                        </div>
+                        <div class="setup-item">
+                            <div class="setup-label">Potential Reward</div>
+                            <div class="setup-value">{abs(setup['target'] - setup['entry']):.2f} pts</div>
+                        </div>
+                    ''', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    st.markdown(f'<div class="rr-badge">RISK/REWARD: {setup["rr"]}:1</div>', unsafe_allow_html=True)
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.info("🔍 No optimal trade setups identified at current price level. Wait for better positioning.")
+        
+        else:
+            st.info("💡 Enter a price to analyze potential trade setups with calculated risk/reward ratios.")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab3:
+        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">📐 FIBONACCI RETRACEMENT CALCULATOR</div>', unsafe_allow_html=True)
+        
+        st.markdown("### Calculate key retracement levels for precise entries")
         
         col1, col2 = st.columns(2)
         with col1:
-            fib_high = st.number_input("Contract High ($)", value=0.00, step=0.01, key="fib_high", format="%.2f", min_value=0.0)
+            fib_high = st.number_input("📈 Contract High ($)", value=0.00, step=0.01, key="fib_high", format="%.2f", min_value=0.0)
         with col2:
-            fib_low = st.number_input("Contract Low ($)", value=0.00, step=0.01, key="fib_low", format="%.2f", min_value=0.0)
+            fib_low = st.number_input("📉 Contract Low ($)", value=0.00, step=0.01, key="fib_low", format="%.2f", min_value=0.0)
         
         if fib_high > 0 and fib_low > 0 and fib_high > fib_low:
             fib_levels = calculate_fibonacci(fib_high, fib_low)
             
+            st.markdown('<div style="margin-top: 32px;">', unsafe_allow_html=True)
+            
             st.markdown(f'''
                 <div class="fib-result primary">
                     <div>
-                        <div class="fib-label">🎯 0.618 Retracement (Primary)</div>
-                        <div style="color: #7d8590; font-size: 12px; margin-top: 4px;">Golden ratio entry</div>
+                        <div class="fib-label">🎯 0.618 Retracement (GOLDEN RATIO)</div>
+                        <div style="color: #7d8590; font-size: 13px; margin-top: 6px;">Primary entry zone - highest probability</div>
                     </div>
                     <div class="fib-value">${fib_levels['0.618']}</div>
                 </div>
@@ -903,22 +1074,27 @@ def main():
             st.markdown(f'''
                 <div class="fib-result primary">
                     <div>
-                        <div class="fib-label">🎯 0.786 Retracement (Secondary)</div>
-                        <div style="color: #7d8590; font-size: 12px; margin-top: 4px;">Deep retracement entry</div>
+                        <div class="fib-label">🎯 0.786 Retracement (DEEP)</div>
+                        <div style="color: #7d8590; font-size: 13px; margin-top: 6px;">Secondary entry - strong support/resistance</div>
                     </div>
                     <div class="fib-value">${fib_levels['0.786']}</div>
                 </div>
             ''', unsafe_allow_html=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="card-title">📊 ALL FIBONACCI LEVELS</div>', unsafe_allow_html=True)
             
             for level, price in fib_levels.items():
                 st.markdown(f'<div class="fib-result"><div class="fib-label">{level}</div><div class="fib-value">${price}</div></div>', unsafe_allow_html=True)
             
-            st.info(f"Range: ${fib_high:.2f} - ${fib_low:.2f} = ${fib_high - fib_low:.2f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.success(f"✅ Range Analyzed: ${fib_high:.2f} - ${fib_low:.2f} = **{fib_high - fib_low:.2f} points**")
         
         elif fib_high > 0 and fib_low > 0:
-            st.error("Contract High must be greater than Contract Low")
+            st.error("❌ Contract High must be greater than Contract Low")
+        else:
+            st.info("💡 Enter high and low values to calculate Fibonacci retracement levels for optimal entry points.")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
