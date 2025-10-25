@@ -51,8 +51,8 @@ def calculate_sd_zones(breakout: float, bull_pivot: float, bear_pivot: float, br
     lower_sd_center = breakdown - pivot_spread
     
     return {
-        "extension_target": upper_sd_center + upper_width,
-        "capitulation_target": lower_sd_center - lower_width
+        "extension_target": upper_sd_center,
+        "capitulation_target": lower_sd_center
     }
 
 def calculate_fibonacci(high: float, low: float) -> Dict[str, float]:
