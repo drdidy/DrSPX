@@ -10,8 +10,8 @@ from typing import List, Dict, Tuple
 
 APP_NAME = "SPX PROPHET"
 CT = pytz.timezone("America/Chicago")
-ASC_SLOPE = 0.48
-DESC_SLOPE = -0.48
+ASC_SLOPE = 0.475
+DESC_SLOPE = -0.475
 
 def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetime]:
     h1, m1 = map(int, start.split(":"))
