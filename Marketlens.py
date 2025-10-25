@@ -1,4 +1,3 @@
-
 # app.py
 # SPX PROPHET - Professional Trading Platform
 
@@ -14,7 +13,6 @@ CT = pytz.timezone("America/Chicago")
 ASC_SLOPE = 0.475
 DESC_SLOPE = -0.475
 AVERAGE_SPREAD = 16.25  # Historical average pivot spread
-EXPECTED_MOVE_OFFSET = 16.25  # Daily expected move offset from anchors
 
 def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetime]:
     h1, m1 = map(int, start.split(":"))
@@ -651,7 +649,6 @@ def main():
         st.markdown("### ⚙️ Configuration")
         st.info(f"Ascending: +{ASC_SLOPE}")
         st.info(f"Descending: {DESC_SLOPE}")
-        st.info(f"Expected Move Offset: ±{EXPECTED_MOVE_OFFSET}")
         st.markdown("---")
         st.markdown("### ℹ️ System")
         st.caption("Central Time (CT)")
@@ -660,14 +657,12 @@ def main():
         st.caption("Weekends: Skipped in calculations")
         st.markdown("---")
         st.markdown("### 📊 Lines")
-        st.caption("⭐ Upper Expected Move")
         st.caption("☁️ Extension Target")
         st.caption("🚀 Breakout Target")
         st.caption("📈 Bull Pivot")
         st.caption("📉 Bear Pivot")
         st.caption("💥 Breakdown Target")
         st.caption("🔥 Capitulation Target")
-        st.caption("⭐ Lower Expected Move")
     
     st.markdown("""
         <div class="prophet-header">
@@ -712,28 +707,20 @@ def main():
         df_bull_pivot = project_line(baseline_price, base_dt, ASC_SLOPE, slots)
         df_breakdown = project_line(baseline_price, base_dt, DESC_SLOPE, slots)
         
-        # Offset lines for daily expected moves
-        df_upper_expected = project_line(skyline_price + EXPECTED_MOVE_OFFSET, sky_dt, ASC_SLOPE, slots)
-        df_lower_expected = project_line(baseline_price - EXPECTED_MOVE_OFFSET, base_dt, DESC_SLOPE, slots)
-        
         merged = pd.DataFrame({"Time (CT)": [dt.strftime("%I:%M %p") for dt in slots]})
-        merged["⭐ Upper Expected Move"] = df_upper_expected["Price"]
         merged["🚀 Breakout Target"] = df_breakout["Price"]
         merged["📈 Bull Pivot"] = df_bull_pivot["Price"]
         merged["📉 Bear Pivot"] = df_bear_pivot["Price"]
         merged["💥 Breakdown Target"] = df_breakdown["Price"]
-        merged["⭐ Lower Expected Move"] = df_lower_expected["Price"]
         
         st.markdown('<div class="premium-card">', unsafe_allow_html=True)
         st.markdown('<div class="card-title">🌅 Market Open (8:30 AM)</div>', unsafe_allow_html=True)
         
         open_row = merged[merged["Time (CT)"] == "08:30 AM"].iloc[0]
-        upper_expected = open_row["⭐ Upper Expected Move"]
         breakout = open_row["🚀 Breakout Target"]
         bull_pivot = open_row["📈 Bull Pivot"]
         bear_pivot = open_row["📉 Bear Pivot"]
         breakdown = open_row["💥 Breakdown Target"]
-        lower_expected = open_row["⭐ Lower Expected Move"]
         
         sd_targets = calculate_sd_targets(breakout, bull_pivot, bear_pivot, breakdown)
         extension = sd_targets['extension_target']
@@ -741,43 +728,16 @@ def main():
         
         st.markdown('<div class="metrics-grid">', unsafe_allow_html=True)
         levels = [
-            ("⭐ Upper Expected Move", upper_expected),
             ("☁️ Extension Target", extension),
             ("🚀 Breakout Target", breakout),
             ("📈 Bull Pivot", bull_pivot),
             ("📉 Bear Pivot", bear_pivot),
             ("💥 Breakdown Target", breakdown),
-            ("🔥 Capitulation Target", capitulation),
-            ("⭐ Lower Expected Move", lower_expected)
+            ("🔥 Capitulation Target", capitulation)
         ]
         for name, price in levels:
             st.markdown(f'<div class="metric-card"><div class="metric-label">{name}</div><div class="metric-value">${price:.2f}</div></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Daily Expected Move Range
-        expected_move_range = upper_expected - lower_expected
-        st.markdown(f'''
-            <div class="opening-context" style="background: linear-gradient(135deg, rgba(218, 165, 32, 0.1) 0%, rgba(218, 165, 32, 0.05) 100%); border-color: rgba(218, 165, 32, 0.3);">
-                <div class="context-title" style="color: #daa520;">⭐ Daily Expected Move Range</div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 16px;">
-                    <div style="text-align: center;">
-                        <div style="font-size: 11px; font-weight: 700; color: #7d8590; text-transform: uppercase; margin-bottom: 8px;">Upper Expected</div>
-                        <div style="font-size: 24px; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #22c55e;">${upper_expected:.2f}</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 11px; font-weight: 700; color: #7d8590; text-transform: uppercase; margin-bottom: 8px;">Expected Range</div>
-                        <div style="font-size: 24px; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #daa520;">{expected_move_range:.2f} pts</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 11px; font-weight: 700; color: #7d8590; text-transform: uppercase; margin-bottom: 8px;">Lower Expected</div>
-                        <div style="font-size: 24px; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #ef4444;">${lower_expected:.2f}</div>
-                    </div>
-                </div>
-                <div class="context-text" style="margin-top: 16px; text-align: center;">
-                    Market typically trades within this range (~68% probability)
-                </div>
-            </div>
-        ''', unsafe_allow_html=True)
         
         # Opening Context with user input
         st.markdown('<div class="opening-context">', unsafe_allow_html=True)
@@ -849,14 +809,12 @@ def main():
             st.markdown('<div class="card-title" style="margin-top: 24px;">📏 Distance Dashboard</div>', unsafe_allow_html=True)
             
             distances = [
-                ("⭐ Upper Expected Move", upper_expected, current_price - upper_expected),
                 ("☁️ Extension Target", extension, current_price - extension),
                 ("🚀 Breakout Target", breakout, current_price - breakout),
                 ("📈 Bull Pivot", bull_pivot, current_price - bull_pivot),
                 ("📉 Bear Pivot", bear_pivot, current_price - bear_pivot),
                 ("💥 Breakdown Target", breakdown, current_price - breakdown),
-                ("🔥 Capitulation Target", capitulation, current_price - capitulation),
-                ("⭐ Lower Expected Move", lower_expected, current_price - lower_expected)
+                ("🔥 Capitulation Target", capitulation, current_price - capitulation)
             ]
             
             for name, level, dist in distances:
@@ -909,9 +867,9 @@ def main():
         with col1:
             st.download_button("Complete Dataset", merged.to_csv(index=False).encode(), "spx_complete.csv", "text/csv", use_container_width=True)
         with col2:
-            st.download_button("Skyline Data", merged[["Time (CT)", "⭐ Upper Expected Move", "🚀 Breakout Target", "📉 Bear Pivot"]].to_csv(index=False).encode(), "skyline.csv", "text/csv", use_container_width=True)
+            st.download_button("Skyline Data", merged[["Time (CT)", "🚀 Breakout Target", "📉 Bear Pivot"]].to_csv(index=False).encode(), "skyline.csv", "text/csv", use_container_width=True)
         with col3:
-            st.download_button("Baseline Data", merged[["Time (CT)", "📈 Bull Pivot", "💥 Breakdown Target", "⭐ Lower Expected Move"]].to_csv(index=False).encode(), "baseline.csv", "text/csv", use_container_width=True)
+            st.download_button("Baseline Data", merged[["Time (CT)", "📈 Bull Pivot", "💥 Breakdown Target"]].to_csv(index=False).encode(), "baseline.csv", "text/csv", use_container_width=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
     
