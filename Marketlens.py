@@ -51,12 +51,8 @@ def calculate_sd_zones(breakout: float, bull_pivot: float, bear_pivot: float, br
     lower_sd_center = breakdown - pivot_spread
     
     return {
-        "upper_zone_start": upper_sd_center,
-        "upper_zone_end": upper_sd_center + upper_width,
-        "lower_zone_start": lower_sd_center - lower_width,
-        "lower_zone_end": lower_sd_center,
-        "upper_center": upper_sd_center,
-        "lower_center": lower_sd_center
+        "extension_target": upper_sd_center + upper_width,
+        "capitulation_target": lower_sd_center - lower_width
     }
 
 def calculate_fibonacci(high: float, low: float) -> Dict[str, float]:
@@ -511,8 +507,8 @@ def main():
         st.caption("📈 Bull Pivot")
         st.caption("📉 Bear Pivot")
         st.caption("💥 Breakdown Target")
-        st.caption("☁️ Extension Zone")
-        st.caption("🔥 Capitulation Zone")
+        st.caption("☁️ Extension Target")
+        st.caption("🔥 Capitulation Target")
     
     st.markdown("""
         <div class="prophet-header">
@@ -580,16 +576,16 @@ def main():
         with col1:
             st.markdown(f'''
                 <div class="zone-card upper">
-                    <div class="zone-title">☁️ Extension Zone</div>
-                    <div class="zone-range upper">${sd_zones['upper_zone_start']:.2f} - ${sd_zones['upper_zone_end']:.2f}</div>
+                    <div class="zone-title">☁️ Extension Target</div>
+                    <div class="zone-range upper">${sd_zones['extension_target']:.2f}</div>
                 </div>
             ''', unsafe_allow_html=True)
         
         with col2:
             st.markdown(f'''
                 <div class="zone-card lower">
-                    <div class="zone-title">🔥 Capitulation Zone</div>
-                    <div class="zone-range lower">${sd_zones['lower_zone_start']:.2f} - ${sd_zones['lower_zone_end']:.2f}</div>
+                    <div class="zone-title">🔥 Capitulation Target</div>
+                    <div class="zone-range lower">${sd_zones['capitulation_target']:.2f}</div>
                 </div>
             ''', unsafe_allow_html=True)
         
@@ -606,7 +602,7 @@ def main():
                     <div class="bias-card bullish">
                         <div class="bias-title bullish">🚀 BULLISH</div>
                         <div style="color: #e8eaed; font-size: 16px;">Price ${current_price:.2f} above ascending lines</div>
-                        <div style="color: #22c55e; font-size: 14px; margin-top: 8px;">Target: Extension Zone</div>
+                        <div style="color: #22c55e; font-size: 14px; margin-top: 8px;">Target: Extension Target</div>
                     </div>
                 ''', unsafe_allow_html=True)
             elif current_price < breakout and current_price < bull_pivot:
@@ -614,7 +610,7 @@ def main():
                     <div class="bias-card bearish">
                         <div class="bias-title bearish">💥 BEARISH</div>
                         <div style="color: #e8eaed; font-size: 16px;">Price ${current_price:.2f} below ascending lines</div>
-                        <div style="color: #ef4444; font-size: 14px; margin-top: 8px;">Target: Capitulation Zone</div>
+                        <div style="color: #ef4444; font-size: 14px; margin-top: 8px;">Target: Capitulation Target</div>
                     </div>
                 ''', unsafe_allow_html=True)
             else:
