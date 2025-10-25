@@ -12,7 +12,6 @@ APP_NAME = "SPX PROPHET"
 CT = pytz.timezone("America/Chicago")
 ASC_SLOPE = 0.475
 DESC_SLOPE = -0.475
-AVERAGE_SPREAD = 16.25  # Historical average pivot spread
 
 def rth_slots_ct_dt(proj_date: date, start="08:30", end="14:00") -> List[datetime]:
     h1, m1 = map(int, start.split(":"))
@@ -54,12 +53,13 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope: float, sl
     return pd.DataFrame(rows)
 
 def calculate_sd_targets(breakout: float, bull_pivot: float, bear_pivot: float, breakdown: float) -> Dict:
-    pivot_spread = bull_pivot - bear_pivot
-    upper_sd_center = breakout + pivot_spread
-    lower_sd_center = breakdown - pivot_spread
+    pivot_spread = abs(bull_pivot - bear_pivot)
+    extension_target = breakout + pivot_spread
+    capitulation_target = breakdown - pivot_spread
     return {
-        "extension_target": upper_sd_center,
-        "capitulation_target": lower_sd_center
+        "extension_target": extension_target,
+        "capitulation_target": capitulation_target,
+        "pivot_spread": pivot_spread
     }
 
 def calculate_fibonacci(high: float, low: float) -> Dict[str, float]:
@@ -110,9 +110,11 @@ def calculate_trade_probability(price: float, extension: float, bull_pivot: floa
         "capitulation": round(capitulation_prob, 1)
     }
 
-def analyze_spread(current_spread: float, avg_spread: float) -> Dict:
-    ratio = (current_spread / avg_spread) * 100
-    diff = current_spread - avg_spread
+def analyze_spread(current_spread: float) -> Dict:
+    # Typical pivot spread baseline for SPX (adjust based on your historical data)
+    typical_spread = 16.25
+    ratio = (current_spread / typical_spread) * 100
+    diff = current_spread - typical_spread
     
     if ratio < 80:
         status = "COMPRESSED"
@@ -132,7 +134,8 @@ def analyze_spread(current_spread: float, avg_spread: float) -> Dict:
         "signal": signal,
         "color": color,
         "ratio": ratio,
-        "diff": diff
+        "diff": diff,
+        "typical_spread": typical_spread
     }
 
 def main():
@@ -722,9 +725,10 @@ def main():
         bear_pivot = open_row["📉 Bear Pivot"]
         breakdown = open_row["💥 Breakdown Target"]
         
-        sd_targets = calculate_sd_targets(breakout, bull_pivot, bear_pivot, breakdown)
-        extension = sd_targets['extension_target']
-        capitulation = sd_targets['capitulation_target']
+        sd_results = calculate_sd_targets(breakout, bull_pivot, bear_pivot, breakdown)
+        extension = sd_results['extension_target']
+        capitulation = sd_results['capitulation_target']
+        pivot_spread = sd_results['pivot_spread']
         
         st.markdown('<div class="metrics-grid">', unsafe_allow_html=True)
         levels = [
@@ -765,16 +769,15 @@ def main():
         
         max_upside = extension - bear_pivot
         max_downside = bull_pivot - capitulation
-        pivot_spread = bull_pivot - bear_pivot
         
         st.markdown('<div class="expected-moves">', unsafe_allow_html=True)
         st.markdown(f'<div class="move-card"><div class="move-label">Max Upside</div><div class="move-value">{max_upside:.2f} pts</div><div style="font-size: 12px; color: #7d8590; margin-top: 8px;">Bear Pivot → Extension</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="move-card"><div class="move-label">Max Downside</div><div class="move-value">{max_downside:.2f} pts</div><div style="font-size: 12px; color: #7d8590; margin-top: 8px;">Bull Pivot → Capitulation</div></div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown(f'<div class="move-card" style="margin-top: 16px;"><div class="move-label">Pivot Spread</div><div class="move-value">{pivot_spread:.2f} pts</div><div style="font-size: 12px; color: #7d8590; margin-top: 8px;">Neutral zone width</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="move-card" style="margin-top: 16px;"><div class="move-label">Pivot Spread</div><div class="move-value">{pivot_spread:.2f} pts</div><div style="font-size: 12px; color: #7d8590; margin-top: 8px;">|Bull Pivot - Bear Pivot|</div></div>', unsafe_allow_html=True)
         
-        spread_analysis = analyze_spread(pivot_spread, AVERAGE_SPREAD)
+        spread_analysis = analyze_spread(pivot_spread)
         
         st.markdown(f'''
             <div class="spread-analysis {spread_analysis['status'].lower()}">
@@ -787,8 +790,8 @@ def main():
                         <div class="spread-metric-value">{pivot_spread:.2f} pts</div>
                     </div>
                     <div class="spread-metric">
-                        <div class="spread-metric-label">Average Spread</div>
-                        <div class="spread-metric-value">{AVERAGE_SPREAD:.2f} pts</div>
+                        <div class="spread-metric-label">Typical Spread</div>
+                        <div class="spread-metric-value">{spread_analysis['typical_spread']:.2f} pts</div>
                     </div>
                     <div class="spread-metric">
                         <div class="spread-metric-label">Ratio</div>
