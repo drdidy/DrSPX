@@ -54,8 +54,9 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope: float, sl
 
 def calculate_sd_targets(breakout: float, bull_pivot: float, bear_pivot: float, breakdown: float) -> Dict:
     pivot_spread = abs(bull_pivot - bear_pivot)
-    extension_target = breakout + pivot_spread
-    capitulation_target = breakdown - pivot_spread
+    extended_spread = 2 * pivot_spread
+    extension_target = breakout + extended_spread
+    capitulation_target = breakdown - extended_spread
     return {
         "extension_target": extension_target,
         "capitulation_target": capitulation_target,
