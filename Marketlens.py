@@ -1,6 +1,6 @@
 # app.py
 # SPX PROPHET - Professional Trading Platform
-# 4-Anchor Channel System
+# 4-Anchor Channel System + Dynamic Channel Trader
 
 import streamlit as st
 import pandas as pd
@@ -45,6 +45,62 @@ def project_line(anchor_price: float, anchor_time_ct: datetime, slope: float, sl
         price = anchor_price + (slope * blocks)
         rows.append({"Time": dt.strftime("%I:%M %p"), "Price": round(price, 2)})
     return pd.DataFrame(rows)
+
+def calculate_dynamic_slope(price1: float, time1: datetime, price2: float, time2: datetime) -> float:
+    """Calculate slope in points per 30-min block between two points"""
+    blocks = count_blocks_with_maintenance_skip(time1, time2)
+    if blocks == 0:
+        return 0.0
+    slope = (price2 - price1) / blocks
+    return slope
+
+def project_dynamic_channel(point1_price: float, point1_time: datetime, 
+                           point2_price: float, point2_time: datetime,
+                           point3_price: float, point3_time: datetime,
+                           slots: List[datetime]) -> Tuple[pd.DataFrame, float, float]:
+    """
+    Project dynamic channel based on three anchor points.
+    Primary line goes through point1 and point2.
+    Parallel line goes through point3.
+    Returns: DataFrame with projections, slope, channel_width
+    """
+    # Calculate slope from point1 to point2
+    slope = calculate_dynamic_slope(point1_price, point1_time, point2_price, point2_time)
+    
+    # Align times to 30-min boundaries
+    minute1 = 0 if point1_time.minute < 30 else 30
+    minute3 = 0 if point3_time.minute < 30 else 30
+    anchor1_aligned = point1_time.replace(minute=minute1, second=0, microsecond=0)
+    anchor3_aligned = point3_time.replace(minute=minute3, second=0, microsecond=0)
+    
+    # Project primary line
+    primary_line = []
+    for dt in slots:
+        blocks = count_blocks_with_maintenance_skip(anchor1_aligned, dt)
+        price = point1_price + (slope * blocks)
+        primary_line.append(price)
+    
+    # Calculate parallel line offset at point3's time
+    blocks_to_point3 = count_blocks_with_maintenance_skip(anchor1_aligned, anchor3_aligned)
+    primary_at_point3 = point1_price + (slope * blocks_to_point3)
+    channel_width = point3_price - primary_at_point3
+    
+    # Project parallel line
+    parallel_line = []
+    for dt in slots:
+        blocks = count_blocks_with_maintenance_skip(anchor1_aligned, dt)
+        price = point1_price + (slope * blocks) + channel_width
+        parallel_line.append(price)
+    
+    # Create DataFrame
+    df = pd.DataFrame({
+        "Time (CT)": [dt.strftime("%I:%M %p") for dt in slots],
+        "Primary Line": [round(p, 2) for p in primary_line],
+        "Parallel Line": [round(p, 2) for p in parallel_line],
+        "Channel Width": [round(abs(channel_width), 2) for _ in slots]
+    })
+    
+    return df, slope, channel_width
 
 def calculate_targets(bull_pivot: float, breakout: float, bear_pivot: float, breakdown: float) -> Dict:
     skyline_channel_width = breakout - bull_pivot
@@ -591,6 +647,56 @@ def main():
         color: #daa520;
     }
     
+    .mode-selector {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin: 24px 0;
+    }
+    
+    .mode-card {
+        background: linear-gradient(135deg, rgba(26, 31, 46, 0.7) 0%, rgba(15, 20, 25, 0.9) 100%);
+        border: 2px solid rgba(218, 165, 32, 0.25);
+        border-radius: 18px;
+        padding: 28px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .mode-card:hover {
+        transform: scale(1.05);
+        border-color: rgba(218, 165, 32, 0.5);
+    }
+    
+    .mode-card.selected {
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.2) 0%, rgba(100, 149, 237, 0.2) 100%);
+        border-color: rgba(218, 165, 32, 0.6);
+        box-shadow: 0 8px 30px rgba(218, 165, 32, 0.4);
+    }
+    
+    .dynamic-point-card {
+        background: linear-gradient(135deg, rgba(100, 149, 237, 0.08), rgba(100, 149, 237, 0.05));
+        border: 1.5px solid rgba(100, 149, 237, 0.3);
+        border-radius: 18px;
+        padding: 24px;
+        margin: 16px 0;
+    }
+    
+    .dynamic-point-card.primary {
+        border-color: rgba(218, 165, 32, 0.4);
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.12), rgba(218, 165, 32, 0.06));
+    }
+    
+    .point-label {
+        font-size: 16px;
+        font-weight: 800;
+        color: #daa520;
+        margin-bottom: 16px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+    
     .stDataFrame {
         border: 1.5px solid rgba(218, 165, 32, 0.25);
         border-radius: 18px;
@@ -733,6 +839,29 @@ def main():
         -webkit-text-fill-color: transparent;
     }
     
+    .stRadio > div {
+        background: transparent !important;
+    }
+    
+    .stRadio label {
+        background: linear-gradient(135deg, rgba(26, 31, 46, 0.7) 0%, rgba(15, 20, 25, 0.9) 100%) !important;
+        border: 2px solid rgba(218, 165, 32, 0.25) !important;
+        border-radius: 12px !important;
+        padding: 16px 24px !important;
+        margin: 8px 0 !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stRadio label:hover {
+        border-color: rgba(218, 165, 32, 0.5) !important;
+        transform: scale(1.02) !important;
+    }
+    
+    .stRadio [data-checked="true"] {
+        background: linear-gradient(135deg, rgba(218, 165, 32, 0.2) 0%, rgba(100, 149, 237, 0.2) 100%) !important;
+        border-color: rgba(218, 165, 32, 0.6) !important;
+    }
+    
     </style>
     """, unsafe_allow_html=True)
     
@@ -759,6 +888,11 @@ def main():
         st.caption("**Skyline Channel:** Bull → Breakout")
         st.caption("**Baseline Channel:** Bear → Breakdown")
         st.markdown("---")
+        st.markdown("### 🎯 DYNAMIC CHANNELS")
+        st.caption("**Variable slope** adapts daily")
+        st.caption("**Parallel channels** from 3 points")
+        st.caption("**Real-time** entry/exit signals")
+        st.markdown("---")
         current_time_ct = datetime.now(CT)
         st.markdown(f"### 🕐 CURRENT TIME")
         st.caption(f"**{current_time_ct.strftime('%I:%M %p CT')}**")
@@ -772,7 +906,7 @@ def main():
         </div>
     """, unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["📊 PROJECTION SYSTEM", "🎯 TRADE ANALYZER", "📐 FIBONACCI CALCULATOR"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 PROJECTION SYSTEM", "🎯 TRADE ANALYZER", "📐 FIBONACCI CALCULATOR", "📈 DYNAMIC CHANNEL TRADER"])
     
     with tab1:
         st.markdown('<div class="premium-card">', unsafe_allow_html=True)
@@ -1095,6 +1229,184 @@ def main():
             st.error("❌ Contract High must be greater than Contract Low")
         else:
             st.info("💡 Enter high and low values to calculate Fibonacci retracement levels for optimal entry points.")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab4:
+        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+        st.markdown('<div class="card-title">📈 DYNAMIC CHANNEL TRADER</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+        ### 🎯 Adaptive Daily Channel System
+        Construct **parallel channels** from actual market structure using 3 anchor points.  
+        The channel **adapts to daily price action** with variable slope.
+        """)
+        
+        st.markdown("---")
+        
+        # Projection Date
+        dynamic_proj_date = st.date_input("📅 Projection Date (RTH)", value=datetime.now(CT).date(), key="dynamic_proj_date")
+        
+        st.markdown("---")
+        
+        # Channel Mode Selection
+        st.markdown('<div class="card-title">🎚️ SELECT CHANNEL MODE</div>', unsafe_allow_html=True)
+        
+        channel_mode = st.radio(
+            "Choose construction method:",
+            ["🔴 Mode A: Two Highs + One Low (Resistance First)", 
+             "🟢 Mode B: Two Lows + One High (Support First)"],
+            key="channel_mode"
+        )
+        
+        mode_a = channel_mode.startswith("🔴")
+        
+        if mode_a:
+            st.info("**Mode A:** Connect 2 high points to form upper trendline, then draw parallel line through 1 low point.")
+        else:
+            st.info("**Mode B:** Connect 2 low points to form lower trendline, then draw parallel line through 1 high point.")
+        
+        st.markdown("---")
+        
+        # Three Anchor Points
+        st.markdown('<div class="card-title">📍 DEFINE 3 ANCHOR POINTS</div>', unsafe_allow_html=True)
+        
+        if mode_a:
+            point_labels = ["🔴 HIGH POINT 1 (Primary Line)", "🔴 HIGH POINT 2 (Primary Line)", "🟢 LOW POINT (Parallel Line)"]
+        else:
+            point_labels = ["🟢 LOW POINT 1 (Primary Line)", "🟢 LOW POINT 2 (Primary Line)", "🔴 HIGH POINT (Parallel Line)"]
+        
+        points_data = []
+        
+        for i, label in enumerate(point_labels):
+            st.markdown(f'<div class="dynamic-point-card {"primary" if i < 2 else ""}">', unsafe_allow_html=True)
+            st.markdown(f'<div class="point-label">{label}</div>', unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                point_date = st.date_input("Date", value=dynamic_proj_date - timedelta(days=1), key=f"dyn_p{i+1}_date")
+            with col2:
+                point_time = st.time_input("Time (CT)", value=dtime(17, 0) if i == 0 else (dtime(1, 0) if i == 1 else dtime(3, 30)), step=1800, key=f"dyn_p{i+1}_time")
+            with col3:
+                default_prices = [6861.10, 6856.90, 6845.30] if mode_a else [6845.30, 6840.00, 6861.10]
+                point_price = st.number_input("Price ($)", value=default_prices[i], step=0.01, key=f"dyn_p{i+1}_price", format="%.2f")
+            
+            points_data.append({
+                'date': point_date,
+                'time': point_time,
+                'price': point_price,
+                'datetime': CT.localize(datetime.combine(point_date, point_time))
+            })
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Calculate and Display Channel
+        if st.button("🚀 CALCULATE DYNAMIC CHANNEL", use_container_width=True):
+            # Get RTH slots
+            dynamic_slots = rth_slots_ct_dt(dynamic_proj_date, "08:30", "14:00")
+            
+            # Project the dynamic channel
+            df_dynamic, slope, channel_width = project_dynamic_channel(
+                points_data[0]['price'], points_data[0]['datetime'],
+                points_data[1]['price'], points_data[1]['datetime'],
+                points_data[2]['price'], points_data[2]['datetime'],
+                dynamic_slots
+            )
+            
+            # Determine line names based on mode
+            if mode_a:
+                upper_name = "🔴 Resistance (Upper)"
+                lower_name = "🟢 Support (Lower)"
+                df_dynamic_display = df_dynamic.rename(columns={
+                    "Primary Line": upper_name,
+                    "Parallel Line": lower_name
+                })
+            else:
+                upper_name = "🔴 Resistance (Upper)"
+                lower_name = "🟢 Support (Lower)"
+                df_dynamic_display = df_dynamic.rename(columns={
+                    "Parallel Line": upper_name,
+                    "Primary Line": lower_name
+                })
+            
+            # Display Channel Metrics
+            st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+            st.markdown('<div class="card-title">📊 CHANNEL METRICS</div>', unsafe_allow_html=True)
+            
+            st.markdown('<div class="stats-bar">', unsafe_allow_html=True)
+            st.markdown(f'''
+                <div class="stat-item">
+                    <div class="stat-label">Slope (pts/30min)</div>
+                    <div class="stat-value">{slope:+.4f}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Channel Width</div>
+                    <div class="stat-value">{abs(channel_width):.2f} pts</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Direction</div>
+                    <div class="stat-value">{"📈 UP" if slope > 0 else "📉 DOWN" if slope < 0 else "⚖️ FLAT"}</div>
+                </div>
+            ''', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Display Projection Table
+            st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+            st.markdown('<div class="card-title">📊 RTH PROJECTION TABLE (8:30 AM - 2:00 PM)</div>', unsafe_allow_html=True)
+            
+            st.dataframe(df_dynamic_display, use_container_width=True, hide_index=True, height=500)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Download Button
+            st.download_button(
+                "📥 DOWNLOAD CHANNEL DATA",
+                df_dynamic_display.to_csv(index=False).encode(),
+                f"dynamic_channel_{dynamic_proj_date}.csv",
+                "text/csv",
+                use_container_width=True
+            )
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Entry/Exit Analysis
+            st.markdown('<div class="premium-card">', unsafe_allow_html=True)
+            st.markdown('<div class="card-title">🎯 ENTRY/EXIT ANALYSIS</div>', unsafe_allow_html=True)
+            
+            # Get upper and lower values
+            if mode_a:
+                upper_line = df_dynamic["Primary Line"].values
+                lower_line = df_dynamic["Parallel Line"].values
+            else:
+                upper_line = df_dynamic["Parallel Line"].values
+                lower_line = df_dynamic["Primary Line"].values
+            
+            st.markdown(f"""
+            ### 📈 Trading Strategy
+            
+            **BUY SETUP:**
+            - ✅ **Entry Zone:** Price touches **{lower_name}** (Support)
+            - 🎯 **Target:** **{upper_name}** (Resistance)
+            - 🛑 **Stop Loss:** Below support channel
+            
+            **SELL SETUP:**
+            - ✅ **Entry Zone:** Price touches **{upper_name}** (Resistance)
+            - 🎯 **Target:** **{lower_name}** (Support)
+            - 🛑 **Stop Loss:** Above resistance channel
+            
+            **Channel Width:** {abs(channel_width):.2f} points = **Profit Potential** per trade
+            """)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.success("✅ Dynamic channel calculated successfully! Use the table to identify entry/exit points throughout RTH.")
+        
+        else:
+            st.info("💡 Configure your 3 anchor points above, then click **CALCULATE DYNAMIC CHANNEL** to generate projections.")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
