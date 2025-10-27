@@ -1288,7 +1288,7 @@ def main():
             with col2:
                 point_time = st.time_input("Time (CT)", value=dtime(17, 0) if i == 0 else (dtime(1, 0) if i == 1 else dtime(3, 30)), step=1800, key=f"dyn_p{i+1}_time")
             with col3:
-                default_prices = [6861.10, 6856.90, 6845.30] if mode_a else [6845.30, 6840.00, 6861.10]
+                default_prices = [6851.10, 6856.90, 6845.30] if mode_a else [6845.30, 6840.00, 6851.10]
                 point_price = st.number_input("Price ($)", value=default_prices[i], step=0.01, key=f"dyn_p{i+1}_price", format="%.2f")
             
             points_data.append({
