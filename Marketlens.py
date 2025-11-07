@@ -2,9 +2,71 @@ import streamlit as st
 import math
 from datetime import datetime, date, time, timedelta
 
-SLOPE = 0.475  # points per 30 min
+SLOPE = 0.475  # pts / 30-min block
 
-# --------------- helpers ---------------
+# ---------- utilities ----------
+
+def half_hour_times():
+    return [time(h, m) for h in range(24) for m in (0, 30)]
+
+def fmt_t(t: time) -> str:
+    return t.strftime("%H:%M")
+
+def to_time(s: str) -> time:
+    h, m = map(int, s.split(":"))
+    return time(h, m)
+
+def parse_dt_from_date_time(d: date, t: time) -> datetime:
+    return datetime.combine(d, t)
+
+def blocks_between(t1: datetime, t2: datetime) -> int:
+    if t2 <= t1:
+        return 0
+    blocks = 0
+    cur = t1
+    while cur < t2:
+        nxt = cur + timedelta(minutes=30)
+        if not (16 <= cur.hour < 17):  # skip maintenance hour
+            blocks += 1
+        cur = nxt
+    return blocks
+
+def project_from_anchor(anchor_price, anchor_time, target_time, sign):
+    b = blocks_between(anchor_time, target_time)
+    return anchor_price + sign * SLOPE * b
+
+def calc_T(hours_left):      # convert hours → year fraction
+    return max(hours_left, 0.05) / (24 * 365)
+
+def hours_until_close(now_dt):
+    close = now_dt.replace(hour=15, minute=15, second=0, microsecond=0)
+    delta = (close - now_dt).total_seconds() / 3600
+    return max(delta, 0.1)
+
+# ---------- Black-Scholes ----------
+
+def N(x): return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+def bs_call(S, K, T, r, v):
+    if T <= 0 or v <= 0: return max(S - K, 0)
+    d1 = (math.log(S / K) + (r + 0.5*v**2)*T) / (v*math.sqrt(T))
+    d2 = d1 - v*math.sqrt(T)
+    return S*N(d1) - K*math.exp(-r*T)*N(d2)
+
+def bs_put(S, K, T, r, v):
+    if T <= 0 or v <= 0: return max(K - S, 0)
+    d1 = (math.log(S / K) + (r + 0.5*v**2)*T) / (v*math.sqrt(T))
+    d2 = d1 - v*math.sqrt(T)
+    return K*math.exp(-r*T)*N(-d2) - S*N(-d1)
+
+def iv_for_strike(curve, strike, atm):
+    if not curve: return atm
+    s = str(int(strike))
+    if s in curve: return curve[s]
+    nearest = min(curve.keys(), key=lambda k: abs(int(k) - strike))
+    return curve[nearest]
+
+# ---------- state helpers ----------
 
 def init_state():
     ss = st.session_state
@@ -13,424 +75,206 @@ def init_state():
     ss.setdefault("signals", [])
     ss.setdefault("iv_snapshot", {})
 
-def half_hour_times():
-    return [time(h, m) for h in range(24) for m in (0, 30)]
+# ---------- weekly rails ----------
 
-def fmt_t(t: time) -> str:
-    return t.strftime("%H:%M")
-
-def parse_dt_from_date_time(d: date, t: time) -> datetime:
-    return datetime.combine(d, t)
-
-def bs_call_price(S, K, T, r, sigma):
-    if T <= 0 or sigma <= 0:
-        return max(S - K, 0.0)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    N1 = 0.5 * (1 + math.erf(d1 / math.sqrt(2)))
-    N2 = 0.5 * (1 + math.erf(d2 / math.sqrt(2)))
-    return S * N1 - K * math.exp(-r * T) * N2
-
-def bs_put_price(S, K, T, r, sigma):
-    if T <= 0 or sigma <= 0:
-        return max(K - S, 0.0)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    N1 = 0.5 * (1 + math.erf(-d1 / math.sqrt(2)))
-    N2 = 0.5 * (1 + math.erf(-d2 / math.sqrt(2)))
-    return K * math.exp(-r * T) * N2 - S * N1
-
-def get_iv_for_strike(iv_curve, strike, atm_iv):
-    if not iv_curve:
-        return atm_iv
-    s = str(int(strike))
-    if s in iv_curve:
-        return iv_curve[s]
-    nearest = min(iv_curve.keys(), key=lambda k: abs(int(k) - strike))
-    return iv_curve[nearest]
-
-def blocks_between(t1: datetime, t2: datetime) -> int:
-    if t2 <= t1:
-        return 0
-    blocks = 0
-    current = t1
-    while current < t2:
-        nxt = current + timedelta(minutes=30)
-        if not (16 <= current.hour < 17):
-            blocks += 1
-        current = nxt
-    return blocks
-
-def project_from_anchor(anchor_price, anchor_time: datetime, target_time: datetime, direction_sign: int):
-    b = blocks_between(anchor_time, target_time)
-    return anchor_price + direction_sign * SLOPE * b
-
-def get_weekly_rails_at(dt_obj: datetime):
+def get_weekly_rails_at(dt_obj):
     ss = st.session_state
-    if not ss.weekly_segments:
-        return None, None
+    if not ss.weekly_segments: return None, None
     active = None
     for seg in ss.weekly_segments:
-        stime = datetime.fromisoformat(seg["start_time"])
-        if stime <= dt_obj:
-            if active is None or stime > datetime.fromisoformat(active["start_time"]):
+        first_anchor = min(datetime.fromisoformat(seg["sky_time"]),
+                           datetime.fromisoformat(seg["base_time"]))
+        if first_anchor <= dt_obj:
+            if active is None or first_anchor > datetime.fromisoformat(active["sky_time"]):
                 active = seg
-    if active is None:
-        return None, None
-    stime = datetime.fromisoformat(active["start_time"])
+    if active is None: return None, None
     sign = 1 if active["direction"] == "up" else -1
-    sky = project_from_anchor(active["skyline_start"], stime, dt_obj, sign)
-    base = project_from_anchor(active["baseline_start"], stime, dt_obj, sign)
+    sky = project_from_anchor(active["sky_price"],
+                              datetime.fromisoformat(active["sky_time"]),
+                              dt_obj, sign)
+    base = project_from_anchor(active["base_price"],
+                               datetime.fromisoformat(active["base_time"]),
+                               dt_obj, sign)
     return sky, base
 
-def auto_update_signals(current_spx, now_dt: datetime):
+def auto_update_signals(spot, now_dt):
     ss = st.session_state
     sky, base = get_weekly_rails_at(now_dt)
-    if sky is None or base is None:
-        return
+    if sky is None: return
     for s in ss.signals:
-        if s.get("status") != "active":
-            continue
-        if s["type"] == "long" and current_spx >= sky:
-            s["status"] = "completed"
-            s["completed_at"] = now_dt.isoformat()
-        if s["type"] == "short" and current_spx <= base:
-            s["status"] = "completed"
-            s["completed_at"] = now_dt.isoformat()
+        if s["status"] != "active": continue
+        if s["type"] == "long" and spot >= sky:
+            s["status"] = "completed"; s["completed_at"] = now_dt.isoformat()
+        if s["type"] == "short" and spot <= base:
+            s["status"] = "completed"; s["completed_at"] = now_dt.isoformat()
 
-def hours_until_close(now_dt: datetime) -> float:
-    close = now_dt.replace(hour=15, minute=15, second=0, microsecond=0)
-    delta_hrs = (close - now_dt).total_seconds() / 3600.0
-    return max(delta_hrs, 0.1)
-
-def calc_T(hours_left: float) -> float:
-    return max(hours_left, 0.05) / (24.0 * 365.0)
-
-# --------------- pages ---------------
+# ---------- pages ----------
 
 def page_weekly_setup():
     st.header("Weekly Setup")
+    init_state(); ss = st.session_state
 
-    init_state()
-    ss = st.session_state
+    st.caption("Separate anchors for Skyline and Baseline (each 30-min slot).")
+    week_date = st.date_input("Anchor date", value=date.today())
 
-    st.caption("Set this once per weekly segment. No typing timestamps.")
+    c1, c2 = st.columns(2)
+    with c1:
+        sky_price = st.number_input("Skyline anchor price", value=6880.0)
+        sky_time = st.selectbox("Skyline anchor time", [fmt_t(t) for t in half_hour_times()], index=17)
+    with c2:
+        base_price = st.number_input("Baseline anchor price", value=6820.0)
+        base_time = st.selectbox("Baseline anchor time", [fmt_t(t) for t in half_hour_times()], index=19)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        week_start_date = st.date_input("Segment start date", value=date.today())
-        start_time_choice = st.selectbox(
-            "Start time (30 min slots)",
-            [fmt_t(t) for t in half_hour_times()],
-            index=17  # 08:30 as a common start
-        )
-    with col2:
-        direction = st.selectbox("Direction", ["up", "down"])
-        sky_start = st.number_input("Skyline start price", value=6880.0)
-        base_start = st.number_input("Baseline start price", value=6820.0)
+    direction = st.selectbox("Weekly direction", ["up", "down"])
 
     if st.button("Save weekly segment"):
-        h, m = map(int, start_time_choice.split(":"))
-        dt_start = parse_dt_from_date_time(week_start_date, time(h, m))
-        ss.weekly_segments.append({
+        seg = {
             "name": f"Seg {len(ss.weekly_segments)+1}",
-            "start_time": dt_start.isoformat(timespec="minutes"),
-            "skyline_start": sky_start,
-            "baseline_start": base_start,
+            "sky_time": parse_dt_from_date_time(week_date, to_time(sky_time)).isoformat(timespec="minutes"),
+            "sky_price": sky_price,
+            "base_time": parse_dt_from_date_time(week_date, to_time(base_time)).isoformat(timespec="minutes"),
+            "base_price": base_price,
             "direction": direction
-        })
+        }
+        ss.weekly_segments.append(seg)
 
     if ss.weekly_segments:
-        st.subheader("Weekly segments")
+        st.subheader("Weekly Segments")
         st.table(ss.weekly_segments)
 
 def page_daily_compass():
-    st.header("Daily Compass and Signals")
-
-    init_state()
-    ss = st.session_state
-
-    st.caption("Pick pivots using only price and 30 min time slots.")
+    st.header("Daily Compass & Signals")
+    init_state(); ss = st.session_state
 
     trade_date = st.date_input("Trading date", value=date.today())
 
-    col1, col2 = st.columns(2)
-    with col1:
-        pprev_price = st.number_input("Previous day last pivot price", value=6850.0)
-        pprev_time_choice = st.selectbox(
-            "Previous pivot time",
-            [fmt_t(t) for t in half_hour_times()],
-            index=29  # 14:30 default
-        )
-    with col2:
-        pnew_price = st.number_input("New session pivot price (5 pm pivot)", value=6862.0)
-        pnew_time_choice = st.selectbox(
-            "New session pivot time",
-            [fmt_t(t) for t in half_hour_times()],
-            index=34  # 17:00 default
-        )
+    c1, c2 = st.columns(2)
+    with c1:
+        prev_price = st.number_input("Prev-day pivot price", value=6850.0)
+        prev_time = st.selectbox("Prev pivot time", [fmt_t(t) for t in half_hour_times()], index=29)
+    with c2:
+        new_price = st.number_input("New session pivot (5 PM)", value=6862.0)
+        new_time = st.selectbox("New session pivot time", [fmt_t(t) for t in half_hour_times()], index=34)
 
-    if st.button("Generate daily lines"):
-        try:
-            # use 08:30 of trade_date as reference
-            ref_dt = parse_dt_from_date_time(trade_date, time(8, 30))
-
-            pprev_h, pprev_m = map(int, pprev_time_choice.split(":"))
-            pprev_dt = parse_dt_from_date_time(trade_date - timedelta(days=1), time(pprev_h, pprev_m))
-
-            pnew_h, pnew_m = map(int, pnew_time_choice.split(":"))
-            # pivot at 17:00 of previous calendar day for the new session start
-            pnew_dt = parse_dt_from_date_time(trade_date - timedelta(days=1), time(pnew_h, pnew_m))
-
-            up1 = project_from_anchor(pprev_price, pprev_dt, ref_dt, 1)
-            dn1 = project_from_anchor(pprev_price, pprev_dt, ref_dt, -1)
-            up2 = project_from_anchor(pnew_price, pnew_dt, ref_dt, 1)
-            dn2 = project_from_anchor(pnew_price, pnew_dt, ref_dt, -1)
-
-            levels = [up1, dn1, up2, dn2]
-            sorted_levels = sorted(levels, reverse=True)
-
-            lines = {
-                "outer_sky": sorted_levels[0],
-                "inner_sky": sorted_levels[1],
-                "inner_ground": sorted_levels[2],
-                "outer_ground": sorted_levels[3]
-            }
-
-            ss.daily_compass = {
-                "date": trade_date.isoformat(),
-                "p_prev": {"time": pprev_time_choice, "price": pprev_price},
-                "p_new": {"time": pnew_time_choice, "price": pnew_price},
-                "lines": lines
-            }
-
-        except Exception as e:
-            st.error(f"Error generating lines: {e}")
-
+    if st.button("Generate Lines"):
+        ref_dt = parse_dt_from_date_time(trade_date, time(8,30))
+        pprev = parse_dt_from_date_time(trade_date - timedelta(days=1), to_time(prev_time))
+        pnew  = parse_dt_from_date_time(trade_date - timedelta(days=1), to_time(new_time))
+        up1 = project_from_anchor(prev_price, pprev, ref_dt, 1)
+        dn1 = project_from_anchor(prev_price, pprev, ref_dt, -1)
+        up2 = project_from_anchor(new_price, pnew, ref_dt, 1)
+        dn2 = project_from_anchor(new_price, pnew, ref_dt, -1)
+        lvls = sorted([up1, dn1, up2, dn2], reverse=True)
+        ss.daily_compass = {"date": trade_date.isoformat(),
+                            "lines": {"outer_sky":lvls[0],"inner_sky":lvls[1],
+                                      "inner_ground":lvls[2],"outer_ground":lvls[3]}}
     if ss.daily_compass:
-        st.subheader("Daily compass at 08:30")
-        lines = ss.daily_compass["lines"]
-        st.table({
-            "Line": ["Outer Sky", "Inner Sky", "Inner Ground", "Outer Ground"],
-            "Level": [
-                round(lines["outer_sky"], 2),
-                round(lines["inner_sky"], 2),
-                round(lines["inner_ground"], 2),
-                round(lines["outer_ground"], 2)
-            ],
-            "Role": ["Context", "Sell zone", "Buy zone", "Context"],
-            "Target": ["", "Baseline", "Skyline", ""]
-        })
+        l = ss.daily_compass["lines"]
+        st.table({"Line":["Outer Sky","Inner Sky","Inner Ground","Outer Ground"],
+                  "Level":[round(l["outer_sky"],2),round(l["inner_sky"],2),
+                           round(l["inner_ground"],2),round(l["outer_ground"],2)],
+                  "Role":["Ctx","Sell zone","Buy zone","Ctx"]})
 
-    st.subheader("Signal entry")
-
-    sig_type = st.selectbox("Signal type", ["None", "Long from Inner Ground", "Short from Inner Sky"])
-    trigger_time_choice = st.selectbox(
-        "Signal trigger time",
-        [fmt_t(t) for t in half_hour_times()],
-        index=17  # default 08:30
-    )
-
-    if st.button("Add signal") and sig_type != "None" and ss.daily_compass:
-        base = {
-            "date": ss.daily_compass["date"],
-            "trigger_time": trigger_time_choice,
-            "status": "active"
-        }
-        if sig_type.startswith("Long"):
-            base.update({"type": "long", "from_line": "Inner Ground", "to_rail": "Skyline"})
-        else:
-            base.update({"type": "short", "from_line": "Inner Sky", "to_rail": "Baseline"})
-        ss.signals.append(base)
-
-    if ss.signals:
-        st.subheader("Signals")
-        st.table(ss.signals)
+    st.subheader("Signal Entry")
+    sig_type = st.selectbox("Signal",["None","Long from Inner Ground","Short from Inner Sky"])
+    trig_time = st.selectbox("Trigger time",[fmt_t(t) for t in half_hour_times()],index=17)
+    if st.button("Add Signal") and sig_type!="None":
+        sig={"date":trade_date.isoformat(),"trigger_time":trig_time,"status":"active"}
+        if sig_type.startswith("Long"): sig.update({"type":"long","from":"Inner Ground","to":"Skyline"})
+        else: sig.update({"type":"short","from":"Inner Sky","to":"Baseline"})
+        ss.signals.append(sig)
+    if ss.signals: st.table(ss.signals)
 
 def page_0dte_lab():
-    st.header("0DTE Options Lab")
+    st.header("0 DTE Options Lab")
+    init_state(); ss = st.session_state
 
-    init_state()
-    ss = st.session_state
-
-    st.subheader("Daily IV snapshot")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        snap_date = st.date_input(
-            "Snapshot date",
-            value=date.fromisoformat(ss.iv_snapshot.get("date", date.today().isoformat()))
-            if ss.iv_snapshot.get("date") else date.today()
-        )
-        spot = st.number_input("Spot price now", value=float(ss.iv_snapshot.get("spot", 6720.0)))
-        atm_iv = st.number_input("ATM IV (percent)", value=float(ss.iv_snapshot.get("atm_iv", 20.0)))
-    with col2:
-        rate = st.number_input("Risk free rate (percent)", value=float(ss.iv_snapshot.get("rate", 4.9)))
-        iv_text = st.text_area(
-            "Per strike IV (strike:iv%, one per line)",
-            value=ss.iv_snapshot.get("raw_text", "")
-        )
-
-    if st.button("Save IV snapshot"):
-        iv_curve = {}
+    # IV snapshot
+    st.subheader("IV Snapshot")
+    c1,c2=st.columns(2)
+    with c1:
+        snap_date=st.date_input("Snapshot date",value=date.today())
+        spot=st.number_input("Spot price now",value=float(ss.iv_snapshot.get("spot",6720)))
+        atm_iv=st.number_input("ATM IV (%)",value=float(ss.iv_snapshot.get("atm_iv",20)))
+    with c2:
+        rate=st.number_input("Risk-free rate (%)",value=float(ss.iv_snapshot.get("rate",4.9)))
+        iv_text=st.text_area("Strike:IV%",value=ss.iv_snapshot.get("raw_text",""))
+    if st.button("Save Snapshot"):
+        iv_curve={}
         for line in iv_text.splitlines():
             if ":" in line:
-                k, v = line.split(":")
-                try:
-                    iv_curve[k.strip()] = float(v.strip()) / 100.0
-                except:
-                    pass
-        ss.iv_snapshot = {
-            "date": snap_date.isoformat(),
-            "spot": spot,
-            "atm_iv": atm_iv / 100.0,
-            "rate": rate / 100.0,
-            "iv_curve": iv_curve,
-            "raw_text": iv_text
-        }
+                k,v=line.split(":"); iv_curve[k.strip()]=float(v.strip())/100
+        ss.iv_snapshot={"date":snap_date.isoformat(),"spot":spot,"atm_iv":atm_iv/100,
+                        "rate":rate/100,"iv_curve":iv_curve,"raw_text":iv_text}
 
-    if not ss.iv_snapshot:
-        st.info("Enter and save IV snapshot to continue.")
-        return
+    if not ss.daily_compass or not ss.iv_snapshot:
+        st.info("Need Daily Compass + IV Snapshot first."); return
 
-    if not ss.daily_compass:
-        st.info("Set up the Daily Compass first.")
-        return
+    # current time
+    st.subheader("Current Time")
+    cur_date=st.date_input("Current date",value=date.fromisoformat(ss.daily_compass["date"]))
+    cur_time=st.selectbox("Time slot",[fmt_t(t) for t in half_hour_times()],index=17)
+    now_dt=parse_dt_from_date_time(cur_date,to_time(cur_time))
+    auto_update_signals(spot,now_dt)
 
-    # current time using date + dropdown
-    st.subheader("Current time")
-    col_ct1, col_ct2 = st.columns(2)
-    with col_ct1:
-        cur_date = st.date_input(
-            "Current date",
-            value=date.fromisoformat(ss.daily_compass["date"])
-        )
-    with col_ct2:
-        cur_time_choice = st.selectbox(
-            "Current time (30 min slots)",
-            [fmt_t(t) for t in half_hour_times()],
-            index=17  # 08:30 default
-        )
+    # weekly rails
+    sky,base=get_weekly_rails_at(now_dt)
+    if not sky:
+        st.warning("Define weekly segment first."); return
+    st.table({"Name":["Skyline","Baseline"],
+              "Level":[round(sky,2),round(base,2)],
+              "Dist from spot":[round(sky-spot,2),round(spot-base,2)]})
 
-    h_now, m_now = map(int, cur_time_choice.split(":"))
-    now_dt = parse_dt_from_date_time(cur_date, time(h_now, m_now))
+    hrs_left=st.number_input("Hours left until expiry",value=float(round(hours_until_close(now_dt),2)))
+    T=calc_T(hrs_left)
 
-    # update signals
-    auto_update_signals(spot, now_dt)
+    # signal context
+    act=[s for s in ss.signals if s["status"]=="active"]
+    sig=act[-1] if act else None
+    if sig: st.write("Active signal:",sig)
+    else: st.info("No active signal — manual mode.")
 
-    # weekly frame at now
-    sky, base = get_weekly_rails_at(now_dt)
-    if sky is None or base is None:
-        st.info("Define weekly segments to see Skyline and Baseline.")
-        return
+    iv_curve=ss.iv_snapshot["iv_curve"]; atm=ss.iv_snapshot["atm_iv"]; r=ss.iv_snapshot["rate"]
 
-    st.subheader("Weekly frame")
-    st.table({
-        "Name": ["Skyline", "Baseline"],
-        "Level": [round(sky, 2), round(base, 2)],
-        "Distance from spot": [round(sky - spot, 2), round(spot - base, 2)]
-    })
-
-    # time to expiry
-    auto_hours = hours_until_close(now_dt)
-    hours_left = st.number_input(
-        "Hours left until expiry",
-        value=float(round(auto_hours, 2))
-    )
-    T = calc_T(hours_left)
-
-    # active signal
-    st.subheader("Active signal")
-    active_signals = [s for s in ss.signals if s["status"] == "active"]
-    signal = active_signals[-1] if active_signals else None
-    if signal:
-        st.write(signal)
+    if sig and sig["type"]=="long":
+        opt_type="call"; tgt,opp=sky,base
+        lbl_tgt,lbl_opp="If Skyline hits","If Baseline hits"
+    elif sig and sig["type"]=="short":
+        opt_type="put"; tgt,opp=base,sky
+        lbl_tgt,lbl_opp="If Baseline hits","If Skyline hits"
     else:
-        st.write("No active signal. You can still test calls or puts.")
+        opt_type=st.selectbox("Option type",["call","put"])
+        tgt=st.number_input("Target SPX",value=spot+30)
+        opp=st.number_input("Opposite SPX",value=spot-30)
+        lbl_tgt,lbl_opp="If target hits","If opposite hits"
 
-    iv_curve = ss.iv_snapshot["iv_curve"]
-    atm_iv_val = ss.iv_snapshot["atm_iv"]
-    rate_val = ss.iv_snapshot["rate"]
-
-    # targets based on signal
-    if signal and signal["type"] == "long":
-        target_spx = sky
-        opp_spx = base
-        opt_type = "call"
-        label_target = "If Skyline hits"
-        label_opp = "If Baseline hits"
-    elif signal and signal["type"] == "short":
-        target_spx = base
-        opp_spx = sky
-        opt_type = "put"
-        label_target = "If Baseline hits"
-        label_opp = "If Skyline hits"
-    else:
-        opt_type = st.selectbox("Option type", ["call", "put"])
-        target_spx = st.number_input("Target SPX", value=spot + 30.0)
-        opp_spx = st.number_input("Opposite SPX", value=spot - 30.0)
-        label_target = "If target hits"
-        label_opp = "If opposite hits"
-
-    st.subheader("Contract candidates")
-
-    strikes_text = st.text_input("Strikes (comma separated)")
-
-    if st.button("Evaluate contracts") and strikes_text:
-        rows = []
-        for s_str in strikes_text.split(","):
-            s_str = s_str.strip()
-            if not s_str:
-                continue
-            try:
-                K = float(s_str)
-            except:
-                continue
-
-            sigma = get_iv_for_strike(iv_curve, K, atm_iv_val)
-
-            if opt_type == "call":
-                now_price = bs_call_price(spot, K, T, rate_val, sigma)
-                at_target = bs_call_price(target_spx, K, T, rate_val, sigma)
-                at_opp = bs_call_price(opp_spx, K, T, rate_val, sigma)
+    # contracts
+    strikes=st.text_input("Strikes (comma separated)")
+    if st.button("Evaluate") and strikes:
+        rows=[]
+        for s_str in strikes.split(","):
+            try: K=float(s_str.strip())
+            except: continue
+            v=iv_for_strike(iv_curve,K,atm)
+            if opt_type=="call":
+                now=bs_call(spot,K,T,r,v); t=bs_call(tgt,K,T,r,v); o=bs_call(opp,K,T,r,v)
             else:
-                now_price = bs_put_price(spot, K, T, rate_val, sigma)
-                at_target = bs_put_price(target_spx, K, T, rate_val, sigma)
-                at_opp = bs_put_price(opp_spx, K, T, rate_val, sigma)
+                now=bs_put(spot,K,T,r,v); t=bs_put(tgt,K,T,r,v); o=bs_put(opp,K,T,r,v)
+            if now<=0: continue
+            rows.append({"Strike":K,"Type":opt_type,"Now":round(now,2),
+                         lbl_tgt:round(t,2),lbl_opp:round(o,2),
+                         "%"+lbl_tgt:round((t-now)/now*100,1),
+                         "%"+lbl_opp:round((o-now)/now*100,1)})
+        if rows: st.table(rows)
 
-            if now_price <= 0:
-                continue
-
-            pct_target = (at_target - now_price) / now_price * 100.0
-            pct_opp = (at_opp - now_price) / now_price * 100.0
-
-            rows.append({
-                "Strike": K,
-                "Type": opt_type,
-                "Now": round(now_price, 2),
-                label_target: round(at_target, 2),
-                label_opp: round(at_opp, 2),
-                "% " + label_target: round(pct_target, 1),
-                "% " + label_opp: round(pct_opp, 1)
-            })
-
-        if rows:
-            st.table(rows)
-
-# --------------- main ---------------
+# ---------- main ----------
 
 def main():
     init_state()
-    page = st.sidebar.selectbox(
-        "Page",
-        ["Weekly Setup", "Daily Compass", "0DTE Lab"]
-    )
-    if page == "Weekly Setup":
-        page_weekly_setup()
-    elif page == "Daily Compass":
-        page_daily_compass()
-    else:
-        page_0dte_lab()
+    page=st.sidebar.selectbox("Page",["Weekly Setup","Daily Compass","0 DTE Lab"])
+    if page=="Weekly Setup": page_weekly_setup()
+    elif page=="Daily Compass": page_daily_compass()
+    else: page_0dte_lab()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
