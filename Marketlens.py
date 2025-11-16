@@ -789,7 +789,7 @@ def section_header(text: str):
 
 
 # ===============================
-# TIME / BLOCK HELPERS (UNCHANGED)
+# TIME / BLOCK HELPERS
 # ===============================
 
 def make_dt_from_time(t: dtime) -> datetime:
@@ -820,7 +820,7 @@ def rth_slots() -> pd.DatetimeIndex:
 
 
 # ===============================
-# CHANNEL ENGINE (UNCHANGED)
+# CHANNEL ENGINE
 # ===============================
 
 def build_channel(
@@ -854,7 +854,7 @@ def build_channel(
 
 
 # ===============================
-# CONTRACT ENGINE (UNCHANGED)
+# CONTRACT ENGINE
 # ===============================
 
 def build_contract_projection(
@@ -886,7 +886,7 @@ def build_contract_projection(
 
 
 # ===============================
-# DAILY FORESIGHT HELPERS (UNCHANGED)
+# DAILY FORESIGHT HELPERS
 # ===============================
 
 def get_active_channel() -> Tuple[Optional[str], Optional[pd.DataFrame], Optional[float]]:
@@ -953,7 +953,7 @@ def main():
         "ℹ️ About",
     ])
 
-    # TAB 1
+    # TAB 1 - CHANNEL
     with tabs[0]:
         card(
             "SPX Channel Setup",
@@ -1089,7 +1089,7 @@ def main():
 
         end_card()
 
-    # TAB 2
+    # TAB 2 - CONTRACT
     with tabs[1]:
         card(
             "Contract Slope Setup",
@@ -1167,10 +1167,6 @@ def main():
                     )
                     st.session_state["contract_df"] = df_contract
                     st.session_state["contract_slope"] = slope_contract
-                    st.session_state["contract_anchor_a_time"] = anchor_a_time
-                    st.session_state["contract_anchor_a_price"] = anchor_a_price
-                    st.session_state["contract_anchor_b_time"] = anchor_b_time
-                    st.session_state["contract_anchor_b_price"] = anchor_b_price
                     st.success("✨ Contract projection generated successfully! Review the table and Daily Foresight tab.")
                 except Exception as e:
                     st.error(f"Error generating contract projection: {e}")
@@ -1200,7 +1196,7 @@ def main():
 
         end_card()
 
-    # TAB 3
+    # TAB 3 - DAILY FORESIGHT
     with tabs[2]:
         card(
             "Daily Foresight Card",
@@ -1222,18 +1218,39 @@ def main():
         else:
             merged = df_ch.merge(df_contract, on="Time", how="left")
 
+            # Structural line change for a full channel move (not realistic options TP)
             blocks_for_channel = h_ch / SLOPE_MAG if SLOPE_MAG != 0 else 0.0
             contract_move_per_channel = slope_contract * blocks_for_channel if blocks_for_channel != 0 else 0.0
             contract_gain_abs = abs(contract_move_per_channel)
 
             section_header("📊 Structure Summary")
+
+            # USER-CALIBRATED EFFECTIVE DELTA FOR REALISTIC TP
+            eff_delta = st.number_input(
+                "Effective contract change per SPX point (your empirical factor)",
+                value=0.60,
+                step=0.05,
+                min_value=0.0,
+                max_value=50.0,
+                key="effective_contract_delta",
+            )
+            realistic_contract_tp = h_ch * eff_delta
+
             c1, c2, c3 = st.columns(3, gap="large")
             with c1:
                 st.markdown(metric_card("Active Channel", df_mode or "Not set"), unsafe_allow_html=True)
             with c2:
                 st.markdown(metric_card("Channel Height", f"{h_ch:.2f} pts"), unsafe_allow_html=True)
             with c3:
-                st.markdown(metric_card("Contract Change", f"{contract_gain_abs:.2f} units"), unsafe_allow_html=True)
+                st.markdown(metric_card("Realistic TP (Full Channel)", f"{realistic_contract_tp:.2f} units"), unsafe_allow_html=True)
+
+            st.markdown(
+                f"<div class='muted'><strong>Structural line change:</strong> "
+                f"Based on the raw contract slope, a full-channel move would change the contract by about "
+                f"<b>{contract_gain_abs:.2f}</b> units. "
+                "Your realistic TP above is scaled by your chosen 'effective change per SPX point' to better match actual options behavior.</div>",
+                unsafe_allow_html=True,
+            )
 
             section_header("📈 Inside Channel Play")
             st.markdown(f"""
@@ -1241,16 +1258,20 @@ def main():
               <p><strong style='color:#6366f1; font-size:1.15rem;'>🟢 Long Idea</strong> → Buy at the lower rail, exit at the upper rail</p>
               <ul style='margin-left:24px;'>
                 <li>Underlying move: about <strong style='color:#10b981;'>{h_ch:.2f} points</strong> in your favor</li>
-                <li>Typical contract change for a full swing: about <strong style='color:#10b981;'>{contract_gain_abs:.2f} units</strong> based on current slope</li>
+                <li>Realistic contract TP for a full swing (using your factor): 
+                    <strong style='color:#10b981;'>{realistic_contract_tp:.2f} units</strong></li>
               </ul>
 
               <p><strong style='color:#6366f1; font-size:1.15rem;'>🔴 Short Idea</strong> → Sell at the upper rail, exit at the lower rail</p>
               <ul style='margin-left:24px;'>
                 <li>Underlying move: about <strong style='color:#ef4444;'>{h_ch:.2f} points</strong> in your favor, opposite direction</li>
-                <li>Same contract size of move in the opposite direction</li>
+                <li>Same magnitude of contract move, opposite sign for a short</li>
               </ul>
 
-              <p style='margin-top:16px; color:#64748b;'><em>This is a structural size of move, not a full options model. Real moves may be larger due to volatility and time effects.</em></p>
+              <p style='margin-top:16px; color:#64748b;'><em>
+              The structural line is straight and blind to IV / gamma. The realistic TP is where you bake in
+              your experience: “for this kind of contract, a full channel usually gives me around this much”.
+              </em></p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1261,7 +1282,7 @@ def main():
               <ul style='margin-left:24px;'>
                 <li>Entry on clean retest of the upper rail from above</li>
                 <li>Continuation target: roughly one additional channel height beyond the rail</li>
-                <li>Same channel-size contract move estimate used as a guide</li>
+                <li>Use your full-channel TP estimate as a guide, not a guarantee</li>
               </ul>
 
               <p><strong style='color:#6366f1; font-size:1.15rem;'>⬇️ Breakdown Below Lower Rail</strong></p>
@@ -1292,7 +1313,6 @@ def main():
                         key="foresight_exit_time",
                     )
 
-                # SAFETY: ensure we have contract prices and matching rows
                 if "Contract Price" not in merged.columns or merged["Contract Price"].isna().all():
                     st.warning("⚠️ Contract prices are not available for the selected structure yet.")
                 else:
@@ -1314,17 +1334,18 @@ def main():
 
                             c1_est, c2_est, c3_est = st.columns(3, gap="large")
                             with c1_est:
-                                st.markdown(metric_card("Entry Contract", f"{entry_contract:.2f}"), unsafe_allow_html=True)
+                                st.markdown(metric_card("Entry Contract (Structural)", f"{entry_contract:.2f}"), unsafe_allow_html=True)
                             with c2_est:
-                                st.markdown(metric_card("Exit Contract", f"{exit_contract:.2f}"), unsafe_allow_html=True)
+                                st.markdown(metric_card("Exit Contract (Structural)", f"{exit_contract:.2f}"), unsafe_allow_html=True)
                             with c3_est:
-                                st.markdown(metric_card("Projected P&L", f"{pnl_contract:+.2f} units"), unsafe_allow_html=True)
+                                st.markdown(metric_card("Projected P&L (Line)", f"{pnl_contract:+.2f} units"), unsafe_allow_html=True)
 
                             st.markdown(
-                                "<div class='muted'><strong>💡 How to use this estimator:</strong> "
-                                "Pick the time you expect the rail touch to happen as your entry, "
-                                "pick your planned exit time, and compare this projected contract move with what the market actually gave you. "
-                                "The difference is your volatility and skew bonus on that day.</div>",
+                                "<div class='muted'><strong>💡 How to read this:</strong> "
+                                "These values are from the straight contract line between your two anchors. "
+                                "On days when a 5.20 contract explodes to 35 by 10:00, that is volatility and "
+                                "order flow doing more than the structural line. The line gives you a reference, "
+                                "your realistic TP factor tells you what you should roughly aim for.</div>",
                                 unsafe_allow_html=True,
                             )
             else:
@@ -1336,14 +1357,14 @@ def main():
 
             st.markdown(
                 "<div class='muted'><strong>📖 Reading the map:</strong> "
-                "The grid does not tell you <em>when</em> the tag will happen. "
+                "The grid does not tell you <em>when</em> the tag will happen or how much IV will expand. "
                 "It tells you what your structure expects the contract to be worth <em>if</em> the tag happens at a given time.</div>",
                 unsafe_allow_html=True,
             )
 
             end_card()
 
-    # TAB 4
+    # TAB 4 - ABOUT
     with tabs[3]:
         card("About SPX Prophet v7.0", TAGLINE, badge="Version 7.0", icon="ℹ️")
         st.markdown(
@@ -1362,7 +1383,10 @@ def main():
                 <li>Contracts follow a straight line defined by <strong style='color:#6366f1;'>two anchor prices</strong> on the same grid</li>
             </ul>
 
-            <p style='margin-top:24px;'>The app does not claim to model full options behavior. It gives you a clean structural map so that when price returns to your rails, you are not reacting blindly. You already have a framework and a plan.</p>
+            <p style='margin-top:24px;'>
+            The contract line is structure only. The realistic TP knob in the Foresight tab is where you plug in
+            your experience of how violently calls and puts actually move when SPX traverses a full channel.
+            </p>
             </div>
             """,
             unsafe_allow_html=True,
