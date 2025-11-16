@@ -1,8 +1,6 @@
-# spx_prophet_v7.py
+# spx_prophet_v7_premium.py
 # SPX Prophet v7.0 — "Where Structure Becomes Foresight."
-# Futuristic quant aesthetic. Streamlit-only. No external data.
-# Core: two pivots define parallel rails with slope ±0.475 per 30 minutes.
-# Contract line projected from two contract anchors. Daily Foresight Card links both.
+# Premium UI Edition - Enterprise-grade design, unchanged strategy
 
 import streamlit as st
 import pandas as pd
@@ -11,117 +9,539 @@ from typing import Tuple, Optional
 
 APP_NAME = "SPX Prophet v7.0"
 TAGLINE = "Where Structure Becomes Foresight."
-SLOPE_MAG = 0.475          # points per 30-minute block for SPX rails
-BASE_DATE = datetime(2000, 1, 1, 15, 0)  # synthetic 15:00 "start" for block indexing
+SLOPE_MAG = 0.475
+BASE_DATE = datetime(2000, 1, 1, 15, 0)
 
 
 # ===============================
-# FUTURISTIC QUANT THEME (CSS)
+# WORLD-CLASS UI SYSTEM
 # ===============================
 
 def inject_css():
     css = """
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    
+    /* === CORE FOUNDATION === */
     html, body, [data-testid="stAppViewContainer"] {
         background:
-          radial-gradient(1000px 800px at 10% 0%, rgba(0, 255, 255, 0.13), transparent 60%),
-          radial-gradient(900px 900px at 90% 0%, rgba(0, 255, 135, 0.12), transparent 65%),
-          linear-gradient(145deg, #020412 0%, #050716 35%, #040510 100%);
+          radial-gradient(ellipse 1400px 900px at 15% 0%, rgba(0, 255, 255, 0.08), transparent 50%),
+          radial-gradient(ellipse 1200px 1000px at 85% 100%, rgba(0, 255, 135, 0.06), transparent 50%),
+          radial-gradient(circle 800px at 50% 50%, rgba(138, 43, 226, 0.03), transparent),
+          linear-gradient(165deg, #010208 0%, #020515 25%, #030a1a 50%, #020515 75%, #010208 100%);
         background-attachment: fixed;
-        color: #E6ECFF;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+        color: #E8F0FF;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        font-weight: 400;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
     }
+    
+    /* === REFINED SIDEBAR === */
     [data-testid="stSidebar"] {
-        background: linear-gradient(160deg, rgba(5,10,30,0.96), rgba(10,20,45,0.98));
-        border-right: 1px solid rgba(0,255,200,0.16);
-        backdrop-filter: blur(22px);
+        background: 
+            linear-gradient(175deg, rgba(3,8,25,0.97) 0%, rgba(8,15,35,0.98) 50%, rgba(5,10,28,0.97) 100%);
+        border-right: 1px solid rgba(0,255,200,0.12);
+        backdrop-filter: blur(28px) saturate(180%);
+        box-shadow: 
+            4px 0 40px rgba(0,0,0,0.5),
+            inset -1px 0 1px rgba(0,255,255,0.08);
     }
-    h1, h2, h3, h4, h5, h6, label, p, span, div {
-        color: #E6ECFF;
+    
+    [data-testid="stSidebar"] h3 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #00FFE5 0%, #00FF9D 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 0.25rem;
+        letter-spacing: -0.02em;
     }
+    
+    [data-testid="stSidebar"] hr {
+        margin: 1.5rem 0;
+        border: none;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0,255,200,0.3), transparent);
+    }
+    
+    [data-testid="stSidebar"] h4 {
+        color: #00FFE5;
+        font-size: 0.85rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-top: 1.5rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    [data-testid="stSidebar"] .stMarkdown p {
+        font-size: 0.95rem;
+        line-height: 1.6;
+        color: #B8C5E0;
+    }
+    
+    [data-testid="stSidebar"] .stMarkdown strong {
+        color: #00FFE5;
+        font-weight: 600;
+    }
+    
+    /* === TYPOGRAPHY SYSTEM === */
+    h1, h2, h3, h4, h5, h6 {
+        color: #E8F0FF;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+    }
+    
+    h1 { font-size: 2.5rem; }
+    h2 { font-size: 2rem; }
+    h3 { font-size: 1.5rem; }
+    h4 { font-size: 1.25rem; }
+    
+    label, p, span, div {
+        color: #D1DFFF;
+        line-height: 1.6;
+    }
+    
+    /* === PREMIUM CARD SYSTEM === */
     .spx-card {
-        background: radial-gradient(circle at top left, rgba(0,255,255,0.10), transparent 60%),
-                    radial-gradient(circle at bottom right, rgba(0,255,135,0.10), transparent 60%),
-                    rgba(9,12,32,0.88);
-        border-radius: 20px;
-        border: 1px solid rgba(0,255,200,0.18);
+        position: relative;
+        background: 
+            radial-gradient(circle at 5% 5%, rgba(0,255,255,0.08), transparent 40%),
+            radial-gradient(circle at 95% 95%, rgba(0,255,135,0.06), transparent 40%),
+            linear-gradient(135deg, rgba(15,20,45,0.95), rgba(8,12,30,0.92));
+        border-radius: 24px;
+        border: 1px solid rgba(0,255,200,0.15);
         box-shadow:
-          0 18px 60px rgba(0,0,0,0.7),
-          0 0 40px rgba(0,255,255,0.15);
-        padding: 18px 20px;
-        margin-bottom: 16px;
-        backdrop-filter: blur(18px);
-        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+          0 20px 60px -12px rgba(0,0,0,0.8),
+          0 8px 24px -8px rgba(0,0,0,0.6),
+          inset 0 1px 0 rgba(255,255,255,0.03),
+          0 0 0 1px rgba(0,255,255,0.05);
+        padding: 28px 32px;
+        margin-bottom: 24px;
+        backdrop-filter: blur(24px) saturate(180%);
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
     }
+    
+    .spx-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, 
+            transparent, 
+            rgba(0,255,255,0.4) 30%, 
+            rgba(0,255,135,0.4) 70%, 
+            transparent);
+        opacity: 0;
+        transition: opacity 0.4s ease;
+    }
+    
     .spx-card:hover {
-        transform: translateY(-2px);
-        border-color: rgba(0,255,255,0.8);
+        transform: translateY(-4px);
+        border-color: rgba(0,255,255,0.35);
         box-shadow:
-          0 24px 70px rgba(0,0,0,0.9),
-          0 0 70px rgba(0,255,255,0.32);
+          0 32px 80px -12px rgba(0,0,0,0.9),
+          0 16px 40px -8px rgba(0,255,255,0.15),
+          inset 0 1px 0 rgba(255,255,255,0.06),
+          0 0 0 1px rgba(0,255,255,0.15),
+          0 0 80px rgba(0,255,255,0.1);
     }
+    
+    .spx-card:hover::before {
+        opacity: 1;
+    }
+    
+    .spx-card h4 {
+        margin: 0 0 8px 0;
+        font-size: 1.35rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #E8F0FF 0%, #B8D5FF 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    /* === PREMIUM BADGE SYSTEM === */
     .spx-pill {
         display: inline-flex;
         align-items: center;
-        gap: .35rem;
-        padding: 4px 12px;
-        border-radius: 999px;
-        border: 1px solid rgba(0,255,200,0.35);
-        background: radial-gradient(circle at top left, rgba(0,255,200,0.24), transparent 60%);
-        font-size: .8rem;
+        gap: 6px;
+        padding: 6px 16px;
+        border-radius: 100px;
+        border: 1px solid rgba(0,255,200,0.3);
+        background: 
+            linear-gradient(135deg, rgba(0,255,200,0.15), rgba(0,255,135,0.12)),
+            rgba(0,30,30,0.4);
+        font-size: 0.75rem;
+        font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: .08em;
-        color: #00ffe0;
+        letter-spacing: 0.1em;
+        color: #00FFE5;
+        box-shadow: 
+            0 4px 12px rgba(0,255,255,0.15),
+            inset 0 1px 0 rgba(255,255,255,0.1);
+        margin-bottom: 12px;
+        transition: all 0.3s ease;
     }
+    
+    .spx-pill:hover {
+        transform: scale(1.05);
+        box-shadow: 
+            0 6px 20px rgba(0,255,255,0.25),
+            inset 0 1px 0 rgba(255,255,255,0.15);
+    }
+    
+    .spx-pill::before {
+        content: '◆';
+        font-size: 0.5rem;
+        color: #00FFE5;
+    }
+    
+    /* === SUBTITLE STYLING === */
     .spx-sub {
-        color: #A2ABCC;
-        font-size: .92rem;
+        color: #8FA8D0;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        font-weight: 400;
     }
-    .spx-row {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 16px;
-    }
+    
     .muted {
-        color: #9AA4C5;
-        font-size: .85rem;
+        color: #7A92B8;
+        font-size: 0.88rem;
+        line-height: 1.6;
+        padding: 12px 16px;
+        background: rgba(0,100,150,0.08);
+        border-left: 2px solid rgba(0,255,200,0.25);
+        border-radius: 8px;
+        margin: 12px 0;
     }
+    
+    /* === PREMIUM METRICS SYSTEM === */
     .spx-metric {
-        padding: 10px 12px;
-        border-radius: 12px;
-        background: radial-gradient(circle at top, rgba(0,255,255,0.18), transparent 55%);
-        border: 1px solid rgba(0,255,255,0.28);
-        font-size: .9rem;
+        position: relative;
+        padding: 20px 24px;
+        border-radius: 16px;
+        background: 
+            radial-gradient(circle at top left, rgba(0,255,255,0.12), transparent 60%),
+            linear-gradient(135deg, rgba(20,30,60,0.6), rgba(10,20,45,0.8));
+        border: 1px solid rgba(0,255,255,0.2);
+        box-shadow: 
+            0 8px 24px rgba(0,0,0,0.4),
+            inset 0 1px 0 rgba(255,255,255,0.05);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
     }
+    
+    .spx-metric::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, #00FFE5, #00FF9D);
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.4s ease;
+    }
+    
+    .spx-metric:hover {
+        transform: translateY(-2px);
+        border-color: rgba(0,255,255,0.4);
+        box-shadow: 
+            0 12px 32px rgba(0,0,0,0.5),
+            0 0 40px rgba(0,255,255,0.1),
+            inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+    
+    .spx-metric:hover::before {
+        transform: scaleX(1);
+    }
+    
     .spx-metric-label {
-        font-size: .75rem;
+        font-size: 0.7rem;
         text-transform: uppercase;
-        letter-spacing: .06em;
-        color: #9AA4C5;
+        letter-spacing: 0.12em;
+        color: #8FA8D0;
+        font-weight: 600;
+        margin-bottom: 8px;
+        display: block;
     }
+    
     .spx-metric-value {
-        font-size: 1.05rem;
+        font-size: 1.5rem;
         font-weight: 700;
-        color: #E6ECFF;
+        color: #E8F0FF;
+        letter-spacing: -0.02em;
+        background: linear-gradient(135deg, #E8F0FF 0%, #00FFE5 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
     }
+    
+    /* === WORLD-CLASS BUTTONS === */
     .stButton>button, .stDownloadButton>button {
-        background: linear-gradient(90deg, #00e5ff, #00ff9d);
-        color: #020412;
-        border-radius: 999px;
+        background: linear-gradient(135deg, #00E5FF 0%, #00FF9D 100%);
+        color: #001a1a;
+        border-radius: 12px;
         border: none;
-        padding: 8px 16px;
+        padding: 12px 28px;
         font-weight: 700;
-        font-size: .9rem;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.6), 0 0 30px rgba(0,255,255,0.28);
+        font-size: 0.9rem;
+        letter-spacing: 0.02em;
+        box-shadow: 
+            0 8px 24px rgba(0,230,255,0.25),
+            0 4px 12px rgba(0,0,0,0.3),
+            inset 0 1px 0 rgba(255,255,255,0.3);
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .stButton>button::before, .stDownloadButton>button::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.3);
+        transform: translate(-50%, -50%);
+        transition: width 0.6s, height 0.6s;
+    }
+    
+    .stButton>button:hover::before, .stDownloadButton>button:hover::before {
+        width: 300px;
+        height: 300px;
+    }
+    
+    .stButton>button:hover, .stDownloadButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 
+            0 12px 32px rgba(0,230,255,0.35),
+            0 6px 16px rgba(0,0,0,0.4),
+            inset 0 1px 0 rgba(255,255,255,0.4);
+    }
+    
+    .stButton>button:active, .stDownloadButton>button:active {
+        transform: translateY(0);
+        box-shadow: 
+            0 4px 12px rgba(0,230,255,0.2),
+            0 2px 6px rgba(0,0,0,0.3);
+    }
+    
+    /* === REFINED INPUTS === */
+    .stNumberInput>div>div>input,
+    .stTimeInput>div>div>input,
+    .stTextInput>div>div>input {
+        background: rgba(15,25,50,0.6) !important;
+        border: 1px solid rgba(0,255,200,0.2) !important;
+        border-radius: 10px !important;
+        color: #E8F0FF !important;
+        padding: 10px 14px !important;
+        font-size: 0.95rem !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stNumberInput>div>div>input:focus,
+    .stTimeInput>div>div>input:focus,
+    .stTextInput>div>div>input:focus {
+        border-color: rgba(0,255,255,0.5) !important;
+        box-shadow: 
+            0 0 0 3px rgba(0,255,255,0.1),
+            0 4px 12px rgba(0,255,255,0.15) !important;
+        background: rgba(20,30,60,0.7) !important;
+    }
+    
+    /* === PREMIUM RADIO BUTTONS === */
+    .stRadio>div {
+        gap: 12px;
+    }
+    
+    .stRadio>div>label {
+        background: rgba(15,25,50,0.5);
+        padding: 10px 20px;
+        border-radius: 10px;
+        border: 1px solid rgba(0,255,200,0.15);
+        transition: all 0.3s ease;
         cursor: pointer;
     }
-    .stButton>button:hover, .stDownloadButton>button:hover {
-        filter: brightness(1.07);
+    
+    .stRadio>div>label:hover {
+        background: rgba(20,30,60,0.7);
+        border-color: rgba(0,255,200,0.3);
         transform: translateY(-1px);
     }
+    
+    .stRadio>div>label[data-selected="true"] {
+        background: linear-gradient(135deg, rgba(0,255,255,0.15), rgba(0,255,135,0.12));
+        border-color: rgba(0,255,200,0.5);
+        box-shadow: 0 4px 16px rgba(0,255,255,0.2);
+    }
+    
+    /* === ELEGANT TABS === */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: rgba(5,10,25,0.6);
+        padding: 8px;
+        border-radius: 16px;
+        border: 1px solid rgba(0,255,200,0.1);
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: transparent;
+        border-radius: 10px;
+        color: #8FA8D0;
+        font-weight: 600;
+        padding: 12px 24px;
+        transition: all 0.3s ease;
+        border: 1px solid transparent;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(0,255,200,0.08);
+        color: #00FFE5;
+    }
+    
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(135deg, rgba(0,255,255,0.15), rgba(0,255,135,0.12));
+        color: #00FFE5;
+        border-color: rgba(0,255,200,0.3);
+        box-shadow: 0 4px 16px rgba(0,255,255,0.15);
+    }
+    
+    /* === PREMIUM DATAFRAMES === */
+    .stDataFrame {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    
     .stDataFrame div[data-testid="StyledTable"] {
         font-variant-numeric: tabular-nums;
-        font-size: .85rem;
+        font-size: 0.88rem;
+        background: rgba(10,15,35,0.7);
+    }
+    
+    .stDataFrame thead tr th {
+        background: linear-gradient(135deg, rgba(0,255,255,0.15), rgba(0,255,135,0.12)) !important;
+        color: #00FFE5 !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.08em !important;
+        font-size: 0.75rem !important;
+        padding: 14px 12px !important;
+        border-bottom: 2px solid rgba(0,255,200,0.3) !important;
+    }
+    
+    .stDataFrame tbody tr {
+        transition: all 0.2s ease;
+    }
+    
+    .stDataFrame tbody tr:hover {
+        background: rgba(0,255,255,0.05) !important;
+    }
+    
+    .stDataFrame tbody tr td {
+        padding: 12px !important;
+        border-bottom: 1px solid rgba(0,255,200,0.08) !important;
+        color: #D1DFFF !important;
+    }
+    
+    /* === SUCCESS/WARNING/INFO MESSAGES === */
+    .stSuccess, .stWarning, .stInfo {
+        border-radius: 12px;
+        border-left-width: 4px;
+        padding: 16px 20px;
+        backdrop-filter: blur(10px);
+    }
+    
+    .stSuccess {
+        background: linear-gradient(135deg, rgba(0,255,135,0.15), rgba(0,255,200,0.1));
+        border-left-color: #00FF9D;
+    }
+    
+    .stWarning {
+        background: linear-gradient(135deg, rgba(255,200,0,0.15), rgba(255,150,0,0.1));
+        border-left-color: #FFC800;
+    }
+    
+    .stInfo {
+        background: linear-gradient(135deg, rgba(0,200,255,0.15), rgba(0,150,255,0.1));
+        border-left-color: #00C8FF;
+    }
+    
+    /* === SELECTBOX === */
+    .stSelectbox>div>div {
+        background: rgba(15,25,50,0.6);
+        border: 1px solid rgba(0,255,200,0.2);
+        border-radius: 10px;
+        transition: all 0.3s ease;
+    }
+    
+    .stSelectbox>div>div:hover {
+        border-color: rgba(0,255,200,0.4);
+        background: rgba(20,30,60,0.7);
+    }
+    
+    /* === SCROLLBAR === */
+    ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: rgba(5,10,25,0.5);
+        border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, rgba(0,255,255,0.3), rgba(0,255,135,0.3));
+        border-radius: 10px;
+        border: 2px solid rgba(5,10,25,0.5);
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(135deg, rgba(0,255,255,0.5), rgba(0,255,135,0.5));
+    }
+    
+    /* === ENHANCED SPACING === */
+    .block-container {
+        padding-top: 3rem;
+        padding-bottom: 3rem;
+        max-width: 1400px;
+    }
+    
+    /* === SECTION HEADERS === */
+    .section-header {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #E8F0FF;
+        margin: 2rem 0 1rem 0;
+        padding-bottom: 0.75rem;
+        border-bottom: 2px solid rgba(0,255,200,0.2);
+        background: linear-gradient(135deg, #E8F0FF 0%, #00FFE5 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    /* === FOOTER === */
+    .app-footer {
+        margin-top: 3rem;
+        padding-top: 2rem;
+        border-top: 1px solid rgba(0,255,200,0.1);
+        text-align: center;
+        color: #6A7A98;
+        font-size: 0.85rem;
     }
     </style>
     """
@@ -132,7 +552,7 @@ def card(title: str, sub: Optional[str] = None, badge: Optional[str] = None):
     st.markdown('<div class="spx-card">', unsafe_allow_html=True)
     if badge:
         st.markdown(f"<div class='spx-pill'>{badge}</div>", unsafe_allow_html=True)
-    st.markdown(f"<h4 style='margin:6px 0 4px 0'>{title}</h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4>{title}</h4>", unsafe_allow_html=True)
     if sub:
         st.markdown(f"<div class='spx-sub'>{sub}</div>", unsafe_allow_html=True)
 
@@ -141,16 +561,21 @@ def end_card():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+def metric_card(label: str, value: str):
+    """Premium metric display"""
+    return f"""
+    <div class='spx-metric'>
+        <div class='spx-metric-label'>{label}</div>
+        <div class='spx-metric-value'>{value}</div>
+    </div>
+    """
+
+
 # ===============================
-# TIME / BLOCK HELPERS (SYNTHETIC TIMELINE)
+# TIME / BLOCK HELPERS (UNCHANGED)
 # ===============================
 
 def make_dt_from_time(t: dtime) -> datetime:
-    """
-    Map a time to a synthetic date around BASE_DATE.
-    Times >= 15:00 are treated as 'day 1' (previous afternoon/evening),
-    times < 15:00 as 'day 2' (overnight / morning).
-    """
     if t.hour >= 15:
         return BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
     else:
@@ -159,7 +584,6 @@ def make_dt_from_time(t: dtime) -> datetime:
 
 
 def align_30min(dt: datetime) -> datetime:
-    """Snap a datetime to nearest 30-min boundary (00 or 30)."""
     minute = 0 if dt.minute < 15 else (30 if dt.minute < 45 else 0)
     if dt.minute >= 45:
         dt = dt + timedelta(hours=1)
@@ -167,13 +591,11 @@ def align_30min(dt: datetime) -> datetime:
 
 
 def blocks_from_base(dt: datetime) -> int:
-    """Return number of 30-min blocks from BASE_DATE 15:00."""
     diff = dt - BASE_DATE
     return int(round(diff.total_seconds() / 1800.0))
 
 
 def rth_slots() -> pd.DatetimeIndex:
-    """RTH 08:30–14:30 on synthetic day2."""
     next_day = BASE_DATE.date() + timedelta(days=1)
     start = datetime(next_day.year, next_day.month, next_day.day, 8, 30)
     end = datetime(next_day.year, next_day.month, next_day.day, 14, 30)
@@ -181,7 +603,7 @@ def rth_slots() -> pd.DatetimeIndex:
 
 
 # ===============================
-# CHANNEL ENGINE
+# CHANNEL ENGINE (UNCHANGED)
 # ===============================
 
 def build_channel(
@@ -191,46 +613,31 @@ def build_channel(
     low_time: dtime,
     slope_sign: int,
 ) -> Tuple[pd.DataFrame, float]:
-    """
-    Build parallel rails given high/low pivots and slope sign.
-    slope_sign: +1 for ascending, -1 for descending.
-    Returns (df, channel_height).
-    """
     s = slope_sign * SLOPE_MAG
-
     dt_hi = align_30min(make_dt_from_time(high_time))
     dt_lo = align_30min(make_dt_from_time(low_time))
     k_hi = blocks_from_base(dt_hi)
     k_lo = blocks_from_base(dt_lo)
-
-    # lines: P = s * k + b
     b_top = high_price - s * k_hi
     b_bottom = low_price - s * k_lo
-
-    # channel height is constant difference between lines
     channel_height = b_top - b_bottom
-
-    # project across RTH
     slots = rth_slots()
     rows = []
     for dt in slots:
         k = blocks_from_base(dt)
         top = s * k + b_top
         bottom = s * k + b_bottom
-        rows.append(
-            {
-                "Time": dt.strftime("%H:%M"),
-                "Top Rail": round(top, 4),
-                "Bottom Rail": round(bottom, 4),
-            }
-        )
-
+        rows.append({
+            "Time": dt.strftime("%H:%M"),
+            "Top Rail": round(top, 4),
+            "Bottom Rail": round(bottom, 4),
+        })
     df = pd.DataFrame(rows)
     return df, round(channel_height, 4)
 
 
 # ===============================
-# CONTRACT ENGINE
+# CONTRACT ENGINE (UNCHANGED)
 # ===============================
 
 def build_contract_projection(
@@ -239,39 +646,30 @@ def build_contract_projection(
     anchor_b_time: dtime,
     anchor_b_price: float,
 ) -> Tuple[pd.DataFrame, float]:
-    """
-    Build a contract line from two anchor points (time+price).
-    Returns (projection_df, slope_per_block).
-    """
     dt_a = align_30min(make_dt_from_time(anchor_a_time))
     dt_b = align_30min(make_dt_from_time(anchor_b_time))
     k_a = blocks_from_base(dt_a)
     k_b = blocks_from_base(dt_b)
-
     if k_a == k_b:
         slope = 0.0
     else:
         slope = (anchor_b_price - anchor_a_price) / (k_b - k_a)
-
-    # projection based on: P = slope*k + b
     b_contract = anchor_a_price - slope * k_a
     slots = rth_slots()
     rows = []
     for dt in slots:
         k = blocks_from_base(dt)
         price = slope * k + b_contract
-        rows.append(
-            {
-                "Time": dt.strftime("%H:%M"),
-                "Contract Price": round(price, 4),
-            }
-        )
+        rows.append({
+            "Time": dt.strftime("%H:%M"),
+            "Contract Price": round(price, 4),
+        })
     df = pd.DataFrame(rows)
     return df, round(slope, 6)
 
 
 # ===============================
-# DAILY FORESIGHT CARD LOGIC
+# DAILY FORESIGHT CARD LOGIC (UNCHANGED)
 # ===============================
 
 def get_active_channel() -> Tuple[Optional[str], Optional[pd.DataFrame], Optional[float]]:
@@ -312,14 +710,16 @@ def main():
     )
     inject_css()
 
-    # Sidebar
+    # Premium Sidebar
     with st.sidebar:
         st.markdown(f"### {APP_NAME}")
         st.markdown(f"<span class='spx-sub'>{TAGLINE}</span>", unsafe_allow_html=True)
         st.markdown("---")
+        
         st.markdown("#### Core Slope")
         st.write(f"SPX rail slope magnitude: **{SLOPE_MAG} pts / 30 min**")
         st.caption("All calculations use a uniform per-block slope. Time grid = 30-minute candles.")
+        
         st.markdown("---")
         st.markdown("#### Notes")
         st.caption(
@@ -328,14 +728,12 @@ def main():
             "RTH projection window: 08:30–14:30 CT."
         )
 
-    tabs = st.tabs(
-        [
-            "🧱 SPX Channel Setup",
-            "📐 Contract Slope Setup",
-            "🔮 Daily Foresight Card",
-            "ℹ️ About",
-        ]
-    )
+    tabs = st.tabs([
+        "🧱 SPX Channel Setup",
+        "📐 Contract Slope Setup",
+        "🔮 Daily Foresight Card",
+        "ℹ️ About",
+    ])
 
     # ==========================
     # TAB 1 — CHANNEL SETUP
@@ -347,8 +745,8 @@ def main():
             badge="Rails Engine",
         )
 
-        st.markdown("##### Pivots (3:00 PM to 7:30 AM, manual)")
-        c1, c2 = st.columns(2)
+        st.markdown("<h5 class='section-header'>Pivots (3:00 PM to 7:30 AM, manual)</h5>", unsafe_allow_html=True)
+        c1, c2 = st.columns(2, gap="large")
         with c1:
             high_price = st.number_input(
                 "High Pivot Price",
@@ -376,7 +774,7 @@ def main():
                 key="pivot_low_time",
             )
 
-        st.markdown("##### Channel Regime")
+        st.markdown("<h5 class='section-header'>Channel Regime</h5>", unsafe_allow_html=True)
         mode = st.radio(
             "Channel Mode",
             ["Ascending", "Descending", "Both"],
@@ -385,83 +783,78 @@ def main():
             horizontal=True,
         )
 
-        if st.button("Build Channel", key="build_channel_btn"):
-            # Ascending
-            if mode in ("Ascending", "Both"):
-                df_asc, h_asc = build_channel(
-                    high_price=high_price,
-                    high_time=high_time,
-                    low_price=low_price,
-                    low_time=low_time,
-                    slope_sign=+1,
-                )
-                st.session_state["channel_asc_df"] = df_asc
-                st.session_state["channel_asc_height"] = h_asc
-            else:
-                st.session_state["channel_asc_df"] = None
-                st.session_state["channel_asc_height"] = None
+        col_btn = st.columns([1, 2])[0]
+        with col_btn:
+            if st.button("⚡ Build Channel", key="build_channel_btn", use_container_width=True):
+                if mode in ("Ascending", "Both"):
+                    df_asc, h_asc = build_channel(
+                        high_price=high_price,
+                        high_time=high_time,
+                        low_price=low_price,
+                        low_time=low_time,
+                        slope_sign=+1,
+                    )
+                    st.session_state["channel_asc_df"] = df_asc
+                    st.session_state["channel_asc_height"] = h_asc
+                else:
+                    st.session_state["channel_asc_df"] = None
+                    st.session_state["channel_asc_height"] = None
 
-            # Descending
-            if mode in ("Descending", "Both"):
-                df_desc, h_desc = build_channel(
-                    high_price=high_price,
-                    high_time=high_time,
-                    low_price=low_price,
-                    low_time=low_time,
-                    slope_sign=-1,
-                )
-                st.session_state["channel_desc_df"] = df_desc
-                st.session_state["channel_desc_height"] = h_desc
-            else:
-                st.session_state["channel_desc_df"] = None
-                st.session_state["channel_desc_height"] = None
+                if mode in ("Descending", "Both"):
+                    df_desc, h_desc = build_channel(
+                        high_price=high_price,
+                        high_time=high_time,
+                        low_price=low_price,
+                        low_time=low_time,
+                        slope_sign=-1,
+                    )
+                    st.session_state["channel_desc_df"] = df_desc
+                    st.session_state["channel_desc_height"] = h_desc
+                else:
+                    st.session_state["channel_desc_df"] = None
+                    st.session_state["channel_desc_height"] = None
 
-            st.success("Channel(s) generated. Check tables below and the Daily Foresight Card tab.")
+                st.success("✨ Channel(s) generated successfully! Check tables below and the Daily Foresight Card tab.")
 
-        # Display results if present
         df_asc = st.session_state.get("channel_asc_df")
         df_desc = st.session_state.get("channel_desc_df")
         h_asc = st.session_state.get("channel_asc_height")
         h_desc = st.session_state.get("channel_desc_height")
 
-        st.markdown("### Channel Projections (RTH 08:30–14:30 CT)")
+        st.markdown("<h5 class='section-header'>Channel Projections (RTH 08:30–14:30 CT)</h5>", unsafe_allow_html=True)
         if df_asc is None and df_desc is None:
-            st.info("Build a channel to view projections.")
+            st.info("📊 Build a channel to view projections.")
         else:
             if df_asc is not None:
                 st.markdown("#### Ascending Channel")
-                c_top = st.columns([3, 1])
+                c_top = st.columns([2, 1], gap="large")
                 with c_top[0]:
                     st.dataframe(df_asc, use_container_width=True, hide_index=True)
                 with c_top[1]:
-                    st.markdown("<div class='spx-metric'>"
-                                "<div class='spx-metric-label'>Channel Height (Ascending)</div>"
-                                f"<div class='spx-metric-value'>{h_asc:.2f} pts</div>"
-                                "</div>", unsafe_allow_html=True)
+                    st.markdown(metric_card("Channel Height (Ascending)", f"{h_asc:.2f} pts"), unsafe_allow_html=True)
                     st.download_button(
-                        "Download Ascending Rails CSV",
+                        "📥 Download Ascending Rails CSV",
                         df_asc.to_csv(index=False).encode(),
                         "spx_ascending_rails.csv",
                         "text/csv",
                         key="dl_asc_channel",
+                        use_container_width=True,
                     )
 
             if df_desc is not None:
                 st.markdown("#### Descending Channel")
-                c_bot = st.columns([3, 1])
+                c_bot = st.columns([2, 1], gap="large")
                 with c_bot[0]:
                     st.dataframe(df_desc, use_container_width=True, hide_index=True)
                 with c_bot[1]:
-                    st.markdown("<div class='spx-metric'>"
-                                "<div class='spx-metric-label'>Channel Height (Descending)</div>"
-                                f"<div class='spx-metric-value'>{h_desc:.2f} pts</div>"
-                                "</div>", unsafe_allow_html=True)
+                    st.markdown(metric_card("Channel Height (Descending)", f"{h_desc:.2f} pts"), unsafe_allow_html=True)
                     st.download_button(
-                        "Download Descending Rails CSV",
+                        "📥 Download Descending Rails CSV",
                         df_desc.to_csv(index=False).encode(),
                         "spx_descending_rails.csv",
                         "text/csv",
                         key="dl_desc_channel",
+                        use_container_width=True,
                     )
 
         end_card()
@@ -476,11 +869,10 @@ def main():
             badge="Contract Engine",
         )
 
-        # Need channel pivots available for pivot-based Anchor A selection
         ph_time: dtime = st.session_state.get("pivot_high_time", dtime(15, 0))
         pl_time: dtime = st.session_state.get("pivot_low_time", dtime(3, 0))
 
-        st.markdown("##### Anchor A — Contract Origin")
+        st.markdown("<h5 class='section-header'>Anchor A — Contract Origin</h5>", unsafe_allow_html=True)
         anchor_a_source = st.radio(
             "Use which time for Anchor A?",
             ["High Pivot Time", "Low Pivot Time", "Custom Time"],
@@ -492,13 +884,13 @@ def main():
         if anchor_a_source == "High Pivot Time":
             anchor_a_time = ph_time
             st.markdown(
-                f"<div class='muted'>Anchor A time set to High Pivot Time: <b>{anchor_a_time.strftime('%H:%M')}</b> CT.</div>",
+                f"<div class='muted'>✓ Anchor A time set to High Pivot Time: <b>{anchor_a_time.strftime('%H:%M')}</b> CT</div>",
                 unsafe_allow_html=True,
             )
         elif anchor_a_source == "Low Pivot Time":
             anchor_a_time = pl_time
             st.markdown(
-                f"<div class='muted'>Anchor A time set to Low Pivot Time: <b>{anchor_a_time.strftime('%H:%M')}</b> CT.</div>",
+                f"<div class='muted'>✓ Anchor A time set to Low Pivot Time: <b>{anchor_a_time.strftime('%H:%M')}</b> CT</div>",
                 unsafe_allow_html=True,
             )
         else:
@@ -516,8 +908,8 @@ def main():
             key="contract_anchor_a_price",
         )
 
-        st.markdown("##### Anchor B — Second Contract Point")
-        c1, c2 = st.columns(2)
+        st.markdown("<h5 class='section-header'>Anchor B — Second Contract Point</h5>", unsafe_allow_html=True)
+        c1, c2 = st.columns(2, gap="large")
         with c1:
             anchor_b_time = st.time_input(
                 "Anchor B Time (CT)",
@@ -533,42 +925,42 @@ def main():
                 key="contract_anchor_b_price",
             )
 
-        if st.button("Build Contract Projection", key="build_contract_btn"):
-            df_contract, slope_contract = build_contract_projection(
-                anchor_a_time=anchor_a_time,
-                anchor_a_price=anchor_a_price,
-                anchor_b_time=anchor_b_time,
-                anchor_b_price=anchor_b_price,
-            )
-            st.session_state["contract_df"] = df_contract
-            st.session_state["contract_slope"] = slope_contract
-            st.session_state["contract_anchor_a_time"] = anchor_a_time
-            st.session_state["contract_anchor_a_price"] = anchor_a_price
-            st.session_state["contract_anchor_b_time"] = anchor_b_time
-            st.session_state["contract_anchor_b_price"] = anchor_b_price
-            st.success("Contract projection generated. Check the table below and the Daily Foresight Card tab.")
+        col_btn = st.columns([1, 2])[0]
+        with col_btn:
+            if st.button("⚡ Build Contract Projection", key="build_contract_btn", use_container_width=True):
+                df_contract, slope_contract = build_contract_projection(
+                    anchor_a_time=anchor_a_time,
+                    anchor_a_price=anchor_a_price,
+                    anchor_b_time=anchor_b_time,
+                    anchor_b_price=anchor_b_price,
+                )
+                st.session_state["contract_df"] = df_contract
+                st.session_state["contract_slope"] = slope_contract
+                st.session_state["contract_anchor_a_time"] = anchor_a_time
+                st.session_state["contract_anchor_a_price"] = anchor_a_price
+                st.session_state["contract_anchor_b_time"] = anchor_b_time
+                st.session_state["contract_anchor_b_price"] = anchor_b_price
+                st.success("✨ Contract projection generated successfully! Check the table below and the Daily Foresight Card tab.")
 
         df_contract = st.session_state.get("contract_df")
         slope_contract = st.session_state.get("contract_slope")
 
-        st.markdown("### Contract Projection (RTH 08:30–14:30 CT)")
+        st.markdown("<h5 class='section-header'>Contract Projection (RTH 08:30–14:30 CT)</h5>", unsafe_allow_html=True)
         if df_contract is None:
-            st.info("Build a contract projection to view projected contract prices.")
+            st.info("📊 Build a contract projection to view projected contract prices.")
         else:
-            c_top = st.columns([3, 1])
+            c_top = st.columns([2, 1], gap="large")
             with c_top[0]:
                 st.dataframe(df_contract, use_container_width=True, hide_index=True)
             with c_top[1]:
-                st.markdown("<div class='spx-metric'>"
-                            "<div class='spx-metric-label'>Contract Slope</div>"
-                            f"<div class='spx-metric-value'>{slope_contract:+.4f} / 30m</div>"
-                            "</div>", unsafe_allow_html=True)
+                st.markdown(metric_card("Contract Slope", f"{slope_contract:+.4f} / 30m"), unsafe_allow_html=True)
                 st.download_button(
-                    "Download Contract Projection CSV",
+                    "📥 Download Contract Projection CSV",
                     df_contract.to_csv(index=False).encode(),
                     "contract_projection.csv",
                     "text/csv",
                     key="dl_contract",
+                    use_container_width=True,
                 )
 
         end_card()
@@ -589,48 +981,26 @@ def main():
         slope_contract = st.session_state.get("contract_slope")
 
         if df_ch is None or h_ch is None:
-            st.warning("No active channel found. Build a channel in the SPX Channel Setup tab first.")
+            st.warning("⚠️ No active channel found. Build a channel in the SPX Channel Setup tab first.")
             end_card()
         elif df_contract is None or slope_contract is None:
-            st.warning("No contract projection found. Build one in the Contract Slope Setup tab first.")
+            st.warning("⚠️ No contract projection found. Build one in the Contract Slope Setup tab first.")
             end_card()
         else:
-            # Merge channel and contract projections by Time
             merged = df_ch.merge(df_contract, on="Time", how="left")
-
-            # Expected contract move per channel-height move in underlying
             blocks_for_channel = h_ch / SLOPE_MAG if SLOPE_MAG != 0 else 0
             contract_move_per_channel = slope_contract * blocks_for_channel if blocks_for_channel != 0 else 0
 
-            # Summary metrics row
-            st.markdown("### Structure Summary")
-            c1, c2, c3 = st.columns(3)
+            st.markdown("<h5 class='section-header'>Structure Summary</h5>", unsafe_allow_html=True)
+            c1, c2, c3 = st.columns(3, gap="large")
             with c1:
-                st.markdown(
-                    "<div class='spx-metric'>"
-                    "<div class='spx-metric-label'>Active Channel</div>"
-                    f"<div class='spx-metric-value'>{df_mode}</div>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(metric_card("Active Channel", df_mode), unsafe_allow_html=True)
             with c2:
-                st.markdown(
-                    "<div class='spx-metric'>"
-                    "<div class='spx-metric-label'>Channel Height</div>"
-                    f"<div class='spx-metric-value'>{h_ch:.2f} pts</div>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(metric_card("Channel Height", f"{h_ch:.2f} pts"), unsafe_allow_html=True)
             with c3:
-                st.markdown(
-                    "<div class='spx-metric'>"
-                    "<div class='spx-metric-label'>Contract Move per Channel</div>"
-                    f"<div class='spx-metric-value'>{contract_move_per_channel:+.2f} units</div>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(metric_card("Contract Move per Channel", f"{contract_move_per_channel:+.2f} units"), unsafe_allow_html=True)
 
-            st.markdown("### Inside-Channel Play (If Price Stays Between Rails)")
+            st.markdown("<h5 class='section-header'>Inside-Channel Play (If Price Stays Between Rails)</h5>", unsafe_allow_html=True)
             st.markdown(
                 f"""
                 - **Long Play**: Buy at bottom rail, exit at top rail  
@@ -642,7 +1012,7 @@ def main():
                 """.strip()
             )
 
-            st.markdown("### Breakout / Breakdown Play (If Price Leaves the Channel)")
+            st.markdown("<h5 class='section-header'>Breakout / Breakdown Play (If Price Leaves the Channel)</h5>", unsafe_allow_html=True)
             st.markdown(
                 f"""
                 - **Bullish Breakout**:  
@@ -656,14 +1026,14 @@ def main():
                 """.strip()
             )
 
-            st.markdown("### Time-Aligned Map (Rails + Contract)")
+            st.markdown("<h5 class='section-header'>Time-Aligned Map (Rails + Contract)</h5>", unsafe_allow_html=True)
             st.caption("Each row is a 30-minute slot in RTH. Use this as a conditional map: if price tags a rail at that time, this is the expected contract level.")
             st.dataframe(merged, use_container_width=True, hide_index=True)
 
             st.markdown(
-                "<div class='muted'>Interpretation: "
-                "The map does not predict exactly *when* SPX will hit a rail. "
-                "It tells you what the contract should roughly be worth *if* that touch happens at a given time.</div>",
+                "<div class='muted'><strong>Interpretation:</strong> "
+                "The map does not predict exactly <em>when</em> SPX will hit a rail. "
+                "It tells you what the contract should roughly be worth <em>if</em> that touch happens at a given time.</div>",
                 unsafe_allow_html=True,
             )
 
@@ -692,11 +1062,11 @@ def main():
             You are prepared.
             """.strip()
         )
-        st.markdown("<div class='muted'>Maintenance windows: SPX 16:00–17:00 CT, contracts 16:00–19:00 CT.</div>", unsafe_allow_html=True)
+        st.markdown("<div class='muted'><strong>Maintenance windows:</strong> SPX 16:00–17:00 CT, contracts 16:00–19:00 CT.</div>", unsafe_allow_html=True)
         end_card()
 
     st.markdown(
-        "<div class='muted' style='margin-top:10px'>© 2025 SPX Prophet v7.0 • Where Structure Becomes Foresight.</div>",
+        "<div class='app-footer'>© 2025 SPX Prophet v7.0 • Where Structure Becomes Foresight.</div>",
         unsafe_allow_html=True,
     )
 
