@@ -1,5 +1,5 @@
-# spx_prophet_v7_stunning_fixed.py
-# SPX Prophet v7.0 — STUNNING LIGHT MODE EDITION (with robust contract handling)
+# spx_prophet_v7_stunning.py
+# SPX Prophet v7.0 — STUNNING LIGHT MODE EDITION
 
 import streamlit as st
 import pandas as pd
@@ -13,16 +13,738 @@ BASE_DATE = datetime(2000, 1, 1, 15, 0)
 
 
 # ===============================
-# STUNNING LIGHT MODE UI (UNCHANGED)
+# STUNNING LIGHT MODE UI
 # ===============================
 
 def inject_css():
     css = """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
-    /* ------------- ALL YOUR CSS EXACTLY AS BEFORE ------------- */
-    /* I’m leaving it unchanged, just truncated here for brevity
-       in this explanation. In your real file, keep your full CSS. */
+    
+    /* === FOUNDATION === */
+    html, body, [data-testid="stAppViewContainer"] {
+        background:
+          radial-gradient(ellipse 1800px 1200px at 20% 10%, rgba(99, 102, 241, 0.08), transparent 60%),
+          radial-gradient(ellipse 1600px 1400px at 80% 90%, rgba(59, 130, 246, 0.08), transparent 60%),
+          radial-gradient(circle 1200px at 50% 50%, rgba(167, 139, 250, 0.05), transparent),
+          linear-gradient(180deg, #ffffff 0%, #f8fafc 30%, #f1f5f9 60%, #f8fafc 100%);
+        background-attachment: fixed;
+        color: #0f172a;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    
+    .block-container {
+        padding-top: 3.5rem;
+        padding-bottom: 4rem;
+        max-width: 1400px;
+    }
+    
+    /* === STUNNING SIDEBAR === */
+    [data-testid="stSidebar"] {
+        background:
+            radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.08), transparent 70%),
+            linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+        border-right: 2px solid rgba(99, 102, 241, 0.15);
+        box-shadow: 
+            8px 0 40px rgba(99, 102, 241, 0.08),
+            4px 0 20px rgba(0, 0, 0, 0.03);
+    }
+    
+    [data-testid="stSidebar"] h3 {
+        font-size: 2rem;
+        font-weight: 900;
+        font-family: 'Poppins', sans-serif;
+        background: linear-gradient(135deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 0.5rem;
+        letter-spacing: -0.04em;
+    }
+    
+    [data-testid="stSidebar"] hr {
+        margin: 2rem 0;
+        border: none;
+        height: 2px;
+        background: linear-gradient(90deg, 
+            transparent 0%, 
+            rgba(99, 102, 241, 0.3) 20%, 
+            rgba(59, 130, 246, 0.5) 50%, 
+            rgba(99, 102, 241, 0.3) 80%, 
+            transparent 100%);
+        box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
+    }
+    
+    [data-testid="stSidebar"] h4 {
+        color: #6366f1;
+        font-size: 0.95rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+    }
+    
+    /* === EPIC HERO HEADER === */
+    .hero-header {
+        position: relative;
+        background:
+            radial-gradient(ellipse at top left, rgba(99, 102, 241, 0.12), transparent 60%),
+            radial-gradient(ellipse at bottom right, rgba(59, 130, 246, 0.12), transparent 60%),
+            linear-gradient(135deg, #ffffff, #fafbff);
+        border-radius: 32px;
+        padding: 48px 56px;
+        margin-bottom: 48px;
+        border: 2px solid rgba(99, 102, 241, 0.2);
+        box-shadow:
+            0 32px 80px -12px rgba(99, 102, 241, 0.15),
+            0 16px 40px -8px rgba(0, 0, 0, 0.08),
+            inset 0 2px 4px rgba(255, 255, 255, 0.9),
+            inset 0 -2px 4px rgba(99, 102, 241, 0.05);
+        overflow: hidden;
+        animation: heroGlow 6s ease-in-out infinite;
+    }
+    
+    @keyframes heroGlow {
+        0%, 100% { box-shadow: 0 32px 80px -12px rgba(99, 102, 241, 0.15), 0 16px 40px -8px rgba(0, 0, 0, 0.08); }
+        50% { box-shadow: 0 32px 80px -12px rgba(99, 102, 241, 0.25), 0 16px 40px -8px rgba(99, 102, 241, 0.12); }
+    }
+    
+    .hero-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #6366f1, #3b82f6, #06b6d4, #3b82f6, #6366f1);
+        background-size: 200% 100%;
+        animation: shimmer 4s linear infinite;
+    }
+    
+    @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+    }
+    
+    .hero-title {
+        font-size: 3.5rem;
+        font-weight: 900;
+        font-family: 'Poppins', sans-serif;
+        background: linear-gradient(135deg, #1e293b 0%, #6366f1 40%, #3b82f6 70%, #06b6d4 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin: 0;
+        letter-spacing: -0.05em;
+        line-height: 1.1;
+        animation: titleFloat 3s ease-in-out infinite;
+    }
+    
+    @keyframes titleFloat {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
+    }
+    
+    .hero-subtitle {
+        font-size: 1.4rem;
+        color: #64748b;
+        margin-top: 12px;
+        font-weight: 500;
+        font-family: 'Poppins', sans-serif;
+    }
+    
+    /* === ANIMATED STATUS INDICATOR === */
+    .status-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 20px;
+        border-radius: 100px;
+        background: 
+            linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.12)),
+            #ffffff;
+        border: 2px solid rgba(16, 185, 129, 0.3);
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: #059669;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        box-shadow: 
+            0 8px 24px rgba(16, 185, 129, 0.15),
+            inset 0 1px 2px rgba(255, 255, 255, 0.8);
+        margin-bottom: 20px;
+        animation: statusPulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes statusPulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 8px 24px rgba(16, 185, 129, 0.15); }
+        50% { transform: scale(1.03); box-shadow: 0 12px 32px rgba(16, 185, 129, 0.25); }
+    }
+    
+    .status-indicator::before {
+        content: '';
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #10b981;
+        box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
+        animation: pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.7; transform: scale(0.85); }
+    }
+    
+    /* === EPIC CARDS === */
+    .spx-card {
+        position: relative;
+        background:
+            radial-gradient(circle at 8% 8%, rgba(99, 102, 241, 0.08), transparent 50%),
+            radial-gradient(circle at 92% 92%, rgba(59, 130, 246, 0.08), transparent 50%),
+            linear-gradient(135deg, #ffffff, #fefeff);
+        border-radius: 32px;
+        border: 2px solid rgba(99, 102, 241, 0.2);
+        box-shadow:
+            0 32px 80px -12px rgba(99, 102, 241, 0.12),
+            0 16px 40px -8px rgba(0, 0, 0, 0.06),
+            inset 0 2px 4px rgba(255, 255, 255, 0.9),
+            inset 0 -2px 4px rgba(99, 102, 241, 0.05);
+        padding: 40px 44px;
+        margin-bottom: 40px;
+        transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
+    }
+    
+    .spx-card::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, 
+            transparent, 
+            rgba(99, 102, 241, 0.08), 
+            transparent);
+        transition: left 0.8s ease;
+    }
+    
+    .spx-card:hover {
+        transform: translateY(-8px) scale(1.01);
+        border-color: rgba(99, 102, 241, 0.4);
+        box-shadow:
+            0 48px 100px -12px rgba(99, 102, 241, 0.2),
+            0 24px 60px -8px rgba(99, 102, 241, 0.15),
+            inset 0 2px 6px rgba(255, 255, 255, 1),
+            inset 0 -2px 6px rgba(99, 102, 241, 0.1);
+    }
+    
+    .spx-card:hover::after {
+        left: 100%;
+    }
+    
+    .spx-card h4 {
+        font-size: 2rem;
+        font-weight: 900;
+        font-family: 'Poppins', sans-serif;
+        background: linear-gradient(135deg, #1e293b 0%, #6366f1 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin: 0 0 12px 0;
+        letter-spacing: -0.03em;
+    }
+    
+    /* === LARGE ICONS === */
+    .icon-large {
+        font-size: 4rem;
+        background: linear-gradient(135deg, #6366f1, #3b82f6, #06b6d4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 16px;
+        display: block;
+        text-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
+        animation: iconBounce 3s ease-in-out infinite;
+    }
+    
+    @keyframes iconBounce {
+        0%, 100% { transform: translateY(0) rotate(0deg); }
+        50% { transform: translateY(-6px) rotate(2deg); }
+    }
+    
+    /* === PREMIUM BADGES === */
+    .spx-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 24px;
+        border-radius: 100px;
+        border: 2px solid rgba(99, 102, 241, 0.3);
+        background: 
+            linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(59, 130, 246, 0.12)),
+            #ffffff;
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: #6366f1;
+        text-transform: uppercase;
+        box-shadow: 
+            0 8px 24px rgba(99, 102, 241, 0.15),
+            inset 0 1px 2px rgba(255, 255, 255, 0.8);
+        margin-bottom: 16px;
+        transition: all 0.4s ease;
+    }
+    
+    .spx-pill:hover {
+        transform: scale(1.08) translateY(-2px);
+        box-shadow: 
+            0 12px 36px rgba(99, 102, 241, 0.25),
+            inset 0 1px 3px rgba(255, 255, 255, 1);
+        border-color: rgba(99, 102, 241, 0.5);
+    }
+    
+    .spx-pill::before {
+        content: '◆';
+        font-size: 0.9rem;
+        color: #6366f1;
+        animation: badgeGlow 2s ease-in-out infinite;
+    }
+    
+    @keyframes badgeGlow {
+        0%, 100% { filter: brightness(1); }
+        50% { filter: brightness(1.5); }
+    }
+    
+    .spx-sub {
+        color: #475569;
+        font-size: 1.05rem;
+        line-height: 1.7;
+        font-weight: 400;
+    }
+    
+    /* === STUNNING SECTION HEADERS === */
+    .section-header {
+        font-size: 1.8rem;
+        font-weight: 800;
+        font-family: 'Poppins', sans-serif;
+        background: linear-gradient(135deg, #1e293b 0%, #6366f1 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin: 3rem 0 1.5rem 0;
+        padding-bottom: 1rem;
+        border-bottom: 3px solid transparent;
+        border-image: linear-gradient(90deg, #6366f1, #3b82f6, transparent) 1;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        position: relative;
+    }
+    
+    .section-header::before {
+        content: '';
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #6366f1, #3b82f6);
+        box-shadow: 
+            0 0 20px rgba(99, 102, 241, 0.6),
+            0 4px 12px rgba(99, 102, 241, 0.3);
+        animation: headerPulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes headerPulse {
+        0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(99, 102, 241, 0.6); }
+        50% { transform: scale(1.2); box-shadow: 0 0 30px rgba(99, 102, 241, 0.9); }
+    }
+    
+    /* === DRAMATIC METRICS === */
+    .spx-metric {
+        position: relative;
+        padding: 32px 28px;
+        border-radius: 24px;
+        background: 
+            radial-gradient(circle at top left, rgba(99, 102, 241, 0.12), transparent 70%),
+            linear-gradient(135deg, #ffffff, #fefeff);
+        border: 2px solid rgba(99, 102, 241, 0.25);
+        box-shadow: 
+            0 24px 60px rgba(99, 102, 241, 0.12),
+            0 12px 30px rgba(0, 0, 0, 0.05),
+            inset 0 2px 4px rgba(255, 255, 255, 0.9);
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
+    }
+    
+    .spx-metric::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #6366f1, #3b82f6, #06b6d4);
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.6s ease;
+    }
+    
+    .spx-metric:hover {
+        transform: translateY(-6px) scale(1.02);
+        border-color: rgba(99, 102, 241, 0.5);
+        box-shadow: 
+            0 36px 80px rgba(99, 102, 241, 0.2),
+            0 18px 40px rgba(99, 102, 241, 0.12),
+            inset 0 2px 6px rgba(255, 255, 255, 1);
+    }
+    
+    .spx-metric:hover::before {
+        transform: scaleX(1);
+    }
+    
+    .spx-metric-label {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: #64748b;
+        font-weight: 700;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .spx-metric-label::before {
+        content: '●';
+        color: #6366f1;
+        font-size: 0.6rem;
+        text-shadow: 0 0 8px rgba(99, 102, 241, 0.8);
+    }
+    
+    .spx-metric-value {
+        font-size: 2.2rem;
+        font-weight: 900;
+        font-family: 'JetBrains Mono', monospace;
+        background: linear-gradient(135deg, #1e293b 0%, #6366f1 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        letter-spacing: -0.03em;
+    }
+    
+    /* === EPIC BUTTONS === */
+    .stButton>button, .stDownloadButton>button {
+        background: linear-gradient(135deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);
+        color: #ffffff;
+        border-radius: 100px;
+        border: none;
+        padding: 16px 36px;
+        font-weight: 800;
+        font-size: 1rem;
+        letter-spacing: 0.08em;
+        box-shadow: 
+            0 16px 40px rgba(99, 102, 241, 0.3),
+            0 8px 20px rgba(0, 0, 0, 0.1),
+            inset 0 1px 2px rgba(255, 255, 255, 0.3);
+        cursor: pointer;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        text-transform: uppercase;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .stButton>button::before, .stDownloadButton>button::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.3);
+        transform: translate(-50%, -50%);
+        transition: width 0.6s, height 0.6s;
+    }
+    
+    .stButton>button:hover::before, .stDownloadButton>button:hover::before {
+        width: 400px;
+        height: 400px;
+    }
+    
+    .stButton>button:hover, .stDownloadButton>button:hover {
+        transform: translateY(-4px) scale(1.05);
+        box-shadow: 
+            0 24px 56px rgba(99, 102, 241, 0.4),
+            0 12px 28px rgba(99, 102, 241, 0.2),
+            inset 0 1px 3px rgba(255, 255, 255, 0.4);
+    }
+    
+    .stButton>button:active, .stDownloadButton>button:active {
+        transform: translateY(-2px) scale(1.03);
+    }
+    
+    /* === BEAUTIFUL INPUTS === */
+    .stNumberInput>div>div>input,
+    .stTimeInput>div>div>input {
+        background: #ffffff !important;
+        border: 2px solid rgba(99, 102, 241, 0.25) !important;
+        border-radius: 16px !important;
+        color: #0f172a !important;
+        padding: 14px 18px !important;
+        font-size: 1.05rem !important;
+        font-weight: 600 !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        box-shadow: 
+            0 4px 16px rgba(99, 102, 241, 0.08),
+            inset 0 1px 2px rgba(255, 255, 255, 0.8) !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stNumberInput>div>div>input:focus,
+    .stTimeInput>div>div>input:focus {
+        border-color: #6366f1 !important;
+        box-shadow: 
+            0 0 0 4px rgba(99, 102, 241, 0.15),
+            0 8px 24px rgba(99, 102, 241, 0.2) !important;
+        background: #fefeff !important;
+    }
+    
+    /* === STUNNING RADIO === */
+    .stRadio>div {
+        gap: 16px;
+    }
+    
+    .stRadio>div>label {
+        background: #ffffff;
+        padding: 14px 28px;
+        border-radius: 100px;
+        border: 2px solid rgba(99, 102, 241, 0.25);
+        font-size: 1rem;
+        font-weight: 600;
+        color: #475569;
+        box-shadow: 0 4px 16px rgba(99, 102, 241, 0.08);
+        transition: all 0.3s ease;
+    }
+    
+    .stRadio>div>label:hover {
+        background: #fefeff;
+        border-color: rgba(99, 102, 241, 0.4);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
+    }
+    
+    .stRadio>div>label[data-selected="true"] {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(59, 130, 246, 0.12));
+        border-color: #6366f1;
+        color: #6366f1;
+        box-shadow: 
+            0 8px 32px rgba(99, 102, 241, 0.2),
+            inset 0 1px 2px rgba(255, 255, 255, 0.8);
+        transform: translateY(-2px);
+    }
+    
+    /* === PREMIUM TABS === */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 12px;
+        background: 
+            linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(250, 250, 255, 0.95));
+        padding: 10px;
+        border-radius: 100px;
+        border: 2px solid rgba(99, 102, 241, 0.2);
+        box-shadow: 
+            0 12px 36px rgba(99, 102, 241, 0.1),
+            inset 0 1px 2px rgba(255, 255, 255, 0.8);
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: transparent;
+        border-radius: 100px;
+        color: #64748b;
+        font-weight: 700;
+        font-size: 1rem;
+        padding: 12px 28px;
+        border: none;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background: rgba(99, 102, 241, 0.08);
+        color: #6366f1;
+        transform: translateY(-2px);
+    }
+    
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(135deg, #6366f1, #3b82f6);
+        color: #ffffff;
+        box-shadow: 
+            0 8px 24px rgba(99, 102, 241, 0.3),
+            inset 0 1px 2px rgba(255, 255, 255, 0.3);
+        transform: translateY(-2px);
+    }
+    
+    /* === STUNNING DATAFRAMES === */
+    .stDataFrame {
+        border-radius: 24px;
+        overflow: hidden;
+        box-shadow:
+            0 24px 60px rgba(99, 102, 241, 0.12),
+            0 12px 30px rgba(0, 0, 0, 0.05);
+        border: 2px solid rgba(99, 102, 241, 0.2);
+    }
+    
+    .stDataFrame div[data-testid="StyledTable"] {
+        font-variant-numeric: tabular-nums;
+        font-size: 0.98rem;
+        font-family: 'JetBrains Mono', monospace;
+        background: #ffffff;
+    }
+    
+    .stDataFrame thead tr th {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(59, 130, 246, 0.12)) !important;
+        color: #6366f1 !important;
+        font-weight: 800 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.1em !important;
+        font-size: 0.8rem !important;
+        padding: 16px 12px !important;
+        border-bottom: 2px solid rgba(99, 102, 241, 0.3) !important;
+    }
+    
+    .stDataFrame tbody tr {
+        transition: all 0.2s ease;
+    }
+    
+    .stDataFrame tbody tr:hover {
+        background: rgba(99, 102, 241, 0.05) !important;
+        transform: scale(1.01);
+    }
+    
+    .stDataFrame tbody tr td {
+        padding: 14px 12px !important;
+        border-bottom: 1px solid rgba(226, 232, 240, 0.8) !important;
+        color: #1e293b !important;
+        font-weight: 500 !important;
+    }
+    
+    /* === COLORFUL MESSAGES === */
+    .stSuccess {
+        background: 
+            linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.10)),
+            #ffffff;
+        border-radius: 20px;
+        border: 2px solid rgba(16, 185, 129, 0.3);
+        padding: 20px 28px;
+        color: #047857;
+        font-size: 1rem;
+        font-weight: 500;
+        box-shadow: 
+            0 12px 36px rgba(16, 185, 129, 0.12),
+            inset 0 1px 2px rgba(255, 255, 255, 0.8);
+    }
+    
+    .stWarning {
+        background: 
+            linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(217, 119, 6, 0.10)),
+            #ffffff;
+        border-radius: 20px;
+        border: 2px solid rgba(245, 158, 11, 0.3);
+        padding: 20px 28px;
+        color: #d97706;
+        font-size: 1rem;
+        font-weight: 500;
+        box-shadow: 
+            0 12px 36px rgba(245, 158, 11, 0.12),
+            inset 0 1px 2px rgba(255, 255, 255, 0.8);
+    }
+    
+    .stInfo {
+        background: 
+            linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(37, 99, 235, 0.10)),
+            #ffffff;
+        border-radius: 20px;
+        border: 2px solid rgba(59, 130, 246, 0.3);
+        padding: 20px 28px;
+        color: #2563eb;
+        font-size: 1rem;
+        font-weight: 500;
+        box-shadow: 
+            0 12px 36px rgba(59, 130, 246, 0.12),
+            inset 0 1px 2px rgba(255, 255, 255, 0.8);
+    }
+    
+    .muted {
+        color: #475569;
+        font-size: 1rem;
+        line-height: 1.7;
+        padding: 20px 24px;
+        background: 
+            linear-gradient(135deg, rgba(148, 163, 184, 0.08), rgba(100, 116, 139, 0.06)),
+            #ffffff;
+        border-left: 4px solid #6366f1;
+        border-radius: 12px;
+        margin: 20px 0;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.03);
+    }
+    
+    /* === SELECTBOX === */
+    .stSelectbox>div>div {
+        background: #ffffff;
+        border: 2px solid rgba(99, 102, 241, 0.25);
+        border-radius: 16px;
+        box-shadow: 0 4px 16px rgba(99, 102, 241, 0.08);
+        font-size: 1.05rem;
+        transition: all 0.3s ease;
+    }
+    
+    .stSelectbox>div>div:hover {
+        border-color: rgba(99, 102, 241, 0.4);
+        box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
+    }
+    
+    /* === LABELS === */
+    label {
+        font-size: 0.95rem !important;
+        font-weight: 600 !important;
+        color: #475569 !important;
+        margin-bottom: 6px !important;
+    }
+    
+    /* === SCROLLBAR === */
+    ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: rgba(241, 245, 249, 0.8);
+        border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #6366f1, #3b82f6);
+        border-radius: 10px;
+        border: 2px solid rgba(241, 245, 249, 0.8);
+        box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(135deg, #4f46e5, #2563eb);
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+    }
+    
+    /* === FOOTER === */
+    .app-footer {
+        margin-top: 4rem;
+        padding-top: 2rem;
+        border-top: 2px solid rgba(99, 102, 241, 0.2);
+        text-align: center;
+        color: #64748b;
+        font-size: 1rem;
+    }
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
@@ -67,33 +789,7 @@ def section_header(text: str):
 
 
 # ===============================
-# SMALL HELPER: SAFE TIME READING
-# ===============================
-
-def get_time_from_session(key: str, default: dtime) -> dtime:
-    """
-    Safely pull a time value from st.session_state.
-    Handles cases where an older run stored datetime or string.
-    """
-    v = st.session_state.get(key, default)
-
-    if isinstance(v, dtime):
-        return v
-    if isinstance(v, datetime):
-        return v.time()
-    if isinstance(v, str):
-        # Try "HH:MM:SS" then "HH:MM"
-        for fmt in ("%H:%M:%S", "%H:%M"):
-            try:
-                return datetime.strptime(v, fmt).time()
-            except ValueError:
-                pass
-    # Fallback
-    return default
-
-
-# ===============================
-# TIME / BLOCK HELPERS
+# TIME / BLOCK HELPERS (UNCHANGED)
 # ===============================
 
 def make_dt_from_time(t: dtime) -> datetime:
@@ -124,7 +820,7 @@ def rth_slots() -> pd.DatetimeIndex:
 
 
 # ===============================
-# CHANNEL ENGINE
+# CHANNEL ENGINE (UNCHANGED)
 # ===============================
 
 def build_channel(
@@ -158,7 +854,7 @@ def build_channel(
 
 
 # ===============================
-# CONTRACT ENGINE
+# CONTRACT ENGINE (UNCHANGED)
 # ===============================
 
 def build_contract_projection(
@@ -190,7 +886,7 @@ def build_contract_projection(
 
 
 # ===============================
-# DAILY FORESIGHT HELPERS
+# DAILY FORESIGHT HELPERS (UNCHANGED)
 # ===============================
 
 def get_active_channel() -> Tuple[Optional[str], Optional[pd.DataFrame], Optional[float]]:
@@ -257,9 +953,7 @@ def main():
         "ℹ️ About",
     ])
 
-    # ==================================
-    # TAB 1 — SPX CHANNEL SETUP
-    # ==================================
+    # TAB 1
     with tabs[0]:
         card(
             "SPX Channel Setup",
@@ -395,9 +1089,7 @@ def main():
 
         end_card()
 
-    # ==================================
-    # TAB 2 — CONTRACT SLOPE SETUP
-    # ==================================
+    # TAB 2
     with tabs[1]:
         card(
             "Contract Slope Setup",
@@ -406,9 +1098,8 @@ def main():
             icon="📐"
         )
 
-        # SAFE: read pivot times from session with type normalization
-        ph_time: dtime = get_time_from_session("pivot_high_time", dtime(15, 0))
-        pl_time: dtime = get_time_from_session("pivot_low_time", dtime(3, 0))
+        ph_time: dtime = st.session_state.get("pivot_high_time", dtime(15, 0))
+        pl_time: dtime = st.session_state.get("pivot_low_time", dtime(3, 0))
 
         section_header("⚓ Anchor A — Contract Origin")
         anchor_a_source = st.radio(
@@ -467,19 +1158,22 @@ def main():
         col_btn = st.columns([1, 3])[0]
         with col_btn:
             if st.button("⚡ Build Contract", key="build_contract_btn", use_container_width=True):
-                df_contract, slope_contract = build_contract_projection(
-                    anchor_a_time=anchor_a_time,
-                    anchor_a_price=anchor_a_price,
-                    anchor_b_time=anchor_b_time,
-                    anchor_b_price=anchor_b_price,
-                )
-                st.session_state["contract_df"] = df_contract
-                st.session_state["contract_slope"] = slope_contract
-                st.session_state["contract_anchor_a_time"] = anchor_a_time
-                st.session_state["contract_anchor_a_price"] = anchor_a_price
-                st.session_state["contract_anchor_b_time"] = anchor_b_time
-                st.session_state["contract_anchor_b_price"] = anchor_b_price
-                st.success("✨ Contract projection generated successfully! Review the table and Daily Foresight tab.")
+                try:
+                    df_contract, slope_contract = build_contract_projection(
+                        anchor_a_time=anchor_a_time,
+                        anchor_a_price=anchor_a_price,
+                        anchor_b_time=anchor_b_time,
+                        anchor_b_price=anchor_b_price,
+                    )
+                    st.session_state["contract_df"] = df_contract
+                    st.session_state["contract_slope"] = slope_contract
+                    st.session_state["contract_anchor_a_time"] = anchor_a_time
+                    st.session_state["contract_anchor_a_price"] = anchor_a_price
+                    st.session_state["contract_anchor_b_time"] = anchor_b_time
+                    st.session_state["contract_anchor_b_price"] = anchor_b_price
+                    st.success("✨ Contract projection generated successfully! Review the table and Daily Foresight tab.")
+                except Exception as e:
+                    st.error(f"Error generating contract projection: {e}")
 
         df_contract = st.session_state.get("contract_df")
         slope_contract = st.session_state.get("contract_slope")
@@ -506,9 +1200,7 @@ def main():
 
         end_card()
 
-    # ==================================
-    # TAB 3 — DAILY FORESIGHT CARD
-    # ==================================
+    # TAB 3
     with tabs[2]:
         card(
             "Daily Foresight Card",
@@ -529,6 +1221,7 @@ def main():
             end_card()
         else:
             merged = df_ch.merge(df_contract, on="Time", how="left")
+
             blocks_for_channel = h_ch / SLOPE_MAG if SLOPE_MAG != 0 else 0.0
             contract_move_per_channel = slope_contract * blocks_for_channel if blocks_for_channel != 0 else 0.0
             contract_gain_abs = abs(contract_move_per_channel)
@@ -599,27 +1292,43 @@ def main():
                         key="foresight_exit_time",
                     )
 
-                entry_row = merged[merged["Time"] == entry_time].iloc[0]
-                exit_row = merged[merged["Time"] == exit_time].iloc[0]
-                entry_contract = float(entry_row["Contract Price"])
-                exit_contract = float(exit_row["Contract Price"])
-                pnl_contract = exit_contract - entry_contract
+                # SAFETY: ensure we have contract prices and matching rows
+                if "Contract Price" not in merged.columns or merged["Contract Price"].isna().all():
+                    st.warning("⚠️ Contract prices are not available for the selected structure yet.")
+                else:
+                    entry_rows = merged[merged["Time"] == entry_time]
+                    exit_rows = merged[merged["Time"] == exit_time]
 
-                c1_est, c2_est, c3_est = st.columns(3, gap="large")
-                with c1_est:
-                    st.markdown(metric_card("Entry Contract", f"{entry_contract:.2f}"), unsafe_allow_html=True)
-                with c2_est:
-                    st.markdown(metric_card("Exit Contract", f"{exit_contract:.2f}"), unsafe_allow_html=True)
-                with c3_est:
-                    st.markdown(metric_card("Projected P&L", f"{pnl_contract:+.2f} units"), unsafe_allow_html=True)
+                    if entry_rows.empty or exit_rows.empty:
+                        st.warning("⚠️ No contract data found for the selected entry or exit time.")
+                    else:
+                        entry_row = entry_rows.iloc[0]
+                        exit_row = exit_rows.iloc[0]
 
-                st.markdown(
-                    "<div class='muted'><strong>💡 How to use this estimator:</strong> "
-                    "Pick the time you expect the rail touch to happen as your entry, "
-                    "pick your planned exit time, and compare this projected contract move with what the market actually gave you. "
-                    "The difference is your volatility and skew bonus on that day.</div>",
-                    unsafe_allow_html=True,
-                )
+                        if pd.isna(entry_row["Contract Price"]) or pd.isna(exit_row["Contract Price"]):
+                            st.warning("⚠️ Contract price is missing for one of the selected times.")
+                        else:
+                            entry_contract = float(entry_row["Contract Price"])
+                            exit_contract = float(exit_row["Contract Price"])
+                            pnl_contract = exit_contract - entry_contract
+
+                            c1_est, c2_est, c3_est = st.columns(3, gap="large")
+                            with c1_est:
+                                st.markdown(metric_card("Entry Contract", f"{entry_contract:.2f}"), unsafe_allow_html=True)
+                            with c2_est:
+                                st.markdown(metric_card("Exit Contract", f"{exit_contract:.2f}"), unsafe_allow_html=True)
+                            with c3_est:
+                                st.markdown(metric_card("Projected P&L", f"{pnl_contract:+.2f} units"), unsafe_allow_html=True)
+
+                            st.markdown(
+                                "<div class='muted'><strong>💡 How to use this estimator:</strong> "
+                                "Pick the time you expect the rail touch to happen as your entry, "
+                                "pick your planned exit time, and compare this projected contract move with what the market actually gave you. "
+                                "The difference is your volatility and skew bonus on that day.</div>",
+                                unsafe_allow_html=True,
+                            )
+            else:
+                st.info("No time slots available in the merged structure yet. Build a channel and contract projection first.")
 
             section_header("🗺️ Time-Aligned Map")
             st.caption("Every row is a 30-minute slot in RTH. If SPX tags a rail at that time, this is the structural contract level from your anchors.")
@@ -634,9 +1343,7 @@ def main():
 
             end_card()
 
-    # ==================================
-    # TAB 4 — ABOUT
-    # ==================================
+    # TAB 4
     with tabs[3]:
         card("About SPX Prophet v7.0", TAGLINE, badge="Version 7.0", icon="ℹ️")
         st.markdown(
