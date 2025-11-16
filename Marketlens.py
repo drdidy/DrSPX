@@ -10,6 +10,7 @@ APP_NAME = "SPX Prophet v7.0"
 TAGLINE = "Where Structure Becomes Foresight."
 SLOPE_MAG = 0.475
 BASE_DATE = datetime(2000, 1, 1, 15, 0)
+DEFAULT_CONTRACT_FACTOR = 0.30  # units of contract per 1 SPX point
 
 
 # ===============================
@@ -751,13 +752,16 @@ def inject_css():
 
 
 def hero():
-    st.markdown("""
-    <div class="hero-header">
-        <div class="status-indicator">System Active ✓</div>
-        <h1 class="hero-title">SPX Prophet v7.0</h1>
-        <p class="hero-subtitle">Where Structure Becomes Foresight.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="hero-header">
+            <div class="status-indicator">System Active ✓</div>
+            <h1 class="hero-title">SPX Prophet v7.0</h1>
+            <p class="hero-subtitle">Where Structure Becomes Foresight.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def card(title: str, sub: Optional[str] = None, badge: Optional[str] = None, icon: str = ""):
@@ -844,11 +848,13 @@ def build_channel(
         k = blocks_from_base(dt)
         top = s * k + b_top
         bottom = s * k + b_bottom
-        rows.append({
-            "Time": dt.strftime("%H:%M"),
-            "Top Rail": round(top, 4),
-            "Bottom Rail": round(bottom, 4),
-        })
+        rows.append(
+            {
+                "Time": dt.strftime("%H:%M"),
+                "Top Rail": round(top, 4),
+                "Bottom Rail": round(bottom, 4),
+            }
+        )
     df = pd.DataFrame(rows)
     return df, round(channel_height, 4)
 
@@ -877,10 +883,12 @@ def build_contract_projection(
     for dt in slots:
         k = blocks_from_base(dt)
         price = slope * k + b_contract
-        rows.append({
-            "Time": dt.strftime("%H:%M"),
-            "Contract Price": round(price, 4),
-        })
+        rows.append(
+            {
+                "Time": dt.strftime("%H:%M"),
+                "Contract Price": round(price, 4),
+            }
+        )
     df = pd.DataFrame(rows)
     return df, round(slope, 6)
 
@@ -929,13 +937,16 @@ def main():
 
     with st.sidebar:
         st.markdown(f"### {APP_NAME}")
-        st.markdown(f"<span class='spx-sub' style='font-size:1.05rem;'>{TAGLINE}</span>", unsafe_allow_html=True)
+        st.markdown(
+            f"<span class='spx-sub' style='font-size:1.05rem;'>{TAGLINE}</span>",
+            unsafe_allow_html=True,
+        )
         st.markdown("---")
-        
+
         st.markdown("#### ⚡ Core Slope")
         st.write(f"SPX rail slope magnitude: **{SLOPE_MAG} pts / 30 min**")
         st.caption("All calculations use a uniform 30-minute grid.")
-        
+
         st.markdown("---")
         st.markdown("#### 📋 Notes")
         st.caption(
@@ -946,20 +957,22 @@ def main():
 
     hero()
 
-    tabs = st.tabs([
-        "🧱 SPX Channel Setup",
-        "📐 Contract Slope Setup",
-        "🔮 Daily Foresight Card",
-        "ℹ️ About",
-    ])
+    tabs = st.tabs(
+        [
+            "🧱 SPX Channel Setup",
+            "📐 Contract Slope Setup",
+            "🔮 Daily Foresight Card",
+            "ℹ️ About",
+        ]
+    )
 
-    # TAB 1 - CHANNEL
+    # TAB 1 — CHANNEL
     with tabs[0]:
         card(
             "SPX Channel Setup",
             "Define your engulfing pivots, pick the channel direction, and project parallel rails across the session.",
             badge="Rails Engine",
-            icon="🧱"
+            icon="🧱",
         )
 
         section_header("⚙️ Pivots Configuration")
@@ -967,9 +980,9 @@ def main():
             "<p class='spx-sub' style='margin-bottom:24px;'>"
             "Choose the highest and lowest engulfing reversals you trust between 15:00 and 07:30 CT."
             "</p>",
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
-        
+
         c1, c2 = st.columns(2, gap="large")
         with c1:
             st.markdown("#### 📈 High Pivot")
@@ -1012,7 +1025,9 @@ def main():
         st.markdown("<br>", unsafe_allow_html=True)
         col_btn = st.columns([1, 3])[0]
         with col_btn:
-            if st.button("⚡ Build Channel", key="build_channel_btn", use_container_width=True):
+            if st.button(
+                "⚡ Build Channel", key="build_channel_btn", use_container_width=True
+            ):
                 if mode in ("Ascending", "Both"):
                     df_asc, h_asc = build_channel(
                         high_price=high_price,
@@ -1041,7 +1056,9 @@ def main():
                     st.session_state["channel_desc_df"] = None
                     st.session_state["channel_desc_height"] = None
 
-                st.success("✨ Channel generated successfully! Review the tables and the Daily Foresight tab.")
+                st.success(
+                    "✨ Channel generated successfully! Review the tables and the Daily Foresight tab."
+                )
 
         df_asc = st.session_state.get("channel_asc_df")
         df_desc = st.session_state.get("channel_desc_df")
@@ -1049,17 +1066,28 @@ def main():
         h_desc = st.session_state.get("channel_desc_height")
 
         section_header("📊 Channel Projections • RTH 08:30–14:30 CT")
-        
+
         if df_asc is None and df_desc is None:
             st.info("📊 Build at least one channel to view projections.")
         else:
             if df_asc is not None:
-                st.markdown("<h4 style='font-size:1.4rem; margin:20px 0;'>📈 Ascending Channel</h4>", unsafe_allow_html=True)
+                st.markdown(
+                    "<h4 style='font-size:1.4rem; margin:20px 0;'>📈 Ascending Channel</h4>",
+                    unsafe_allow_html=True,
+                )
                 c_top = st.columns([3, 1], gap="large")
                 with c_top[0]:
-                    st.dataframe(df_asc, use_container_width=True, hide_index=True, height=400)
+                    st.dataframe(
+                        df_asc,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=400,
+                    )
                 with c_top[1]:
-                    st.markdown(metric_card("Channel Height", f"{h_asc:.2f} pts"), unsafe_allow_html=True)
+                    st.markdown(
+                        metric_card("Channel Height", f"{h_asc:.2f} pts"),
+                        unsafe_allow_html=True,
+                    )
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.download_button(
                         "📥 Download CSV",
@@ -1071,12 +1099,23 @@ def main():
                     )
 
             if df_desc is not None:
-                st.markdown("<h4 style='font-size:1.4rem; margin:28px 0 20px;'>📉 Descending Channel</h4>", unsafe_allow_html=True)
+                st.markdown(
+                    "<h4 style='font-size:1.4rem; margin:28px 0 20px;'>📉 Descending Channel</h4>",
+                    unsafe_allow_html=True,
+                )
                 c_bot = st.columns([3, 1], gap="large")
                 with c_bot[0]:
-                    st.dataframe(df_desc, use_container_width=True, hide_index=True, height=400)
+                    st.dataframe(
+                        df_desc,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=400,
+                    )
                 with c_bot[1]:
-                    st.markdown(metric_card("Channel Height", f"{h_desc:.2f} pts"), unsafe_allow_html=True)
+                    st.markdown(
+                        metric_card("Channel Height", f"{h_desc:.2f} pts"),
+                        unsafe_allow_html=True,
+                    )
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.download_button(
                         "📥 Download CSV",
@@ -1089,13 +1128,13 @@ def main():
 
         end_card()
 
-    # TAB 2 - CONTRACT
+    # TAB 2 — CONTRACT
     with tabs[1]:
         card(
             "Contract Slope Setup",
             "Use two contract prices to define a simple line on the same time grid as the rails.",
             badge="Contract Engine",
-            icon="📐"
+            icon="📐",
         )
 
         ph_time: dtime = st.session_state.get("pivot_high_time", dtime(15, 0))
@@ -1154,10 +1193,26 @@ def main():
                 key="contract_anchor_b_price",
             )
 
+        section_header("🎯 Contract Sensitivity")
+        factor_default = st.session_state.get(
+            "contract_factor", DEFAULT_CONTRACT_FACTOR
+        )
+        contract_factor = st.number_input(
+            "Contract sensitivity (units per 1 SPX point)",
+            min_value=0.0,
+            max_value=10.0,
+            step=0.01,
+            value=float(factor_default),
+            key="contract_factor_input",
+        )
+        st.session_state["contract_factor"] = float(contract_factor)
+
         st.markdown("<br>", unsafe_allow_html=True)
         col_btn = st.columns([1, 3])[0]
         with col_btn:
-            if st.button("⚡ Build Contract", key="build_contract_btn", use_container_width=True):
+            if st.button(
+                "⚡ Build Contract", key="build_contract_btn", use_container_width=True
+            ):
                 try:
                     df_contract, slope_contract = build_contract_projection(
                         anchor_a_time=anchor_a_time,
@@ -1167,7 +1222,9 @@ def main():
                     )
                     st.session_state["contract_df"] = df_contract
                     st.session_state["contract_slope"] = slope_contract
-                    st.success("✨ Contract projection generated successfully! Review the table and Daily Foresight tab.")
+                    st.success(
+                        "✨ Contract projection generated successfully! Review the table and Daily Foresight tab."
+                    )
                 except Exception as e:
                     st.error(f"Error generating contract projection: {e}")
 
@@ -1175,15 +1232,23 @@ def main():
         slope_contract = st.session_state.get("contract_slope")
 
         section_header("📊 Contract Projection • RTH 08:30–14:30 CT")
-        
+
         if df_contract is None:
             st.info("📊 Build a contract projection to see projected prices.")
         else:
             c_top = st.columns([3, 1], gap="large")
             with c_top[0]:
-                st.dataframe(df_contract, use_container_width=True, hide_index=True, height=400)
+                st.dataframe(
+                    df_contract,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400,
+                )
             with c_top[1]:
-                st.markdown(metric_card("Contract Slope", f"{slope_contract:+.4f} / 30m"), unsafe_allow_html=True)
+                st.markdown(
+                    metric_card("Contract Slope", f"{slope_contract:+.4f} / 30m"),
+                    unsafe_allow_html=True,
+                )
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.download_button(
                     "📥 Download CSV",
@@ -1196,13 +1261,13 @@ def main():
 
         end_card()
 
-    # TAB 3 - DAILY FORESIGHT
+    # TAB 3 — DAILY FORESIGHT
     with tabs[2]:
         card(
             "Daily Foresight Card",
             "Rails and contract line combined into a simple time-based playbook.",
             badge="Foresight",
-            icon="🔮"
+            icon="🔮",
         )
 
         df_mode, df_ch, h_ch = get_active_channel()
@@ -1210,79 +1275,74 @@ def main():
         slope_contract = st.session_state.get("contract_slope")
 
         if df_ch is None or h_ch is None:
-            st.warning("⚠️ No active channel found. Build a channel in the SPX Channel Setup tab first.")
+            st.warning(
+                "⚠️ No active channel found. Build a channel in the SPX Channel Setup tab first."
+            )
             end_card()
         elif df_contract is None or slope_contract is None:
-            st.warning("⚠️ No contract projection found. Build one in the Contract Slope Setup tab first.")
+            st.warning(
+                "⚠️ No contract projection found. Build one in the Contract Slope Setup tab first."
+            )
             end_card()
         else:
             merged = df_ch.merge(df_contract, on="Time", how="left")
 
-            # Structural line change for a full channel move (not realistic options TP)
-            blocks_for_channel = h_ch / SLOPE_MAG if SLOPE_MAG != 0 else 0.0
-            contract_move_per_channel = slope_contract * blocks_for_channel if blocks_for_channel != 0 else 0.0
-            contract_gain_abs = abs(contract_move_per_channel)
+            factor = st.session_state.get("contract_factor", DEFAULT_CONTRACT_FACTOR)
+            contract_move_factor = factor * h_ch
+            contract_gain_abs = abs(contract_move_factor)
 
             section_header("📊 Structure Summary")
-
-            # USER-CALIBRATED EFFECTIVE DELTA FOR REALISTIC TP
-            eff_delta = st.number_input(
-                "Effective contract change per SPX point (your empirical factor)",
-                value=0.60,
-                step=0.05,
-                min_value=0.0,
-                max_value=50.0,
-                key="effective_contract_delta",
-            )
-            realistic_contract_tp = h_ch * eff_delta
-
             c1, c2, c3 = st.columns(3, gap="large")
             with c1:
-                st.markdown(metric_card("Active Channel", df_mode or "Not set"), unsafe_allow_html=True)
+                st.markdown(
+                    metric_card("Active Channel", df_mode or "Not set"),
+                    unsafe_allow_html=True,
+                )
             with c2:
-                st.markdown(metric_card("Channel Height", f"{h_ch:.2f} pts"), unsafe_allow_html=True)
+                st.markdown(
+                    metric_card("Channel Height", f"{h_ch:.2f} pts"),
+                    unsafe_allow_html=True,
+                )
             with c3:
-                st.markdown(metric_card("Realistic TP (Full Channel)", f"{realistic_contract_tp:.2f} units"), unsafe_allow_html=True)
-
-            st.markdown(
-                f"<div class='muted'><strong>Structural line change:</strong> "
-                f"Based on the raw contract slope, a full-channel move would change the contract by about "
-                f"<b>{contract_gain_abs:.2f}</b> units. "
-                "Your realistic TP above is scaled by your chosen 'effective change per SPX point' to better match actual options behavior.</div>",
-                unsafe_allow_html=True,
-            )
+                st.markdown(
+                    metric_card(
+                        "Contract Target\n(factor 0.30)",
+                        f"{contract_gain_abs:.2f} units",
+                    ),
+                    unsafe_allow_html=True,
+                )
 
             section_header("📈 Inside Channel Play")
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div class='spx-sub' style='font-size:1.05rem; line-height:1.8;'>
               <p><strong style='color:#6366f1; font-size:1.15rem;'>🟢 Long Idea</strong> → Buy at the lower rail, exit at the upper rail</p>
               <ul style='margin-left:24px;'>
                 <li>Underlying move: about <strong style='color:#10b981;'>{h_ch:.2f} points</strong> in your favor</li>
-                <li>Realistic contract TP for a full swing (using your factor): 
-                    <strong style='color:#10b981;'>{realistic_contract_tp:.2f} units</strong></li>
+                <li>Factor-based contract target (0.30 × SPX move): <strong style='color:#10b981;'>{contract_gain_abs:.2f} units</strong></li>
               </ul>
 
               <p><strong style='color:#6366f1; font-size:1.15rem;'>🔴 Short Idea</strong> → Sell at the upper rail, exit at the lower rail</p>
               <ul style='margin-left:24px;'>
                 <li>Underlying move: about <strong style='color:#ef4444;'>{h_ch:.2f} points</strong> in your favor, opposite direction</li>
-                <li>Same magnitude of contract move, opposite sign for a short</li>
+                <li>Same factor-based contract size of move, opposite sign.</li>
               </ul>
 
-              <p style='margin-top:16px; color:#64748b;'><em>
-              The structural line is straight and blind to IV / gamma. The realistic TP is where you bake in
-              your experience: “for this kind of contract, a full channel usually gives me around this much”.
-              </em></p>
+              <p style='margin-top:16px; color:#64748b;'><em>The 0.30 factor is deliberately conservative. If SPX gives a full rail-to-rail move, this is the contract target that is usually hit before the day exhausts.</em></p>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
             section_header("💥 Breakout and Breakdown Ideas")
-            st.markdown(f"""
+            st.markdown(
+                f"""
             <div class='spx-sub' style='font-size:1.05rem; line-height:1.8;'>
               <p><strong style='color:#6366f1; font-size:1.15rem;'>🚀 Breakout Above Upper Rail</strong></p>
               <ul style='margin-left:24px;'>
                 <li>Entry on clean retest of the upper rail from above</li>
                 <li>Continuation target: roughly one additional channel height beyond the rail</li>
-                <li>Use your full-channel TP estimate as a guide, not a guarantee</li>
+                <li>Factor-based contract move per extra channel ≈ <strong>{contract_gain_abs:.2f} units</strong></li>
               </ul>
 
               <p><strong style='color:#6366f1; font-size:1.15rem;'>⬇️ Breakdown Below Lower Rail</strong></p>
@@ -1291,7 +1351,9 @@ def main():
                 <li>Continuation target: roughly one additional channel height below that rail</li>
               </ul>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+                unsafe_allow_html=True,
+            )
 
             section_header("🧮 Contract Trade Estimator")
 
@@ -1313,58 +1375,55 @@ def main():
                         key="foresight_exit_time",
                     )
 
-                if "Contract Price" not in merged.columns or merged["Contract Price"].isna().all():
-                    st.warning("⚠️ Contract prices are not available for the selected structure yet.")
-                else:
-                    entry_rows = merged[merged["Time"] == entry_time]
-                    exit_rows = merged[merged["Time"] == exit_time]
+                entry_row = merged[merged["Time"] == entry_time].iloc[0]
+                exit_row = merged[merged["Time"] == exit_time].iloc[0]
+                entry_contract = float(entry_row["Contract Price"])
+                exit_contract = float(exit_row["Contract Price"])
+                pnl_contract = exit_contract - entry_contract
 
-                    if entry_rows.empty or exit_rows.empty:
-                        st.warning("⚠️ No contract data found for the selected entry or exit time.")
-                    else:
-                        entry_row = entry_rows.iloc[0]
-                        exit_row = exit_rows.iloc[0]
+                c1_est, c2_est, c3_est = st.columns(3, gap="large")
+                with c1_est:
+                    st.markdown(
+                        metric_card("Entry Contract (line)", f"{entry_contract:.2f}"),
+                        unsafe_allow_html=True,
+                    )
+                with c2_est:
+                    st.markdown(
+                        metric_card("Exit Contract (line)", f"{exit_contract:.2f}"),
+                        unsafe_allow_html=True,
+                    )
+                with c3_est:
+                    st.markdown(
+                        metric_card("Projected P&L (line)", f"{pnl_contract:+.2f} units"),
+                        unsafe_allow_html=True,
+                    )
 
-                        if pd.isna(entry_row["Contract Price"]) or pd.isna(exit_row["Contract Price"]):
-                            st.warning("⚠️ Contract price is missing for one of the selected times.")
-                        else:
-                            entry_contract = float(entry_row["Contract Price"])
-                            exit_contract = float(exit_row["Contract Price"])
-                            pnl_contract = exit_contract - entry_contract
-
-                            c1_est, c2_est, c3_est = st.columns(3, gap="large")
-                            with c1_est:
-                                st.markdown(metric_card("Entry Contract (Structural)", f"{entry_contract:.2f}"), unsafe_allow_html=True)
-                            with c2_est:
-                                st.markdown(metric_card("Exit Contract (Structural)", f"{exit_contract:.2f}"), unsafe_allow_html=True)
-                            with c3_est:
-                                st.markdown(metric_card("Projected P&L (Line)", f"{pnl_contract:+.2f} units"), unsafe_allow_html=True)
-
-                            st.markdown(
-                                "<div class='muted'><strong>💡 How to read this:</strong> "
-                                "These values are from the straight contract line between your two anchors. "
-                                "On days when a 5.20 contract explodes to 35 by 10:00, that is volatility and "
-                                "order flow doing more than the structural line. The line gives you a reference, "
-                                "your realistic TP factor tells you what you should roughly aim for.</div>",
-                                unsafe_allow_html=True,
-                            )
-            else:
-                st.info("No time slots available in the merged structure yet. Build a channel and contract projection first.")
+                st.markdown(
+                    "<div class='muted'><strong>💡 How to use this estimator:</strong> "
+                    "The line values are purely structural from your two anchors. "
+                    "Compare them to the actual tape and to your factor-based target to see how much "
+                    "volatility and skew you are getting on that particular session.</div>",
+                    unsafe_allow_html=True,
+                )
 
             section_header("🗺️ Time-Aligned Map")
-            st.caption("Every row is a 30-minute slot in RTH. If SPX tags a rail at that time, this is the structural contract level from your anchors.")
-            st.dataframe(merged, use_container_width=True, hide_index=True, height=480)
+            st.caption(
+                "Every row is a 30-minute slot in RTH. If SPX tags a rail at that time, this is the structural contract level from your anchors."
+            )
+            st.dataframe(
+                merged, use_container_width=True, hide_index=True, height=480
+            )
 
             st.markdown(
                 "<div class='muted'><strong>📖 Reading the map:</strong> "
-                "The grid does not tell you <em>when</em> the tag will happen or how much IV will expand. "
+                "The grid does not tell you <em>when</em> the tag will happen. "
                 "It tells you what your structure expects the contract to be worth <em>if</em> the tag happens at a given time.</div>",
                 unsafe_allow_html=True,
             )
 
             end_card()
 
-    # TAB 4 - ABOUT
+    # TAB 4 — ABOUT
     with tabs[3]:
         card("About SPX Prophet v7.0", TAGLINE, badge="Version 7.0", icon="ℹ️")
         st.markdown(
@@ -1381,12 +1440,10 @@ def main():
                 <li>Pivots are <strong style='color:#6366f1;'>engulfing reversals</strong> chosen by you between 15:00 and 07:30 CT</li>
                 <li>Channels can be viewed as <strong style='color:#6366f1;'>ascending, descending, or inspected both ways</strong></li>
                 <li>Contracts follow a straight line defined by <strong style='color:#6366f1;'>two anchor prices</strong> on the same grid</li>
+                <li>Contract take-profit is guided by a conservative <strong style='color:#6366f1;'>factor of about 0.30 units per SPX point</strong>.</li>
             </ul>
 
-            <p style='margin-top:24px;'>
-            The contract line is structure only. The realistic TP knob in the Foresight tab is where you plug in
-            your experience of how violently calls and puts actually move when SPX traverses a full channel.
-            </p>
+            <p style='margin-top:24px;'>The app does not claim to model full options behavior. It gives you a clean structural map and a conservative contract target so that when price returns to your rails, you already know what you are aiming for.</p>
             </div>
             """,
             unsafe_allow_html=True,
