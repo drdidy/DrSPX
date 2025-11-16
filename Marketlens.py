@@ -729,7 +729,7 @@ def section_header(text: str):
 
 
 # ===============================
-# TIME / BLOCK HELPERS (UNCHANGED)
+# TIME / BLOCK HELPERS
 # ===============================
 
 def make_dt_from_time(t: dtime) -> datetime:
@@ -760,7 +760,7 @@ def rth_slots() -> pd.DatetimeIndex:
 
 
 # ===============================
-# CHANNEL ENGINE (UNCHANGED)
+# CHANNEL ENGINE
 # ===============================
 
 def build_channel(
@@ -794,7 +794,7 @@ def build_channel(
 
 
 # ===============================
-# CONTRACT ENGINE (UNCHANGED)
+# CONTRACT ENGINE
 # ===============================
 
 def build_contract_projection(
@@ -826,7 +826,7 @@ def build_contract_projection(
 
 
 # ===============================
-# DAILY FORESIGHT CARD LOGIC (UNCHANGED)
+# DAILY FORESIGHT CARD LOGIC
 # ===============================
 
 def get_active_channel() -> Tuple[Optional[str], Optional[pd.DataFrame], Optional[float]]:
@@ -1105,12 +1105,9 @@ def main():
                     anchor_b_time=anchor_b_time,
                     anchor_b_price=anchor_b_price,
                 )
+                # ONLY store derived objects, not widget-controlled values
                 st.session_state["contract_df"] = df_contract
                 st.session_state["contract_slope"] = slope_contract
-                st.session_state["contract_anchor_a_time"] = anchor_a_time
-                st.session_state["contract_anchor_a_price"] = anchor_a_price
-                st.session_state["contract_anchor_b_time"] = anchor_b_time
-                st.session_state["contract_anchor_b_price"] = anchor_b_price
                 st.success("✨ Contract projection generated successfully! Check the table below and the Daily Foresight Card tab.")
 
         df_contract = st.session_state.get("contract_df")
