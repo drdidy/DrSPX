@@ -1,6 +1,5 @@
 # spx_prophet_v7_ultimate.py
 # SPX Prophet v7.0 — ULTIMATE PREMIUM EDITION
-# The most beautiful trading app you've ever seen
 
 import streamlit as st
 import pandas as pd
