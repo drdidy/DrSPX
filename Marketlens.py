@@ -157,6 +157,49 @@ def inject_css():
         font-weight: 500;
         font-family: 'Poppins', sans-serif;
     }
+
+    .hero-chips {
+        margin-top: 24px;
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+
+    .hero-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 18px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #475569;
+        box-shadow:
+            0 6px 18px rgba(15, 23, 42, 0.06),
+            inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        animation: chipIn 0.8s ease-out forwards;
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    .hero-chip:nth-child(1) { animation-delay: 0.1s; }
+    .hero-chip:nth-child(2) { animation-delay: 0.2s; }
+    .hero-chip:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes chipIn {
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .hero-chip span {
+        font-family: 'JetBrains Mono', monospace;
+        color: #1e293b;
+    }
     
     /* === ANIMATED STATUS INDICATOR === */
     .status-indicator {
@@ -760,6 +803,11 @@ def hero():
             <div class="status-indicator">System Active ✓</div>
             <h1 class="hero-title">{APP_NAME}</h1>
             <p class="hero-subtitle">{TAGLINE}</p>
+            <div class="hero-chips">
+                <div class="hero-chip">Rail slope <span>{SLOPE_MAG} pts / 30m</span></div>
+                <div class="hero-chip">Contract factor <span>{CONTRACT_FACTOR:.2f} × channel</span></div>
+                <div class="hero-chip">Grid <span>08:30 → 14:30 CT</span></div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1328,7 +1376,7 @@ def main():
                     <li>Same structural contract move size, in the opposite direction</li>
                   </ul>
 
-                  <p style='margin-top:16px; color:#64748b;'><em>The factor {CONTRACT_FACTOR:.2f} is a structural take-profit guide. Real option moves can be larger because of volatility and time, but this keeps you disciplined.</em></p>
+                  <p style='margin-top:16px; color:#64748b;'><em>The factor {CONTRACT_FACTOR:.2f} is a structural take-profit guide. Real option moves can be larger because of volatility and time, but this keeps you consistent.</em></p>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1412,7 +1460,6 @@ def main():
                 "Every row is a 30-minute slot in RTH. If SPX tags a rail at that time, this table shows the structural contract level and take-profit bands."
             )
 
-            # Order columns for panoramic view
             cols_order = [
                 "Time",
                 "Top Rail",
@@ -1463,7 +1510,7 @@ def main():
 
             <p style='margin-top:24px;'>
             The app is not trying to be a full options model. It gives you a clean structural map so that 
-            when price returns to your rails, you already know where the contract <em>should</em> be and where you will take profit.
+            when price returns to your rails, you already know where the contract should be and where you will take profit.
             </p>
             </div>
             """,
