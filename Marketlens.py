@@ -1,5 +1,5 @@
 # spx_prophet.py
-# SPX Prophet
+# SPX Prophet - Stunning Light Mode Edition
 
 import streamlit as st
 import pandas as pd
@@ -802,9 +802,17 @@ def section_header(text: str):
 # ===============================
 
 def make_dt_from_time(t: dtime) -> datetime:
-    if t.hour >= 15:
+    """
+    Map a clock time to the correct synthetic date relative to BASE_DATE.
+
+    Any time 12:00 or later is treated as "previous day" for the script,
+    any time before 12:00 is treated as the next RTH day.
+    """
+    if t.hour >= 12:
+        # previous day script (overnight starts from noon)
         return BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
     else:
+        # next RTH day
         next_day = BASE_DATE.date() + timedelta(days=1)
         return datetime(next_day.year, next_day.month, next_day.day, t.hour, t.minute)
 
@@ -921,14 +929,14 @@ def main():
         st.markdown("#### ⚡ Core Slope")
         st.write(f"SPX rail slope magnitude: **{SLOPE_MAG} pts / 30 min**")
         st.write(f"Contract TP factor: **{CONTRACT_PROFIT_FACTOR:.2f} × channel height**")
-        st.caption("All calculations use a uniform 30-minute grid.")
+        st.caption("All calculations use a uniform 30 minute grid.")
 
         st.markdown("---")
         st.markdown("#### 📋 Notes")
         st.caption(
-            "Underlying maintenance: 16:00–17:00 CT\n\n"
-            "Contracts maintenance: 16:00–19:00 CT\n\n"
-            "RTH projection window: 08:30–14:30 CT."
+            "Underlying maintenance: 16:00-17:00 CT\n\n"
+            "Contracts maintenance: 16:00-19:00 CT\n\n"
+            "RTH projection window: 08:30-14:30 CT."
         )
 
     # Hero
@@ -941,13 +949,11 @@ def main():
         "ℹ️ About",
     ])
 
-    # ==========================
-    # TAB 1 — SPX CHANNEL SETUP
-    # ==========================
+    # TAB 1
     with tabs[0]:
         card(
             "SPX Channel Setup",
-            "Define your engulfing pivots once. The app will build both ascending and descending rails so you can let the day reveal which script is active.",
+            "Define your engulfing pivots once. The app builds both ascending and descending rails so you can let the day reveal which script is active.",
             badge="Rails Engine",
             icon="🧱"
         )
@@ -955,7 +961,7 @@ def main():
         section_header("⚙️ Pivots Configuration")
         st.markdown(
             "<p class='spx-sub' style='margin-bottom:20px;'>"
-            "Choose the highest and lowest engulfing reversals you trust between 15:00 and 07:30 CT."
+            "Choose the highest and lowest engulfing reversals you trust between 12:00 and 07:30 CT."
             "</p>",
             unsafe_allow_html=True
         )
@@ -992,7 +998,7 @@ def main():
 
         section_header("📊 Build Both Channels")
         st.markdown(
-            "<div class='muted'>The app will always build <b>both</b> ascending and descending channels from the same pivots. "
+            "<div class='muted'>The app always builds <b>both</b> ascending and descending channels from the same pivots. "
             "You decide during RTH which script the market is actually playing.</div>",
             unsafe_allow_html=True,
         )
@@ -1001,7 +1007,6 @@ def main():
         col_btn = st.columns([1, 3])[0]
         with col_btn:
             if st.button("⚡ Build Channels", key="build_channel_btn", use_container_width=True):
-                # Ascending
                 df_asc, h_asc = build_channel(
                     high_price=high_price,
                     high_time=high_time,
@@ -1009,7 +1014,6 @@ def main():
                     low_time=low_time,
                     slope_sign=+1,
                 )
-                # Descending
                 df_desc, h_desc = build_channel(
                     high_price=high_price,
                     high_time=high_time,
@@ -1023,14 +1027,14 @@ def main():
                 st.session_state["channel_desc_df"] = df_desc
                 st.session_state["channel_desc_height"] = h_desc
 
-                st.success("✨ Ascending and descending channels generated successfully. Check tables below and the Daily Foresight tab.")
+                st.success("✨ Ascending and descending channels generated. Check tables below and the Daily Foresight tab.")
 
         df_asc = st.session_state.get("channel_asc_df")
         df_desc = st.session_state.get("channel_desc_df")
         h_asc = st.session_state.get("channel_asc_height")
         h_desc = st.session_state.get("channel_desc_height")
 
-        section_header("📊 Channel Projections • RTH 08:30–14:30 CT")
+        section_header("📊 Channel Projections • RTH 08:30-14:30 CT")
 
         if df_asc is None or df_desc is None:
             st.info("📊 Build the channels to view projections.")
@@ -1071,9 +1075,7 @@ def main():
 
         end_card()
 
-    # ==========================
-    # TAB 2 — CONTRACT SLOPE
-    # ==========================
+    # TAB 2
     with tabs[1]:
         card(
             "Contract Slope Setup",
@@ -1086,7 +1088,7 @@ def main():
         ph_time: dtime = st.session_state.get("pivot_high_time", dtime(15, 0))
         pl_time: dtime = st.session_state.get("pivot_low_time", dtime(3, 0))
 
-        section_header("⚓ Anchor A — Contract Origin")
+        section_header("⚓ Anchor A - Contract Origin")
         anchor_a_source = st.radio(
             "Use which time for Anchor A",
             ["High pivot time", "Low pivot time", "Custom time"],
@@ -1122,7 +1124,7 @@ def main():
             key="contract_anchor_a_price",
         )
 
-        section_header("⚓ Anchor B — Second Contract Point")
+        section_header("⚓ Anchor B - Second Contract Point")
         c1, c2 = st.columns(2, gap="large")
         with c1:
             anchor_b_time = st.time_input(
@@ -1151,12 +1153,12 @@ def main():
                 )
                 st.session_state["contract_df"] = df_contract
                 st.session_state["contract_slope"] = slope_contract
-                st.success("✨ Contract projection generated successfully. Review the table and Daily Foresight tab.")
+                st.success("✨ Contract projection generated. Review the table and Daily Foresight tab.")
 
         df_contract = st.session_state.get("contract_df")
         slope_contract = st.session_state.get("contract_slope")
 
-        section_header("📊 Contract Projection • RTH 08:30–14:30 CT")
+        section_header("📊 Contract Projection • RTH 08:30-14:30 CT")
 
         if df_contract is None:
             st.info("📊 Build a contract projection to see projected prices.")
@@ -1178,13 +1180,11 @@ def main():
 
         end_card()
 
-    # ==========================
-    # TAB 3 — DAILY FORESIGHT
-    # ==========================
+    # TAB 3
     with tabs[2]:
         card(
             "Daily Foresight Card",
-            "Ascending and descending rails plus your contract line merged into a simple, time-based playbook for the session.",
+            "Ascending and descending rails plus your contract line merged into a simple, time based playbook for the session.",
             badge="Foresight",
             icon="🔮"
         )
@@ -1203,7 +1203,6 @@ def main():
             st.warning("⚠️ No contract projection found. Build one in the Contract Slope Setup tab first.")
             end_card()
         else:
-            # Scenario level stats
             tp_move_asc = CONTRACT_PROFIT_FACTOR * (h_asc or 0.0)
             tp_move_desc = CONTRACT_PROFIT_FACTOR * (h_desc or 0.0)
 
@@ -1234,7 +1233,6 @@ def main():
                     unsafe_allow_html=True,
                 )
 
-            # Build panoramic time-aligned map
             df_asc_ren = df_asc.rename(columns={
                 "Top Rail": "Top Rail Asc",
                 "Bottom Rail": "Bottom Rail Asc",
@@ -1250,28 +1248,26 @@ def main():
             pano["Channel Height Asc"] = h_asc
             pano["Channel Height Desc"] = h_desc
 
-            # TP levels using the 0.3 factor
             pano["Asc Long TP Contract"] = pano["Contract Price"] + tp_move_asc
             pano["Asc Short TP Contract"] = pano["Contract Price"] - tp_move_asc
 
             pano["Desc Long TP Contract"] = pano["Contract Price"] + tp_move_desc
             pano["Desc Short TP Contract"] = pano["Contract Price"] - tp_move_desc
 
-            # Inside-channel play explanation
             section_header("📈 Inside Channel Play (Rail to Rail)")
 
             st.markdown(f"""
             <div class='spx-sub' style='font-size:0.98rem; line-height:1.8;'>
-              <p><strong style='color:#6366f1; font-size:1.05rem;'>Scenario A — Ascending Day</strong></p>
+              <p><strong style='color:#6366f1; font-size:1.05rem;'>Scenario A - Ascending Day</strong></p>
               <ul style='margin-left:24px;'>
                 <li>Long from lower ascending rail to upper ascending rail</li>
                 <li>Structural SPX move: about <strong style='color:#10b981;'>{h_asc:.2f} points</strong></li>
                 <li>Initial options TP size: about <strong style='color:#10b981;'>{tp_move_asc:.2f} units</strong> from entry contract level</li>
               </ul>
 
-              <p><strong style='color:#6366f1; font-size:1.05rem;'>Scenario B — Descending Day</strong></p>
+              <p><strong style='color:#6366f1; font-size:1.05rem;'>Scenario B - Descending Day</strong></p>
               <ul style='margin-left:24px;'>
-                <li>Long downside bet from upper descending rail to lower descending rail</li>
+                <li>Short from upper descending rail to lower descending rail</li>
                 <li>Structural SPX move: about <strong style='color:#ef4444;'>{h_desc:.2f} points</strong></li>
                 <li>Initial options TP size: about <strong style='color:#ef4444;'>{tp_move_desc:.2f} units</strong> from entry contract level</li>
               </ul>
@@ -1283,8 +1279,7 @@ def main():
             </div>
             """, unsafe_allow_html=True)
 
-            # Contract trade estimator (straight-line)
-            section_header("🧮 Contract Trade Estimator (Line-Based)")
+            section_header("🧮 Contract Trade Estimator (Line Based)")
 
             times = pano["Time"].tolist()
             if times:
@@ -1329,19 +1324,17 @@ def main():
                     "<div class='muted'><strong>💡 How to read this:</strong> "
                     "This estimator uses only the straight contract line defined by your two anchors. "
                     "Compare this structural move with what the market actually did that day. "
-                    "The gap between the two is your volatility and skew bonus (or penalty).</div>",
+                    "The gap between the two is your volatility and skew bonus or penalty.</div>",
                     unsafe_allow_html=True,
                 )
 
-            # Panoramic map
-            section_header("🗺️ Panoramic Time-Aligned Map")
+            section_header("🗺️ Panoramic Time Aligned Map")
 
             st.caption(
-                "Each row is a 30-minute RTH slot. "
+                "Each row is a 30 minute RTH slot. "
                 "You see ascending and descending rails, the contract reference line, and the TP levels for both scenarios."
             )
 
-            # Reorder columns for readability
             cols_order = [
                 "Time",
                 "Contract Price",
@@ -1364,17 +1357,15 @@ def main():
                 "<div class='muted'><strong>📖 Reading the map:</strong> "
                 "The grid does not tell you when SPX will hit a rail. "
                 "It tells you what your contract structure expects at each time, "
-                "and what a conservative TP looks like (0.3 × channel height) once the rail-to-rail move completes. "
-                "You simply identify whether the day is trading more like the ascending script or the descending script, "
-                "and then follow the corresponding row and TP columns.</div>",
+                "and what a conservative TP looks like once the rail to rail move completes. "
+                "You identify whether the day is trading like the ascending script or the descending script, "
+                "then you use the corresponding TP columns as your first target.</div>",
                 unsafe_allow_html=True,
             )
 
             end_card()
 
-    # ==========================
-    # TAB 4 — ABOUT
-    # ==========================
+    # TAB 4
     with tabs[3]:
         card("About SPX Prophet", TAGLINE, badge="Version 7.0", icon="ℹ️")
         st.markdown(
@@ -1388,14 +1379,14 @@ def main():
 
             <ul style='margin-left:24px; font-size:0.98rem;'>
                 <li>Rails are projected with a <strong style='color:#6366f1;'>uniform slope of ±0.475 points per 30 minutes</strong></li>
-                <li>Pivots are your trusted <strong style='color:#6366f1;'>engulfing reversals</strong> between 15:00 and 07:30 CT</li>
+                <li>Pivots are your trusted <strong style='color:#6366f1;'>engulfing reversals</strong> between 12:00 and 07:30 CT</li>
                 <li>Every day you see both <strong style='color:#6366f1;'>ascending and descending channels</strong> so the market can reveal its script</li>
                 <li>Contracts follow a straight line defined by <strong style='color:#6366f1;'>two anchor prices</strong> on the same grid</li>
                 <li>A conservative TP is set as <strong style='color:#6366f1;'>0.3 × channel height</strong> on the contract side, so you lock in structure and let volatility be a bonus</li>
             </ul>
 
             <p style='margin-top:18px;'>
-            The app is not pretending to be a full options model. It gives you a clean structural map so that when SPX returns to your rails,
+            The app is not a full options model. It gives you a clean structural map so that when SPX returns to your rails,
             you are not guessing. You already have a framework and a plan for both directions.
             </p>
             </div>
@@ -1404,7 +1395,7 @@ def main():
         )
         st.markdown(
             "<div class='muted'><strong>🔧 Maintenance windows:</strong> "
-            "SPX 16:00–17:00 CT. Contracts 16:00–19:00 CT.</div>",
+            "SPX 16:00-17:00 CT. Contracts 16:00-19:00 CT.</div>",
             unsafe_allow_html=True,
         )
         end_card()
