@@ -740,7 +740,6 @@ def main():
                     metric_card("Channel Height", f"{h_desc:.2f} pts"),
                     unsafe_allow_html=True,
                 )
-                st.markmarkdown = st.markdown
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.download_button(
                     "📥 Download Descending CSV",
@@ -756,6 +755,7 @@ def main():
             <div class="muted">
             <strong>Reminder:</strong> the same pivots generate both ascending and descending grids.
             You decide which one is primary in the Daily Foresight tab. The other becomes the alternate frame.
+            Stacked rails (±1H) will be displayed there.
             </div>
             """,
             unsafe_allow_html=True,
@@ -946,6 +946,45 @@ def main():
                 unsafe_allow_html=True,
             )
 
+            # ----- Explicit Stacked Channels section -----
+            section_header("Stacked Channels (±1H)")
+
+            first_row = df_primary.iloc[0]  # 08:30 row
+            top_main_0830 = first_row["Top Rail"]
+            bottom_main_0830 = first_row["Bottom Rail"]
+            top_stack_0830 = first_row["Top +1H"]
+            bottom_stack_0830 = first_row["Bottom -1H"]
+
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                st.markdown(
+                    metric_card("Main Top @ 08:30", f"{top_main_0830:.2f}"),
+                    unsafe_allow_html=True,
+                )
+            with sc2:
+                st.markdown(
+                    metric_card("Stacked Top (+1H)", f"{top_stack_0830:.2f}"),
+                    unsafe_allow_html=True,
+                )
+            with sc3:
+                st.markdown(
+                    metric_card("Stacked Bottom (−1H)", f"{bottom_stack_0830:.2f}"),
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(
+                """
+                <div class="muted">
+                <strong>How to read this:</strong>
+                The main top/bottom rails define your core channel.
+                When price escapes, the stacked rails (+1H above, −1H below) mark the typical zones where
+                large players start fading the move and steering it back toward the body of the channel.
+                These stacked rails also appear in the time-aligned map as <code>Top +1H</code> and <code>Bottom -1H</code>.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
             # ----- Rail Playbook -----
             section_header("Rail Playbook")
 
@@ -1053,7 +1092,7 @@ def main():
 
             st.caption(
                 "Every row is a 30-minute RTH slot. Primary rails define your core swing. "
-                "Stacked rails (+1H / -1H) mark likely reversal zones when price escapes the main channel. "
+                "Stacked rails (+1H / −1H) mark likely reversal zones when price escapes the main channel. "
                 "Alt rails show the opposing structural frame."
             )
             st.dataframe(display_df, use_container_width=True, hide_index=True, height=420)
