@@ -418,7 +418,7 @@ def rth_slots() -> pd.DatetimeIndex:
 
 
 # ===============================
-# PIVOT SUGGESTION (YFINANCE) – HARDENED
+# PIVOT SUGGESTION (YFINANCE) – MULTIINDEX-SAFE
 # ===============================
 
 def suggest_pivots_from_yahoo(ticker: str, session_date: ddate):
@@ -450,22 +450,40 @@ def suggest_pivots_from_yahoo(ticker: str, session_date: ddate):
             st.warning("No intraday data returned from Yahoo. Please enter pivots manually.")
             return None
 
-        # Make sure we have the expected columns
-        cols = [c.lower() for c in data.columns]
-        if not any("high" in c for c in cols) or not any("low" in c for c in cols):
-            st.warning("Downloaded data does not contain High/Low columns in expected form.")
+        # Flatten possible MultiIndex columns to simple strings
+        if isinstance(data.columns, pd.MultiIndex):
+            flat_cols = []
+            for col in data.columns:
+                # take the first level name if available
+                if isinstance(col, tuple) and len(col) > 0:
+                    flat_cols.append(str(col[0]))
+                else:
+                    flat_cols.append(str(col))
+            data.columns = flat_cols
+        else:
+            data.columns = [str(c) for c in data.columns]
+
+        # Make sure we have High/Low columns present
+        cols_lower = [c.lower() for c in data.columns]
+        if not any("high" == c or " high" in c or "high " in c for c in cols_lower) or \
+           not any("low" == c or " low" in c or "low " in c for c in cols_lower):
+            st.warning("Downloaded data does not contain recognizable High/Low columns.")
             return None
 
-        # Normalize column names to 'High' and 'Low' if needed
+        # Normalize column names exactly to 'High' and 'Low'
         rename_map = {}
         for c in data.columns:
             lc = c.lower()
-            if "high" in lc and c != "High":
+            if "high" == lc or lc.endswith(" high") or lc.startswith("high "):
                 rename_map[c] = "High"
-            if "low" in lc and c != "Low":
+            if "low" == lc or lc.endswith(" low") or lc.startswith("low "):
                 rename_map[c] = "Low"
         if rename_map:
             data = data.rename(columns=rename_map)
+
+        if "High" not in data.columns or "Low" not in data.columns:
+            st.warning("After normalization, High/Low still not found. Please enter pivots manually.")
+            return None
 
         # Timezone handling
         if data.index.tz is None:
@@ -485,7 +503,6 @@ def suggest_pivots_from_yahoo(ticker: str, session_date: ddate):
             st.warning("No RTH data for that date. Please enter pivots manually.")
             return None
 
-        # Safely get hi/lo prices and times
         hi_ser = day_data["High"]
         lo_ser = day_data["Low"]
 
@@ -499,7 +516,7 @@ def suggest_pivots_from_yahoo(ticker: str, session_date: ddate):
         hi_idx = hi_ser.idxmax()
         lo_idx = lo_ser.idxmin()
 
-        # Extract times robustly
+        # Extract local time-of-day
         try:
             hi_time = hi_idx.to_pydatetime().astimezone().time()
         except Exception:
@@ -971,11 +988,6 @@ def main():
                 entry_contract = float(entry_row["Contract Price"])
                 exit_contract = float(exit_row["Contract Price"])
                 pnl_contract = exit_contract - entry_contract
-
-                entry_top = float(entry_row["Top Rail"])
-                entry_bottom = float(entry_row["Bottom Rail"])
-                exit_top = float(exit_row["Top Rail"])
-                exit_bottom = float(exit_row["Bottom Rail"])
 
                 c1e, c2e, c3e = st.columns(3)
                 with c1e:
