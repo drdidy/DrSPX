@@ -1,5 +1,5 @@
 # spx_prophet.py
-# SPX Prophet - Light Mode Legendary Edition
+# SPX Prophet - Light Mode Edition
 
 import streamlit as st
 import pandas as pd
