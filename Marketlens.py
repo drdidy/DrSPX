@@ -418,13 +418,14 @@ def rth_slots() -> pd.DatetimeIndex:
 
 
 # ===============================
-# PIVOT SUGGESTION (YFINANCE)
+# PIVOT SUGGESTION (YFINANCE) – HARDENED
 # ===============================
 
 def suggest_pivots_from_yahoo(ticker: str, session_date: ddate):
     """
     Try to suggest previous session high/low pivots from Yahoo Finance.
     Uses 30m candles around the given session_date.
+    Safely returns None on any problem, instead of crashing.
     """
     try:
         import yfinance as yf  # type: ignore
@@ -432,48 +433,88 @@ def suggest_pivots_from_yahoo(ticker: str, session_date: ddate):
         st.warning("yfinance is not installed in this environment. Please enter pivots manually.")
         return None
 
-    # We request 2 days around the session date to be safe.
-    start = session_date - timedelta(days=1)
-    end = session_date + timedelta(days=1)
-
     try:
-        data = yf.download(ticker, start=start, end=end, interval="30m", progress=False)
+        # Request 2 days around the session date to be safe.
+        start = session_date - timedelta(days=1)
+        end = session_date + timedelta(days=1)
+
+        data = yf.download(
+            ticker,
+            start=start,
+            end=end,
+            interval="30m",
+            progress=False,
+        )
+
+        if data is None or data.empty:
+            st.warning("No intraday data returned from Yahoo. Please enter pivots manually.")
+            return None
+
+        # Make sure we have the expected columns
+        cols = [c.lower() for c in data.columns]
+        if not any("high" in c for c in cols) or not any("low" in c for c in cols):
+            st.warning("Downloaded data does not contain High/Low columns in expected form.")
+            return None
+
+        # Normalize column names to 'High' and 'Low' if needed
+        rename_map = {}
+        for c in data.columns:
+            lc = c.lower()
+            if "high" in lc and c != "High":
+                rename_map[c] = "High"
+            if "low" in lc and c != "Low":
+                rename_map[c] = "Low"
+        if rename_map:
+            data = data.rename(columns=rename_map)
+
+        # Timezone handling
+        if data.index.tz is None:
+            data.index = data.index.tz_localize("UTC").tz_convert("US/Central")
+        else:
+            data.index = data.index.tz_convert("US/Central")
+
+        # Select candles for the requested session_date during 08:30–15:00 CT
+        mask = (
+            (data.index.date == session_date)
+            & (data.index.time >= dtime(8, 30))
+            & (data.index.time <= dtime(15, 0))
+        )
+        day_data = data.loc[mask]
+
+        if day_data.empty:
+            st.warning("No RTH data for that date. Please enter pivots manually.")
+            return None
+
+        # Safely get hi/lo prices and times
+        hi_ser = day_data["High"]
+        lo_ser = day_data["Low"]
+
+        if hi_ser.isna().all() or lo_ser.isna().all():
+            st.warning("High/Low data for that day is all NaN. Please enter pivots manually.")
+            return None
+
+        hi_price = float(hi_ser.max())
+        lo_price = float(lo_ser.min())
+
+        hi_idx = hi_ser.idxmax()
+        lo_idx = lo_ser.idxmin()
+
+        # Extract times robustly
+        try:
+            hi_time = hi_idx.to_pydatetime().astimezone().time()
+        except Exception:
+            hi_time = hi_idx.to_pydatetime().time()
+
+        try:
+            lo_time = lo_idx.to_pydatetime().astimezone().time()
+        except Exception:
+            lo_time = lo_idx.to_pydatetime().time()
+
+        return hi_price, hi_time, lo_price, lo_time
+
     except Exception as e:
-        st.warning(f"Could not fetch data from Yahoo Finance: {e}")
+        st.warning(f"Could not fetch pivot suggestion from Yahoo Finance. Reason: {e}")
         return None
-
-    if data.empty:
-        st.warning("No intraday data returned from Yahoo. Please enter pivots manually.")
-        return None
-
-    # Restrict to regular hours in US / convert to US Central
-    if data.index.tz is None:
-        data.index = data.index.tz_localize("UTC").tz_convert("US/Central")
-    else:
-        data.index = data.index.tz_convert("US/Central")
-
-    # Select candles for the requested session_date during 08:30–15:00 CT
-    mask = (
-        (data.index.date == session_date)
-        & (data.index.time >= dtime(8, 30))
-        & (data.index.time <= dtime(15, 0))
-    )
-    day_data = data.loc[mask]
-
-    if day_data.empty:
-        st.warning("No RTH data for that date. Please enter pivots manually.")
-        return None
-
-    # High pivot row
-    hi_idx = day_data["High"].idxmax()
-    lo_idx = day_data["Low"].idxmin()
-
-    hi_price = float(day_data.loc[hi_idx, "High"])
-    lo_price = float(day_data.loc[lo_idx, "Low"])
-    hi_time = hi_idx.tz_convert("US/Central").time()
-    lo_time = lo_idx.tz_convert("US/Central").time()
-
-    return hi_price, hi_time, lo_price, lo_time
 
 
 # ===============================
