@@ -583,17 +583,18 @@ def main():
         st.markdown("---")
 
         st.markdown("#### Core Parameters")
-        st.write(f"Rails slope: **{SLOPE_MAG:.3f} pts / 30m**")
         contract_factor = st.number_input(
             "Contract factor (contract move per 1 SPX point)",
             min_value=0.05,
             max_value=1.0,
-            step=0.05,
-            value=0.30,
+            step=0.01,
+            value=0.33,  # updated default factor
             format="%.2f",
             key="contract_factor",
             help="If SPX moves 100 pts, this factor × 100 is your expected contract move.",
         )
+        st.write(f"Rails slope: **{SLOPE_MAG:.3f} pts / 30m**")
+
         min_channel_height = st.number_input(
             "Min channel height to trade (H, pts)",
             min_value=10.0,
@@ -774,6 +775,7 @@ def main():
         )
 
         section_header("How the Contract Factor Works")
+        cf = st.session_state.get("contract_factor", 0.33)
         st.markdown(
             f"""
             <div class="spx-sub">
@@ -786,8 +788,8 @@ def main():
               <li>Expected contract move ≈ <strong>f × H</strong> points</li>
             </ul>
             <p>
-            For example, if <strong>H = 80</strong> and <strong>f = {st.session_state.get("contract_factor", 0.30):.2f}</strong>,
-            a clean bottom-to-top move suggests about <strong>{st.session_state.get("contract_factor", 0.30) * 80:.1f} pts</strong> of contract change.
+            For example, if <strong>H = 80</strong> and <strong>f = {cf:.2f}</strong>,
+            a clean bottom-to-top move suggests about <strong>{cf * 80:.1f} pts</strong> of contract change.
             The rail-based estimator in the Daily Foresight tab uses exactly this logic.
             </p>
             </div>
@@ -805,7 +807,6 @@ def main():
             format="%.1f",
             key="calc_h",
         )
-        cf = st.session_state.get("contract_factor", 0.30)
         move_1h = cf * calc_h
         move_2h = cf * 2 * calc_h
 
@@ -853,7 +854,6 @@ def main():
             st.warning("No rails found. Go to 'Rails Setup' first and build the structure.")
             end_card()
         else:
-            # Choose primary scenario (no writing to session_state to avoid widget conflict)
             section_header("Primary Structural Scenario")
             # Simple default: pick the larger channel as primary
             default_index = 0 if h_asc >= h_desc else 1
@@ -884,19 +884,27 @@ def main():
             df_primary["Alt Top"] = df_alt["Top Rail"]
             df_primary["Alt Bottom"] = df_alt["Bottom Rail"]
 
-            contract_factor = st.session_state.get("contract_factor", 0.30)
+            contract_factor = st.session_state.get("contract_factor", 0.33)
             min_channel_height = st.session_state.get("min_channel_height", 40.0)
 
-            # ----- Trade stance (simple traffic light based on structure) -----
+            # Contract move for 1H swing (absolute)
+            contract_move_1h = contract_factor * primary_h
+
+            # ----- Trade stance (simple traffic light based on structure + your 9.9 rule) -----
             section_header("Structure Summary")
 
-            # Basic stance rules
-            if primary_h < min_channel_height:
+            if primary_h <= 0:
+                stance = "Stand Aside"
+                stance_class = "trade-stance-avoid"
+                stance_msg = "Channel height is invalid or zero. Rebuild your rails."
+            elif primary_h < min_channel_height or contract_move_1h < 9.9:
+                # Your rule: contract move relative to channel width < 9.9 => stand aside
                 stance = "Stand Aside"
                 stance_class = "trade-stance-avoid"
                 stance_msg = (
-                    "Primary channel height is smaller than your minimum threshold. "
-                    "Structurally this is a narrow day — treat it as likely chop."
+                    f"Primary channel H ≈ {primary_h:.1f} pts, contract 1H move ≈ {contract_move_1h:.1f} pts. "
+                    "Either H is below your minimum threshold or expected contract move is under 9.9. "
+                    "Structurally this is too small to justify risk."
                 )
             else:
                 # If alt height is very different from primary, mark as caution
@@ -911,8 +919,8 @@ def main():
                     stance = "OK"
                     stance_class = "trade-stance-good"
                     stance_msg = (
-                        "Channel height is healthy and both structures are in a similar range. "
-                        "Good environment to look for clean rail-to-rail plays."
+                        "Channel height is healthy, expected contract move is respectable, and both structures "
+                        "are in a similar range. Good environment to look for clean rail-to-rail plays."
                     )
 
             c1, c2, c3, c4 = st.columns(4)
@@ -928,7 +936,7 @@ def main():
                 )
             with c3:
                 st.markdown(
-                    metric_card("Alt H", f"{alt_h:.2f} pts"),
+                    metric_card("Contract Move (1H)", f"{contract_move_1h:.2f} pts"),
                     unsafe_allow_html=True,
                 )
             with c4:
@@ -1042,9 +1050,11 @@ def main():
                 )
 
                 multiplier = 2.0 if "2H" in swing_type else 1.0
-                dir_sign = +1 if "Long Call" in side else -1
+                # For both long calls and long puts, a successful trade means the contract
+                # moves up in your favour. So we treat direction as +1 for the P&L.
+                beneficial_sign = 1.0
 
-                projected_change = dir_sign * contract_factor * primary_h * multiplier
+                projected_change = beneficial_sign * contract_factor * primary_h * multiplier
                 projected_exit = entry_contract + projected_change
 
                 cc1, cc2, cc3 = st.columns(3)
@@ -1071,7 +1081,8 @@ def main():
                     Enter the contract price where you expect to buy at the rail touch.
                     The estimator multiplies your channel height by your contract factor to give you a conservative
                     exit target for a full rail-to-rail swing (1H) or a stacked extension (2H).
-                    Real moves can pay more if volatility expands in your favour.
+                    For both long calls and long puts, a successful rail play is modeled as the contract price
+                    increasing by this amount in your favour.
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -1130,11 +1141,12 @@ def main():
               <li>You pick the structural high and low pivots from the previous RTH session.</li>
               <li>The app builds both ascending and descending channels, plus stacked rails at ±1H.</li>
               <li>A single contract factor converts SPX rail-to-rail moves into realistic contract targets.</li>
+              <li>Stand-aside filters check both channel height and expected contract move (9.9 rule) before you risk capital.</li>
             </ul>
             <p>
             This is not a full options model with greeks and IV curves.
-            It is a clean structural map so that when price returns to your rails, you are not guessing.
-            You already know the lane, the distance, and a conservative target for your contracts.
+            It is a clean structural map so that when price returns to your rails, you already know
+            the lane, the distance, and a conservative target for your contracts.
             </p>
             </div>
             """,
