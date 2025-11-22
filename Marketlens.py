@@ -13,6 +13,7 @@ SLOPE_MAG = 0.475          # points per 30 minutes for rails
 CONTRACT_FACTOR_DEFAULT = 0.33  # contract move per 1 point SPX move
 MIN_CONTRACT_MOVE = 9.9    # below this, likely not worth trading the channel
 
+# Base reference: previous session "afternoon anchor"
 BASE_DATE = datetime(2000, 1, 1, 15, 0)
 
 
@@ -450,16 +451,27 @@ def section_header(text: str):
 
 def make_dt_from_time(t: dtime) -> datetime:
     """
-    Time axis:
-    - Times from 15:00 to 23:59 are treated as BASE_DATE same calendar day.
-    - Times from 00:00 to 14:59 are treated as next day relative to BASE_DATE.
-    This works for the overnight window from previous RTH afternoon into the next morning.
+    Map a clock time into the two-session structure around BASE_DATE:
+
+    - Times from 08:30 to 23:59 are treated as belonging to the
+      PREVIOUS SESSION DAY (previous RTH or late-day swings).
+    - Times from 00:00 up to 08:00 are treated as the CURRENT DAY
+      OVERNIGHT leading into the RTH open.
+
+    BASE_DATE itself is 15:00 on the previous session day.
     """
-    if t.hour >= 15:
-        return BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
-    else:
+    # Minutes since midnight
+    minutes = t.hour * 60 + t.minute
+    # 08:30 cutoff
+    cutoff_830 = 8 * 60 + 30
+
+    if minutes < cutoff_830:
+        # Overnight of the "current" day
         next_day = BASE_DATE.date() + timedelta(days=1)
         return datetime(next_day.year, next_day.month, next_day.day, t.hour, t.minute)
+    else:
+        # Previous session day (RTH and late day)
+        return BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
 
 
 def align_30min(dt: datetime) -> datetime:
@@ -548,7 +560,6 @@ def classify_time_window(time_str: str) -> str:
     except Exception:
         return "Unknown"
 
-    # Convert to minutes since midnight for comparison
     minutes = h * 60 + m
 
     open_830 = 8 * 60 + 30
@@ -593,7 +604,8 @@ def main():
         st.caption(
             "Underlying: 16:00–17:00 CT maintenance\n\n"
             "Contracts: 16:00–19:00 CT maintenance\n\n"
-            "RTH grid: 08:30–14:30 CT (30m blocks)."
+            "RTH grid: 08:30–14:30 CT (30m blocks).\n\n"
+            "You choose the previous-session pivots. The app carries the structure."
         )
 
     hero()
@@ -613,16 +625,21 @@ def main():
     with tabs[0]:
         card(
             "Rails + Stacks",
-            "Define your underlying channel from your key pivots and project both ascending and descending rails. "
-            "Stack them by one channel height to see extension reversal zones.",
+            "Define your underlying channel from your key previous-session pivots and project both ascending and "
+            "descending rails into today's RTH. Stack them by one channel height to see common extension reversal zones.",
             badge="Structure Engine",
             icon="🧱",
         )
 
-        section_header("Underlying Pivots (15:00 to 07:30 Window)")
+        section_header("Underlying Pivots (Previous Session Structure)")
         st.markdown(
-            "<div class='spx-sub'>Pick the high and low engulfing pivots that define your overnight structure. "
-            "Times should be between 15:00 of the previous day and 07:30 of the current day (CT).</div>",
+            "<div class='spx-sub'>"
+            "Pick the <strong>structural high and low pivots</strong> from the previous session on your line chart. "
+            "These can come from the previous RTH (for example 09:30, 11:00, 14:30) "
+            "or from the overnight action leading into today (for example 18:00, 23:00, 03:00, 07:30). "
+            "<br><br>The app maps any time from <strong>08:30–23:59</strong> as part of the previous session day, and "
+            "any time from <strong>00:00–08:00</strong> as overnight for the current day."
+            "</div>",
             unsafe_allow_html=True,
         )
 
@@ -685,26 +702,32 @@ def main():
         h_asc = st.session_state.get("channel_asc_height")
         h_desc = st.session_state.get("channel_desc_height")
 
-        section_header("Underlying Rails - RTH 08:30–14:30 CT")
+        section_header("Underlying Rails - Today’s RTH 08:30–14:30 CT")
 
         if df_asc is None or df_desc is None:
             st.info("Build the rails to see projections.")
         else:
-            st.markdown("**Ascending Channel (Price Respecting Higher Lows)**")
+            st.markdown("**Ascending Channel (Price respecting higher lows)**")
             c_top = st.columns([3, 1])
             with c_top[0]:
                 st.dataframe(df_asc, use_container_width=True, hide_index=True, height=280)
             with c_top[1]:
                 if h_asc is not None:
-                    st.markdown(metric_card("Channel Height", f"{h_asc:.2f} pts"), unsafe_allow_html=True)
+                    st.markdown(
+                        metric_card("Channel Height", f"{h_asc:.2f} pts"),
+                        unsafe_allow_html=True,
+                    )
 
-            st.markdown("**Descending Channel (Price Respecting Lower Highs)**")
+            st.markdown("**Descending Channel (Price respecting lower highs)**")
             c_bot = st.columns([3, 1])
             with c_bot[0]:
                 st.dataframe(df_desc, use_container_width=True, hide_index=True, height=280)
             with c_bot[1]:
                 if h_desc is not None:
-                    st.markdown(metric_card("Channel Height", f"{h_desc:.2f} pts"), unsafe_allow_html=True)
+                    st.markdown(
+                        metric_card("Channel Height", f"{h_desc:.2f} pts"),
+                        unsafe_allow_html=True,
+                    )
 
         end_card()
 
@@ -714,7 +737,7 @@ def main():
     with tabs[1]:
         card(
             "Contract Setup",
-            "Tell the app roughly how your contract moves relative to SPX. "
+            "Tell the app roughly how your chosen contract moves relative to SPX. "
             "This lets the Foresight card translate a rail to rail move into a realistic options target.",
             badge="Contract Engine",
             icon="📐",
@@ -751,7 +774,7 @@ def main():
             "<div class='muted'><strong>How to use this:</strong> "
             "Pick the contract you intend to trade, enter the approximate price you expect to pay when your rail is touched, "
             "and use a contract factor that reflects how that contract moves relative to SPX. "
-            "Further out of the money contracts usually have a higher factor, closer to the money a bit lower.</div>",
+            "Further out-of-the-money contracts usually have a higher factor; closer to the money a bit lower.</div>",
             unsafe_allow_html=True,
         )
 
@@ -848,7 +871,7 @@ def main():
                 st.markdown(
                     "<div class='muted'>"
                     "<span class='risk-badge risk-good'>Tradable Channel</span> "
-                    "The expected contract move from a full rail to rail swing is large enough to justify taking the setup, "
+                    "The expected contract move from a full rail-to-rail swing is large enough to justify taking the setup, "
                     "if price and timing cooperate."
                     "</div>",
                     unsafe_allow_html=True,
@@ -875,10 +898,10 @@ def main():
                 )
                 entry_price = st.session_state.get("contract_entry_price", 0.0)
 
-                # For a full rail to rail move, we use absolute move.
-                # Long call: bottom to top, SPX up, contract up.
-                # Long put: top to bottom, SPX down, contract up in value.
-                # So projected PnL is positive in both when move goes in trade direction.
+                # For a full rail-to-rail move, we use the absolute move.
+                # Long Call: bottom to top, SPX up, contract up.
+                # Long Put: top to bottom, SPX down, contract up in value.
+                # Projected PnL is positive when price travels the full channel in the trade direction.
                 projected_move = approx_contract_move
                 target_price = entry_price + projected_move
 
@@ -904,7 +927,7 @@ def main():
                     timing_badge = "<span class='risk-badge risk-good'>Prime Window</span>"
                     comment = (
                         "You are planning to enter inside one of the prime windows "
-                        "(08:30 to 11:30 CT). This is where the cleanest rail to rail "
+                        "(08:30 to 11:30 CT). This is where the cleanest rail-to-rail "
                         "moves tend to complete."
                     )
                 elif "Late" in timing_label:
@@ -941,7 +964,7 @@ def main():
             st.markdown(
                 "<div class='muted'>"
                 "<strong>Reading this grid:</strong> "
-                "Top Rail and Bottom Rail are the main channel for your primary scenario. "
+                "Top Rail and Bottom Rail form the main channel for your primary scenario. "
                 "Top +1H and Bottom -1H are the stacked rails one channel height above and below. "
                 "Timing Window shows how friendly that 30 minute slot tends to be for clean moves. "
                 "You still wait for price action at the rail, but now you have structure, contracts, "
@@ -960,18 +983,18 @@ def main():
         st.markdown(
             """
             <div class='spx-sub'>
-            <p><strong>Core idea:</strong> two pivots define your rails, the slope carries that structure into the next session, and your contract factor connects SPX movement to an options target.</p>
+            <p><strong>Core idea:</strong> two previous-session pivots define your rails, the slope carries that structure into today's RTH, and your contract factor connects SPX movement to an options target.</p>
 
             <ul style="margin-left:20px;">
                 <li>Rails use a fixed slope of <strong>±0.475 points per 30 minutes</strong> on a 30 minute grid.</li>
-                <li>You define the high and low engulfing pivots between 15:00 and 07:30 CT.</li>
-                <li>The app builds <strong>both</strong> ascending and descending channels and lets you pick the primary scenario.</li>
+                <li>You define the high and low engulfing pivots from the <strong>previous session structure</strong> – either previous RTH or overnight up to 07:30 CT.</li>
+                <li>The app builds <strong>both</strong> ascending and descending channels and lets you pick the primary scenario for the day.</li>
                 <li>Stacked rails one channel height above and below highlight common extension reversal zones.</li>
-                <li>A simple <strong>contract factor</strong> turns a rail to rail SPX move into an expected contract move.</li>
+                <li>A simple <strong>contract factor</strong> turns a rail-to-rail SPX move into an expected contract move.</li>
                 <li>Timing windows label each 30 minute slot as prime, late, or dead zone to help you avoid forcing trades at the wrong time of day.</li>
             </ul>
 
-            <p>This is not a full options model. It is a structural map designed to make your discretionary decisions clearer and calmer:
+            <p>This is not a full options model. It is a structural map designed to make your discretionary decisions clearer:
             where to focus, which way to lean, when the contract has enough juice, and when the clock is working for or against you.</p>
             </div>
             """,
