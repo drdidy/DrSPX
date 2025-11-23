@@ -1,6 +1,6 @@
 # spx_prophet.py
 # SPX Prophet – Structural Channels + Stacked Rails + Bias + Contract Estimator
-# Prior RTH pivots only. No EM. Contract factor model.
+# Offline edition: prior RTH pivots only. No EM, no APIs.
 
 import streamlit as st
 import pandas as pd
@@ -10,11 +10,11 @@ from typing import Tuple, Optional
 APP_NAME = "SPX Prophet"
 TAGLINE = "Where Structure Becomes Foresight."
 SLOPE_MAG = 0.475        # pts per 30 min for underlying rails
-BASE_DATE = datetime(2000, 1, 1, 15, 0)  # 15:00 "anchor" for 30m grid
+BASE_DATE = datetime(2000, 1, 1, 15, 0)  # 15:00 anchor for 30m grid
 CONTRACT_FACTOR_DEFAULT = 0.33           # contract move ≈ factor × SPX move
 MIN_CHANNEL_HEIGHT = 60.0                # below this, structure is too tight
-ASYM_RATIO_MAX = 1.30                    # >30% asymmetry = caution
-MIN_CONTRACT_MOVE = 9.9                  # below this, not worth the risk
+ASYM_RATIO_MAX = 1.30                    # >30 percent asymmetry = caution
+MIN_CONTRACT_MOVE = 9.9                  # below this, not worth taking the risk
 
 
 # ===============================
@@ -555,9 +555,7 @@ def blocks_from_base(dt: datetime) -> int:
 
 
 def rth_slots() -> pd.DatetimeIndex:
-    """
-    RTH grid for projections: 08:30–14:30 CT, every 30 minutes.
-    """
+    """RTH grid: 08:30–14:30 CT in 30-minute blocks."""
     next_day = BASE_DATE.date() + timedelta(days=1)
     start = datetime(next_day.year, next_day.month, next_day.day, 8, 30)
     end = datetime(next_day.year, next_day.month, next_day.day, 14, 30)
@@ -578,7 +576,7 @@ def build_structural_channel(
     """
     Build a structural channel (ascending or descending) from prior RTH pivots
     using constant slope magnitude SLOPE_MAG.
-    Returns DataFrame with Time, Main Top/Bottom, Stack ±1 and channel height.
+    Returns DataFrame with Time, Main Top/Bottom, Stacks and channel height.
     """
     s = slope_sign * SLOPE_MAG
 
@@ -632,11 +630,10 @@ def classify_day(
     contract_factor: float,
 ) -> Tuple[str, str, dict]:
     """
-    Combine structural filters into a simple classification:
+    Combine structural filters into:
     - "STAND ASIDE"
     - "LIGHT SIZE / SCALP ONLY"
     - "NORMAL STRUCTURAL DAY"
-    Returns (headline, explanation, flags_dict).
     """
     flags = {
         "narrow": False,
@@ -675,7 +672,7 @@ def classify_day(
         explanation = (
             " and ".join(reason).capitalize()
             + ". Combine this with your timing rules: if the first clean rail touch "
-              "happens before 09:00 CT, keep your powder dry."
+              "happens before 09:00 CT, treat the whole day with suspicion."
         )
     elif score == 1:
         headline = "LIGHT SIZE / SCALP ONLY"
@@ -689,14 +686,14 @@ def classify_day(
         explanation = (
             ", ".join(parts).capitalize()
             + ". You can trade, but treat it as a scalping environment. "
-              "Respect your first touch rejection and get paid, don't marry it."
+              "Respect your first touch rejection and get paid; do not marry it."
         )
     else:
         headline = "NORMAL STRUCTURAL DAY"
         explanation = (
             "Channel width and projected contract move are healthy, and the two scenarios "
-            "are not excessively asymmetric. Your main focus is waiting for a clean touch "
-            "and rejection near a rail inside the preferred timing window."
+            "are not excessively asymmetric. Your focus is waiting for a clean touch and "
+            "rejection near a rail inside the preferred timing window."
         )
 
     return headline, explanation, flags
@@ -726,7 +723,7 @@ def main():
         st.caption("Underlying channels are projected on a fixed 30-minute grid.")
 
         contract_factor = st.number_input(
-            "Contract factor (≈ move / SPX move)",
+            "Contract factor (≈ contract move / SPX move)",
             min_value=0.10,
             max_value=1.00,
             value=CONTRACT_FACTOR_DEFAULT,
@@ -771,8 +768,8 @@ def main():
         card(
             "Rails + Stacks",
             "Use the structural high and low pivots from the previous regular session "
-            "to build both ascending and descending rails. Stacked levels show where "
-            "extensions tend to reverse.",
+            "to build both ascending and descending rails. Stacked bands show where "
+            "extensions often reverse.",
             badge="Structure Engine",
         )
 
@@ -862,7 +859,7 @@ def main():
                     metric_card(
                         "Ascending Height",
                         f"{h_asc:.2f} pts",
-                        "Full swing from main bottom rail to main top rail.",
+                        "Full span from main bottom rail to main top rail.",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -876,7 +873,7 @@ def main():
                     metric_card(
                         "Descending Height",
                         f"{h_desc:.2f} pts",
-                        "Full swing from main top rail to main bottom rail.",
+                        "Full span from main top rail to main bottom rail.",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -930,7 +927,7 @@ def main():
                     metric_card(
                         "Primary Scenario",
                         primary_choice,
-                        "You can still glance at the alternate, but this is your main map.",
+                        "You can glance at the alternate, but this is your main map.",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -983,7 +980,7 @@ def main():
                     metric_card(
                         "Projected Contract Move",
                         f"{contract_move:.2f} units",
-                        "Full swing from one rail to the opposite rail.",
+                        "Full span from one rail to the opposite rail.",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -992,7 +989,7 @@ def main():
                 note = f"Threshold: {MIN_CONTRACT_MOVE:.1f} units. Below 1.0× is a caution flag."
                 st.markdown(
                     metric_card(
-                        "Size vs Threshold",
+                        "Move vs Threshold",
                         f"{threshold_ratio:.2f}×",
                         note,
                     ),
@@ -1038,12 +1035,12 @@ def main():
                 <div class="spx-sub">
                   <ul style="margin-left:18px;">
                     <li><strong>08:30–09:00 CT:</strong> treated as noise and trap zone. Avoid entries here.</li>
-                    <li><strong>09:00–09:30 CT:</strong> only touch if everything else lines up and structure looks clean.</li>
+                    <li><strong>09:00–09:30 CT:</strong> only touch if everything else lines up and structure is clean.</li>
                     <li><strong>10:00–12:00 CT:</strong> preferred hours for first clean rail touch and rejection.</li>
-                    <li><strong>After 13:00 CT:</strong> good for secondary tests, take profits faster.</li>
+                    <li><strong>After 13:00 CT:</strong> good for secondary tests, but take profits faster.</li>
                   </ul>
-                  <em>Rule of thumb:</em> if your very first clean structural touch happens before 09:00, treat the whole day as suspect
-                  unless you have a very strong reason to engage.
+                  <em>Rule of thumb:</em> if your very first clean structural touch happens before 09:00,
+                  treat the entire day with caution unless the behaviour is very obvious.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1066,7 +1063,7 @@ def main():
             bias_col1, bias_col2 = st.columns(2)
             with bias_col1:
                 open_price = st.number_input(
-                    "SPX opening / current price (optional)",
+                    "SPX opening / key early price (optional)",
                     min_value=0.0,
                     value=0.0,
                     step=0.5,
@@ -1075,7 +1072,6 @@ def main():
                 )
             with bias_col2:
                 slot_options = list(primary_df["Time"])
-                # default to 09:30 if present, else first row
                 default_idx = 0
                 if "09:30" in slot_options:
                     default_idx = slot_options.index("09:30")
@@ -1112,10 +1108,10 @@ def main():
                                 pos_text = "near the upper rail inside the main channel."
                                 suggestion = (
                                     "Bias: day may be extended early. Favour short-term long puts "
-                                    "from upper rail rejections, but take profits quickly."
+                                    "from upper rail rejections and take profits quickly."
                                 )
                             else:
-                                pos_text = "near the mid-zone between rails."
+                                pos_text = "near the middle of the channel."
                                 suggestion = (
                                     "Bias: neutral. Be patient and wait for a clean touch of either rail "
                                     "instead of forcing trades in the middle."
@@ -1124,8 +1120,8 @@ def main():
                             if pos <= 0.3:
                                 pos_text = "near the lower rail inside the main channel."
                                 suggestion = (
-                                    "Bias: in a descending primary day, price starting low often bounces upward first. "
-                                    "You can fade that bounce with long puts near the upper rail, not down here."
+                                    "Bias: in a descending day, price starting low often bounces upward first. "
+                                    "Fade that bounce with long puts near the upper rail, not from down here."
                                 )
                             elif pos >= 0.7:
                                 pos_text = "near the upper rail inside the main channel."
@@ -1134,7 +1130,7 @@ def main():
                                     "top-to-bottom plays."
                                 )
                             else:
-                                pos_text = "near the mid-zone between rails."
+                                pos_text = "near the middle of the channel."
                                 suggestion = (
                                     "Bias: neutral. Let price pick a side and touch a rail before committing."
                                 )
@@ -1152,8 +1148,8 @@ def main():
                             else:
                                 pos_text = "well above both the main and first stacked channel."
                                 suggestion = (
-                                    "This is stretched. Expect mean-reversion style behaviour rather than chasing up here. "
-                                    "If you cannot frame the risk tightly, stand aside."
+                                    "This is stretched. Expect mean-reversion behaviour rather than chasing up here. "
+                                    "If risk is hard to define, stand aside."
                                 )
                                 banner_class_bias = "spx-banner-stop"
                                 icon_bias = "🛑"
@@ -1170,7 +1166,7 @@ def main():
                                 pos_text = "well below both the main and first stacked channel."
                                 suggestion = (
                                     "This is washed out. Chasing further in the same direction is dangerous. "
-                                    "If you cannot define risk clearly, stand aside."
+                                    "If risk is hard to define, stand aside."
                                 )
                                 banner_class_bias = "spx-banner-stop"
                                 icon_bias = "🛑"
@@ -1196,8 +1192,8 @@ def main():
                 """
                 <div class="spx-sub">
                   This takes your <strong>primary channel height</strong> and your <strong>contract factor</strong>
-                  and turns it into a projected contract move for a structural swing.
-                  It does not guess the exact minute. It tells you whether the move is worth building a plan around.
+                  and turns it into a projected contract move for a structural swing
+                  from one rail to the opposite rail.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1232,13 +1228,13 @@ def main():
                     key="entry_contract_price_input",
                 )
 
-            # Compute projected move
-            if primary_height > 0 and entry_contract_price > 0:
-                underlying_move = primary_height * rail_fraction
-                contract_proj_move = underlying_move * contract_factor
-                exit_price_proj = entry_contract_price + contract_proj_move
-                roi_pct = (contract_proj_move / entry_contract_price) * 100.0
+            # Default values for later sections
+            underlying_move = primary_height * rail_fraction
+            contract_proj_move = underlying_move * contract_factor
+            exit_price_proj = entry_contract_price + contract_proj_move if entry_contract_price > 0 else 0.0
+            roi_pct = (contract_proj_move / entry_contract_price) * 100.0 if entry_contract_price > 0 else 0.0
 
+            if primary_height > 0 and entry_contract_price > 0:
                 ecol1, ecol2, ecol3 = st.columns(3)
                 with ecol1:
                     st.markdown(
@@ -1254,7 +1250,7 @@ def main():
                         metric_card(
                             "Projected contract move",
                             f"+{contract_proj_move:.2f}",
-                            f"Threshold: {MIN_CONTRACT_MOVE:.1f}. Below that, day is not worth it.",
+                            f"Minimum useful: {MIN_CONTRACT_MOVE:.1f} units.",
                         ),
                         unsafe_allow_html=True,
                     )
@@ -1291,7 +1287,7 @@ def main():
                     icon_trade = "🛑"
                     extra = (
                         "Projected contract move is below the minimum you set for a meaningful day. "
-                        "Respect this. If the structure and size both whisper 'small', you do not need to trade."
+                        "If structure and size both whisper 'small', you do not need to trade."
                     )
                 else:
                     if headline == "STAND ASIDE":
@@ -1299,7 +1295,7 @@ def main():
                         icon_trade = "🛑"
                         extra = (
                             "Your structural filters already classify today as a stand-aside day. "
-                            "Even if the math looks tempting, listen to the full picture, not the single number."
+                            "Even if the math looks tempting, listen to the full picture, not just one number."
                         )
                     elif headline == "LIGHT SIZE / SCALP ONLY":
                         banner_class_trade = "spx-banner-caution"
@@ -1328,21 +1324,31 @@ def main():
                     unsafe_allow_html=True,
                 )
 
-            # Time-aligned map
+            # Time-aligned map with contract context
             section_header("Time-Aligned Map (Primary Scenario)")
 
             st.caption(
-                "Each row is a 30-minute RTH slot. Main rails show your inside-channel plays; "
-                "Stack±1 rails show where extensions often reverse."
+                "Each row is a 30-minute RTH slot. Structural rails and stacks frame the day. "
+                "Contract columns show what a full structural move implies for your option."
             )
-            st.dataframe(primary_df, use_container_width=True, hide_index=True, height=420)
+
+            map_df = primary_df.copy()
+            map_df["Struct Span"] = round(primary_height, 2)
+            map_df["Contract Δ (full)"] = round(primary_height * contract_factor, 2)
+            if entry_contract_price > 0:
+                full_exit = entry_contract_price + (primary_height * contract_factor)
+                map_df["Proj Exit @ full span"] = round(full_exit, 2)
+            else:
+                map_df["Proj Exit @ full span"] = None
+
+            st.dataframe(map_df, use_container_width=True, hide_index=True, height=420)
 
             st.markdown(
                 """
                 <div class="spx-sub" style="margin-top:10px;">
-                  <strong>Reading it:</strong> you are not trying to guess which exact time will tag the rail.
-                  You are asking: <em>if</em> price is near one of these rails in a healthy timing window,
-                  how big is the structural move available to the opposite rail and how does that align with your contract factor.
+                  <strong>Reading it:</strong> you are not predicting which exact row will be the touch.
+                  You are using the rails and stacks for price location, and the span/contract columns
+                  to judge if the structural move is worth your risk for that day.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1367,7 +1373,7 @@ def main():
                 <li><strong>Both ascending and descending</strong> versions are built from the same pivots.</li>
                 <li><strong>Stacked channels (±1 height)</strong> frame extension and snap-back behaviour.</li>
                 <li><strong>Contract factor</strong> (default 0.33) turns SPX structure into an options move estimate.</li>
-                <li><strong>Filters</strong> (channel width, asymmetry, contract move) tell you when to treat the day as a scalp day or a full stand-aside day.</li>
+                <li><strong>Filters</strong> (channel width, asymmetry, contract move) tell you when to scalp and when to stand aside.</li>
                 <li><strong>Bias planner and trade estimator</strong> turn the map into a daily plan without pretending to be an oracle.</li>
               </ul>
 
@@ -1382,7 +1388,7 @@ def main():
         st.markdown(
             """
             <div class="spx-sub" style="margin-top:14px;">
-              <strong>Practical checklist before any trade:</strong>
+              <strong>Checklist before any trade:</strong>
               <ul style="margin-left:20px;">
                 <li>Is today classified as <em>Normal</em>, <em>Scalp Only</em>, or <em>Stand Aside</em>?</li>
                 <li>Is the touch happening near a main rail or a stacked rail?</li>
