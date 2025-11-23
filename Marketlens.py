@@ -9,7 +9,9 @@ from datetime import datetime, timedelta, time as dtime
 APP_NAME = "SPX Prophet"
 TAGLINE = "Quantitative structure for intraday SPX planning."
 SLOPE_MAG = 0.475          # pts per 30 min for underlying rails
-BASE_DATE = datetime(2000, 1, 1, 15, 0)  # 15:00 anchor for synthetic 30m grid
+
+# We treat prior RTH as happening on this "day 0".
+BASE_DATE = datetime(2000, 1, 1, 15, 0)  # 15:00 anchor for 30m grid
 
 # Risk / sizing parameters
 CONTRACT_FACTOR_DEFAULT = 0.33       # contract move ≈ factor × SPX move
@@ -468,19 +470,15 @@ def metric_card(label: str, value: str, note: str = "") -> str:
 # TIME / GRID HELPERS
 # ===============================
 
-def make_dt_from_time(t: dtime) -> datetime:
+def pivot_dt_from_time(t: dtime) -> datetime:
     """
-    Map a CT clock time into synthetic grid:
-    - times >= 15:00 belong to BASE_DATE
-    - times < 15:00 belong to BASE_DATE + 1 day
+    Map a prior-session pivot time (CT) onto BASE_DATE (day 0).
+    Example: prior RTH high at 12:00 CT => 2000-01-01 12:00.
     """
-    if t.hour >= 15:
-        return BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
-    next_day = BASE_DATE.date() + timedelta(days=1)
-    return datetime(next_day.year, next_day.month, next_day.day, t.hour, t.minute)
+    return BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
 
 
-def align_30min(dt: datetime) -> datetime:
+def align_30min_dt(dt: datetime) -> datetime:
     """Align any datetime to the nearest 30-minute block."""
     minute = 0 if dt.minute < 15 else (30 if dt.minute < 45 else 0)
     if dt.minute >= 45:
@@ -494,10 +492,14 @@ def blocks_from_base(dt: datetime) -> int:
 
 
 def rth_slots() -> pd.DatetimeIndex:
-    """RTH grid: 08:30–14:30 CT at 30-minute steps (synthetic next-day mapping)."""
-    day = BASE_DATE.date() + timedelta(days=1)
-    start = datetime(day.year, day.month, day.day, 8, 30)
-    end = datetime(day.year, day.month, day.day, 14, 30)
+    """
+    RTH grid for the new session:
+    Day 1 = BASE_DATE.date() + 1
+    08:30–14:30 CT at 30-minute steps.
+    """
+    day1 = BASE_DATE.date() + timedelta(days=1)
+    start = datetime(day1.year, day1.month, day1.day, 8, 30)
+    end = datetime(day1.year, day1.month, day1.day, 14, 30)
     return pd.date_range(start=start, end=end, freq="30min")
 
 
@@ -516,19 +518,20 @@ def build_structural_channel(
     Build either an ascending or descending structural channel from prior RTH pivots.
     Uses fixed slope magnitude SLOPE_MAG.
 
-    Returns:
-      - DataFrame with Time, Main rails, and stacked rails
-      - Channel height (top - bottom intercepts)
+    Logic:
+      - Prior RTH pivots live on BASE_DATE (day 0).
+      - New session RTH grid lives on BASE_DATE+1 (day 1).
     """
     s = slope_sign * SLOPE_MAG
 
-    dt_hi = align_30min(make_dt_from_time(high_time))
-    dt_lo = align_30min(make_dt_from_time(low_time))
+    # Map pivot times onto day 0
+    dt_hi = align_30min_dt(pivot_dt_from_time(high_time))
+    dt_lo = align_30min_dt(pivot_dt_from_time(low_time))
 
     k_hi = blocks_from_base(dt_hi)
     k_lo = blocks_from_base(dt_lo)
 
-    # Intercepts
+    # Channel intercepts for main rails
     b_top = high_price - s * k_hi
     b_bottom = low_price - s * k_lo
 
@@ -539,6 +542,7 @@ def build_structural_channel(
         k = blocks_from_base(dt)
         main_top = s * k + b_top
         main_bottom = s * k + b_bottom
+
         stack_plus_top = main_top + channel_height
         stack_plus_bottom = main_bottom + channel_height
         stack_minus_top = main_top - channel_height
@@ -675,7 +679,7 @@ def main():
             "• This app does not use live data or volatility feeds."
         )
 
-    # Session structure containers (initialized before widgets)
+    # Session structure containers
     if "asc_channel_df" not in st.session_state:
         st.session_state["asc_channel_df"] = None
     if "desc_channel_df" not in st.session_state:
@@ -1178,7 +1182,6 @@ def main():
 
                 if main_bottom < main_top:
                     if main_bottom <= open_price <= main_top:
-                        # inside main channel
                         pos = (open_price - main_bottom) / (main_top - main_bottom)
                         if primary_choice == "Ascending":
                             if pos <= 0.3:
@@ -1216,7 +1219,6 @@ def main():
                                     "Bias: neutral. Let price choose a rail before you commit."
                                 )
                     else:
-                        # outside the main channel
                         if open_price > main_top:
                             if open_price <= stack_up_top:
                                 pos_text = "above the main channel but inside the first upper stack."
