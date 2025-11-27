@@ -1,6 +1,6 @@
 # spx_prophet.py
-# SPX Prophet – Structural Channels + Stacked Rails + Contract Planner + Daily Playbook
-# Offline edition: prior RTH pivots only. No external APIs.
+# SPX Prophet – Lanes, options, and game plan in one screen.
+# Offline edition: prior RTH pivots plus overnight up to 03:00. No external APIs.
 
 import streamlit as st
 import pandas as pd
@@ -8,17 +8,17 @@ from datetime import datetime, timedelta, time as dtime
 
 APP_NAME = "SPX Prophet"
 TAGLINE = "Quantitative structure for intraday SPX planning."
-SLOPE_MAG = 0.475          # pts per 30 min for underlying rails
+SLOPE_MAG = 0.475          # points per 30 min for underlying lanes
 
-# We treat prior RTH as happening on this "day 0".
-BASE_DATE = datetime(2000, 1, 1, 15, 0)  # 15:00 anchor for 30m grid
+# Synthetic calendar anchor
+BASE_DATE = datetime(2000, 1, 1, 15, 0)  # 15:00 anchor for 30 minute grid
 
 # Risk / sizing parameters
 CONTRACT_FACTOR_DEFAULT = 0.33       # contract move ≈ factor × SPX move
-MIN_CHANNEL_HEIGHT = 60.0            # below this, structure is too tight
-ASYM_RATIO_MAX = 1.30                # >30% asymmetry = structural imbalance
-MIN_CONTRACT_MOVE = 9.9              # below this, contract move is not worth it
-MAX_STACK_DEPTH = 3                  # up to 3 extra lanes if night was wild
+MIN_CHANNEL_HEIGHT = 60.0            # below this, structure is tight
+ASYM_RATIO_MAX = 1.30                # above 30 percent asymmetry = imbalance
+MIN_CONTRACT_MOVE = 9.9              # below this, option move not worth it
+MAX_STACK_DEPTH = 3                  # up to 3 extra outer lanes
 
 
 # ===============================
@@ -430,7 +430,7 @@ def hero():
             <div class="hero-tagline">{TAGLINE}</div>
             <div class="hero-subline">
               Yesterday's key swings draw today's lanes. A steady slope carries the map forward.
-              You just decide when to step in.
+              You decide when to step in and when to stand aside.
             </div>
           </div>
         </div>
@@ -471,16 +471,32 @@ def metric_card(label: str, value: str, note: str = "") -> str:
 # TIME / GRID HELPERS
 # ===============================
 
-def pivot_dt_from_time(t: dtime) -> datetime:
+def pivot_dt_from_time(t: dtime, is_night: bool = False) -> datetime:
     """
-    Map a prior-session pivot time (CT) onto BASE_DATE (day 0).
-    Example: prior RTH high at 12:00 CT => 2000-01-01 12:00.
+    Map a pivot time onto either:
+      - BASE_DATE for prior RTH, or
+      - BASE_DATE plus one day for moves between midnight and 03:00.
     """
-    return BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+    base_day = BASE_DATE.date()
+
+    if is_night and t.hour < 3:
+        pivot_date = base_day + timedelta(days=1)
+    else:
+        pivot_date = base_day
+
+    return datetime(
+        pivot_date.year,
+        pivot_date.month,
+        pivot_date.day,
+        t.hour,
+        t.minute,
+        0,
+        0,
+    )
 
 
 def align_30min_dt(dt: datetime) -> datetime:
-    """Align any datetime to the nearest 30-minute block."""
+    """Align any datetime to the nearest 30 minute block."""
     minute = 0 if dt.minute < 15 else (30 if dt.minute < 45 else 0)
     if dt.minute >= 45:
         dt = dt + timedelta(hours=1)
@@ -495,8 +511,8 @@ def blocks_from_base(dt: datetime) -> int:
 def rth_slots() -> pd.DatetimeIndex:
     """
     RTH grid for the new session:
-    Day 1 = BASE_DATE.date() + 1
-    08:30–14:30 CT at 30-minute steps.
+    Day 1 = BASE_DATE date plus one day
+    08:30 to 14:30 CT at 30 minute steps.
     """
     day1 = BASE_DATE.date() + timedelta(days=1)
     start = datetime(day1.year, day1.month, day1.day, 8, 30)
@@ -505,7 +521,7 @@ def rth_slots() -> pd.DatetimeIndex:
 
 
 # ===============================
-# CHANNEL BUILDER + STACKED RAILS
+# CHANNEL BUILDER AND STACKED LANES
 # ===============================
 
 def build_structural_channel(
@@ -514,25 +530,23 @@ def build_structural_channel(
     low_price: float,
     low_time: dtime,
     slope_sign: int,
+    high_is_night: bool = False,
+    low_is_night: bool = False,
 ) -> tuple[pd.DataFrame, float]:
     """
-    Build either an ascending or descending structural channel from prior RTH pivots.
-    Uses fixed slope magnitude SLOPE_MAG.
-
-    Logic:
-      - Prior RTH pivots live on BASE_DATE (day 0).
-      - New session RTH grid lives on BASE_DATE+1 (day 1).
+    Build either an up view or down view structural channel from chosen pivots.
+    Pivots can be from prior RTH or from overnight up to 03:00 of the new day.
     """
     s = slope_sign * SLOPE_MAG
 
-    # Map pivot times onto day 0
-    dt_hi = align_30min_dt(pivot_dt_from_time(high_time))
-    dt_lo = align_30min_dt(pivot_dt_from_time(low_time))
+    # Map pivot times onto synthetic dates
+    dt_hi = align_30min_dt(pivot_dt_from_time(high_time, is_night=high_is_night))
+    dt_lo = align_30min_dt(pivot_dt_from_time(low_time, is_night=low_is_night))
 
     k_hi = blocks_from_base(dt_hi)
     k_lo = blocks_from_base(dt_lo)
 
-    # Channel intercepts for main rails
+    # Channel intercepts for main lanes
     b_top = high_price - s * k_hi
     b_bottom = low_price - s * k_lo
 
@@ -544,7 +558,6 @@ def build_structural_channel(
         main_top = s * k + b_top
         main_bottom = s * k + b_bottom
 
-        # Base stack +/-1
         stack_plus_top = main_top + channel_height
         stack_plus_bottom = main_bottom + channel_height
         stack_minus_top = main_top - channel_height
@@ -568,8 +581,8 @@ def build_structural_channel(
 
 def extend_stacks(df: pd.DataFrame, channel_height: float, max_depth: int = MAX_STACK_DEPTH) -> pd.DataFrame:
     """
-    Quietly add Stack+2/3 and Stack-2/3 rails based on the main channel height.
-    Existing Stack+1 / Stack-1 stay as they are.
+    Add Stack+2, Stack+3, Stack-2, Stack-3 lanes based on main channel height.
+    Existing Stack+1 and Stack-1 stay as they are.
     """
     if channel_height <= 0:
         return df
@@ -598,7 +611,7 @@ def extend_stacks(df: pd.DataFrame, channel_height: float, max_depth: int = MAX_
 
 
 # ===============================
-# DAY TYPE / FILTERS
+# DAY TYPE AND FILTERS
 # ===============================
 
 def classify_day(
@@ -624,7 +637,6 @@ def classify_day(
     if contract_move < MIN_CONTRACT_MOVE:
         flags["low_contract"] = True
 
-    ratio = None
     if alt_height and alt_height > 0:
         big = max(primary_height, alt_height)
         small = min(primary_height, alt_height)
@@ -643,7 +655,7 @@ def classify_day(
         if flags["low_contract"]:
             reasons.append("projected option move is small")
         if flags["asym"]:
-            reasons.append("up view vs down view is unbalanced")
+            reasons.append("up view and down view are far apart")
         explanation = (
             " and ".join(reasons).capitalize()
             + ". This is a good day to protect your ammo."
@@ -656,7 +668,7 @@ def classify_day(
         if flags["low_contract"]:
             reasons.append("option move is modest")
         if flags["asym"]:
-            reasons.append("the two views are out of sync")
+            reasons.append("the two views are not aligned")
         explanation = (
             ", ".join(reasons).capitalize()
             + ". You can trade, but think small size and quick exits."
@@ -665,7 +677,7 @@ def classify_day(
         headline = "NORMAL STRUCTURAL DAY"
         explanation = (
             "Room to move is healthy and the two views are close enough. "
-            "Your job is just to wait for a clean touch in the right time window."
+            "Your job is to wait for a clean touch in the right time window."
         )
 
     return headline, explanation, flags
@@ -673,8 +685,8 @@ def classify_day(
 
 def suggest_stack_depth(channel_height: float, overnight_high: float, overnight_low: float) -> tuple[int, str]:
     """
-    Suggest how many extra lanes (stacks) to pay attention to based on
-    how wild the night was compared to your main channel height.
+    Suggest how many extra lanes to pay attention to based on
+    how the night range compares to the main channel height.
     """
     if channel_height <= 0 or overnight_high <= overnight_low:
         return 1, "Night range unknown. Defaulting to one extra lane each side."
@@ -684,13 +696,13 @@ def suggest_stack_depth(channel_height: float, overnight_high: float, overnight_
 
     if ratio <= 0.75:
         depth = 1
-        label = "Calm night. Main lane plus one extra lane is usually enough."
+        label = "Calm night. Main lane plus one outer lane is usually enough."
     elif ratio <= 1.5:
         depth = 2
-        label = "Busy night. Two extra lanes give you a better picture of how far price might stretch."
+        label = "Busy night. Two outer lanes give a clearer view of stretch zones."
     else:
         depth = 3
-        label = "Wild night. Price has shown it can step out far; up to three extra lanes may come into play."
+        label = "Wild night. Price has shown it can step out far; three outer lanes may be needed."
 
     return depth, label
 
@@ -715,15 +727,15 @@ def main():
         st.markdown("---")
 
         st.markdown("#### Core Settings")
-        st.write(f"Lane slope: **{SLOPE_MAG:.3f} pts / 30m**")
+        st.write(f"Lane slope: **{SLOPE_MAG:.3f} pts / 30 min**")
 
         contract_factor = st.number_input(
-            "How sensitive is your option? (approx move per 1 SPX point)",
+            "Option sensitivity (approx move per 1 SPX point)",
             min_value=0.10,
             max_value=1.00,
             value=CONTRACT_FACTOR_DEFAULT,
             step=0.01,
-            help="For many 0DTE near-the-money contracts, around 0.33 is common.",
+            help="For many 0DTE near the money contracts, around 0.33 is common.",
             key="contract_factor",
         )
 
@@ -749,8 +761,8 @@ def main():
         st.markdown("#### Notes")
         st.caption(
             "• Lanes are built from yesterday's key swing high and low.\n"
-            "• A fixed slope carries those lanes through today's RTH.\n"
-            "• No live data. Everything here is your map and your plan."
+            "• Pivots can include overnight action up to 03:00.\n"
+            "• A fixed slope carries those lanes through today's RTH."
         )
 
     # Session structure containers
@@ -778,13 +790,13 @@ def main():
         ]
     )
 
-    # ============= TAB 1 – MAP OF THE DAY (STRUCTURE) =============
+    # ============= TAB 1 – MAP OF THE DAY =============
     with tabs[0]:
         card(
             "Map of the Day",
             "Pick yesterday's key swing high and low. The app draws today's lanes (up and down), "
-            "plus extra 'outer lanes' based on how wild the night was.",
-            badge="Lanes + Extra Lanes",
+            "plus outer lanes chosen by how wild the night was.",
+            badge="Lanes plus Outer Lanes",
         )
 
         section_header("Yesterday's Key Swings")
@@ -793,8 +805,7 @@ def main():
             """
             <div class="spx-sub">
               Choose the main <strong>high swing</strong> and <strong>low swing</strong> from the previous regular-hours
-              session on your chart. Times should be valid CT times from that session
-              (for example 09:30, 11:00, 14:30). These are your reference turns.
+              session or from the overnight stretch up to 03:00. Times are in CT.
             </div>
             """,
             unsafe_allow_html=True,
@@ -804,7 +815,7 @@ def main():
         with c1:
             st.markdown("**High Swing**")
             high_price = st.number_input(
-                "High price (prior RTH)",
+                "High price (prior RTH or up to 03:00)",
                 value=5200.0,
                 step=0.25,
                 key="high_pivot",
@@ -815,10 +826,16 @@ def main():
                 step=1800,
                 key="high_time",
             )
+            high_is_night = st.checkbox(
+                "High was between midnight and 03:00",
+                value=False,
+                key="high_is_night",
+            )
+
         with c2:
             st.markdown("**Low Swing**")
             low_price = st.number_input(
-                "Low price (prior RTH)",
+                "Low price (prior RTH or up to 03:00)",
                 value=5100.0,
                 step=0.25,
                 key="low_pivot",
@@ -828,6 +845,11 @@ def main():
                 value=dtime(13, 0),
                 step=1800,
                 key="low_time",
+            )
+            low_is_night = st.checkbox(
+                "Low was between midnight and 03:00",
+                value=False,
+                key="low_is_night",
             )
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -840,6 +862,8 @@ def main():
                     low_price=low_price,
                     low_time=low_time,
                     slope_sign=+1,
+                    high_is_night=high_is_night,
+                    low_is_night=low_is_night,
                 )
                 df_desc, h_desc = build_structural_channel(
                     high_price=high_price,
@@ -847,9 +871,10 @@ def main():
                     low_price=low_price,
                     low_time=low_time,
                     slope_sign=-1,
+                    high_is_night=high_is_night,
+                    low_is_night=low_is_night,
                 )
 
-                # Extend with up to 3 extra outer lanes (quietly)
                 df_asc = extend_stacks(df_asc, h_asc, MAX_STACK_DEPTH)
                 df_desc = extend_stacks(df_desc, h_desc, MAX_STACK_DEPTH)
 
@@ -858,7 +883,6 @@ def main():
                 st.session_state["asc_height"] = h_asc
                 st.session_state["desc_height"] = h_desc
 
-                # Overnight suggestion
                 depth_suggest, label = suggest_stack_depth(
                     channel_height=max(h_asc, h_desc),
                     overnight_high=overnight_high,
@@ -876,8 +900,16 @@ def main():
 
         if df_asc is None or df_desc is None:
             section_header("Today's RTH Grid")
-            st.info("Once you draw today's lanes, you'll see a full time × price grid with main lanes and outer lanes.")
+            st.info("After you draw the lanes, you will see a full time by price grid with main and outer lanes.")
         else:
+            view_choice = st.radio(
+                "Which view do you want to see right now?",
+                ["Up view only", "Down view only", "Show both"],
+                index=2,
+                horizontal=True,
+                key="map_view_choice",
+            )
+
             section_header("Quick Summary")
 
             depth_suggest = st.session_state.get("stack_depth_suggestion", 1)
@@ -905,53 +937,54 @@ def main():
             with s3:
                 st.markdown(
                     metric_card(
-                        "Suggested extra lanes",
+                        "Suggested outer lanes",
                         f"{depth_suggest} each side",
                         stack_label,
                     ),
                     unsafe_allow_html=True,
                 )
 
-            section_header("Up View (Rising Lanes)")
-            a1, a2 = st.columns([3, 1])
-            with a1:
-                # Show columns up to suggested depth for readability
-                cols_to_show = ["Time", "Main Top", "Main Bottom"]
-                for lvl in range(1, depth_suggest + 1):
-                    cols_to_show.extend(
-                        [f"Stack+{lvl} Top", f"Stack+{lvl} Bottom", f"Stack-{lvl} Top", f"Stack-{lvl} Bottom"]
+            if view_choice in ["Up view only", "Show both"]:
+                section_header("Up View (Rising Lanes)")
+                a1, a2 = st.columns([3, 1])
+                with a1:
+                    cols_to_show = ["Time", "Main Top", "Main Bottom"]
+                    for lvl in range(1, depth_suggest + 1):
+                        cols_to_show.extend(
+                            [f"Stack+{lvl} Top", f"Stack+{lvl} Bottom", f"Stack-{lvl} Top", f"Stack-{lvl} Bottom"]
+                        )
+                    cols_to_show = [c for c in cols_to_show if c in df_asc.columns]
+                    st.dataframe(df_asc[cols_to_show], use_container_width=True, hide_index=True, height=340)
+                with a2:
+                    st.markdown(
+                        metric_card(
+                            "Max outer lane shown",
+                            f"+/- {depth_suggest}",
+                            "You can still scroll in the table to see all lanes if needed.",
+                        ),
+                        unsafe_allow_html=True,
                     )
-                cols_to_show = [c for c in cols_to_show if c in df_asc.columns]
-                st.dataframe(df_asc[cols_to_show], use_container_width=True, hide_index=True, height=340)
-            with a2:
-                st.markdown(
-                    metric_card(
-                        "Max outer lane shown",
-                        f"+/- {depth_suggest}",
-                        "You can still scroll right in the table to see all lanes if needed.",
-                    ),
-                    unsafe_allow_html=True,
-                )
 
-            section_header("Down View (Falling Lanes)")
-            d1, d2 = st.columns([3, 1])
-            with d1:
-                cols_to_show_d = ["Time", "Main Top", "Main Bottom"]
-                for lvl in range(1, depth_suggest + 1):
-                    cols_to_show_d.extend(
-                        [f"Stack+{lvl} Top", f"Stack+{lvl} Bottom", f"Stack-{lvl} Top", f"Stack-{lvl} Bottom"]
+            if view_choice in ["Down view only", "Show both"]:
+                section_header("Down View (Falling Lanes)")
+                d1, d2 = st.columns([3, 1])
+                with d1:
+                    cols_to_show_d = ["Time", "Main Top", "Main Bottom"]
+                    for lvl in range(1, depth_suggest + 1):
+                        cols_to_show_d.extend(
+                            [f"Stack+{lvl} Top", f"Stack+{lvl} Bottom", f"Stack-{lvl} Top", f"Stack-{lvl} Bottom"]
+                        )
+                    cols_to_show_d = [c for c in cols_to_show_d if c in df_desc.columns]
+                    st.dataframe(df_desc[cols_to_show_d], use_container_width=True, hide_index=True, height=340)
+                with d2:
+                    st.markdown(
+                        metric_card(
+                            "Same outer lanes",
+                            f"+/- {depth_suggest}",
+                            "Both views use the same outer lane depth.",
+                        ),
+                        unsafe_allow_html=True,
                     )
-                cols_to_show_d = [c for c in cols_to_show_d if c in df_desc.columns]
-                st.dataframe(df_desc[cols_to_show_d], use_container_width=True, hide_index=True, height=340)
-            with d2:
-                st.markdown(
-                    metric_card(
-                        "Same outer lanes",
-                        f"+/- {depth_suggest}",
-                        "Both views use the same extra-lane depth for consistency.",
-                    ),
-                    unsafe_allow_html=True,
-                )
 
         end_card()
 
@@ -959,7 +992,7 @@ def main():
     with tabs[1]:
         card(
             "Option Move Planner",
-            "Take the distance between lanes, apply your option sensitivity, and build a simple rail-to-rail template "
+            "Take the distance between lanes, apply your option sensitivity, and build a simple rail to rail template "
             "for calls or puts.",
             badge="Options Layer",
         )
@@ -970,7 +1003,7 @@ def main():
         h_desc = st.session_state["desc_height"]
 
         if df_asc is None or df_desc is None or h_asc is None or h_desc is None:
-            st.warning("No lanes yet. Draw today's lanes first in 'Map of the Day'.")
+            st.warning("No lanes yet. Draw today's lanes first in Map of the Day.")
             end_card()
         else:
             section_header("Which version are you leaning toward?")
@@ -1013,14 +1046,14 @@ def main():
                     unsafe_allow_html=True,
                 )
             with c3:
-                asym_text = "—"
+                asym_text = "N/A"
                 note = "Uses both views."
                 if primary_height and alt_height and alt_height > 0 and primary_height > 0:
                     big = max(primary_height, alt_height)
                     small = min(primary_height, alt_height)
                     ratio = big / small
-                    asym_text = f"{ratio:.2f}×"
-                    note = "Above 1.30× means one side of the story dominates."
+                    asym_text = f"{ratio:.2f}x"
+                    note = "Above 1.30x means one side of the story dominates."
                 st.markdown(
                     metric_card(
                         "Difference between views",
@@ -1038,7 +1071,7 @@ def main():
             with m1:
                 st.markdown(
                     metric_card(
-                        "Full rail-to-rail move",
+                        "Full rail to rail move",
                         f"{underlying_full_span:.2f} pts",
                         "If price travels the whole lane.",
                     ),
@@ -1058,8 +1091,8 @@ def main():
                 st.markdown(
                     metric_card(
                         "Power vs minimum move",
-                        f"{ratio_vs_min:.2f}×",
-                        f"Below 1.0× is more of a 'small win' day.",
+                        f"{ratio_vs_min:.2f}x",
+                        f"Below 1.0x is more of a small win day.",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -1070,7 +1103,7 @@ def main():
             with t1:
                 trade_side = st.radio(
                     "Which way are you planning to ride the lane?",
-                    ["Long Call (bottom → top)", "Long Put (top → bottom)"],
+                    ["Long Call (bottom to top)", "Long Put (top to bottom)"],
                     index=0,
                     key="trade_side",
                 )
@@ -1082,16 +1115,16 @@ def main():
                     value=1.00,
                     step=0.05,
                     key="rail_fraction",
-                    help="1.00 = full lane. 0.70 = take profits earlier and let the rest go.",
+                    help="1.00 = full lane, 0.70 = take profits earlier and let the rest go.",
                 )
             with t3:
                 entry_contract_price = st.number_input(
-                    "Rough option entry price at the rail",
+                    "Rough option entry price at the lane",
                     min_value=0.01,
                     value=5.00,
                     step=0.05,
                     key="entry_contract_price",
-                    help="Your ballpark option price when the rail touch happens.",
+                    help="Your ballpark option price when the lane touch happens.",
                 )
 
             underlying_plan = primary_height * rail_fraction
@@ -1136,11 +1169,11 @@ def main():
                     unsafe_allow_html=True,
                 )
 
-            section_header("Time × price view with option overlay")
+            section_header("Time by price view with option overlay")
 
             st.caption(
-                "Each row is a 30-minute slot on your main view. Lanes show location. "
-                "The option columns remind you what a full lane move could pay."
+                "Each row is a 30 minute slot on your main view. Lanes show location. "
+                "The option columns show what a full lane move could pay."
             )
 
             map_df = primary_df.copy()
@@ -1156,7 +1189,7 @@ def main():
             st.markdown(
                 """
                 <div class="spx-sub" style="margin-top:8px;">
-                  The table does not guess where the touch will happen. It just gives you a clean grid:
+                  The table does not try to guess where the touch will happen. It gives a clean grid:
                   time on one axis, lanes on the other, and what a full move might hand your option.
                 </div>
                 """,
@@ -1165,7 +1198,7 @@ def main():
 
         end_card()
 
-    # ============= TAB 3 – GAME PLAN (DAILY PLAYBOOK) =============
+    # ============= TAB 3 – GAME PLAN =============
     with tabs[2]:
         card(
             "Game Plan",
@@ -1180,7 +1213,7 @@ def main():
         h_desc = st.session_state["desc_height"]
 
         if df_asc is None or df_desc is None or h_asc is None or h_desc is None:
-            st.warning("No lanes yet. Draw today's lanes first in 'Map of the Day'.")
+            st.warning("No lanes yet. Draw today's lanes first in Map of the Day.")
             end_card()
         else:
             section_header("Which version are you watching today?")
@@ -1209,7 +1242,7 @@ def main():
                     metric_card(
                         "Main view",
                         primary_choice,
-                        "Based on yesterday's swings.",
+                        "Based on your chosen swings.",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -1223,14 +1256,14 @@ def main():
                     unsafe_allow_html=True,
                 )
             with c3:
-                asym_text = "—"
+                asym_text = "N/A"
                 note = "Looks at both views."
                 if primary_height and alt_height and alt_height > 0 and primary_height > 0:
                     big = max(primary_height, alt_height)
                     small = min(primary_height, alt_height)
                     ratio = big / small
-                    asym_text = f"{ratio:.2f}×"
-                    note = "Above 1.30× means one side of the story is louder."
+                    asym_text = f"{ratio:.2f}x"
+                    note = "Above 1.30x means one side of the story is louder."
                 st.markdown(
                     metric_card(
                         "Difference between views",
@@ -1251,7 +1284,7 @@ def main():
             if headline == "STAND ASIDE":
                 banner_class = "spx-banner-stop"
                 icon = "🛑"
-                friendly = "No-Trade Zone"
+                friendly = "No Trade Zone"
             elif headline == "LIGHT SIZE / SCALP ONLY":
                 banner_class = "spx-banner-caution"
                 icon = "⚠️"
@@ -1299,10 +1332,6 @@ def main():
                     key="open_slot_playbook",
                 )
 
-            true_day_label = ""
-            true_banner_class = None
-            true_icon = ""
-
             if open_price > 0.0:
                 row = primary_df[primary_df["Time"] == open_slot].iloc[0]
                 main_top = row["Main Top"]
@@ -1310,7 +1339,11 @@ def main():
                 stack_up_top = row.get("Stack+1 Top", main_top)
                 stack_down_bottom = row.get("Stack-1 Bottom", main_bottom)
 
-                # True bullish / true bearish logic based on open relative to main lanes
+                # True surprise logic based on open relative to main lanes
+                true_day_label = ""
+                true_banner_class = None
+                true_icon = ""
+
                 if primary_choice == "Up Day View" and open_price < main_bottom:
                     true_day_label = "Bear Surprise Day"
                     true_banner_class = "spx-banner-stop"
@@ -1325,7 +1358,7 @@ def main():
                         f"""
                         <div class="{true_banner_class}" style="margin-top:4px; margin-bottom:6px;">
                           <strong>{true_icon} {true_day_label}</strong><br>
-                          Open is beyond the main lane in the “wrong” direction. Expect fake-outs and violent snaps.
+                          Open is beyond the main lane in the opposite direction of your main view. Expect fake outs and violent snaps.
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -1343,7 +1376,7 @@ def main():
                             if pos <= 0.3:
                                 pos_text = "near the lower lane inside the main channel."
                                 suggestion = (
-                                    "Bias: you have room above. Best ideas usually come from patient bounces here, "
+                                    "Bias: you have room above. Best ideas often come from patient bounces here, "
                                     "especially after the first hour."
                                 )
                             elif pos >= 0.7:
@@ -1357,7 +1390,7 @@ def main():
                                 suggestion = (
                                     "Bias: middle of the playground. Let price choose a lane before you commit."
                                 )
-                        else:  # Down Day View
+                        else:
                             if pos <= 0.3:
                                 pos_text = "near the lower lane inside the main channel."
                                 suggestion = (
@@ -1377,7 +1410,7 @@ def main():
                     else:
                         if open_price > main_top:
                             if open_price <= stack_up_top:
-                                pos_text = "above the main channel but inside the first outer lane."
+                                pos_text = "above the main channel but inside the first upper outer lane."
                                 suggestion = (
                                     "Bias: this is an extension zone. It can still snap back into the main lanes. "
                                     "Wait for price to slow down before stepping in."
@@ -1385,9 +1418,9 @@ def main():
                                 banner_class_bias = "spx-banner-caution"
                                 icon_bias = "⚠️"
                             else:
-                                pos_text = "well above both the main lane and the first outer lane."
+                                pos_text = "well above both the main lane and the first upper outer lane."
                                 suggestion = (
-                                    "Bias: very stretched. Chasing in the same direction up here usually ends in regret."
+                                    "Bias: very stretched. Chasing in the same direction up here usually ends badly."
                                 )
                                 banner_class_bias = "spx-banner-stop"
                                 icon_bias = "🛑"
@@ -1403,12 +1436,12 @@ def main():
                             else:
                                 pos_text = "well below both the main lane and the first lower outer lane."
                                 suggestion = (
-                                    "Bias: washed-out levels. Let other people chase; you protect your firepower."
+                                    "Bias: washed out levels. Let other traders chase; you protect your firepower."
                                 )
                                 banner_class_bias = "spx-banner-stop"
                                 icon_bias = "🛑"
                 else:
-                    pos_text = "not well-defined because the lanes are flat."
+                    pos_text = "not well defined because the lanes are flat."
                     suggestion = "Check your chosen swings; top and bottom should not be the same."
 
                 st.markdown(
@@ -1427,25 +1460,27 @@ def main():
             primary_height_for_play = st.session_state.get("primary_height_for_play", primary_height)
             rail_fraction_for_play = st.session_state.get("rail_fraction_for_play", 1.0)
             entry_contract_price_for_play = st.session_state.get("entry_contract_price_for_play", 5.0)
-            contract_plan_move_for_play = st.session_state.get("contract_plan_move_for_play", primary_height_for_play * contract_factor * rail_fraction_for_play)
+            contract_plan_move_for_play = st.session_state.get(
+                "contract_plan_move_for_play",
+                primary_height_for_play * contract_factor * rail_fraction_for_play,
+            )
             roi_pct_for_play = st.session_state.get("roi_pct_for_play", 0.0)
 
-            # Simple labels for how strong the planned move is
             if contract_plan_move_for_play >= MIN_CONTRACT_MOVE * 1.5 and roi_pct_for_play >= 100:
                 play_label = "Green Light Setup"
                 play_banner = "spx-banner-ok"
                 play_icon = "🚀"
-                play_text = "The lane gives your option plenty of room. If your entry rules line up, this is worth your full attention."
+                play_text = "The lane gives your option plenty of room. If your entry rules line up, this deserves your full focus."
             elif contract_plan_move_for_play >= MIN_CONTRACT_MOVE:
                 play_label = "Decent Opportunity"
                 play_banner = "spx-banner-caution"
                 play_icon = "✨"
-                play_text = "This can still be a nice trade, but think in terms of singles and doubles, not home runs."
+                play_text = "This can still be a solid trade. Think in terms of singles and doubles, not home runs."
             else:
                 play_label = "Save Your Bullets"
                 play_banner = "spx-banner-stop"
                 play_icon = "🧊"
-                play_text = "The planned option move is small. Today might be a better day to observe than to push size."
+                play_text = "The planned option move is small. Today might be better for watching and recording notes."
 
             st.markdown(
                 f"""
@@ -1465,14 +1500,13 @@ def main():
                 """
                 <div class="spx-sub">
                   <ul style="margin-left:18px;">
-                    <li>Your day label and play label both agree that it's worth playing.</li>
+                    <li>Your day label and play label both agree that it is worth playing.</li>
                     <li>The first clean touch at a lane appears after the opening chaos, not inside it.</li>
-                    <li>You know in advance what price means "I'm wrong" and where you will exit.</li>
+                    <li>You know in advance what price means "I am wrong" and where you will exit.</li>
                     <li>You know your max loss for the day and you respect it.</li>
-                    <li>Every trade can be written in one line: <em>“If price does X at lane Y in time window Z, I will do A with size B.”</em></li>
+                    <li>Every trade can be written in one line: <em>If price does X at lane Y in time window Z, I will do A with size B.</em></li>
                   </ul>
-                  The app gives you structure, names, and numbers. The real edge is how consistently you follow
-                  your own rules on top of that.
+                  The app gives structure, names, and numbers. Your edge is how consistently you follow your own rules on top of that.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1487,26 +1521,26 @@ def main():
         st.markdown(
             """
             <div class="spx-sub" style="font-size:0.95rem; line-height:1.7;">
-              <p><strong>What this tool is doing quietly in the background:</strong></p>
+              <p><strong>What this tool does quietly in the background:</strong></p>
               <ul style="margin-left:18px;">
-                <li>It takes yesterday's chosen high swing and low swing and treats them as the "rails" for today.</li>
-                <li>It leans on a fixed slope of 0.475 points per 30 minutes to carry those rails forward.</li>
-                <li>It builds an "up day" version and a "down day" version from the same swings.</li>
-                <li>It adds extra outer lanes above and below so you can see extensions and snap-back zones.</li>
-                <li>It turns the distance between rails into an option move using your sensitivity number.</li>
-                <li>It gives the day a simple label, so you know whether to press, scalp, or sit out.</li>
-                <li>It lets you plug in your own planned option entry and quietly shows what that plan is really worth.</li>
+                <li>Takes yesterday's chosen high swing and low swing as the rails for today.</li>
+                <li>Lets those swings come from prior RTH or from overnight up to 03:00.</li>
+                <li>Uses a fixed slope of 0.475 points per 30 minutes to carry those rails forward.</li>
+                <li>Builds an up day view and a down day view from the same swings.</li>
+                <li>Adds outer lanes above and below so you can see stretch and snap back zones.</li>
+                <li>Turns the distance between rails into an option move using your sensitivity number.</li>
+                <li>Gives the day a simple label so you know whether to press, scalp, or sit out.</li>
+                <li>Lets you plug in your own planned option entry and shows what that plan is really worth.</li>
               </ul>
 
-              <p><strong>What it is not trying to do:</strong></p>
+              <p><strong>What it does not try to do:</strong></p>
               <ul style="margin-left:18px;">
                 <li>Predict news, volatility spikes, or sudden waves of buyers or sellers.</li>
                 <li>Replace your own entry pattern, stop placement, or review process.</li>
-                <li>Guarantee wins. It just makes the map and the math easier to see.</li>
+                <li>Guarantee wins. It just makes the map and the math easier to see and repeat.</li>
               </ul>
 
-              <p>The idea is simple: clear lanes, simple labels, honest math. You bring your own
-              reading of price and discipline on top of that.</p>
+              <p>The goal is simple: clear lanes, simple labels, honest math. You bring your reading of price and your discipline.</p>
             </div>
             """,
             unsafe_allow_html=True,
