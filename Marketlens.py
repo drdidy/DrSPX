@@ -1,14 +1,13 @@
 # spx_prophet_app.py
-# SPX Prophet – Light Mode, Manual Input, Legendary UI
+# SPX Prophet – Light Mode, Manual Input, Styled UI
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta, time
 
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 # CONSTANTS
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 
 SLOPE_PER_30M = 0.475        # points per 30-min block (magnitude)
 MAX_OFFSETS = 3
@@ -16,9 +15,9 @@ MAX_RAIL_DISTANCE = 5.0      # max distance between close and rail for valid sig
 EFFICIENCY_THRESHOLD = 0.33  # your contract movement factor
 
 
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 # GLOBAL LIGHT-THEME STYLING
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 
 st.set_page_config(
     page_title="SPX Prophet – Options Channel Engine",
@@ -28,7 +27,6 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-/* Global */
 body {
     background-color: #F5F7FB;
     color: #111827;
@@ -65,17 +63,17 @@ h1, h2, h3 {
     box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25);
 }
 
-/* Number / text inputs */
+/* Inputs */
 input, textarea {
     border-radius: 10px !important;
 }
 
-/* Containers – subtle card look */
+/* Main container padding */
 .block-container {
     padding-top: 0.5rem;
 }
 
-/* Metric-style cards (we'll mimic using containers) */
+/* Card look */
 .spx-card {
     padding: 18px 20px;
     background-color: #FFFFFF;
@@ -116,14 +114,14 @@ input, textarea {
     font-weight: 600;
 }
 
-/* Data editor tweaks */
+/* Data editor */
 [data-testid="stDataEditor"] {
     background-color: #FFFFFF;
     border-radius: 16px;
     border: 1px solid #E5E7EB;
 }
 
-/* Scrollbars smaller */
+/* Scrollbars */
 ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -138,30 +136,22 @@ input, textarea {
 )
 
 
-# ---------------------------------------------------------------
-# SMALL HELPERS
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
+# HELPERS
+# -------------------------------------------------------------------
 
-def blocks_between(t_ref: datetime, t_target: datetime) -> float:
-    """Number of 30-min blocks from t_ref to t_target."""
+def blocks_between(t_ref, t_target):
+    """Number of 30-min blocks between two datetimes."""
     delta = t_target - t_ref
     minutes = delta.total_seconds() / 60.0
     return minutes / 30.0
 
 
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 # CHANNEL CALCULATIONS
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 
-def compute_channel_params(
-    structure: str,
-    ref_time: datetime,
-    bottom_ref: float,
-    top_ref: float,
-    overnight_high: float,
-    overnight_low: float,
-):
-    """Return dict describing the main channel geometry."""
+def compute_channel_params(structure, ref_time, bottom_ref, top_ref, overnight_high, overnight_low):
     width = top_ref - bottom_ref
     if width <= 0:
         width = abs(width) if width != 0 else 1.0
@@ -169,7 +159,6 @@ def compute_channel_params(
     overnight_range = overnight_high - overnight_low
     violence = overnight_range / width if width != 0 else 1.0
 
-    # Map violence → offset count
     if violence <= 0.75:
         offsets = 1
     elif violence <= 1.5:
@@ -178,12 +167,11 @@ def compute_channel_params(
         offsets = 3
     offsets = min(offsets, MAX_OFFSETS)
 
-    # Slope sign from structure
     if structure == "Ascending":
         slope = +SLOPE_PER_30M
     elif structure == "Descending":
         slope = -SLOPE_PER_30M
-    else:  # Both – use magnitude, you interpret direction
+    else:
         slope = SLOPE_PER_30M
 
     return {
@@ -198,8 +186,7 @@ def compute_channel_params(
     }
 
 
-def rail_values_at_time(channel: dict, t: datetime, side: str = "primary", level: int = 0):
-    """Return bottom, top rail price at timestamp t."""
+def rail_values_at_time(channel, t, side="primary", level=0):
     n_blocks = blocks_between(channel["ref_time"], t)
     slope = channel["slope"]
 
@@ -213,8 +200,7 @@ def rail_values_at_time(channel: dict, t: datetime, side: str = "primary", level
     return bottom_primary + shift, top_primary + shift
 
 
-def classify_day_type(channel: dict, open_price: float, open_time: datetime) -> str:
-    """Simple open relative-position classification."""
+def classify_day_type(channel, open_price, open_time):
     bottom, top = rail_values_at_time(channel, open_time, side="primary")
     structure = channel["structure"]
 
@@ -230,16 +216,14 @@ def classify_day_type(channel: dict, open_price: float, open_time: datetime) -> 
     return f"Dual structure – {position}"
 
 
-# ---------------------------------------------------------------
-# SIGNAL ENGINE (RAW + SECOND-CANDLE CONFIRMATION)
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
+# SIGNAL ENGINE
+# -------------------------------------------------------------------
 
-def raw_candle_signal(channel: dict, t: datetime, o: float, h: float, l: float, c: float):
-    """Evaluate raw signal from a single 30-min candle."""
+def raw_candle_signal(channel, t, o, h, l, c):
     structure = channel["structure"]
     bottom, top = rail_values_at_time(channel, t, side="primary")
 
-    # Candle type
     if c > o:
         ctype = "bull"
     elif c < o:
@@ -250,7 +234,6 @@ def raw_candle_signal(channel: dict, t: datetime, o: float, h: float, l: float, 
     dist_bottom = abs(c - bottom)
     dist_top = abs(c - top)
 
-    # Up structure – long signals from bear candle at rails
     if structure == "Ascending":
         # Long from bottom rail
         if (
@@ -281,7 +264,6 @@ def raw_candle_signal(channel: dict, t: datetime, o: float, h: float, l: float, 
                 "c": c,
             }
 
-    # Down structure – short signals from bull candle at rails
     if structure == "Descending":
         # Short from top rail
         if (
@@ -312,27 +294,18 @@ def raw_candle_signal(channel: dict, t: datetime, o: float, h: float, l: float, 
                 "c": c,
             }
 
-    # For "Both", you’ll interpret manually – no auto raw signal
     return None
 
 
-def confirm_signal(side: str, rail: float, first_close: float, o2: float, h2: float, l2: float, c2: float) -> bool:
-    """Second candle confirmation. Long: continuation up; Short: continuation down."""
+def confirm_signal(side, rail, first_close, o2, h2, l2, c2):
     if side == "long":
-        if c2 > first_close and l2 > rail - 1.0:
-            return True
-        return False
-
+        return c2 > first_close and l2 > rail - 1.0
     if side == "short":
-        if c2 < first_close and h2 < rail + 1.0:
-            return True
-        return False
-
+        return c2 < first_close and h2 < rail + 1.0
     return False
 
 
-def scan_signals_with_confirmation(channel: dict, df_30: pd.DataFrame):
-    """Scan all candles for signals, with second-candle confirmation."""
+def scan_signals_with_confirmation(channel, df_30):
     signals = []
     if df_30.empty or len(df_30) < 2:
         return signals
@@ -369,30 +342,25 @@ def scan_signals_with_confirmation(channel: dict, df_30: pd.DataFrame):
     return signals
 
 
-# ---------------------------------------------------------------
-# OPTIONS LAYER (MODELING)
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
+# OPTIONS LAYER
+# -------------------------------------------------------------------
 
-def expected_spx_move(channel: dict, num_blocks: int = 1) -> float:
-    """Project expected SPX move along the channel for N 30-min blocks."""
+def expected_spx_move(channel, num_blocks=1):
     return abs(channel["slope"]) * num_blocks
 
 
-def suggest_option_contracts(price: float, expected_move: float, side: str):
-    """
-    Simple, model-based contract suggestions.
-    Uses your 0.33 factor as minimum efficiency target.
-    """
+def suggest_option_contracts(price, expected_move, side):
     expected_contract_move = expected_move * EFFICIENCY_THRESHOLD
 
     if side == "long":
-        safe_strike = round(price - 10)  # ITM-ish call
-        opt_strike = round(price)       # ATM call
-        agg_strike = round(price + 10)  # OTM call
-    else:  # short
-        safe_strike = round(price + 10)  # ITM-ish put
-        opt_strike = round(price)        # ATM put
-        agg_strike = round(price - 10)   # OTM put
+        safe_strike = round(price - 10)
+        opt_strike = round(price)
+        agg_strike = round(price + 10)
+    else:
+        safe_strike = round(price + 10)
+        opt_strike = round(price)
+        agg_strike = round(price - 10)
 
     return {
         "expected_spx_move": expected_move,
@@ -415,9 +383,9 @@ def suggest_option_contracts(price: float, expected_move: float, side: str):
     }
 
 
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 # HEADER
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 
 st.markdown(
     """
@@ -445,9 +413,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---------------------------------------------------------------
+
+# -------------------------------------------------------------------
 # SIDEBAR – SESSION SETUP
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 
 st.sidebar.title("Session Setup")
 
@@ -457,13 +426,11 @@ structure = st.sidebar.selectbox(
     "Market structure",
     ["Ascending", "Descending", "Both"],
     index=0,
-    help="How you interpret the overnight geometry.",
 )
 
 ref_time_str = st.sidebar.text_input(
     "Reference time (HH:MM)",
     value="03:00",
-    help="Time where your bottom/top reference rails apply.",
 )
 try:
     rh, rm = map(int, ref_time_str.split(":"))
@@ -503,16 +470,12 @@ holding_blocks = st.sidebar.slider(
     min_value=1,
     max_value=4,
     value=2,
-    help="Used to estimate SPX move and contract expansion.",
 )
 
-st.sidebar.markdown("---")
-st.sidebar.caption("All price & candle values are entered manually for full control.")
 
-
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 # CHANNEL SUMMARY
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 
 channel = compute_channel_params(
     structure,
@@ -523,19 +486,19 @@ channel = compute_channel_params(
     overnight_low,
 )
 
-summary_col1, summary_col2 = st.columns(2)
+col1, col2 = st.columns(2)
 
-with summary_col1:
+with col1:
     st.markdown('<div class="spx-card">', unsafe_allow_html=True)
     st.subheader("Channel Geometry")
     st.write(f"**Structure:** {channel['structure']}")
     st.write(f"**Slope per 30 min:** {channel['slope']:+.3f} pts")
-    st.write(f"**Width (top − bottom):** {channel['width']:.2f} pts")
-    st.write(f"**Violence score (range/width):** {channel['violence']:.2f}")
+    st.write(f"**Width:** {channel['width']:.2f} pts")
+    st.write(f"**Violence (range/width):** {channel['violence']:.2f}")
     st.write(f"**Offsets used:** {channel['offsets']}")
     st.markdown("</div>", unsafe_allow_html=True)
 
-with summary_col2:
+with col2:
     st.markdown('<div class="spx-card">', unsafe_allow_html=True)
     st.subheader("Reference & Overnight")
     st.write(f"**Reference time:** {channel['ref_time']}")
@@ -548,18 +511,19 @@ with summary_col2:
 st.markdown("---")
 
 
-# ---------------------------------------------------------------
-# CANDLE INPUT – DATA EDITOR
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
+# CANDLE INPUT – EDITOR (BACKWARDS COMPATIBLE)
+# -------------------------------------------------------------------
 
 st.markdown('<div class="spx-card">', unsafe_allow_html=True)
 st.subheader("30-Minute Candle Input")
 
 st.caption(
-    "Edit the template below with your actual session candles. "
-    "Times should be in HH:MM (24h) format. Use 8:30, 9:00, 9:30, etc."
+    "Edit the table below with your actual 30-min candles. "
+    "Times should be HH:MM (24h)."
 )
 
+# Default template
 default_times = []
 cursor = datetime.combine(session_date, time(8, 30))
 end_time = datetime.combine(session_date, time(15, 0))
@@ -578,19 +542,28 @@ df_template = pd.DataFrame(
     }
 )
 
-df_candles = st.data_editor(
-    df_template,
-    num_rows="dynamic",
-    use_container_width=True,
-    key="candles_editor",
-)
+# Use data_editor if available, else experimental_data_editor
+try:
+    df_candles = st.data_editor(
+        df_template,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="candles_editor",
+    )
+except AttributeError:
+    df_candles = st.experimental_data_editor(
+        df_template,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="candles_editor",
+    )
 
 st.markdown("</div>", unsafe_allow_html=True)
 
-# Convert Time strings → datetime objects safely
+# Convert to usable dataframe
 valid_rows = []
 for _, row in df_candles.iterrows():
-    t_str = str(row["Time"]).strip()
+    t_str = str(row.get("Time", "")).strip()
     if not t_str:
         continue
     try:
@@ -610,9 +583,10 @@ for _, row in df_candles.iterrows():
 
 df_30 = pd.DataFrame(valid_rows)
 
-# ---------------------------------------------------------------
-# DAY TYPE (from first candle, if present)
-# ---------------------------------------------------------------
+
+# -------------------------------------------------------------------
+# DAILY TYPE
+# -------------------------------------------------------------------
 
 if not df_30.empty:
     first_row = df_30.iloc[0]
@@ -639,30 +613,28 @@ st.markdown(
 
 if "Ascending channel – open above" in day_type:
     st.write(
-        "- Structure up and open above rails; calls at open are stretched.\n"
-        "- Best edge: wait for a bear candle touch and close above a rail, then call entries.\n"
-        "- Puts only if a clear flip below a rail forms."
+        "- Up structure and open above rails; calls at open are stretched.\n"
+        "- Edge is from bear candle touches & closes above rails."
     )
 elif "Ascending channel – open below" in day_type:
     st.write(
-        "- Up structure with bearish open. Strong put action possible until bottom rail.\n"
-        "- Once bottom rail is tested with your candle rule, calls can explode upward."
+        "- Up structure with bearish open; puts strong into bottom rail.\n"
+        "- Calls become powerful from a clean bottom-rail touch rule."
     )
 elif "Descending channel – open below" in day_type:
     st.write(
-        "- Down structure with bearish open; puts are powerful once a clean bull candle "
-        "touch and close below rail appears.\n"
-        "- Calls are defensive until a flip above rail confirms."
+        "- Down structure with bearish open; puts powerful from bull candle rule at rail.\n"
+        "- Calls only from flips above rails."
     )
 elif "Descending channel – open above" in day_type:
     st.write(
-        "- Down structure but bullish open; early puts are dangerous.\n"
-        "- Edge is in confirmed short entries from the top rail or in long flips above rails."
+        "- Down structure but bullish open; early puts dangerous.\n"
+        "- Wait for top-rail tests and flips."
     )
 else:
     st.write(
-        "- Dual or inside structure; trade lighter and prefer ATM contracts.\n"
-        "- Let second-candle confirmation do the heavy filtering."
+        "- Dual or inside structure; reduce aggression and prefer ATM contracts.\n"
+        "- Let the second-candle confirmation filter most setups."
     )
 
 st.markdown("</div>", unsafe_allow_html=True)
@@ -670,12 +642,12 @@ st.markdown("</div>", unsafe_allow_html=True)
 st.markdown("---")
 
 
-# ---------------------------------------------------------------
-# CHANNEL TABLE – TIME vs RAILS
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
+# CHANNEL TABLE
+# -------------------------------------------------------------------
 
 st.markdown('<div class="spx-card">', unsafe_allow_html=True)
-st.subheader("Price–Time Map – Channel Table")
+st.subheader("Price–Time Channel Table")
 
 times_for_table = []
 cursor = datetime.combine(session_date, time(8, 30))
@@ -708,31 +680,28 @@ st.markdown("</div>", unsafe_allow_html=True)
 st.markdown("---")
 
 
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 # SIGNALS + TRADE PLANNER
-# ---------------------------------------------------------------
+# -------------------------------------------------------------------
 
 st.markdown('<div class="spx-card">', unsafe_allow_html=True)
 st.subheader("Confirmed Signals")
 
 if df_30.empty or len(df_30) < 2:
-    st.info("Enter at least 2 valid 30-minute candles to scan for signals.")
+    st.info("Enter at least 2 valid 30-min candles to scan for signals.")
     st.markdown("</div>", unsafe_allow_html=True)
 else:
     signals = scan_signals_with_confirmation(channel, df_30)
 
     if not signals:
-        st.info("No signals passed your strict channel + second-candle filters. That protects your capital.")
+        st.info("No signals passed your channel + second-candle filters.")
         st.markdown("</div>", unsafe_allow_html=True)
     else:
         df_signals = pd.DataFrame(signals)
-        # Nice formatting
         df_signals["Signal time"] = df_signals["Signal time"].dt.strftime("%H:%M")
         df_signals["Confirm time"] = df_signals["Confirm time"].dt.strftime("%H:%M")
-
         st.dataframe(df_signals, use_container_width=True)
 
-        # Trade planner for first signal
         st.markdown("---")
         st.subheader("Trade Planner (First Confirmed Signal)")
 
@@ -757,21 +726,21 @@ else:
             unsafe_allow_html=True,
         )
 
-        col_a, col_b, col_c = st.columns(3)
+        c1, c2, c3 = st.columns(3)
 
-        with col_a:
-            st.write("**Rail price used**")
+        with c1:
+            st.write("**Rail price**")
             st.write(f"{rail_price:.2f}")
             st.write("**Distance to rail**")
             st.write(f"{sig0['Distance to rail']:.2f} pts")
 
-        with col_b:
+        with c2:
             st.write("**Projected SPX move**")
             st.write(f"{opt_plan['expected_spx_move']:.2f} pts")
             st.write("**Min contract move (0.33)**")
             st.write(f"{opt_plan['expected_contract_move']:.2f} $")
 
-        with col_c:
+        with c3:
             st.write("**Contract map (model)**")
             st.write(f"Safe: {opt_plan['safe']['label']} @ {opt_plan['safe']['strike']}")
             st.caption(opt_plan["safe"]["note"])
@@ -781,8 +750,8 @@ else:
             st.caption(opt_plan["aggressive"]["note"])
 
         st.caption(
-            "Use your broker’s live option chain to pick actual contracts, but keep this hierarchy: "
-            "Safe → Optimal → Aggressive. The 0.33 factor filters out dead contracts."
+            "Use your broker’s live option chain for actual contracts. "
+            "The hierarchy Safe → Optimal → Aggressive and the 0.33 factor are your edge filters."
         )
 
         st.markdown("</div>", unsafe_allow_html=True)
