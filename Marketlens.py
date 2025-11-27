@@ -1,115 +1,175 @@
 # spx_prophet_app.py
-
-pip install -r requirements.txt
+# SPX Prophet – Light Mode, Manual Input, Legendary UI
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import yfinance as yf
 from datetime import datetime, timedelta, time
 
-# -------------------------------------------------------------------
-# CONSTANTS AND CORE PARAMETERS
-# -------------------------------------------------------------------
+# ---------------------------------------------------------------
+# CONSTANTS
+# ---------------------------------------------------------------
 
-SLOPE_PER_30M = 0.475      # points per 30 minute block (magnitude)
-MAX_OFFSETS = 3            # maximum offset channels
-MAX_RAIL_DISTANCE = 5.0    # max distance in points between close and rail for valid signal
-EFFICIENCY_THRESHOLD = 0.33  # your contract efficiency factor
-TZ = "America/Chicago"     # your local market time
-
-
-# -------------------------------------------------------------------
-# UTILITIES
-# -------------------------------------------------------------------
-
-def get_today_date():
-    return datetime.now().date()
+SLOPE_PER_30M = 0.475        # points per 30-min block (magnitude)
+MAX_OFFSETS = 3
+MAX_RAIL_DISTANCE = 5.0      # max distance between close and rail for valid signal
+EFFICIENCY_THRESHOLD = 0.33  # your contract movement factor
 
 
-def download_spx_intraday(date, interval="5m"):
+# ---------------------------------------------------------------
+# GLOBAL LIGHT-THEME STYLING
+# ---------------------------------------------------------------
+
+st.set_page_config(
+    page_title="SPX Prophet – Options Channel Engine",
+    layout="wide",
+)
+
+st.markdown(
     """
-    Download SPX intraday data for given date using yfinance.
-    Uses ^GSPC (cash index), RTH only.
-    """
-    symbol = "^GSPC"
-    # A bit before open to a bit after close
-    start = datetime.combine(date, time(8, 25))
-    end = datetime.combine(date + timedelta(days=1), time(3, 10))
+<style>
+/* Global */
+body {
+    background-color: #F5F7FB;
+    color: #111827;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 
-    data = yf.download(
-        symbol,
-        start=start,
-        end=end,
-        interval=interval,
-        auto_adjust=False,
-        prepost=False,
-        progress=False,
-    )
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background-color: #FFFFFF;
+    border-right: 1px solid #E5E7EB;
+}
 
-    if data.empty:
-        return data
+/* Headings */
+h1, h2, h3 {
+    color: #111827 !important;
+    font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 
-    # convert timezone to Chicago
-    data.index = data.index.tz_convert(TZ)
-    return data
+/* Dataframes */
+[data-testid="stDataFrame"] {
+    background-color: #FFFFFF;
+    border-radius: 14px;
+    border: 1px solid #E5E7EB;
+}
+
+/* Buttons */
+.stButton > button {
+    border-radius: 999px;
+    background: linear-gradient(135deg, #2563EB, #22C55E);
+    color: white;
+    font-weight: 600;
+    border: none;
+    padding: 0.45rem 1.4rem;
+    box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25);
+}
+
+/* Number / text inputs */
+input, textarea {
+    border-radius: 10px !important;
+}
+
+/* Containers – subtle card look */
+.block-container {
+    padding-top: 0.5rem;
+}
+
+/* Metric-style cards (we'll mimic using containers) */
+.spx-card {
+    padding: 18px 20px;
+    background-color: #FFFFFF;
+    border-radius: 16px;
+    border: 1px solid #E5E7EB;
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.04);
+}
+
+/* Tag styles */
+.spx-tag {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+.spx-tag-green {
+    background-color: #DCFCE7;
+    color: #166534;
+}
+.spx-tag-red {
+    background-color: #FEE2E2;
+    color: #B91C1C;
+}
+.spx-tag-blue {
+    background-color: #DBEAFE;
+    color: #1D4ED8;
+}
+
+/* Signal text */
+.spx-signal-long {
+    color: #15803D;
+    font-weight: 600;
+}
+.spx-signal-short {
+    color: #B91C1C;
+    font-weight: 600;
+}
+
+/* Data editor tweaks */
+[data-testid="stDataEditor"] {
+    background-color: #FFFFFF;
+    border-radius: 16px;
+    border: 1px solid #E5E7EB;
+}
+
+/* Scrollbars smaller */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-thumb {
+    background-color: #CBD5F5;
+    border-radius: 999px;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 
-def resample_to_30m(df):
-    if df.empty:
-        return df
-    df_30 = df.resample("30T").agg(
-        {
-            "Open": "first",
-            "High": "max",
-            "Low": "min",
-            "Close": "last",
-            "Volume": "sum",
-        }
-    )
-    df_30.dropna(subset=["Open", "High", "Low", "Close"], inplace=True)
-    return df_30
+# ---------------------------------------------------------------
+# SMALL HELPERS
+# ---------------------------------------------------------------
 
-
-def blocks_between(t_ref, t_target):
-    """
-    Number of 30 minute blocks between two timestamps.
-    Positive if t_target after t_ref.
-    """
+def blocks_between(t_ref: datetime, t_target: datetime) -> float:
+    """Number of 30-min blocks from t_ref to t_target."""
     delta = t_target - t_ref
     minutes = delta.total_seconds() / 60.0
     return minutes / 30.0
 
 
-# -------------------------------------------------------------------
-# CHANNEL AND OFFSETS
-# -------------------------------------------------------------------
+# ---------------------------------------------------------------
+# CHANNEL CALCULATIONS
+# ---------------------------------------------------------------
 
 def compute_channel_params(
-    structure,
-    ref_time,
-    bottom_ref_price,
-    top_ref_price,
-    overnight_high=None,
-    overnight_low=None,
+    structure: str,
+    ref_time: datetime,
+    bottom_ref: float,
+    top_ref: float,
+    overnight_high: float,
+    overnight_low: float,
 ):
-    """
-    Build primary channel and decide number of offsets based on overnight violence.
-    structure: 'Ascending', 'Descending', 'Both'
-    ref_time: datetime
-    bottom_ref_price: bottom rail at ref_time
-    top_ref_price: top rail at ref_time
-    """
-    width = top_ref_price - bottom_ref_price
+    """Return dict describing the main channel geometry."""
+    width = top_ref - bottom_ref
     if width <= 0:
         width = abs(width) if width != 0 else 1.0
 
-    if overnight_high is not None and overnight_low is not None:
-        overnight_range = overnight_high - overnight_low
-        violence = overnight_range / width if width > 0 else 0
-    else:
-        violence = 1.0
+    overnight_range = overnight_high - overnight_low
+    violence = overnight_range / width if width != 0 else 1.0
 
+    # Map violence → offset count
     if violence <= 0.75:
         offsets = 1
     elif violence <= 1.5:
@@ -118,18 +178,19 @@ def compute_channel_params(
         offsets = 3
     offsets = min(offsets, MAX_OFFSETS)
 
+    # Slope sign from structure
     if structure == "Ascending":
         slope = +SLOPE_PER_30M
     elif structure == "Descending":
         slope = -SLOPE_PER_30M
-    else:
+    else:  # Both – use magnitude, you interpret direction
         slope = SLOPE_PER_30M
 
     return {
         "structure": structure,
         "ref_time": ref_time,
-        "bottom_ref": bottom_ref_price,
-        "top_ref": top_ref_price,
+        "bottom_ref": bottom_ref,
+        "top_ref": top_ref,
         "width": width,
         "violence": violence,
         "offsets": offsets,
@@ -137,540 +198,591 @@ def compute_channel_params(
     }
 
 
-def rail_values_at_time(channel, t, side="primary", level=0):
-    """
-    Compute top and bottom rail at time t.
-
-    side: 'primary', 'offset_up', 'offset_down'
-    level: offset index (1, 2, 3)
-    """
-    ref_time = channel["ref_time"]
+def rail_values_at_time(channel: dict, t: datetime, side: str = "primary", level: int = 0):
+    """Return bottom, top rail price at timestamp t."""
+    n_blocks = blocks_between(channel["ref_time"], t)
     slope = channel["slope"]
-    width = channel["width"]
 
-    n_blocks = blocks_between(ref_time, t)
-    signed_slope = slope  # you manually choose structure sign
-
-    bottom_at_ref = channel["bottom_ref"]
-    top_at_ref = channel["top_ref"]
-
-    bottom_primary = bottom_at_ref + signed_slope * n_blocks
-    top_primary = top_at_ref + signed_slope * n_blocks
+    bottom_primary = channel["bottom_ref"] + slope * n_blocks
+    top_primary = channel["top_ref"] + slope * n_blocks
 
     if side == "primary":
         return bottom_primary, top_primary
 
-    if side == "offset_up":
-        shift = level * width
-    elif side == "offset_down":
-        shift = -level * width
-    else:
-        shift = 0
-
-    bottom = bottom_primary + shift
-    top = top_primary + shift
-    return bottom, top
+    shift = channel["width"] * level * (1 if side == "offset_up" else -1)
+    return bottom_primary + shift, top_primary + shift
 
 
-def classify_day_type(channel, open_price, open_time):
+def classify_day_type(channel: dict, open_price: float, open_time: datetime) -> str:
+    """Simple open relative-position classification."""
     bottom, top = rail_values_at_time(channel, open_time, side="primary")
     structure = channel["structure"]
 
     if open_price > top:
-        position = "open_above"
+        position = "open above"
     elif open_price < bottom:
-        position = "open_below"
+        position = "open below"
     else:
-        position = "open_inside"
+        position = "open inside"
 
     if structure in ["Ascending", "Descending"]:
-        return f"{structure} channel - {position.replace('_', ' ')}"
-    else:
-        return f"Dual structure - {position.replace('_', ' ')}"
+        return f"{structure} channel – {position}"
+    return f"Dual structure – {position}"
 
 
-# -------------------------------------------------------------------
-# SIGNAL ENGINE WITH SECOND CANDLE CONFIRMATION
-# -------------------------------------------------------------------
+# ---------------------------------------------------------------
+# SIGNAL ENGINE (RAW + SECOND-CANDLE CONFIRMATION)
+# ---------------------------------------------------------------
 
-def raw_candle_signal(channel, candle_time, o, h, l, c):
-    """
-    Evaluate raw (first pass) signal for a single candle.
-    Returns dict with minimal info or None.
-    """
+def raw_candle_signal(channel: dict, t: datetime, o: float, h: float, l: float, c: float):
+    """Evaluate raw signal from a single 30-min candle."""
     structure = channel["structure"]
-    bottom, top = rail_values_at_time(channel, candle_time, side="primary")
+    bottom, top = rail_values_at_time(channel, t, side="primary")
 
+    # Candle type
     if c > o:
-        candle_type = "bull"
+        ctype = "bull"
     elif c < o:
-        candle_type = "bear"
+        ctype = "bear"
     else:
-        candle_type = "neutral"
+        ctype = "neutral"
 
-    # Distances
     dist_bottom = abs(c - bottom)
     dist_top = abs(c - top)
 
-    # Ascending: valid long from bottom or top rail
+    # Up structure – long signals from bear candle at rails
     if structure == "Ascending":
-        # Bottom long
+        # Long from bottom rail
         if (
-            candle_type == "bear"
+            ctype == "bear"
             and l <= bottom <= h
             and c > bottom
             and dist_bottom <= MAX_RAIL_DISTANCE
         ):
             return {
-                "time": candle_time,
                 "side": "long",
-                "rail_name": "primary_bottom",
                 "rail_price": bottom,
+                "rail_name": "primary_bottom",
                 "distance": dist_bottom,
-                "candle_type": candle_type,
-                "o": o,
-                "h": h,
-                "l": l,
                 "c": c,
             }
-        # Top long
+        # Long from top rail
         if (
-            candle_type == "bear"
+            ctype == "bear"
             and l <= top <= h
             and c > top
             and dist_top <= MAX_RAIL_DISTANCE
         ):
             return {
-                "time": candle_time,
                 "side": "long",
-                "rail_name": "primary_top",
                 "rail_price": top,
+                "rail_name": "primary_top",
                 "distance": dist_top,
-                "candle_type": candle_type,
-                "o": o,
-                "h": h,
-                "l": l,
                 "c": c,
             }
 
-    # Descending: valid short from top or bottom rail
+    # Down structure – short signals from bull candle at rails
     if structure == "Descending":
-        # Top short
+        # Short from top rail
         if (
-            candle_type == "bull"
+            ctype == "bull"
             and l <= top <= h
             and c < top
             and dist_top <= MAX_RAIL_DISTANCE
         ):
             return {
-                "time": candle_time,
                 "side": "short",
-                "rail_name": "primary_top",
                 "rail_price": top,
+                "rail_name": "primary_top",
                 "distance": dist_top,
-                "candle_type": candle_type,
-                "o": o,
-                "h": h,
-                "l": l,
                 "c": c,
             }
-        # Bottom short
+        # Short from bottom rail
         if (
-            candle_type == "bull"
+            ctype == "bull"
             and l <= bottom <= h
             and c < bottom
             and dist_bottom <= MAX_RAIL_DISTANCE
         ):
             return {
-                "time": candle_time,
                 "side": "short",
-                "rail_name": "primary_bottom",
                 "rail_price": bottom,
+                "rail_name": "primary_bottom",
                 "distance": dist_bottom,
-                "candle_type": candle_type,
-                "o": o,
-                "h": h,
-                "l": l,
                 "c": c,
             }
 
-    # For Dual structure, use discretion; here no automatic raw signal
+    # For "Both", you’ll interpret manually – no auto raw signal
     return None
 
 
-def confirm_signal_with_next_candle(channel, raw_sig, next_time, o2, h2, l2, c2):
-    """
-    Second candle confirmation filter.
-    For long:
-      next close should be higher and not break hard below rail.
-    For short:
-      next close should be lower and not break hard above rail.
-    Returns True if confirmed.
-    """
-    rail = raw_sig["rail_price"]
-    first_close = raw_sig["c"]
-    side = raw_sig["side"]
-
+def confirm_signal(side: str, rail: float, first_close: float, o2: float, h2: float, l2: float, c2: float) -> bool:
+    """Second candle confirmation. Long: continuation up; Short: continuation down."""
     if side == "long":
-        # Require continuation up and no decisive break under rail
         if c2 > first_close and l2 > rail - 1.0:
             return True
-        else:
-            return False
+        return False
 
     if side == "short":
-        # Require continuation down and no decisive break above rail
         if c2 < first_close and h2 < rail + 1.0:
             return True
-        else:
-            return False
+        return False
 
     return False
 
 
-def scan_signals_with_confirmation(channel, df_30):
-    """
-    Scan 30m candles for signals using raw rules plus second candle confirmation.
-    Skip first bar of the day for entries.
-    """
+def scan_signals_with_confirmation(channel: dict, df_30: pd.DataFrame):
+    """Scan all candles for signals, with second-candle confirmation."""
     signals = []
-
-    idx = df_30.index
-    n = len(idx)
-    if n < 3:
+    if df_30.empty or len(df_30) < 2:
         return signals
 
-    for i in range(1, n - 1):  # skip first bar (i=0), last bar has no confirm
-        t1 = idx[i]
+    for i in range(len(df_30) - 1):
         row1 = df_30.iloc[i]
+        row2 = df_30.iloc[i + 1]
+
+        t1 = row1["Time_dt"]
+        t2 = row2["Time_dt"]
         o1, h1, l1, c1 = row1["Open"], row1["High"], row1["Low"], row1["Close"]
+        o2, h2, l2, c2 = row2["Open"], row2["High"], row2["Low"], row2["Close"]
 
         raw = raw_candle_signal(channel, t1, o1, h1, l1, c1)
         if raw is None:
             continue
 
-        t2 = idx[i + 1]
-        row2 = df_30.iloc[i + 1]
-        o2, h2, l2, c2 = row2["Open"], row2["High"], row2["Low"], row2["Close"]
-
-        confirmed = confirm_signal_with_next_candle(channel, raw, t2, o2, h2, l2, c2)
-        if not confirmed:
+        if not confirm_signal(raw["side"], raw["rail_price"], raw["c"], o2, h2, l2, c2):
             continue
-
-        bottom, top = rail_values_at_time(channel, t1, side="primary")
 
         signals.append(
             {
-                "signal_time": t1,
-                "confirm_time": t2,
-                "side": raw["side"],
-                "rail_used": raw["rail_name"],
-                "rail_price": raw["rail_price"],
-                "distance_to_rail": raw["distance"],
-                "candle1_open": o1,
-                "candle1_close": c1,
-                "candle1_high": h1,
-                "candle1_low": l1,
-                "candle2_open": o2,
-                "candle2_close": c2,
-                "candle2_high": h2,
-                "candle2_low": l2,
-                "primary_bottom_at_signal": bottom,
-                "primary_top_at_signal": top,
+                "Signal time": t1,
+                "Confirm time": t2,
+                "Side": raw["side"],
+                "Rail used": raw["rail_name"],
+                "Rail price": round(raw["rail_price"], 2),
+                "Distance to rail": round(raw["distance"], 2),
+                "Candle1 close": c1,
+                "Candle2 close": c2,
             }
         )
 
     return signals
 
 
-# -------------------------------------------------------------------
-# SIMPLE OPTIONS LAYER (MODELING ONLY)
-# -------------------------------------------------------------------
+# ---------------------------------------------------------------
+# OPTIONS LAYER (MODELING)
+# ---------------------------------------------------------------
 
-def expected_spx_move(channel, num_blocks=1):
+def expected_spx_move(channel: dict, num_blocks: int = 1) -> float:
+    """Project expected SPX move along the channel for N 30-min blocks."""
     return abs(channel["slope"]) * num_blocks
 
 
-def suggest_option_contracts(price, expected_move_points):
-    expected_contract_move = expected_move_points * EFFICIENCY_THRESHOLD
+def suggest_option_contracts(price: float, expected_move: float, side: str):
+    """
+    Simple, model-based contract suggestions.
+    Uses your 0.33 factor as minimum efficiency target.
+    """
+    expected_contract_move = expected_move * EFFICIENCY_THRESHOLD
 
-    safe_strike = round(price - 10)   # ITM feel for calls if long
-    opt_strike = round(price)         # ATM
-    agg_strike = round(price + 10)    # OTM feel for calls if long
+    if side == "long":
+        safe_strike = round(price - 10)  # ITM-ish call
+        opt_strike = round(price)       # ATM call
+        agg_strike = round(price + 10)  # OTM call
+    else:  # short
+        safe_strike = round(price + 10)  # ITM-ish put
+        opt_strike = round(price)        # ATM put
+        agg_strike = round(price - 10)   # OTM put
 
     return {
-        "expected_spx_move": expected_move_points,
+        "expected_spx_move": expected_move,
         "expected_contract_move": expected_contract_move,
         "safe": {
             "strike": safe_strike,
-            "label": "Safe (ITM or heavy ATM)",
-            "note": "Stable, lower speed, better for reversals or chop.",
+            "label": "Safe (ITM-heavy)",
+            "note": "Stable, smaller swings. Best for reversals or noisy days.",
         },
         "optimal": {
             "strike": opt_strike,
             "label": "Optimal (ATM)",
-            "note": "Best balance for most clean channel trades.",
+            "note": "Best balance of cost vs speed on clean channel trades.",
         },
         "aggressive": {
             "strike": agg_strike,
             "label": "Aggressive (OTM)",
-            "note": "Use only on very clean, confirmed signals.",
+            "note": "Use only on very clean, confirmed signals in high-confidence days.",
         },
     }
 
 
-# -------------------------------------------------------------------
-# STREAMLIT APP
-# -------------------------------------------------------------------
-
-st.set_page_config(
-    page_title="SPX Prophet - Options Channel App",
-    layout="wide",
-)
-
-st.title("SPX Prophet - Options Channel App (V1.1)")
-
 # ---------------------------------------------------------------
-# SIDEBAR - GLOBAL CONTROLS
+# HEADER
 # ---------------------------------------------------------------
 
-st.sidebar.header("Global Settings")
-
-date_mode = st.sidebar.selectbox(
-    "Date mode",
-    ["Today", "Custom"],
-    index=0,
+st.markdown(
+    """
+<div style="text-align:center; margin-top: 0.5rem; margin-bottom: 1.5rem;">
+  <div style="
+      display:inline-block;
+      padding: 10px 22px;
+      border-radius: 999px;
+      background: linear-gradient(135deg,#2563EB,#22C55E);
+      color: white;
+      font-weight: 600;
+      font-family: Poppins, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 0.8rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 0.6rem;">
+    SPX Prophet
+  </div>
+  <h1 style="margin-bottom: 0; font-size: 2.3rem;">Options Channel Engine</h1>
+  <p style="margin-top: 0.3rem; color: #6B7280; font-size: 0.95rem;">
+    Manual-precision market structure, institutional-style entries, and options-aware planning.
+  </p>
+</div>
+""",
+    unsafe_allow_html=True,
 )
 
-if date_mode == "Today":
-    trade_date = get_today_date()
-else:
-    trade_date = st.sidebar.date_input("Select trade date", value=get_today_date())
+# ---------------------------------------------------------------
+# SIDEBAR – SESSION SETUP
+# ---------------------------------------------------------------
+
+st.sidebar.title("Session Setup")
+
+session_date = st.sidebar.date_input("Session date", value=datetime.today().date())
 
 structure = st.sidebar.selectbox(
     "Market structure",
     ["Ascending", "Descending", "Both"],
     index=0,
+    help="How you interpret the overnight geometry.",
 )
 
-st.sidebar.markdown("---")
-st.sidebar.write("Channel reference (from overnight or futures):")
-
-ref_time_input = st.sidebar.text_input(
-    "Reference time (HH:MM, local)",
+ref_time_str = st.sidebar.text_input(
+    "Reference time (HH:MM)",
     value="03:00",
-    help="Time (America/Chicago) where your bottom and top reference prices apply.",
+    help="Time where your bottom/top reference rails apply.",
 )
-
 try:
-    ref_hour, ref_minute = map(int, ref_time_input.split(":"))
-    ref_time = datetime.combine(trade_date, time(ref_hour, ref_minute))
+    rh, rm = map(int, ref_time_str.split(":"))
+    ref_time = datetime.combine(session_date, time(rh, rm))
 except Exception:
-    ref_time = datetime.combine(trade_date, time(3, 0))
+    ref_time = datetime.combine(session_date, time(3, 0))
 
-bottom_ref_price = st.sidebar.number_input(
-    "Bottom rail price at reference time",
+bottom_ref = st.sidebar.number_input(
+    "Bottom rail @ reference",
     value=4700.0,
     step=1.0,
     format="%.1f",
 )
-
-top_ref_price = st.sidebar.number_input(
-    "Top rail price at reference time",
+top_ref = st.sidebar.number_input(
+    "Top rail @ reference",
     value=4720.0,
     step=1.0,
     format="%.1f",
 )
 
-st.sidebar.markdown("Overnight range from ES (optional but useful):")
+st.sidebar.markdown("---")
 overnight_low = st.sidebar.number_input(
-    "Overnight low",
+    "Overnight low (ES)",
     value=4690.0,
     step=1.0,
     format="%.1f",
 )
 overnight_high = st.sidebar.number_input(
-    "Overnight high",
+    "Overnight high (ES)",
     value=4730.0,
     step=1.0,
     format="%.1f",
 )
 
+holding_blocks = st.sidebar.slider(
+    "Expected holding time (30-min blocks)",
+    min_value=1,
+    max_value=4,
+    value=2,
+    help="Used to estimate SPX move and contract expansion.",
+)
+
+st.sidebar.markdown("---")
+st.sidebar.caption("All price & candle values are entered manually for full control.")
+
+
 # ---------------------------------------------------------------
-# BUILD CHANNEL
+# CHANNEL SUMMARY
 # ---------------------------------------------------------------
 
 channel = compute_channel_params(
-    structure=structure,
-    ref_time=ref_time,
-    bottom_ref_price=bottom_ref_price,
-    top_ref_price=top_ref_price,
-    overnight_high=overnight_high,
-    overnight_low=overnight_low,
+    structure,
+    ref_time,
+    bottom_ref,
+    top_ref,
+    overnight_high,
+    overnight_low,
 )
 
-col1, col2 = st.columns(2)
+summary_col1, summary_col2 = st.columns(2)
 
-with col1:
-    st.subheader("Channel Overview")
-    st.write(f"Structure: {channel['structure']}")
-    st.write(f"Slope per 30 minutes: {channel['slope']:+.3f} points")
-    st.write(f"Channel width: {channel['width']:.2f} points")
-    st.write(f"Violence score (range / width): {channel['violence']:.2f}")
-    st.write(f"Offsets used: {channel['offsets']}")
+with summary_col1:
+    st.markdown('<div class="spx-card">', unsafe_allow_html=True)
+    st.subheader("Channel Geometry")
+    st.write(f"**Structure:** {channel['structure']}")
+    st.write(f"**Slope per 30 min:** {channel['slope']:+.3f} pts")
+    st.write(f"**Width (top − bottom):** {channel['width']:.2f} pts")
+    st.write(f"**Violence score (range/width):** {channel['violence']:.2f}")
+    st.write(f"**Offsets used:** {channel['offsets']}")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-with col2:
-    st.subheader("Reference and Overnight")
-    st.write(f"Reference time: {channel['ref_time']}")
-    st.write(f"Bottom rail at ref: {channel['bottom_ref']:.2f}")
-    st.write(f"Top rail at ref: {channel['top_ref']:.2f}")
-    st.write(f"Overnight low: {overnight_low:.2f}")
-    st.write(f"Overnight high: {overnight_high:.2f}")
-
-st.markdown("---")
-
-# ---------------------------------------------------------------
-# DOWNLOAD AND PROCESS SPX DATA
-# ---------------------------------------------------------------
-
-st.subheader("SPX Data and Daily Card")
-
-with st.spinner("Downloading SPX intraday data from yfinance..."):
-    spx_5m = download_spx_intraday(trade_date, interval="5m")
-
-if spx_5m.empty:
-    st.error("No SPX data retrieved. Check date or yfinance availability.")
-    st.stop()
-
-spx_30m = resample_to_30m(spx_5m)
-
-first_idx = spx_30m.index[0]
-spx_open = spx_30m.iloc[0]["Open"]
-
-day_type = classify_day_type(channel, spx_open, first_idx)
-
-card_col1, card_col2 = st.columns(2)
-
-with card_col1:
-    st.markdown("### Daily Card - High Level")
-    st.write(f"Trade date: {trade_date}")
-    st.write(f"SPX open (first 30m candle): {spx_open:.2f}")
-    st.write(f"Day type: {day_type}")
-    st.write("Options focused bias:")
-
-    if "Ascending channel - open above" in day_type:
-        st.write(
-            "- Up structure and open above channel, calls at open are extended.\n"
-            "- Wait for pullback to a rail and a clean bear candle touch and close above.\n"
-            "- Puts only if a strong flip below rails forms."
-        )
-    elif "Ascending channel - open below" in day_type:
-        st.write(
-            "- Up structure and open below channel, true bearish day inside uptrend.\n"
-            "- Puts can be strong until bottom rail is tagged.\n"
-            "- At bottom rail with your candle rule, calls become explosive."
-        )
-    elif "Descending channel - open below" in day_type:
-        st.write(
-            "- Down structure and open below, stretched downside.\n"
-            "- Wait for bull candle touch and close below rail to take puts.\n"
-            "- Calls only if a clear flip above rails forms."
-        )
-    elif "Descending channel - open above" in day_type:
-        st.write(
-            "- Down structure and open above, true bullish day inside downtrend.\n"
-            "- Early puts are dangerous, calls favored after top rail confirmation.\n"
-        )
-    else:
-        st.write(
-            "- Dual or inside structure, treat as potential chop.\n"
-            "- Prefer ATM contracts and wait for confirmation."
-        )
-
-with card_col2:
-    st.markdown("### Expected Move and Option Model")
-    proj_move = expected_spx_move(channel, num_blocks=1)
-    st.write(f"Projected SPX move next 30 minutes along channel: {proj_move:.2f} points")
-    opt_model = suggest_option_contracts(spx_open, proj_move)
-    st.write(f"Minimum expected contract move with 0.33 factor: {opt_model['expected_contract_move']:.2f} dollars")
-
-    st.write("Contract suggestions (model based, you will map to real chain):")
-    st.write(
-        f"- {opt_model['safe']['label']}: strike about {opt_model['safe']['strike']}, {opt_model['safe']['note']}"
-    )
-    st.write(
-        f"- {opt_model['optimal']['label']}: strike about {opt_model['optimal']['strike']}, {opt_model['optimal']['note']}"
-    )
-    st.write(
-        f"- {opt_model['aggressive']['label']}: strike about {opt_model['aggressive']['strike']}, {opt_model['aggressive']['note']}"
-    )
+with summary_col2:
+    st.markdown('<div class="spx-card">', unsafe_allow_html=True)
+    st.subheader("Reference & Overnight")
+    st.write(f"**Reference time:** {channel['ref_time']}")
+    st.write(f"**Bottom rail @ ref:** {channel['bottom_ref']:.2f}")
+    st.write(f"**Top rail @ ref:** {channel['top_ref']:.2f}")
+    st.write(f"**Overnight low:** {overnight_low:.2f}")
+    st.write(f"**Overnight high:** {overnight_high:.2f}")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("---")
 
+
 # ---------------------------------------------------------------
-# CHANNEL TABLE
+# CANDLE INPUT – DATA EDITOR
 # ---------------------------------------------------------------
 
-st.subheader("Channel Table - Rails by Time")
+st.markdown('<div class="spx-card">', unsafe_allow_html=True)
+st.subheader("30-Minute Candle Input")
 
-times = []
-t_cursor = datetime.combine(trade_date, time(8, 30))
-market_close = datetime.combine(trade_date, time(15, 0))
+st.caption(
+    "Edit the template below with your actual session candles. "
+    "Times should be in HH:MM (24h) format. Use 8:30, 9:00, 9:30, etc."
+)
 
-while t_cursor <= market_close:
-    times.append(t_cursor)
-    t_cursor += timedelta(minutes=30)
+default_times = []
+cursor = datetime.combine(session_date, time(8, 30))
+end_time = datetime.combine(session_date, time(15, 0))
+while cursor <= end_time:
+    default_times.append(cursor.strftime("%H:%M"))
+    cursor += timedelta(minutes=30)
+
+template_rows = min(len(default_times), 10)
+df_template = pd.DataFrame(
+    {
+        "Time": default_times[:template_rows],
+        "Open": [bottom_ref + 5.0] * template_rows,
+        "High": [bottom_ref + 10.0] * template_rows,
+        "Low": [bottom_ref] * template_rows,
+        "Close": [bottom_ref + 6.0] * template_rows,
+    }
+)
+
+df_candles = st.data_editor(
+    df_template,
+    num_rows="dynamic",
+    use_container_width=True,
+    key="candles_editor",
+)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# Convert Time strings → datetime objects safely
+valid_rows = []
+for _, row in df_candles.iterrows():
+    t_str = str(row["Time"]).strip()
+    if not t_str:
+        continue
+    try:
+        t_dt = datetime.combine(session_date, datetime.strptime(t_str, "%H:%M").time())
+    except Exception:
+        continue
+    try:
+        o = float(row["Open"])
+        h = float(row["High"])
+        l = float(row["Low"])
+        c = float(row["Close"])
+    except Exception:
+        continue
+    valid_rows.append(
+        {"Time": t_str, "Time_dt": t_dt, "Open": o, "High": h, "Low": l, "Close": c}
+    )
+
+df_30 = pd.DataFrame(valid_rows)
+
+# ---------------------------------------------------------------
+# DAY TYPE (from first candle, if present)
+# ---------------------------------------------------------------
+
+if not df_30.empty:
+    first_row = df_30.iloc[0]
+    open_price = first_row["Open"]
+    open_time = first_row["Time_dt"]
+    day_type = classify_day_type(channel, open_price, open_time)
+else:
+    day_type = "No candles yet."
+
+st.markdown('<div class="spx-card">', unsafe_allow_html=True)
+st.subheader("Daily Card – Bias Snapshot")
+
+tag_class = "spx-tag-blue"
+if "Ascending" in day_type:
+    tag_class = "spx-tag-green"
+elif "Descending" in day_type:
+    tag_class = "spx-tag-red"
+
+st.markdown(
+    f"<div class='spx-tag {tag_class}'>DAY TYPE</div> "
+    f"<span style='margin-left:6px; font-weight:600;'>{day_type}</span>",
+    unsafe_allow_html=True,
+)
+
+if "Ascending channel – open above" in day_type:
+    st.write(
+        "- Structure up and open above rails; calls at open are stretched.\n"
+        "- Best edge: wait for a bear candle touch and close above a rail, then call entries.\n"
+        "- Puts only if a clear flip below a rail forms."
+    )
+elif "Ascending channel – open below" in day_type:
+    st.write(
+        "- Up structure with bearish open. Strong put action possible until bottom rail.\n"
+        "- Once bottom rail is tested with your candle rule, calls can explode upward."
+    )
+elif "Descending channel – open below" in day_type:
+    st.write(
+        "- Down structure with bearish open; puts are powerful once a clean bull candle "
+        "touch and close below rail appears.\n"
+        "- Calls are defensive until a flip above rail confirms."
+    )
+elif "Descending channel – open above" in day_type:
+    st.write(
+        "- Down structure but bullish open; early puts are dangerous.\n"
+        "- Edge is in confirmed short entries from the top rail or in long flips above rails."
+    )
+else:
+    st.write(
+        "- Dual or inside structure; trade lighter and prefer ATM contracts.\n"
+        "- Let second-candle confirmation do the heavy filtering."
+    )
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+
+# ---------------------------------------------------------------
+# CHANNEL TABLE – TIME vs RAILS
+# ---------------------------------------------------------------
+
+st.markdown('<div class="spx-card">', unsafe_allow_html=True)
+st.subheader("Price–Time Map – Channel Table")
+
+times_for_table = []
+cursor = datetime.combine(session_date, time(8, 30))
+end_time = datetime.combine(session_date, time(15, 0))
+while cursor <= end_time:
+    times_for_table.append(cursor)
+    cursor += timedelta(minutes=30)
 
 rows = []
-for t in times:
-    bottom_primary, top_primary = rail_values_at_time(channel, t, side="primary")
-
+for t in times_for_table:
+    b_primary, t_primary = rail_values_at_time(channel, t, side="primary")
     row = {
         "Time": t.strftime("%H:%M"),
-        "Primary Bottom": round(bottom_primary, 2),
-        "Primary Top": round(top_primary, 2),
+        "Primary Bottom": round(b_primary, 2),
+        "Primary Top": round(t_primary, 2),
     }
-
-    for level in range(1, channel["offsets"] + 1):
-        b_up, t_up = rail_values_at_time(channel, t, side="offset_up", level=level)
-        b_down, t_down = rail_values_at_time(channel, t, side="offset_down", level=level)
-
-        row[f"Offset +{level} Bottom"] = round(b_up, 2)
-        row[f"Offset +{level} Top"] = round(t_up, 2)
-        row[f"Offset -{level} Bottom"] = round(b_down, 2)
-        row[f"Offset -{level} Top"] = round(t_down, 2)
-
+    for lvl in range(1, channel["offsets"] + 1):
+        b_up, t_up = rail_values_at_time(channel, t, side="offset_up", level=lvl)
+        b_dn, t_dn = rail_values_at_time(channel, t, side="offset_down", level=lvl)
+        row[f"Offset +{lvl} Bottom"] = round(b_up, 2)
+        row[f"Offset +{lvl} Top"] = round(t_up, 2)
+        row[f"Offset -{lvl} Bottom"] = round(b_dn, 2)
+        row[f"Offset -{lvl} Top"] = round(t_dn, 2)
     rows.append(row)
 
 df_channels = pd.DataFrame(rows)
 st.dataframe(df_channels, use_container_width=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("---")
 
+
 # ---------------------------------------------------------------
-# SIGNAL SCAN WITH SECOND CANDLE CONFIRMATION
+# SIGNALS + TRADE PLANNER
 # ---------------------------------------------------------------
 
-st.subheader("Confirmed Signals (Channel plus Candle Rules plus Second Candle Filter)")
+st.markdown('<div class="spx-card">', unsafe_allow_html=True)
+st.subheader("Confirmed Signals")
 
-signals = scan_signals_with_confirmation(channel, spx_30m)
-
-if signals:
-    df_signals = pd.DataFrame(signals)
-    # Make times more readable
-    df_signals["signal_time"] = df_signals["signal_time"].dt.strftime("%Y-%m-%d %H:%M")
-    df_signals["confirm_time"] = df_signals["confirm_time"].dt.strftime("%Y-%m-%d %H:%M")
-    st.write("Confirmed high quality signals:")
-    st.dataframe(df_signals, use_container_width=True)
+if df_30.empty or len(df_30) < 2:
+    st.info("Enter at least 2 valid 30-minute candles to scan for signals.")
+    st.markdown("</div>", unsafe_allow_html=True)
 else:
-    st.info("No signals passed your strict rules plus second candle confirmation today. That is protective for your account.")
+    signals = scan_signals_with_confirmation(channel, df_30)
 
-st.markdown(
-    """
-Notes:
-- Entries use your bear or bull candle touch and close rules at the rail, with the 5 point distance filter.
-- First 30 minute bar is skipped for entries due to noise and liquidation moves.
-- Second candle confirmation must agree with the direction and not violate the rail, which cuts many false starts.
-- Options layer is a model based view, you will plug in your broker option chain and still use the 0.33 filter and safe or optimal or aggressive contract logic.
-"""
-)
+    if not signals:
+        st.info("No signals passed your strict channel + second-candle filters. That protects your capital.")
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        df_signals = pd.DataFrame(signals)
+        # Nice formatting
+        df_signals["Signal time"] = df_signals["Signal time"].dt.strftime("%H:%M")
+        df_signals["Confirm time"] = df_signals["Confirm time"].dt.strftime("%H:%M")
+
+        st.dataframe(df_signals, use_container_width=True)
+
+        # Trade planner for first signal
+        st.markdown("---")
+        st.subheader("Trade Planner (First Confirmed Signal)")
+
+        sig0 = signals[0]
+        side = sig0["Side"]
+        rail_price = sig0["Rail price"]
+        signal_time = sig0["Signal time"]
+        confirm_time = sig0["Confirm time"]
+
+        exp_move = expected_spx_move(channel, num_blocks=holding_blocks)
+        opt_plan = suggest_option_contracts(rail_price, exp_move, side)
+
+        if side == "long":
+            side_html = "<span class='spx-signal-long'>LONG (Calls)</span>"
+        else:
+            side_html = "<span class='spx-signal-short'>SHORT (Puts)</span>"
+
+        st.markdown(
+            f"**Direction:** {side_html} &nbsp; | &nbsp; "
+            f"**Signal @** {signal_time.strftime('%H:%M')} &nbsp;→&nbsp; "
+            f"**Confirmed @** {confirm_time.strftime('%H:%M')}",
+            unsafe_allow_html=True,
+        )
+
+        col_a, col_b, col_c = st.columns(3)
+
+        with col_a:
+            st.write("**Rail price used**")
+            st.write(f"{rail_price:.2f}")
+            st.write("**Distance to rail**")
+            st.write(f"{sig0['Distance to rail']:.2f} pts")
+
+        with col_b:
+            st.write("**Projected SPX move**")
+            st.write(f"{opt_plan['expected_spx_move']:.2f} pts")
+            st.write("**Min contract move (0.33)**")
+            st.write(f"{opt_plan['expected_contract_move']:.2f} $")
+
+        with col_c:
+            st.write("**Contract map (model)**")
+            st.write(f"Safe: {opt_plan['safe']['label']} @ {opt_plan['safe']['strike']}")
+            st.caption(opt_plan["safe"]["note"])
+            st.write(f"Optimal: {opt_plan['optimal']['label']} @ {opt_plan['optimal']['strike']}")
+            st.caption(opt_plan["optimal"]["note"])
+            st.write(f"Aggressive: {opt_plan['aggressive']['label']} @ {opt_plan['aggressive']['strike']}")
+            st.caption(opt_plan["aggressive"]["note"])
+
+        st.caption(
+            "Use your broker’s live option chain to pick actual contracts, but keep this hierarchy: "
+            "Safe → Optimal → Aggressive. The 0.33 factor filters out dead contracts."
+        )
+
+        st.markdown("</div>", unsafe_allow_html=True)
