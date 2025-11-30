@@ -442,7 +442,7 @@ def metric_card(label: str, value: str) -> str:
     """
 
 
-def style_time_highlight(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+def style_time_highlight(df: pd.DataFrame):
     """Highlight 09:30 and especially 10:00 rows."""
     def highlight(row):
         if "Time" not in row:
