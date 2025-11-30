@@ -442,6 +442,22 @@ def metric_card(label: str, value: str) -> str:
     """
 
 
+def style_time_highlight(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+    """Highlight 09:30 and especially 10:00 rows."""
+    def highlight(row):
+        if "Time" not in row:
+            return ['' for _ in row]
+        t = row["Time"]
+        if t == "10:00":
+            return ['background-color: rgba(252, 211, 77, 0.45); font-weight: 700;' for _ in row]
+        elif t == "09:30":
+            return ['background-color: rgba(191, 219, 254, 0.55); font-weight: 600;' for _ in row]
+        else:
+            return ['' for _ in row]
+
+    return df.style.apply(highlight, axis=1)
+
+
 # =========================================================
 # ===============  TIME / GRID HELPERS  ==================
 # =========================================================
@@ -451,7 +467,6 @@ def make_dt_from_time(t: dtime) -> datetime:
     Map any CT time into a synthetic date anchored at BASE_DATE with 30m blocks.
     We only care about relative 30m spacing, not calendar day.
     """
-    # If time is >= 15:00, treat it as "day 0"; else as "day 1"
     if t.hour >= 15:
         return BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
     else:
@@ -503,7 +518,7 @@ def build_single_channel(
     k_hi = blocks_from_base(dt_hi)
     k_lo = blocks_from_base(dt_lo)
 
-    # Solve y = s * k + b   =>   b = y - s*k
+    # y = s*k + b => b = y - s*k
     b_top = high_price - s * k_hi
     b_bottom = low_price - s * k_lo
     channel_height = b_top - b_bottom
@@ -545,7 +560,6 @@ def pick_primary_scenario(
 ) -> Tuple[str, str]:
     """
     Decide which scenario is primary based on channel height contrast.
-    Returns: (primary, comment)
     """
     if asc_height is None or desc_height is None:
         return "Ascending", "Both channels not available; defaulting to ascending."
@@ -575,30 +589,40 @@ def strict_no_trade_evaluation(
     desc_height: Optional[float],
 ) -> Tuple[str, str]:
     """
-    Combine a few structural filters into a simple recommendation.
+    Combine structural filters into a simple pre-session recommendation.
+
+    Looser than before: only hard "Stand aside" if structure is truly dead.
+    Remember: if by 10:00 CT price is sitting at stack 4–6, that becomes a
+    high-opportunity mean-reversion setup, even if this filter was cautious.
     """
     reasons = []
 
     # Filter 1: channel height
-    if primary_height < 25:
-        reasons.append("Primary channel height is under 25 points.")
+    if primary_height < 18:
+        reasons.append("Primary channel height is under 18 points (very compressed).")
         height_flag = "fail"
-    elif primary_height < 40:
-        reasons.append("Primary channel height is between 25 and 40 points (compressed).")
+    elif primary_height < 30:
+        reasons.append("Primary channel height is between 18 and 30 points (compressed).")
         height_flag = "caution"
+    elif primary_height < 40:
+        reasons.append("Primary channel height is between 30 and 40 points (moderate).")
+        height_flag = "ok_caution"
     else:
-        reasons.append("Primary channel height is above 40 points.")
+        reasons.append("Primary channel height is above 40 points (plenty of room to work).")
         height_flag = "ok"
 
     # Filter 2: contract move
-    if contract_move < 9.9:
-        reasons.append("Expected contract move for a full rail-to-rail is under 9.9 units.")
+    if contract_move < 7.0:
+        reasons.append("Estimated contract move for a full rail-to-rail is under 7 units.")
         contract_flag = "fail"
-    elif contract_move < 14:
-        reasons.append("Expected contract move is between 9.9 and 14 units (smaller payoff).")
+    elif contract_move < 10.0:
+        reasons.append("Estimated contract move is between 7 and 10 units (smaller payoff).")
         contract_flag = "caution"
+    elif contract_move < 14.0:
+        reasons.append("Estimated contract move is between 10 and 14 units (respectable).")
+        contract_flag = "ok_caution"
     else:
-        reasons.append("Expected contract move is healthy for a single rail-to-rail swing.")
+        reasons.append("Estimated contract move is strong for a single structural swing.")
         contract_flag = "ok"
 
     # Filter 3: symmetry between ascending and descending
@@ -611,22 +635,21 @@ def strict_no_trade_evaluation(
             reasons.append("Ascending and descending heights are extremely similar (structure may be indecisive).")
             symmetry_flag = "caution"
         else:
-            reasons.append("Ascending and descending heights are separated enough to define a clear bias.")
+            reasons.append("Ascending and descending heights are separated enough to define a bias.")
             symmetry_flag = "ok"
 
-    # Aggregate
     flags = [height_flag, contract_flag, symmetry_flag]
-    fail_count = flags.count("fail")
-    caution_count = flags.count("caution")
 
-    if fail_count >= 1 or (caution_count >= 2):
-        status = "Stand aside or size very small."
+    # Hard stand aside: structure and contract both dead
+    if height_flag == "fail" and contract_flag == "fail":
+        status = "Stand aside. Structure offers almost nothing today."
         cls = "no-trade-stop"
-    elif caution_count == 1:
-        status = "Trade only if intraday tape is clean."
+    # Soft caution: some compression / small move but not completely dead
+    elif "fail" in flags or flags.count("caution") + flags.count("ok_caution") >= 2:
+        status = "Trade only if intraday tape is clean. Keep size small."
         cls = "no-trade-warning"
     else:
-        status = "Day is structurally viable. Focus on discipline."
+        status = "Day is structurally viable. Focus on discipline at the rails."
         cls = "no-trade-ok"
 
     html = (
@@ -693,7 +716,7 @@ def main():
             """
             <div class="spx-sub">
             Choose the structural high and low pivots from the previous RTH session or early overnight (for example 17:00–21:00 CT).
-            They do not need to be the absolute wick extremes. Use the first clean reversal high and low that define the day’s structure.
+            They do not need to be the absolute wick extremes. Use the first clean reversal high and low on your line chart that define the day’s structure.
             </div>
             """,
             unsafe_allow_html=True,
@@ -791,7 +814,6 @@ def main():
         if asc_df is None or desc_df is None:
             st.info("Build channels to see stacked structures.")
         else:
-            # Primary scenario hint (auto)
             auto_primary, auto_comment = pick_primary_scenario(asc_h, desc_h)
             st.markdown(
                 f"<div class='muted'><strong>Primary scenario (auto):</strong> {auto_primary}. {auto_comment}</div>",
@@ -799,7 +821,7 @@ def main():
             )
 
             st.markdown("**Ascending Structure (Main + ±6 stacks)**")
-            st.dataframe(asc_df, use_container_width=True, hide_index=True, height=340)
+            st.dataframe(style_time_highlight(asc_df), use_container_width=True, height=340)
             st.download_button(
                 "Download Ascending Rails (CSV)",
                 asc_df.to_csv(index=False).encode(),
@@ -810,7 +832,7 @@ def main():
             )
 
             st.markdown("**Descending Structure (Main + ±6 stacks)**")
-            st.dataframe(desc_df, use_container_width=True, hide_index=True, height=340)
+            st.dataframe(style_time_highlight(desc_df), use_container_width=True, height=340)
             st.download_button(
                 "Download Descending Rails (CSV)",
                 desc_df.to_csv(index=False).encode(),
@@ -856,11 +878,15 @@ def main():
 
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown(metric_card("Ascending: full rail-to-rail", f"{asc_contract_move:.2f} units"),
-                            unsafe_allow_html=True)
+                st.markdown(
+                    metric_card("Ascending: full rail-to-rail", f"{asc_contract_move:.2f} units"),
+                    unsafe_allow_html=True,
+                )
             with c2:
-                st.markdown(metric_card("Descending: full rail-to-rail", f"{desc_contract_move:.2f} units"),
-                            unsafe_allow_html=True)
+                st.markdown(
+                    metric_card("Descending: full rail-to-rail", f"{desc_contract_move:.2f} units"),
+                    unsafe_allow_html=True,
+                )
 
             st.markdown(
                 """
@@ -978,38 +1004,71 @@ def main():
                     unsafe_allow_html=True,
                 )
 
-            # No-trade logic
             _, html = strict_no_trade_evaluation(primary_h, primary_contract_move, asc_h, desc_h)
-            st.markdown(f"<div class='muted'><strong>No-trade filter summary:</strong><br/>{html}</div>",
-                        unsafe_allow_html=True)
-
-            section_header("09:30 and 10:00 CT Map (Primary Scenario)")
-            key_times = ["09:30", "10:00"]
-            mask = primary_df["Time"].isin(key_times)
-            focus_cols = ["Time", "Top_0", "Bottom_0"]
-            # Include first three stacks for quick marking
-            for n in range(1, 4):
-                focus_cols.extend([f"Top_+{n}", f"Bottom_+{n}", f"Top_-{n}", f"Bottom_-{n}"])
-            focus_cols = [c for c in focus_cols if c in primary_df.columns]
-            focus_df = primary_df.loc[mask, focus_cols]
-
-            st.dataframe(focus_df, use_container_width=True, hide_index=True, height=160)
+            st.markdown(
+                f"<div class='muted'><strong>No-trade filter summary (pre-session):</strong><br/>{html}</div>",
+                unsafe_allow_html=True,
+            )
 
             st.markdown(
                 """
-                <div class="muted">
-                Mark these prices on your chart as horizontal levels at 09:30 and 10:00 CT. 
-                When price rejects one of these rails with conviction, that is where the structure and timing are aligned.
+                <div class="spx-sub" style="margin-top:0.4rem;">
+                • Before the open, this tells you how much structure the day is offering.<br/>
+                • Around 09:30–10:00 CT, combine this with where price actually sits in the stacks:<br/>
+                &nbsp;&nbsp;&nbsp;&nbsp;– Near main rails → standard channel swing plays.<br/>
+                &nbsp;&nbsp;&nbsp;&nbsp;– Deep in stacks (±4 to ±6) → high-opportunity mean-reversion setups, even if the pre-session filter was cautious.
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
+            # 09:30 + 10:00 table (main + first 3 stacks)
+            section_header("09:30 and 10:00 CT Map (Primary Scenario)")
+            key_times = ["09:30", "10:00"]
+            mask = primary_df["Time"].isin(key_times)
+            focus_cols = ["Time", "Top_0", "Bottom_0"]
+            for n in range(1, 4):
+                focus_cols.extend(
+                    [f"Top_+{n}", f"Bottom_+{n}", f"Top_-{n}", f"Bottom_-{n}"]
+                )
+            focus_cols = [c for c in focus_cols if c in primary_df.columns]
+            focus_df = primary_df.loc[mask, focus_cols]
+
+            st.dataframe(style_time_highlight(focus_df), use_container_width=True, height=160)
+
+            # Dedicated 10:00 map with all stacks
+            section_header("10:00 CT Stack Map (Primary Scenario)")
+            ten_mask = primary_df["Time"] == "10:00"
+            ten_df = primary_df.loc[ten_mask].copy()
+            if ten_df.empty:
+                st.info("No 10:00 row found in the grid (check pivot inputs).")
+            else:
+                st.dataframe(style_time_highlight(ten_df), use_container_width=True, height=140)
+                st.download_button(
+                    "Download 10:00 CT Stack Map (CSV)",
+                    ten_df.to_csv(index=False).encode(),
+                    "spx_10_00_stack_map.csv",
+                    "text/csv",
+                    use_container_width=True,
+                    key="dl_10am",
+                )
+                st.markdown(
+                    """
+                    <div class="muted">
+                    Mark these 10:00 CT values as horizontal levels on your chart:<br/>
+                    • Main rails: <em>Top_0</em> and <em>Bottom_0</em>.<br/>
+                    • Extension levels: <em>Top_±1…±6</em>, <em>Bottom_±1…±6</em> where available.<br/>
+                    When price is sitting in stack 4–6 at 10:00, you are in the outer bands of the structure where sharp reversals back toward the main channel are common.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
             section_header("Full Time-Aligned Map (Primary Scenario)")
-            st.dataframe(primary_df, use_container_width=True, hide_index=True, height=380)
+            st.dataframe(style_time_highlight(primary_df), use_container_width=True, height=380)
 
             section_header("Alternate Scenario (For Context)")
-            st.dataframe(alt_df, use_container_width=True, hide_index=True, height=260)
+            st.dataframe(style_time_highlight(alt_df), use_container_width=True, height=260)
 
         end_card()
 
