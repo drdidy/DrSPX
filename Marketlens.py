@@ -1,5 +1,5 @@
 # spx_prophet.py
-# SPX Prophet — Structure-Driven 0DTE Planner
+# SPX Prophet - Structure-Driven 0DTE Planner
 
 import streamlit as st
 import pandas as pd
@@ -163,7 +163,7 @@ def inject_css():
     .spx-card {
         position: relative;
         background:
-            radial-gradient(circle at 5% 0%, rgba(129, 140, 248, 0.10), transparent 50%),
+            radial-gradient(circle at 5% 0%, rgba(129, 140, 248, 0.10), transparent 55%),
             radial-gradient(circle at 100% 100%, rgba(56, 189, 248, 0.10), transparent 55%),
             linear-gradient(135deg, #ffffff, #f9fafb);
         border-radius: 24px;
@@ -415,16 +415,11 @@ def metric_card(label: str, value: str, note: Optional[str] = None) -> str:
 # ===============================
 
 def make_dt_from_time(t: dtime) -> datetime:
-    """
-    Map a CT time to the fixed date grid.
-    Any time between 00:00 and 23:59 is allowed.
-    """
     dt = BASE_DATE.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
     return dt
 
 
 def align_30min(dt: datetime) -> datetime:
-    """Round to nearest 30m slot (15-min rule)."""
     minute = 0 if dt.minute < 15 else (30 if dt.minute < 45 else 0)
     if dt.minute >= 45:
         dt = dt + timedelta(hours=1)
@@ -437,7 +432,6 @@ def blocks_from_base(dt: datetime) -> int:
 
 
 def rth_slots() -> pd.DatetimeIndex:
-    """30-minute RTH grid: 08:30–14:30 CT."""
     next_day = BASE_DATE.date() + timedelta(days=1)
     start = datetime(next_day.year, next_day.month, next_day.day, 8, 30)
     end = datetime(next_day.year, next_day.month, next_day.day, 14, 30)
@@ -449,23 +443,17 @@ def time_label_for_dt(dt: datetime) -> str:
 
 
 def classify_timing_label(time_str: str) -> str:
-    """Return one of: prime / caution / late for timing band."""
     h, m = map(int, time_str.split(":"))
     total = h * 60 + m
 
-    # 08:30–09:29: caution
     if 8 * 60 + 30 <= total < 9 * 60 + 30:
         return "caution"
-    # 09:30–10:29: prime (channel touch + decision zone)
     if 9 * 60 + 30 <= total < 10 * 60 + 30:
         return "prime"
-    # 10:30–12:29: prime continuation
     if 10 * 60 + 30 <= total < 12 * 60 + 30:
         return "prime"
-    # 12:30–13:29: caution (midday digestion)
     if 12 * 60 + 30 <= total < 13 * 60 + 30:
         return "caution"
-    # 13:30–14:30: late
     if 13 * 60 + 30 <= total <= 14 * 60 + 30:
         return "late"
     return "caution"
@@ -482,10 +470,6 @@ def build_channel(
     low_time: dtime,
     slope_sign: int,
 ) -> Tuple[pd.DataFrame, float]:
-    """
-    Build a structural ascending/descending channel from two pivots.
-    slope_sign = +1 for ascending, -1 for descending.
-    """
     s = slope_sign * SLOPE_MAG
 
     dt_hi = align_30min(make_dt_from_time(high_time))
@@ -518,15 +502,15 @@ def build_channel(
 
 def build_stacked_channel(df_main: pd.DataFrame, height: float) -> pd.DataFrame:
     """
-    Given a main channel, build one stacked channel above and one below (±1 height).
-    Adds columns:
-        Top Stack Up, Bottom Stack Up, Top Stack Down, Bottom Stack Down
+    Add three stacked channels above and three below:
+      Up 1, 2, 3 and Down 1, 2, 3.
     """
     df = df_main.copy()
-    df["Top Stack Up"] = (df["Top Rail"] + height).round(2)
-    df["Bottom Stack Up"] = (df["Bottom Rail"] + height).round(2)
-    df["Top Stack Down"] = (df["Top Rail"] - height).round(2)
-    df["Bottom Stack Down"] = (df["Bottom Rail"] - height).round(2)
+    for k in range(1, 4):
+        df[f"Top Stack Up {k}"] = (df["Top Rail"] + k * height).round(2)
+        df[f"Bottom Stack Up {k}"] = (df["Bottom Rail"] + k * height).round(2)
+        df[f"Top Stack Down {k}"] = (df["Top Rail"] - k * height).round(2)
+        df[f"Bottom Stack Down {k}"] = (df["Bottom Rail"] - k * height).round(2)
     return df
 
 
@@ -538,11 +522,6 @@ def guess_primary_scenario(
     df_asc: Optional[pd.DataFrame],
     df_desc: Optional[pd.DataFrame],
 ) -> str:
-    """
-    Heuristic: compare where the close sits relative to each channel.
-    Whichever channel has the close nearer to the midline wins.
-    Fallback: if one height is much larger, we assume that is primary.
-    """
     if h_asc is None or h_desc is None or df_asc is None or df_desc is None:
         return "Ascending"
 
@@ -559,7 +538,6 @@ def guess_primary_scenario(
         except IndexError:
             pass
 
-    # Fallback: whichever has taller structure tends to dominate
     if h_asc >= h_desc:
         return "Ascending"
     return "Descending"
@@ -573,15 +551,9 @@ def estimate_contract_move(
     underlying_move: float,
     direction: str,
 ) -> float:
-    """
-    Positive result = profit for that long options direction.
-    direction: "Long Call" or "Long Put"
-    """
     if direction == "Long Call":
-        # Calls profit when underlying rises
         return CONTRACT_FACTOR * underlying_move
     else:
-        # Long Put: profit when underlying falls
         return CONTRACT_FACTOR * (-underlying_move)
 
 
@@ -594,37 +566,25 @@ def evaluate_no_trade(
     height_alternate: float,
     contract_move_full: float,
 ) -> Tuple[str, str]:
-    """
-    Combine a few simple filters:
-      1) Very narrow primary channel
-      2) Big disagreement between ascending and descending heights
-      3) Contract move too small relative to full rail-to-rail
-    Returns: (status, explanation)
-      status in {"OK", "CAUTION", "NO-TRADE"}
-    """
     issues = []
 
-    # 1) Narrow structure -> low edge
     if height_primary < 40:
         issues.append("Primary channel height is under 40 points (narrow structure).")
 
-    # 2) Big disagreement between up/down channels
     if abs(height_primary - height_alternate) > 20:
         issues.append(
             "Ascending vs descending channel heights differ by more than 20 points (structure disagreement)."
         )
 
-    # 3) Small contract move relative to full swing
     if contract_move_full < 9.9:
         issues.append(
-            "Expected contract move from rail-to-rail is under 9.9 units (limited reward)."
+            "Expected contract move from rail to rail is under 9.9 units (limited reward)."
         )
 
     if len(issues) == 0:
         return "OK", "All structure filters clear. You still manage risk, but the map is supportive."
     if len(issues) == 1:
         return "CAUTION", issues[0]
-    # 2 or more issues: stand aside
     joined = " ".join(issues)
     return "NO-TRADE", joined
 
@@ -643,7 +603,7 @@ def main():
 
     inject_css()
 
-    # Sidebar info
+    # Sidebar
     with st.sidebar:
         st.markdown(f"### {APP_NAME}")
         st.caption(TAGLINE)
@@ -672,7 +632,7 @@ def main():
         ]
     )
 
-    # Ensure storage keys exist
+    # State
     if "asc_df" not in st.session_state:
         st.session_state["asc_df"] = None
     if "desc_df" not in st.session_state:
@@ -684,7 +644,7 @@ def main():
     if "primary_guess" not in st.session_state:
         st.session_state["primary_guess"] = "Ascending"
 
-    # TAB 1: RAILS & STACKS
+    # TAB 1
     with tabs[0]:
         st.markdown(
             """
@@ -692,7 +652,7 @@ def main():
               <h4>Rails + Stacks</h4>
               <div class="spx-card-sub">
                 Define your two key pivots, build both ascending and descending channels,
-                and stack them to understand how far extensions are likely to travel before reversing.
+                and stack them multiple levels above and below to see where extensions often reverse.
               </div>
             </div>
             """,
@@ -704,7 +664,8 @@ def main():
             """
             <div class="spx-card-sub" style="margin-bottom:1rem;">
             Use the structural high and low pivots from the previous regular session, or from the first
-            hours of overnight (for example 17:00–21:00). Focus on the clean turning points on your line chart.
+            hours of overnight (for example 17:00–21:00). Focus on the clear turns on your line chart,
+            not random noise inside candles.
             </div>
             """,
             unsafe_allow_html=True,
@@ -846,15 +807,13 @@ def main():
                 unsafe_allow_html=True,
             )
 
-            section_header("Ascending Channel + Stacks")
-            st.caption("Main rails, plus one channel-height above and one below.")
+            section_header("Ascending Channel + Stacks (Up 1–3, Down 1–3)")
             st.dataframe(df_asc, use_container_width=True, hide_index=True, height=260)
 
-            section_header("Descending Channel + Stacks")
-            st.caption("Same pivots, opposite slope, plus stacked extension rails.")
+            section_header("Descending Channel + Stacks (Up 1–3, Down 1–3)")
             st.dataframe(df_desc, use_container_width=True, hide_index=True, height=260)
 
-    # TAB 2: CONTRACT PLANNER
+    # TAB 2 - CONTRACT PLANNER
     with tabs[1]:
         st.markdown(
             """
@@ -879,7 +838,6 @@ def main():
         if df_asc is None or df_desc is None or h_asc is None or h_desc is None:
             st.warning("No channel found. Build the rails in the first tab before planning contracts.")
         else:
-            # Select active DF & heights
             if primary_choice == "Ascending":
                 df_main = df_asc
                 h_primary = h_asc
@@ -916,7 +874,7 @@ def main():
                     metric_card(
                         "Stack Extension Move",
                         f"{stack_move:.2f} units",
-                        note="If price travels one full extra channel beyond the main rails.",
+                        note="If price travels one extra channel beyond the main rails.",
                     ),
                     unsafe_allow_html=True,
                 )
@@ -945,23 +903,21 @@ def main():
                         "Target scope",
                         [
                             "Main channel only",
-                            "Main channel + one stack in direction of trade",
+                            "Main channel + first stack in direction of trade",
                         ],
                         key="contract_target_scope",
                     )
 
-                # Timing: entry and exit
                 section_header("Timing for This Trade Plan")
                 tcol1, tcol2 = st.columns(2)
                 with tcol1:
                     entry_time = st.selectbox(
                         "Planned entry time",
                         times,
-                        index=min(len(times) - 1, 2),  # often 09:30
+                        index=min(len(times) - 1, 2),
                         key="contract_entry_time",
                     )
                 with tcol2:
-                    # default exit a few slots later
                     default_exit_index = min(len(times) - 1, times.index(entry_time) + 2)
                     exit_time = st.selectbox(
                         "Planned exit time",
@@ -970,24 +926,21 @@ def main():
                         key="contract_exit_time",
                     )
 
-                # Underlying prices at entry & exit on selected rail(s)
                 entry_row = df_main[df_main["Time"] == entry_time].iloc[0]
                 exit_row = df_main[df_main["Time"] == exit_time].iloc[0]
 
-                # Determine underlying move based on chosen rail logic
                 if rail_side == "Lower rail to upper rail":
                     entry_underlying = entry_row["Bottom Rail"]
                     if stack_target == "Main channel only":
                         exit_underlying = exit_row["Top Rail"]
                     else:
-                        # main + one stack in direction of move
-                        exit_underlying = exit_row["Top Stack Up"]
-                else:  # Upper to lower
+                        exit_underlying = exit_row["Top Stack Up 1"]
+                else:
                     entry_underlying = entry_row["Top Rail"]
                     if stack_target == "Main channel only":
                         exit_underlying = exit_row["Bottom Rail"]
                     else:
-                        exit_underlying = exit_row["Bottom Stack Down"]
+                        exit_underlying = exit_row["Bottom Stack Down 1"]
 
                 underlying_move = exit_underlying - entry_underlying
                 contract_pnl = estimate_contract_move(underlying_move, direction)
@@ -1017,7 +970,7 @@ def main():
                         metric_card(
                             "Channel Span Used",
                             f"{effective_span*100:.1f} %",
-                            note="Percentage of the full primary channel used by this plan.",
+                            note="Percentage of full primary channel used.",
                         ),
                         unsafe_allow_html=True,
                     )
@@ -1034,7 +987,7 @@ def main():
                     unsafe_allow_html=True,
                 )
 
-    # TAB 3: DAILY FORESIGHT
+    # TAB 3 - DAILY FORESIGHT
     with tabs[2]:
         st.markdown(
             """
@@ -1042,7 +995,7 @@ def main():
               <h4>Daily Foresight</h4>
               <div class="spx-card-sub">
                 One card that combines your primary channel, stacked levels, no-trade filters,
-                timing bands, and a simple directional bias for calls or puts.
+                timing bands, and explicit 10:00 CT levels you can drop as horizontals on your chart.
               </div>
             </div>
             """,
@@ -1120,26 +1073,24 @@ def main():
 
             section_header("Directional Bias (Structure Only)")
 
-            # Simple structural bias: for ascending primary, core trade is long call from lower rail.
-            # For descending primary, core trade is long put from upper rail.
             if primary_choice == "Ascending":
                 bias_html = """
                 <p><strong>Core idea:</strong> treat the lower rail as the buy zone for calls
                 and the upper rail as the fade zone for puts once the first 30–60 minutes have printed.</p>
                 <ul>
                   <li>Look for clean rejection of the lower rail between <strong>09:30–10:30 CT</strong> for long calls.</li>
-                  <li>Use 10:00–11:00 CT as the decision window for follow-through vs fake-out.</li>
-                  <li>If price escapes the upper rail, watch the upper stacked rail as the extension target.</li>
+                  <li>Use 10:00–11:00 CT as the decision window for follow-through versus fake-out.</li>
+                  <li>If price escapes the upper rail, watch the stacked rails above as extension targets.</li>
                 </ul>
                 """
             else:
                 bias_html = """
                 <p><strong>Core idea:</strong> treat the upper rail as the sell zone for puts
-                and the lower rail as the cover/bounce zone once the first 30–60 minutes have printed.</p>
+                and the lower rail as the cover or bounce zone once the first 30–60 minutes have printed.</p>
                 <ul>
                   <li>Look for clean rejection of the upper rail between <strong>09:30–10:30 CT</strong> for long puts.</li>
-                  <li>Use 10:00–11:00 CT as the decision window for continuation vs short-trap.</li>
-                  <li>If price breaks below the main channel, the lower stacked rail becomes the likely extension magnet.</li>
+                  <li>Use 10:00–11:00 CT as the decision window for continuation versus short-trap.</li>
+                  <li>If price breaks below the main channel, the stacked rails below become likely extension magnets.</li>
                 </ul>
                 """
 
@@ -1155,6 +1106,75 @@ def main():
                 unsafe_allow_html=True,
             )
 
+            section_header("10:00 CT Levels For Horizontal Lines")
+
+            row_10 = df_primary[df_primary["Time"] == "10:00"]
+            if row_10.empty:
+                st.info("No 10:00 slot found on the grid.")
+            else:
+                r = row_10.iloc[0]
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.markdown(
+                        metric_card(
+                            "10:00 Top Rail",
+                            f"{r['Top Rail']:.2f}",
+                            note="Mark as resistance on your chart.",
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                with c2:
+                    st.markdown(
+                        metric_card(
+                            "10:00 Bottom Rail",
+                            f"{r['Bottom Rail']:.2f}",
+                            note="Mark as support on your chart.",
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                with c3:
+                    st.markdown(
+                        metric_card(
+                            "10:00 Span",
+                            f"{(r['Top Rail'] - r['Bottom Rail']):.2f} pts",
+                            note="Primary band at 10:00 CT.",
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown("")
+                st.caption("Three stacked levels above and below at 10:00 CT (primary scenario).")
+                s1, s2 = st.columns(2)
+                with s1:
+                    st.markdown(
+                        metric_card(
+                            "Up Stacks at 10:00",
+                            f"Up1 {r['Top Stack Up 1']:.2f} | Up2 {r['Top Stack Up 2']:.2f} | Up3 {r['Top Stack Up 3']:.2f}",
+                            note="Horizontal extension sells / targets above.",
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                with s2:
+                    st.markdown(
+                        metric_card(
+                            "Down Stacks at 10:00",
+                            f"Dn1 {r['Bottom Stack Down 1']:.2f} | Dn2 {r['Bottom Stack Down 2']:.2f} | Dn3 {r['Bottom Stack Down 3']:.2f}",
+                            note="Horizontal extension buys / targets below.",
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown(
+                    """
+                    <div class="muted">
+                    <strong>Practical use:</strong> drop these 10:00 CT prices as horizontals on your SPX chart.
+                    When price trades back into these levels later in the session, you already know whether
+                    they are main rails or stacked extension levels.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
             section_header("Timing Bands (CT, 30m Slots)")
             st.markdown(
                 """
@@ -1164,37 +1184,55 @@ def main():
                   <li><span class="timing-tag timing-prime">09:30–10:29</span> First serious tests of your rails. Many key reversals or breaks form here.</li>
                   <li><span class="timing-tag timing-prime">10:30–12:29</span> Continuation or clean reversal away from the rails if the 09:30–10:00 tests held.</li>
                   <li><span class="timing-tag timing-caution">12:30–13:29</span> Midday digestion. Often choppy; be selective.</li>
-                  <li><span class="timing-tag timing-late">13:30–14:30</span> Late-day pushes, squeezes, and mean-reversion. Good for partials, not fresh risk.</li>
+                  <li><span class="timing-tag timing-late">13:30–14:30</span> Late-day pushes, squeezes, and mean reversion. Good for partials, not fresh risk.</li>
                 </ul>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-            section_header("Time-Aligned Map (Primary + First Stack)")
-            # Build table with timing labels
+            section_header("Time-Aligned Map (Primary + Stacks, with Key Slots)")
+
             map_df = df_primary.copy()
             map_df["Timing Band"] = map_df["Time"].apply(classify_timing_label)
             map_df["Timing Band"] = map_df["Timing Band"].map(
                 {"prime": "Prime", "caution": "Caution", "late": "Late"}
             )
+
+            # Mark 09:30 and 10:00 as key entry focus slots
+            def key_slot_label(t: str) -> str:
+                if t in ("09:30", "10:00"):
+                    return "Entry focus"
+                return ""
+
+            map_df["Key Slot"] = map_df["Time"].apply(key_slot_label)
+
+            cols = [
+                "Time",
+                "Top Rail",
+                "Bottom Rail",
+                "Top Stack Up 1",
+                "Bottom Stack Up 1",
+                "Top Stack Up 2",
+                "Bottom Stack Up 2",
+                "Top Stack Up 3",
+                "Bottom Stack Up 3",
+                "Top Stack Down 1",
+                "Bottom Stack Down 1",
+                "Top Stack Down 2",
+                "Bottom Stack Down 2",
+                "Top Stack Down 3",
+                "Bottom Stack Down 3",
+                "Timing Band",
+                "Key Slot",
+            ]
+
             st.caption(
-                "Main rails and the first stacked rails, all on the same 30-minute grid, "
-                "with a timing band label for context."
+                "Main rails and three stacked levels above and below, on the 30 minute grid, "
+                "with timing band and Key Slot labels so 09:30 and 10:00 stand out."
             )
             st.dataframe(
-                map_df[
-                    [
-                        "Time",
-                        "Top Rail",
-                        "Bottom Rail",
-                        "Top Stack Up",
-                        "Bottom Stack Up",
-                        "Top Stack Down",
-                        "Bottom Stack Down",
-                        "Timing Band",
-                    ]
-                ],
+                map_df[cols],
                 use_container_width=True,
                 hide_index=True,
                 height=360,
@@ -1205,13 +1243,13 @@ def main():
                 <div class="muted">
                 <strong>Reading the map:</strong> the rails tell you where structure expects reactions.
                 The timing band tells you when reactions are more likely to turn into trades worth taking.
-                You combine both and pass only the cleanest tests.
+                The Key Slot column makes 09:30 and 10:00 easy to spot at a glance.
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
-    # TAB 4: ABOUT
+    # TAB 4 - ABOUT
     with tabs[3]:
         st.markdown(
             """
@@ -1220,7 +1258,7 @@ def main():
               <div class="spx-card-sub">
                 SPX Prophet is a structure-only planner. It does not pull live market data, it does not
                 model full options greeks, and it does not promise certainty. It gives you a disciplined
-                map built from two pivots, a fixed slope, and clean timing rules.
+                map built from two pivots, a fixed slope, stacked channels, and clear timing rules.
               </div>
             </div>
             """,
@@ -1233,13 +1271,14 @@ def main():
             <div class="spx-card-sub">
             <ul>
               <li>Builds both ascending and descending channels from your chosen pivots.</li>
-              <li>Stacks channels one height above and below the main structure to frame extensions.</li>
+              <li>Stacks three channels above and three below the main structure to frame extensions.</li>
               <li>Highlights a primary scenario while still giving you the alternate.</li>
-              <li>Estimates contract moves from rail-to-rail using a simple factor of the SPX move.</li>
+              <li>Estimates contract moves from rail to rail using a simple factor of the SPX move.</li>
               <li>Offers structural no-trade filters when conditions are not worth the risk.</li>
-              <li>Marks timing bands so you are not blindly trading outside your best windows.</li>
+              <li>Marks timing bands and key slots so 09:30 and 10:00 are clearly visible.</li>
+              <li>Gives you explicit 10:00 CT prices to use as horizontals on your chart.</li>
             </ul>
-            <p>Everything else is up to your discipline, your sizing, and your ability to wait.</p>
+            <p>Everything else is in your discipline, patience, and position size.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1250,13 +1289,13 @@ def main():
             """
             <div class="spx-card-sub">
             <ul>
-              <li>No automatic data feed, no delayed surprises from external APIs.</li>
-              <li>No volatility surface, no skew or gamma curves.</li>
-              <li>No promises that every day is tradable. Some days the answer will be “stand aside”.</li>
+              <li>No automatic data feed, no dependence on external APIs.</li>
+              <li>No volatility surface, skew, or gamma curves.</li>
+              <li>No promise that every day is tradable. Some days the answer will still be “stand aside”.</li>
             </ul>
             <p>
-            The edge is not in prediction. The edge is in showing up on the right days, at the right rails,
-            at the right times, and passing on everything else.
+            The edge is not in over-trading every move. The edge is in showing up on the right days,
+            at the right rails, at the right times, and letting the bad days pass.
             </p>
             </div>
             """,
