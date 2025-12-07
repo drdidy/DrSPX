@@ -1,7 +1,6 @@
 """
 SPX Prophet - Where Structure Becomes Foresight
 A professional SPX trading assistant using structural cones, timing rules, and flow-regime detection.
-Version 2.0 - Premium UI + Calibrated Slopes
 """
 
 import streamlit as st
@@ -13,7 +12,6 @@ import pytz
 from dataclasses import dataclass
 from typing import Optional, Tuple, List, Dict
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # ============================================================================
 # CONFIGURATION & CONSTANTS
@@ -22,10 +20,8 @@ from plotly.subplots import make_subplots
 CT_TZ = pytz.timezone('America/Chicago')
 ET_TZ = pytz.timezone('America/New_York')
 
-# Asymmetric slopes (calibrated)
-SLOPE_ASCENDING = 0.50   # More aggressive for upside
-SLOPE_DESCENDING = 0.44  # Slightly conservative for downside
-
+SLOPE_ASCENDING = 0.50  # Points per 30-minute block (ascending)
+SLOPE_DESCENDING = 0.44  # Points per 30-minute block (descending)
 CONTRACT_FACTOR = 0.33  # ATM contract move factor
 
 # Trading hours (CT)
@@ -125,11 +121,11 @@ def count_30min_blocks(start_time: datetime, end_time: datetime) -> int:
     
     return blocks
 
-def project_rail(pivot_price: float, blocks: int, direction: str, asc_slope: float, desc_slope: float) -> float:
+def project_rail(pivot_price: float, blocks: int, direction: str) -> float:
     if direction == 'ascending':
-        return pivot_price + (blocks * asc_slope)
+        return pivot_price + (blocks * SLOPE_ASCENDING)
     else:
-        return pivot_price - (blocks * desc_slope)
+        return pivot_price - (blocks * SLOPE_DESCENDING)
 
 def get_position_in_cone(price: float, ascending_rail: float, descending_rail: float) -> Tuple[str, float]:
     cone_width = ascending_rail - descending_rail
@@ -271,7 +267,6 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         }
         
     except Exception as e:
-        st.error(f"Error fetching ES overnight data: {e}")
         return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0}
 
 @st.cache_data(ttl=60)
@@ -325,14 +320,14 @@ def fetch_first_30min_bar(session_date: datetime) -> Optional[Dict]:
 # STRUCTURAL ENGINE
 # ============================================================================
 
-def build_cones(pivots: List[Pivot], eval_time: datetime, asc_slope: float, desc_slope: float) -> List[Cone]:
+def build_cones(pivots: List[Pivot], eval_time: datetime) -> List[Cone]:
     cones = []
     
     for pivot in pivots:
         blocks = count_30min_blocks(pivot.time, eval_time)
         
-        ascending_rail = project_rail(pivot.price, blocks, 'ascending', asc_slope, desc_slope)
-        descending_rail = project_rail(pivot.price, blocks, 'descending', asc_slope, desc_slope)
+        ascending_rail = project_rail(pivot.price, blocks, 'ascending')
+        descending_rail = project_rail(pivot.price, blocks, 'descending')
         width = ascending_rail - descending_rail
         
         cone = Cone(
@@ -510,26 +505,26 @@ def generate_action_card(
     no_trade = False
     
     if regime.overnight_range_pct > OVERNIGHT_RANGE_MAX_PCT:
-        warnings.append(f"Overnight range too wide ({regime.overnight_range_pct:.0%} of cone)")
+        warnings.append(f"⚠️ Overnight range too wide ({regime.overnight_range_pct:.0%} of cone)")
         no_trade = True
     
     if position == 'dead_zone' and nearest_distance > 20:
-        warnings.append("Price in dead zone - no clear edge")
+        warnings.append("⚠️ Price in dead zone - no clear edge")
         no_trade = True
     
     if not regime.cone_width_adequate:
-        warnings.append("Cone width too narrow - insufficient profit potential")
+        warnings.append("⚠️ Cone width too narrow")
         no_trade = True
     
     if not regime.prior_day_range_adequate:
-        warnings.append("Prior day range weak - unreliable pivots")
+        warnings.append("⚠️ Prior day range weak")
         no_trade = True
     
     if len(regime.overnight_touched_rails) > 0:
-        warnings.append(f"Overnight touched: {', '.join(regime.overnight_touched_rails)}")
+        warnings.append(f"⚠️ Overnight touched: {', '.join(regime.overnight_touched_rails)}")
     
     if regime.first_bar_energy == 'weak':
-        warnings.append("First bar shows weak energy")
+        warnings.append("⚠️ First bar shows weak energy")
     
     if no_trade:
         direction = 'NO TRADE'
@@ -539,8 +534,8 @@ def generate_action_card(
         direction = 'WAIT'
         color = 'yellow'
         position_size = 'NONE'
-        warnings.append(f"Call setup activates at {nearest_cone.descending_rail:.2f} or below")
-        warnings.append(f"Put setup activates at {nearest_cone.ascending_rail:.2f} or above")
+        warnings.append(f"📍 Call setup activates at {nearest_cone.descending_rail:.2f} or below")
+        warnings.append(f"📍 Put setup activates at {nearest_cone.ascending_rail:.2f} or above")
     elif position == 'lower_edge':
         direction = 'CALLS'
         color = 'green' if confluence_score >= 75 else 'yellow'
@@ -575,7 +570,7 @@ def generate_action_card(
     expected_contract_move = expected_move * CONTRACT_FACTOR
     
     if expected_contract_move < MIN_CONTRACT_MOVE and direction in ['CALLS', 'PUTS']:
-        warnings.append(f"Expected contract move (${expected_contract_move:.2f}) below minimum")
+        warnings.append(f"⚠️ Expected contract move (${expected_contract_move:.2f}) below minimum")
         if not no_trade:
             color = 'yellow'
             position_size = 'REDUCED'
@@ -600,14 +595,14 @@ def generate_action_card(
 # VISUALIZATION
 # ============================================================================
 
-def create_cone_chart(cones: List[Cone], current_price: float, session_date: datetime, asc_slope: float, desc_slope: float, pivots: List[Pivot]) -> go.Figure:
+def create_cone_chart(cones: List[Cone], current_price: float, session_date: datetime, pivots: List[Pivot]) -> go.Figure:
     
     fig = go.Figure()
     
     colors = {
-        'High': {'asc': '#ff6b6b', 'desc': '#ee5a5a', 'fill': 'rgba(255, 107, 107, 0.08)'},
-        'Close': {'asc': '#4dabf7', 'desc': '#339af0', 'fill': 'rgba(77, 171, 247, 0.08)'},
-        'Low': {'asc': '#51cf66', 'desc': '#40c057', 'fill': 'rgba(81, 207, 102, 0.08)'}
+        'High': {'line': '#e53935', 'fill': 'rgba(229, 57, 53, 0.1)'},
+        'Close': {'line': '#1e88e5', 'fill': 'rgba(30, 136, 229, 0.1)'},
+        'Low': {'line': '#43a047', 'fill': 'rgba(67, 160, 71, 0.1)'}
     }
     
     start_time = datetime.combine(session_date, time(8, 30))
@@ -622,39 +617,27 @@ def create_cone_chart(cones: List[Cone], current_price: float, session_date: dat
         time_points.append(current)
         current = current + timedelta(minutes=30)
     
+    time_labels = [t.strftime('%H:%M') for t in time_points]
+    
     for cone, pivot in zip(cones, pivots):
         ascending_values = []
         descending_values = []
         
         for t in time_points:
             blocks = count_30min_blocks(pivot.time, t)
-            asc = project_rail(pivot.price, blocks, 'ascending', asc_slope, desc_slope)
-            desc = project_rail(pivot.price, blocks, 'descending', asc_slope, desc_slope)
+            asc = project_rail(pivot.price, blocks, 'ascending')
+            desc = project_rail(pivot.price, blocks, 'descending')
             ascending_values.append(asc)
             descending_values.append(desc)
-        
-        time_labels = [t.strftime('%H:%M') for t in time_points]
-        
-        # Fill between rails
-        fig.add_trace(go.Scatter(
-            x=time_labels + time_labels[::-1],
-            y=ascending_values + descending_values[::-1],
-            fill='toself',
-            fillcolor=colors[cone.name]['fill'],
-            line=dict(color='rgba(0,0,0,0)'),
-            name=f'{cone.name} Zone',
-            showlegend=False,
-            hoverinfo='skip'
-        ))
         
         # Ascending rail
         fig.add_trace(go.Scatter(
             x=time_labels,
             y=ascending_values,
             mode='lines',
-            name=f'{cone.name} ▲',
-            line=dict(color=colors[cone.name]['asc'], width=2.5),
-            hovertemplate='<b>%{y:.2f}</b><extra>' + cone.name + ' Ascending</extra>'
+            name=f'{cone.name} Asc',
+            line=dict(color=colors[cone.name]['line'], width=2),
+            hovertemplate='%{y:.2f}<extra></extra>'
         ))
         
         # Descending rail
@@ -662,712 +645,129 @@ def create_cone_chart(cones: List[Cone], current_price: float, session_date: dat
             x=time_labels,
             y=descending_values,
             mode='lines',
-            name=f'{cone.name} ▼',
-            line=dict(color=colors[cone.name]['desc'], width=2.5, dash='dot'),
-            hovertemplate='<b>%{y:.2f}</b><extra>' + cone.name + ' Descending</extra>'
+            name=f'{cone.name} Desc',
+            line=dict(color=colors[cone.name]['line'], width=2, dash='dash'),
+            hovertemplate='%{y:.2f}<extra></extra>'
         ))
     
     # Current price line
     fig.add_hline(
         y=current_price,
-        line=dict(color='#ffd43b', width=3),
-        annotation_text=f'  SPX: {current_price:,.2f}',
-        annotation_position='right',
-        annotation_font=dict(color='#ffd43b', size=14, family='Inter')
-    )
-    
-    # Decision window markers - using shapes and annotations separately for categorical axis
-    # Find indices for the time labels
-    time_labels = [t.strftime('%H:%M') for t in time_points]
-    
-    # Find index positions for vertical lines
-    idx_830 = time_labels.index('08:30') if '08:30' in time_labels else 0
-    idx_1000 = time_labels.index('10:00') if '10:00' in time_labels else 3
-    
-    # Add vertical lines as shapes using index positions
-    fig.add_shape(
-        type="line",
-        x0=idx_830, x1=idx_830,
-        y0=0, y1=1,
-        xref='x', yref='paper',
-        line=dict(color='rgba(255,212,59,0.4)', width=2, dash='dash')
-    )
-    fig.add_shape(
-        type="line",
-        x0=idx_1000, x1=idx_1000,
-        y0=0, y1=1,
-        xref='x', yref='paper',
-        line=dict(color='#ffd43b', width=3)
-    )
-    
-    # Add annotations separately
-    fig.add_annotation(
-        x=idx_830, y=1.05, xref='x', yref='paper',
-        text='Open',
-        showarrow=False,
-        font=dict(color='#ffd43b', size=11)
-    )
-    fig.add_annotation(
-        x=idx_1000, y=1.05, xref='x', yref='paper',
-        text='10:00 Decision',
-        showarrow=False,
-        font=dict(color='#ffd43b', size=12, family='Inter')
+        line=dict(color='#ff9800', width=2, dash='dot'),
+        annotation_text=f'Current: {current_price:.2f}',
+        annotation_position='right'
     )
     
     fig.update_layout(
-        title=dict(
-            text='<b>Cone Structure Projections</b>',
-            font=dict(size=20, color='#f8f9fa', family='Inter'),
-            x=0.5
-        ),
-        xaxis=dict(
-            title='Time (CT)',
-            titlefont=dict(color='#adb5bd', size=13),
-            tickfont=dict(color='#adb5bd', size=11),
-            gridcolor='rgba(173, 181, 189, 0.1)',
-            showgrid=True
-        ),
-        yaxis=dict(
-            title='SPX Price',
-            titlefont=dict(color='#adb5bd', size=13),
-            tickfont=dict(color='#adb5bd', size=11),
-            gridcolor='rgba(173, 181, 189, 0.1)',
-            showgrid=True,
-            tickformat=',.0f'
-        ),
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        height=520,
+        title='Cone Projections',
+        xaxis_title='Time (CT)',
+        yaxis_title='SPX Price',
+        template='plotly_white',
+        height=500,
         legend=dict(
             orientation='h',
             yanchor='bottom',
             y=1.02,
-            xanchor='center',
-            x=0.5,
-            font=dict(color='#f8f9fa', size=11),
-            bgcolor='rgba(0,0,0,0)'
+            xanchor='right',
+            x=1
         ),
-        hovermode='x',
-        margin=dict(l=60, r=30, t=80, b=60)
+        hovermode='x'
     )
     
     return fig
 
 # ============================================================================
-# STREAMLIT UI - PREMIUM DESIGN
+# STREAMLIT UI
 # ============================================================================
 
 def main():
     st.set_page_config(
         page_title="SPX Prophet",
-        page_icon="🔮",
+        page_icon="📈",
         layout="wide",
         initial_sidebar_state="expanded"
     )
     
-    # Premium CSS
+    # Light theme CSS
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-    
-    :root {
-        --bg-primary: #0a0e17;
-        --bg-secondary: #111827;
-        --bg-card: linear-gradient(145deg, #1a1f2e 0%, #151922 100%);
-        --accent-blue: #3b82f6;
-        --accent-cyan: #06b6d4;
-        --accent-green: #10b981;
-        --accent-yellow: #f59e0b;
-        --accent-red: #ef4444;
-        --accent-purple: #8b5cf6;
-        --text-primary: #f8fafc;
-        --text-secondary: #94a3b8;
-        --text-muted: #64748b;
-        --border-color: rgba(148, 163, 184, 0.1);
-        --glow-blue: 0 0 20px rgba(59, 130, 246, 0.3);
-        --glow-green: 0 0 20px rgba(16, 185, 129, 0.3);
-        --glow-yellow: 0 0 20px rgba(245, 158, 11, 0.3);
-        --glow-red: 0 0 20px rgba(239, 68, 68, 0.3);
-    }
-    
-    .stApp {
-        background: linear-gradient(180deg, #0a0e17 0%, #111827 50%, #0a0e17 100%);
-    }
-    
-    * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-    
-    code, .stCode {
-        font-family: 'JetBrains Mono', monospace;
-    }
-    
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    /* Main Header */
     .main-header {
-        background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 50%, #1e1b4b 100%);
-        padding: 2.5rem 3rem;
-        border-radius: 20px;
-        margin-bottom: 2rem;
-        border: 1px solid rgba(59, 130, 246, 0.2);
-        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.05);
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .main-header::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.5), transparent);
-    }
-    
-    .main-header::after {
-        content: '';
-        position: absolute;
-        top: -50%;
-        right: -10%;
-        width: 300px;
-        height: 300px;
-        background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
-        pointer-events: none;
-    }
-    
-    .logo-container {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-    }
-    
-    .logo-icon {
-        font-size: 3rem;
-        filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.5));
-    }
-    
-    .main-title {
-        font-size: 2.8rem;
-        font-weight: 800;
-        background: linear-gradient(135deg, #f8fafc 0%, #3b82f6 50%, #06b6d4 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        margin: 0;
-        letter-spacing: -0.03em;
-        text-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
-    }
-    
-    .tagline {
-        font-size: 1.15rem;
-        color: #94a3b8;
-        margin-top: 0.5rem;
-        font-weight: 400;
-        letter-spacing: 0.02em;
-    }
-    
-    .tagline span {
-        color: #3b82f6;
-        font-weight: 500;
-    }
-    
-    /* Metric Cards */
-    .metric-card {
-        background: linear-gradient(145deg, #1a1f2e 0%, #151922 100%);
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 1.5rem;
-        border-radius: 16px;
-        border: 1px solid rgba(148, 163, 184, 0.1);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
+        border-radius: 10px;
+        margin-bottom: 1.5rem;
+        color: white;
     }
-    
-    .metric-card:hover {
-        border-color: rgba(59, 130, 246, 0.3);
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3), 0 0 20px rgba(59, 130, 246, 0.1);
-        transform: translateY(-2px);
-    }
-    
-    .metric-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-    }
-    
-    .metric-label {
-        font-size: 0.75rem;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-    }
-    
-    .metric-value {
+    .main-title {
         font-size: 2rem;
         font-weight: 700;
-        color: #f8fafc;
-        font-family: 'JetBrains Mono', monospace;
+        margin: 0;
     }
-    
-    .metric-value.price {
-        background: linear-gradient(135deg, #ffd43b 0%, #fab005 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+    .tagline {
+        font-size: 1rem;
+        margin-top: 0.25rem;
+        opacity: 0.9;
     }
-    
-    /* Price Display */
-    .price-display {
-        background: linear-gradient(145deg, #1a1f2e 0%, #151922 100%);
-        padding: 2rem;
-        border-radius: 20px;
-        border: 1px solid rgba(255, 212, 59, 0.2);
-        box-shadow: 0 0 30px rgba(255, 212, 59, 0.1);
-        text-align: center;
-        margin-bottom: 1.5rem;
-    }
-    
-    .price-label {
-        font-size: 0.85rem;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        font-weight: 600;
-        margin-bottom: 0.75rem;
-    }
-    
-    .price-value {
-        font-size: 3.5rem;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', monospace;
-        background: linear-gradient(135deg, #ffd43b 0%, #fab005 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        text-shadow: 0 0 40px rgba(255, 212, 59, 0.3);
-    }
-    
-    /* Action Cards */
-    .action-card {
-        padding: 2rem;
-        border-radius: 20px;
-        margin: 1.5rem 0;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .action-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        opacity: 0.1;
-        pointer-events: none;
-    }
-    
-    .action-card-green {
-        background: linear-gradient(145deg, #064e3b 0%, #022c22 100%);
-        border: 2px solid #10b981;
-        box-shadow: 0 0 40px rgba(16, 185, 129, 0.2), inset 0 1px 0 rgba(255,255,255,0.05);
-    }
-    
-    .action-card-yellow {
-        background: linear-gradient(145deg, #713f12 0%, #451a03 100%);
-        border: 2px solid #f59e0b;
-        box-shadow: 0 0 40px rgba(245, 158, 11, 0.2), inset 0 1px 0 rgba(255,255,255,0.05);
-    }
-    
-    .action-card-red {
-        background: linear-gradient(145deg, #7f1d1d 0%, #450a0a 100%);
-        border: 2px solid #ef4444;
-        box-shadow: 0 0 40px rgba(239, 68, 68, 0.2), inset 0 1px 0 rgba(255,255,255,0.05);
-    }
-    
-    .direction-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 1rem 2rem;
-        border-radius: 12px;
-        font-size: 1.75rem;
-        font-weight: 800;
-        letter-spacing: 0.05em;
+    .metric-card {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #dee2e6;
         margin-bottom: 1rem;
     }
-    
-    .direction-badge.calls {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: white;
-        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
-    }
-    
-    .direction-badge.puts {
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-        color: white;
-        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
-    }
-    
-    .direction-badge.wait {
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-        color: white;
-        box-shadow: 0 4px 15px rgba(245, 158, 11, 0.4);
-    }
-    
-    .direction-badge.notrade {
-        background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-        color: white;
-        box-shadow: 0 4px 15px rgba(107, 114, 128, 0.4);
-    }
-    
-    /* Confluence Score */
-    .confluence-container {
-        background: linear-gradient(145deg, #1a1f2e 0%, #151922 100%);
-        padding: 2rem;
-        border-radius: 20px;
-        border: 1px solid rgba(148, 163, 184, 0.1);
-        text-align: center;
-        margin-bottom: 1.5rem;
-    }
-    
-    .confluence-score {
-        font-size: 4.5rem;
-        font-weight: 800;
-        font-family: 'JetBrains Mono', monospace;
-        line-height: 1;
-    }
-    
-    .confluence-score.high {
-        background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        text-shadow: 0 0 40px rgba(16, 185, 129, 0.4);
-    }
-    
-    .confluence-score.medium {
-        background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        text-shadow: 0 0 40px rgba(245, 158, 11, 0.4);
-    }
-    
-    .confluence-score.low {
-        background: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        text-shadow: 0 0 40px rgba(239, 68, 68, 0.4);
-    }
-    
-    .confluence-label {
-        font-size: 0.8rem;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        font-weight: 600;
-        margin-top: 0.5rem;
-    }
-    
-    /* Data Table */
-    .data-table {
-        background: linear-gradient(145deg, #1a1f2e 0%, #151922 100%);
-        border-radius: 16px;
-        border: 1px solid rgba(148, 163, 184, 0.1);
-        overflow: hidden;
-    }
-    
-    /* Warning Badges */
-    .warning-badge {
-        background: linear-gradient(145deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%);
-        border: 1px solid rgba(245, 158, 11, 0.3);
-        color: #fbbf24;
-        padding: 0.75rem 1rem;
+    .action-card-green {
+        background: #d4edda;
+        border: 2px solid #28a745;
+        padding: 1.5rem;
         border-radius: 10px;
-        margin: 0.5rem 0;
-        font-size: 0.9rem;
-        font-weight: 500;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-    
-    .info-badge {
-        background: linear-gradient(145deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 100%);
-        border: 1px solid rgba(59, 130, 246, 0.3);
-        color: #60a5fa;
-        padding: 0.75rem 1rem;
-        border-radius: 10px;
-        margin: 0.5rem 0;
-        font-size: 0.9rem;
-        font-weight: 500;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-    
-    .success-badge {
-        background: linear-gradient(145deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%);
-        border: 1px solid rgba(16, 185, 129, 0.3);
-        color: #34d399;
-        padding: 0.75rem 1rem;
-        border-radius: 10px;
-        margin: 0.5rem 0;
-        font-size: 0.9rem;
-        font-weight: 500;
-    }
-    
-    /* Section Headers */
-    .section-header {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: #f8fafc;
-        margin: 1.5rem 0 1rem 0;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-    
-    .section-header::after {
-        content: '';
-        flex: 1;
-        height: 1px;
-        background: linear-gradient(90deg, rgba(148, 163, 184, 0.2), transparent);
-        margin-left: 1rem;
-    }
-    
-    /* Trade Details */
-    .trade-detail {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.75rem 0;
-        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-    }
-    
-    .trade-detail:last-child {
-        border-bottom: none;
-    }
-    
-    .trade-detail-label {
-        color: #94a3b8;
-        font-size: 0.9rem;
-        font-weight: 500;
-    }
-    
-    .trade-detail-value {
-        color: #f8fafc;
-        font-size: 1rem;
-        font-weight: 600;
-        font-family: 'JetBrains Mono', monospace;
-    }
-    
-    /* Regime Indicators */
-    .regime-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 1rem;
         margin: 1rem 0;
     }
-    
-    .regime-item {
-        background: linear-gradient(145deg, #1a1f2e 0%, #151922 100%);
-        padding: 1.25rem;
-        border-radius: 12px;
-        border: 1px solid rgba(148, 163, 184, 0.1);
+    .action-card-yellow {
+        background: #fff3cd;
+        border: 2px solid #ffc107;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+    }
+    .action-card-red {
+        background: #f8d7da;
+        border: 2px solid #dc3545;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+    }
+    .direction-text {
+        font-size: 1.75rem;
+        font-weight: 700;
         text-align: center;
+        margin-bottom: 1rem;
     }
-    
-    .regime-item-label {
-        font-size: 0.7rem;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-    }
-    
-    .regime-item-value {
-        font-size: 1rem;
-        font-weight: 600;
-        color: #f8fafc;
-    }
-    
-    .regime-item-status {
-        font-size: 1.25rem;
-        margin-top: 0.25rem;
-    }
-    
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #111827 0%, #0a0e17 100%);
-        border-right: 1px solid rgba(148, 163, 184, 0.1);
-    }
-    
-    section[data-testid="stSidebar"] .stMarkdown h3 {
-        color: #f8fafc;
-        font-weight: 600;
-        font-size: 0.95rem;
-        letter-spacing: 0.02em;
-    }
-    
-    /* Input Styling */
-    .stNumberInput > div > div > input,
-    .stTextInput > div > div > input {
-        background: #1a1f2e !important;
-        border: 1px solid rgba(148, 163, 184, 0.2) !important;
-        border-radius: 8px !important;
-        color: #f8fafc !important;
-        font-family: 'JetBrains Mono', monospace !important;
-    }
-    
-    .stNumberInput > div > div > input:focus,
-    .stTextInput > div > div > input:focus {
-        border-color: #3b82f6 !important;
-        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
-    }
-    
-    .stSelectbox > div > div {
-        background: #1a1f2e !important;
-        border: 1px solid rgba(148, 163, 184, 0.2) !important;
-        border-radius: 8px !important;
-    }
-    
-    .stDateInput > div > div > input {
-        background: #1a1f2e !important;
-        border: 1px solid rgba(148, 163, 184, 0.2) !important;
-        border-radius: 8px !important;
-        color: #f8fafc !important;
-    }
-    
-    /* Checkbox */
-    .stCheckbox label {
-        color: #f8fafc !important;
-    }
-    
-    /* Dataframe */
-    .stDataFrame {
-        border-radius: 12px;
-        overflow: hidden;
-    }
-    
-    .stDataFrame [data-testid="stDataFrameResizable"] {
-        background: #1a1f2e;
-    }
-    
-    /* Plotly Chart Container */
-    .stPlotlyChart {
-        background: linear-gradient(145deg, #1a1f2e 0%, #151922 100%);
-        border-radius: 16px;
-        border: 1px solid rgba(148, 163, 184, 0.1);
-        padding: 1rem;
-    }
-    
-    /* Insight Box */
-    .insight-box {
-        background: linear-gradient(145deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
-        border: 1px solid rgba(59, 130, 246, 0.2);
-        border-radius: 12px;
-        padding: 1.25rem;
-        margin-top: 1rem;
-    }
-    
-    .insight-box .icon {
-        font-size: 1.5rem;
-        margin-bottom: 0.5rem;
-    }
-    
-    .insight-box .text {
-        color: #94a3b8;
-        font-size: 0.9rem;
-        line-height: 1.5;
-    }
-    
-    .insight-box .highlight {
-        color: #60a5fa;
-        font-weight: 600;
-    }
-    
-    /* Animations */
-    @keyframes pulse-glow {
-        0%, 100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.3); }
-        50% { box-shadow: 0 0 40px rgba(59, 130, 246, 0.5); }
-    }
-    
-    @keyframes float {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-5px); }
-    }
-    
-    .pulse-animation {
-        animation: pulse-glow 2s ease-in-out infinite;
-    }
+    .direction-green { color: #28a745; }
+    .direction-yellow { color: #856404; }
+    .direction-red { color: #dc3545; }
     </style>
     """, unsafe_allow_html=True)
     
     # Header
     st.markdown("""
     <div class="main-header">
-        <div class="logo-container">
-            <span class="logo-icon">🔮</span>
-            <div>
-                <h1 class="main-title">SPX Prophet</h1>
-                <p class="tagline">Where <span>Structure</span> Becomes <span>Foresight</span></p>
-            </div>
-        </div>
+        <h1 class="main-title">📈 SPX Prophet</h1>
+        <p class="tagline">Where Structure Becomes Foresight</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
-        st.markdown("### 📅 Session")
+        st.header("📅 Session Configuration")
         
         session_date = st.date_input(
-            "Trading Date",
+            "Trading Session Date",
             value=datetime.now().date(),
             help="Select the trading session to analyze"
         )
         session_date = datetime.combine(session_date, time(0, 0))
         
-        st.markdown("---")
-        
-        # Slope configuration
-        st.markdown("### ⚙️ Slope Parameters")
-        
-        asc_slope = st.number_input(
-            "Ascending Slope",
-            value=SLOPE_ASCENDING,
-            min_value=0.30,
-            max_value=0.70,
-            step=0.01,
-            format="%.2f",
-            help="Points per 30-min block (upside)"
-        )
-        
-        desc_slope = st.number_input(
-            "Descending Slope", 
-            value=SLOPE_DESCENDING,
-            min_value=0.30,
-            max_value=0.70,
-            step=0.01,
-            format="%.2f",
-            help="Points per 30-min block (downside)"
-        )
-        
-        st.markdown("---")
+        st.divider()
         
         # Fetch data
         prior_session = fetch_prior_session_data(session_date)
@@ -1375,18 +775,18 @@ def main():
         current_price = fetch_current_spx() or (prior_session['close'] if prior_session else 6000)
         first_bar = fetch_first_30min_bar(session_date)
         
-        st.markdown("### 📍 Pivots")
+        st.header("📍 Pivots (Prior Session)")
         
         if prior_session:
-            st.caption(f"Source: {prior_session['date'].strftime('%Y-%m-%d')}")
+            st.info(f"Data from: {prior_session['date'].strftime('%Y-%m-%d')}")
             
-            use_manual = st.checkbox("Override pivots", value=False)
+            use_manual = st.checkbox("Override pivots manually", value=False)
             
             if use_manual:
-                st.warning("⚠️ Manual mode")
+                st.warning("Manual pivots active")
             
             high_price = st.number_input(
-                "High",
+                "High Price",
                 value=float(prior_session['high']),
                 step=0.01,
                 format="%.2f",
@@ -1394,13 +794,13 @@ def main():
             )
             
             high_time_str = st.text_input(
-                "High Time (CT)",
+                "High Time (HH:MM CT)",
                 value=prior_session['high_time'].strftime('%H:%M'),
                 disabled=not use_manual
             )
             
             low_price = st.number_input(
-                "Low",
+                "Low Price",
                 value=float(prior_session['low']),
                 step=0.01,
                 format="%.2f",
@@ -1408,19 +808,20 @@ def main():
             )
             
             low_time_str = st.text_input(
-                "Low Time (CT)",
+                "Low Time (HH:MM CT)",
                 value=prior_session['low_time'].strftime('%H:%M'),
                 disabled=not use_manual
             )
             
             close_price = st.number_input(
-                "Close",
+                "Close Price",
                 value=float(prior_session['close']),
                 step=0.01,
                 format="%.2f",
                 disabled=not use_manual
             )
             
+            # Parse times
             try:
                 high_hour, high_min = map(int, high_time_str.split(':'))
                 high_time = datetime.combine(prior_session['date'], time(high_hour, high_min))
@@ -1439,15 +840,14 @@ def main():
             close_time = CT_TZ.localize(close_time)
             
         else:
-            st.error("Could not fetch data")
-            use_manual = True
+            st.error("Could not fetch data. Enter manually.")
             
-            high_price = st.number_input("High", value=6050.0, step=0.01, format="%.2f")
-            low_price = st.number_input("Low", value=6000.0, step=0.01, format="%.2f")
-            close_price = st.number_input("Close", value=6025.0, step=0.01, format="%.2f")
+            high_price = st.number_input("High Price", value=6050.0, step=0.01, format="%.2f")
+            low_price = st.number_input("Low Price", value=6000.0, step=0.01, format="%.2f")
+            close_price = st.number_input("Close Price", value=6025.0, step=0.01, format="%.2f")
             
-            high_time_str = st.text_input("High Time (CT)", value="10:30")
-            low_time_str = st.text_input("Low Time (CT)", value="13:45")
+            high_time_str = st.text_input("High Time (HH:MM CT)", value="10:30")
+            low_time_str = st.text_input("Low Time (HH:MM CT)", value="13:45")
             
             prior_date = session_date - timedelta(days=1)
             while prior_date.weekday() >= 5:
@@ -1469,10 +869,15 @@ def main():
             
             close_time = CT_TZ.localize(datetime.combine(prior_date, time(15, 0)))
         
-        st.markdown("---")
+        st.divider()
+        
+        st.header("⚙️ Slope Parameters")
+        st.text(f"Ascending: +{SLOPE_ASCENDING} pts/30min")
+        st.text(f"Descending: -{SLOPE_DESCENDING} pts/30min")
         
         if es_data and es_data.get('offset'):
-            st.markdown("### 🔄 ES-SPX Offset")
+            st.divider()
+            st.header("🔄 ES-SPX Offset")
             st.metric("Offset", f"{es_data['offset']:.2f} pts")
     
     # Build pivots and cones
@@ -1482,6 +887,7 @@ def main():
         Pivot(price=low_price, time=low_time, name='Low')
     ]
     
+    # Determine evaluation time
     ct_now = get_ct_now()
     if session_date.date() == ct_now.date():
         eval_time = ct_now
@@ -1490,225 +896,121 @@ def main():
         eval_time = CT_TZ.localize(datetime.combine(session_date, time(10, 0)))
         is_10am_window = True
     
-    cones = build_cones(pivots, eval_time, asc_slope, desc_slope)
+    # Build cones
+    cones = build_cones(pivots, eval_time)
+    
+    # Analyze regime
     regime = analyze_regime(cones, es_data, prior_session, first_bar, current_price)
+    
+    # Generate action card
     action_card = generate_action_card(cones, regime, current_price, is_10am_window)
     
-    # Main Layout
+    # Main content
     col_main, col_action = st.columns([2, 1])
     
     with col_main:
-        # Price Display
-        st.markdown(f"""
-        <div class="price-display">
-            <div class="price-label">SPX Current Price</div>
-            <div class="price-value">{current_price:,.2f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Current price
+        st.metric("SPX Current Price", f"{current_price:,.2f}")
         
-        # Cone Chart
+        # Chart
         st.plotly_chart(
-            create_cone_chart(cones, current_price, session_date, asc_slope, desc_slope, pivots),
+            create_cone_chart(cones, current_price, session_date, pivots),
             use_container_width=True
         )
         
-        # Cone Projections Table
-        st.markdown('<div class="section-header">📊 Cone Projections at Key Times</div>', unsafe_allow_html=True)
+        # Cone table
+        st.subheader("📊 Cone Projections at Key Times")
         
         time_830 = CT_TZ.localize(datetime.combine(session_date, time(8, 30)))
         time_1000 = CT_TZ.localize(datetime.combine(session_date, time(10, 0)))
         
-        cones_830 = build_cones(pivots, time_830, asc_slope, desc_slope)
-        cones_1000 = build_cones(pivots, time_1000, asc_slope, desc_slope)
+        cones_830 = build_cones(pivots, time_830)
+        cones_1000 = build_cones(pivots, time_1000)
         
         table_data = []
         for i, cone_name in enumerate(['High', 'Close', 'Low']):
             table_data.append({
-                'Cone': f"🔺 {cone_name}" if cone_name == 'High' else (f"🔷 {cone_name}" if cone_name == 'Close' else f"🔻 {cone_name}"),
-                '08:30 ▲': f"{cones_830[i].ascending_rail:.2f}",
-                '08:30 ▼': f"{cones_830[i].descending_rail:.2f}",
-                '10:00 ▲': f"{cones_1000[i].ascending_rail:.2f}",
-                '10:00 ▼': f"{cones_1000[i].descending_rail:.2f}",
-                'Width': f"{cones_1000[i].width:.2f}",
-                'Width %': f"{(cones_1000[i].width / current_price * 100):.3f}%"
+                'Cone': cone_name,
+                '08:30 Asc': f"{cones_830[i].ascending_rail:.2f}",
+                '08:30 Desc': f"{cones_830[i].descending_rail:.2f}",
+                '10:00 Asc': f"{cones_1000[i].ascending_rail:.2f}",
+                '10:00 Desc': f"{cones_1000[i].descending_rail:.2f}",
+                'Width': f"{cones_1000[i].width:.2f}"
             })
         
-        df_cones = pd.DataFrame(table_data)
-        st.dataframe(df_cones, use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(table_data), use_container_width=True, hide_index=True)
         
-        # Regime Analysis
-        st.markdown('<div class="section-header">🔍 Regime Analysis</div>', unsafe_allow_html=True)
+        # Regime analysis
+        st.subheader("🔍 Regime Analysis")
         
         col_r1, col_r2, col_r3 = st.columns(3)
         
         with col_r1:
-            overnight_status = "✅" if regime.overnight_range_pct < 0.30 else ("⚠️" if regime.overnight_range_pct < 0.40 else "❌")
-            st.markdown(f"""
-            <div class="regime-item">
-                <div class="regime-item-label">Overnight Range</div>
-                <div class="regime-item-value">{regime.overnight_range:.1f} pts</div>
-                <div class="regime-item-status">{regime.overnight_range_pct:.0%} of cone {overnight_status}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            status = "✅" if regime.overnight_range_pct < 0.30 else ("⚠️" if regime.overnight_range_pct < 0.40 else "❌")
+            st.metric("Overnight Range", f"{regime.overnight_range:.1f} pts", f"{regime.overnight_range_pct:.0%} of cone {status}")
         
         with col_r2:
-            position_emoji = "✅" if regime.opening_position in ['lower_edge', 'upper_edge'] else "⚠️"
-            st.markdown(f"""
-            <div class="regime-item">
-                <div class="regime-item-label">Price Position</div>
-                <div class="regime-item-value">{regime.opening_position.replace('_', ' ').title()}</div>
-                <div class="regime-item-status">{position_emoji}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Opening Position", regime.opening_position.replace('_', ' ').title())
         
         with col_r3:
-            energy_emoji = "✅" if regime.first_bar_energy == 'strong' else ("⚠️" if regime.first_bar_energy == 'neutral' else "❌")
-            st.markdown(f"""
-            <div class="regime-item">
-                <div class="regime-item-label">First Bar Energy</div>
-                <div class="regime-item-value">{regime.first_bar_energy.title()}</div>
-                <div class="regime-item-status">{energy_emoji}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("First Bar Energy", regime.first_bar_energy.title())
         
-        col_r4, col_r5, col_r6 = st.columns(3)
+        col_r4, col_r5 = st.columns(2)
         
         with col_r4:
-            st.markdown(f"""
-            <div class="regime-item">
-                <div class="regime-item-label">Cone Width</div>
-                <div class="regime-item-value">{'Adequate' if regime.cone_width_adequate else 'Narrow'}</div>
-                <div class="regime-item-status">{'✅' if regime.cone_width_adequate else '❌'}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Cone Width Adequate", "Yes ✅" if regime.cone_width_adequate else "No ❌")
         
         with col_r5:
-            st.markdown(f"""
-            <div class="regime-item">
-                <div class="regime-item-label">Prior Day Range</div>
-                <div class="regime-item-value">{'Adequate' if regime.prior_day_range_adequate else 'Weak'}</div>
-                <div class="regime-item-status">{'✅' if regime.prior_day_range_adequate else '❌'}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col_r6:
-            touch_text = ", ".join(regime.overnight_touched_rails) if regime.overnight_touched_rails else "None"
-            st.markdown(f"""
-            <div class="regime-item">
-                <div class="regime-item-label">Overnight Touches</div>
-                <div class="regime-item-value" style="font-size: 0.85rem;">{touch_text}</div>
-                <div class="regime-item-status">{'⚠️' if regime.overnight_touched_rails else '✅'}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.metric("Prior Day Range", "Adequate ✅" if regime.prior_day_range_adequate else "Weak ❌")
     
     with col_action:
-        # Confluence Score
-        score_class = "high" if action_card.confluence_score >= 75 else ("medium" if action_card.confluence_score >= 50 else "low")
-        st.markdown(f"""
-        <div class="confluence-container">
-            <div class="confluence-score {score_class}">{action_card.confluence_score}</div>
-            <div class="confluence-label">Confluence Score</div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Confluence score
+        score_color = "#28a745" if action_card.confluence_score >= 75 else ("#ffc107" if action_card.confluence_score >= 50 else "#dc3545")
+        st.markdown(f"### Confluence Score")
+        st.markdown(f"<h1 style='text-align: center; color: {score_color};'>{action_card.confluence_score}</h1>", unsafe_allow_html=True)
         
-        # Action Card
-        card_class = f"action-card action-card-{action_card.color}"
-        direction_class = action_card.direction.lower().replace(' ', '')
-        direction_icon = '📈' if action_card.direction == 'CALLS' else ('📉' if action_card.direction == 'PUTS' else ('⏳' if action_card.direction == 'WAIT' else '⛔'))
+        # Action card
+        card_class = f"action-card-{action_card.color}"
+        direction_class = f"direction-{action_card.color}"
+        
+        emoji = '🟢' if action_card.direction == 'CALLS' else ('🔴' if action_card.direction == 'PUTS' else ('🟡' if action_card.direction == 'WAIT' else '⛔'))
         
         st.markdown(f"""
         <div class="{card_class}">
-            <div style="text-align: center;">
-                <span class="direction-badge {direction_class}">{direction_icon} {action_card.direction}</span>
+            <div class="direction-text {direction_class}">
+                {emoji} {action_card.direction}
             </div>
         </div>
         """, unsafe_allow_html=True)
         
-        # Trade Details
+        # Trade details
         if action_card.direction in ['CALLS', 'PUTS']:
-            st.markdown('<div class="section-header">📋 Setup Details</div>', unsafe_allow_html=True)
+            st.markdown("#### 📋 Trade Setup")
+            st.write(f"**Structure:** {action_card.active_cone} - {action_card.active_rail.title()}")
+            st.write(f"**Entry:** {action_card.entry_level:.2f}")
             
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="trade-detail">
-                    <span class="trade-detail-label">Structure</span>
-                    <span class="trade-detail-value">{action_card.active_cone} - {action_card.active_rail.title()}</span>
-                </div>
-                <div class="trade-detail">
-                    <span class="trade-detail-label">Entry Level</span>
-                    <span class="trade-detail-value">{action_card.entry_level:.2f}</span>
-                </div>
-                <div class="trade-detail">
-                    <span class="trade-detail-label">Position Size</span>
-                    <span class="trade-detail-value" style="color: {'#10b981' if action_card.position_size == 'FULL' else '#f59e0b'};">{action_card.position_size}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("#### 🎯 Targets")
+            st.write(f"• 60% @ 50%: {action_card.target_50:.2f}")
+            st.write(f"• 20% @ 75%: {action_card.target_75:.2f}")
+            st.write(f"• 20% @ 100%: {action_card.target_100:.2f}")
             
-            st.markdown('<div class="section-header">🎯 Exit Targets</div>', unsafe_allow_html=True)
+            st.markdown("#### 🛑 Stop")
+            st.write(f"**Below:** {action_card.stop_level:.2f}")
             
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="trade-detail">
-                    <span class="trade-detail-label">60% @ 50%</span>
-                    <span class="trade-detail-value" style="color: #10b981;">{action_card.target_50:.2f}</span>
-                </div>
-                <div class="trade-detail">
-                    <span class="trade-detail-label">20% @ 75%</span>
-                    <span class="trade-detail-value" style="color: #10b981;">{action_card.target_75:.2f}</span>
-                </div>
-                <div class="trade-detail">
-                    <span class="trade-detail-label">20% @ 100%</span>
-                    <span class="trade-detail-value" style="color: #10b981;">{action_card.target_100:.2f}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("#### 💰 Expected Move")
+            st.metric("ATM 0DTE", f"${action_card.expected_contract_move:.2f}")
             
-            st.markdown('<div class="section-header">🛑 Risk Management</div>', unsafe_allow_html=True)
-            
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="trade-detail">
-                    <span class="trade-detail-label">Stop Loss</span>
-                    <span class="trade-detail-value" style="color: #ef4444;">{action_card.stop_level:.2f}</span>
-                </div>
-                <div class="trade-detail">
-                    <span class="trade-detail-label">ATM 0DTE Move</span>
-                    <span class="trade-detail-value">${action_card.expected_contract_move:.2f}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        elif action_card.direction == 'WAIT':
-            st.markdown("""
-            <div class="metric-card">
-                <div style="text-align: center; padding: 1rem;">
-                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">⏳</div>
-                    <div style="color: #f8fafc; font-weight: 600;">Waiting for Setup</div>
-                    <div style="color: #94a3b8; font-size: 0.9rem; margin-top: 0.5rem;">Price in dead zone. Monitor for migration to edge.</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("#### 📊 Position Size")
+            st.write(f"**{action_card.position_size}**")
         
         # Warnings
         if action_card.warnings:
-            st.markdown('<div class="section-header">⚠️ Alerts</div>', unsafe_allow_html=True)
-            
+            st.markdown("#### ⚠️ Alerts")
             for warning in action_card.warnings:
-                if "activates at" in warning:
-                    st.markdown(f'<div class="info-badge">📍 {warning}</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="warning-badge">⚠️ {warning}</div>', unsafe_allow_html=True)
+                st.warning(warning)
         
-        # Insight Box
-        st.markdown("""
-        <div class="insight-box">
-            <div class="icon">💡</div>
-            <div class="text">
-                Your edge is highest when the <span class="highlight">10:00 CT reaction</span> aligns with your primary cone structure.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.divider()
+        st.info("💡 Your edge is highest when the 10:00 CT reaction aligns with your primary cone.")
 
 if __name__ == "__main__":
     main()
