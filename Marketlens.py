@@ -235,7 +235,8 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
         close_price = df_intraday['Close'].iloc[-1]
         
         # ============================================================
-        # SECONDARY HIGH DETECTION
+        # SECONDARY HIGH DETECTION (Independent of Low)
+        # Looking for: High -> Drop -> Lower High (Secondary High)
         # ============================================================
         secondary_high = None
         secondary_high_time = None
@@ -249,7 +250,7 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
             pullback_pct = (high_price - min_after_high) / high_price
             
             if pullback_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                # Find the lowest point after the high
+                # Find the lowest point after the high (this is where pullback bottomed)
                 min_idx = df_after_high['Low'].idxmin()
                 
                 # Look for a bounce (secondary high) after the pullback
@@ -260,14 +261,27 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
                     secondary_high_idx = df_after_pullback['High'].idxmax()
                     potential_secondary_high = df_after_pullback.loc[secondary_high_idx, 'High']
                     
-                    # Validate: must be lower than primary and at least 5 points below
+                    # Validate: must be LOWER than primary high and at least 5 points below
                     if (potential_secondary_high < high_price and 
                         (high_price - potential_secondary_high) >= SECONDARY_PIVOT_MIN_DISTANCE):
-                        secondary_high = potential_secondary_high
-                        secondary_high_time = to_ct(secondary_high_idx.to_pydatetime())
+                        
+                        # Additional check: make sure this secondary high is followed by 
+                        # at least some downward movement (it's a real pivot, not just noise)
+                        df_after_sec_high = df_after_pullback[df_after_pullback.index > secondary_high_idx]
+                        if not df_after_sec_high.empty:
+                            min_after_sec_high = df_after_sec_high['Low'].min()
+                            # If price dropped at least 0.1% after the secondary high, it's valid
+                            if (potential_secondary_high - min_after_sec_high) / potential_secondary_high >= 0.001:
+                                secondary_high = potential_secondary_high
+                                secondary_high_time = to_ct(secondary_high_idx.to_pydatetime())
+                        else:
+                            # If it's near end of day, accept it
+                            secondary_high = potential_secondary_high
+                            secondary_high_time = to_ct(secondary_high_idx.to_pydatetime())
         
         # ============================================================
-        # SECONDARY LOW DETECTION
+        # SECONDARY LOW DETECTION (Independent of High)
+        # Looking for: Low -> Bounce -> Higher Low (Secondary Low)
         # ============================================================
         secondary_low = None
         secondary_low_time = None
@@ -281,7 +295,7 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
             bounce_pct = (max_after_low - low_price) / low_price
             
             if bounce_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                # Find the highest point after the low
+                # Find the highest point after the low (this is where bounce topped)
                 max_idx = df_after_low['High'].idxmax()
                 
                 # Look for a pullback (secondary low) after the bounce
@@ -292,11 +306,23 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
                     secondary_low_idx = df_after_bounce['Low'].idxmin()
                     potential_secondary_low = df_after_bounce.loc[secondary_low_idx, 'Low']
                     
-                    # Validate: must be higher than primary and at least 5 points above
+                    # Validate: must be HIGHER than primary low and at least 5 points above
                     if (potential_secondary_low > low_price and 
                         (potential_secondary_low - low_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
-                        secondary_low = potential_secondary_low
-                        secondary_low_time = to_ct(secondary_low_idx.to_pydatetime())
+                        
+                        # Additional check: make sure this secondary low is followed by 
+                        # at least some upward movement (it's a real pivot, not just noise)
+                        df_after_sec_low = df_after_bounce[df_after_bounce.index > secondary_low_idx]
+                        if not df_after_sec_low.empty:
+                            max_after_sec_low = df_after_sec_low['High'].max()
+                            # If price bounced at least 0.1% after the secondary low, it's valid
+                            if (max_after_sec_low - potential_secondary_low) / potential_secondary_low >= 0.001:
+                                secondary_low = potential_secondary_low
+                                secondary_low_time = to_ct(secondary_low_idx.to_pydatetime())
+                        else:
+                            # If it's near end of day, accept it
+                            secondary_low = potential_secondary_low
+                            secondary_low_time = to_ct(secondary_low_idx.to_pydatetime())
         
         return {
             'date': prior_date,
@@ -1417,22 +1443,34 @@ def main():
             close_price = st.number_input("Close", value=float(prior_session['close']), disabled=not use_manual, format="%.2f")
             
             # Secondary Pivots Display
-            if prior_session.get('secondary_high') is not None:
+            if prior_session.get('secondary_high') is not None or prior_session.get('secondary_low') is not None:
                 st.markdown("---")
                 st.markdown("### 📍 Secondary Pivots")
+            
+            if prior_session.get('secondary_high') is not None:
                 st.success("🔄 Secondary High Detected!")
                 secondary_high_price = prior_session['secondary_high']
                 secondary_high_time = prior_session['secondary_high_time']
-                st.metric("2nd High", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
+                st.metric("2nd High (High²)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
             
             if prior_session.get('secondary_low') is not None:
-                if prior_session.get('secondary_high') is None:
-                    st.markdown("---")
-                    st.markdown("### 📍 Secondary Pivots")
                 st.success("🔄 Secondary Low Detected!")
                 secondary_low_price = prior_session['secondary_low']
                 secondary_low_time = prior_session['secondary_low_time']
-                st.metric("2nd Low", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
+                st.metric("2nd Low (Low²)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
+            
+            # Debug: Show timing info
+            with st.expander("🔍 Pivot Timing Details"):
+                st.write(f"**Primary High:** {prior_session['high']:.2f} @ {prior_session['high_time'].strftime('%H:%M')} CT")
+                st.write(f"**Primary Low:** {prior_session['low']:.2f} @ {prior_session['low_time'].strftime('%H:%M')} CT")
+                if prior_session.get('secondary_high') is not None:
+                    st.write(f"**Secondary High²:** {prior_session['secondary_high']:.2f} @ {prior_session['secondary_high_time'].strftime('%H:%M')} CT")
+                else:
+                    st.write("**Secondary High²:** Not detected")
+                if prior_session.get('secondary_low') is not None:
+                    st.write(f"**Secondary Low²:** {prior_session['secondary_low']:.2f} @ {prior_session['secondary_low_time'].strftime('%H:%M')} CT")
+                else:
+                    st.write("**Secondary Low²:** Not detected")
             
             try:
                 h, m = map(int, high_time_str.split(':'))
