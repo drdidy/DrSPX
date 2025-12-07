@@ -949,30 +949,30 @@ def render_action_card(action: ActionCard):
     """, unsafe_allow_html=True)
 
 def render_decision_card(title: str, cones: List[Cone]):
-    cone_html = ""
-    for cone in cones:
-        cone_html += f"""
-        <div style="margin-bottom: 1rem;">
-            <div style="font-weight: 600; color: #fbbf24; margin-bottom: 0.5rem;">{cone.name} Cone</div>
-            <div style="display: flex; justify-content: space-between;">
-                <div>
-                    <div class="decision-label">Puts Entry ▲</div>
-                    <div class="decision-value decision-puts">{cone.ascending_rail:.2f}</div>
-                </div>
-                <div>
-                    <div class="decision-label">Calls Entry ▼</div>
-                    <div class="decision-value decision-calls">{cone.descending_rail:.2f}</div>
-                </div>
-            </div>
-        </div>
-        """
-    
     st.markdown(f"""
     <div class="decision-card">
         <div class="decision-time">{title}</div>
-        {cone_html}
     </div>
     """, unsafe_allow_html=True)
+    
+    for cone in cones:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**{cone.name} Cone**")
+        with col2:
+            st.write("")
+        
+        col_puts, col_calls = st.columns(2)
+        with col_puts:
+            st.metric(
+                label="🔴 Puts Entry ▲",
+                value=f"{cone.ascending_rail:.2f}"
+            )
+        with col_calls:
+            st.metric(
+                label="🟢 Calls Entry ▼", 
+                value=f"{cone.descending_rail:.2f}"
+            )
 
 def render_proximity_meters(cones: List[Cone], current_price: float):
     st.markdown("#### 📍 Distance to Entry Rails")
