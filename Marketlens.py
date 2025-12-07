@@ -132,10 +132,10 @@ def count_30min_blocks(start_time: datetime, end_time: datetime) -> int:
     """
     Count 30-minute blocks between two times, skipping:
     - Daily maintenance window: 4pm-5pm CT (16:00-17:00)
-    - Weekend closure: Friday 4pm CT to Sunday 5pm CT
+    - Weekend: Friday 4pm CT to Sunday 5pm CT
     
-    The market treats Monday as the next day after Friday.
-    Friday close (4pm CT) → Sunday open (5pm CT) = no blocks counted during weekend
+    TradingView behavior: Friday's last candle is 3:30pm, next candle is Sunday 5pm.
+    So we skip Friday after 4pm, all of Saturday, and Sunday until 5pm.
     """
     if start_time >= end_time:
         return 0
@@ -143,27 +143,31 @@ def count_30min_blocks(start_time: datetime, end_time: datetime) -> int:
     blocks = 0
     current = start_time
     
+    FRIDAY_CUTOFF = time(16, 0)  # Friday stops at 4pm CT
+    SUNDAY_RESUME = time(17, 0)  # Sunday resumes at 5pm CT
+    
     while current < end_time:
         current_ct = current.astimezone(CT_TZ)
         current_ct_time = current_ct.time()
-        current_weekday = current_ct.weekday()  # 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
+        current_weekday = current_ct.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
         
-        # Skip weekend hours
-        # Saturday (5) - skip entirely
-        # Sunday (6) before 5pm CT - skip
-        # Friday (4) after 4pm CT - skip (this is covered by maintenance window)
-        
-        if current_weekday == 5:  # Saturday
-            # Skip to Sunday
+        # Friday after 4pm - SKIP (weekend started)
+        if current_weekday == 4 and current_ct_time >= FRIDAY_CUTOFF:
             current = current + timedelta(minutes=30)
             continue
         
-        if current_weekday == 6:  # Sunday
-            if current_ct_time < MAINTENANCE_END_CT:  # Before 5pm CT
-                current = current + timedelta(minutes=30)
-                continue
+        # Saturday - SKIP entirely
+        if current_weekday == 5:
+            current = current + timedelta(minutes=30)
+            continue
         
-        # Skip daily maintenance window (4pm-5pm CT) on all days
+        # Sunday before 5pm - SKIP
+        if current_weekday == 6 and current_ct_time < SUNDAY_RESUME:
+            current = current + timedelta(minutes=30)
+            continue
+        
+        # Daily maintenance window (4pm-5pm CT) on weekdays
+        # (Friday after 4pm is already handled above)
         if MAINTENANCE_START_CT <= current_ct_time < MAINTENANCE_END_CT:
             current = current + timedelta(minutes=30)
             continue
