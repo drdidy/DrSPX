@@ -20,13 +20,18 @@ from typing import Optional, Tuple, List, Dict
 CT_TZ = pytz.timezone('America/Chicago')
 ET_TZ = pytz.timezone('America/New_York')
 
-SLOPE_ASCENDING = 0.54
-SLOPE_DESCENDING = 0.44
+# SLOPES - Symmetric ±0.45 pts per 30-min block
+SLOPE_ASCENDING = 0.45
+SLOPE_DESCENDING = 0.45
 CONTRACT_FACTOR = 0.33
 
 MAINTENANCE_START_CT = time(16, 0)
 MAINTENANCE_END_CT = time(17, 0)
 POWER_HOUR_START = time(14, 0)  # Avoid highs during power hour
+
+# Pre-market window (for detecting pre-market pivots)
+PREMARKET_START_CT = time(6, 0)   # Pre-market starts 6am CT
+PREMARKET_END_CT = time(8, 30)    # Pre-market ends at SPX open
 
 # Secondary Pivot Detection
 SECONDARY_PIVOT_MIN_PULLBACK_PCT = 0.003  # 0.3% pullback required
@@ -435,6 +440,59 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
         
     except Exception as e:
         st.error(f"Error fetching SPX data: {e}")
+        return None
+
+def fetch_premarket_pivots(session_date: datetime) -> Optional[Dict]:
+    """
+    Fetch pre-market high/low from the PREVIOUS day's pre-market session (6am-8:30am CT).
+    These become pivots for TODAY's trading session.
+    Uses ES futures data since SPX doesn't trade pre-market.
+    """
+    try:
+        # Get the prior trading day
+        prior_date = session_date - timedelta(days=1)
+        while prior_date.weekday() >= 5:  # Skip weekends
+            prior_date = prior_date - timedelta(days=1)
+        
+        # Fetch ES futures data
+        es = yf.Ticker("ES=F")
+        start_date = prior_date - timedelta(days=1)
+        end_date = prior_date + timedelta(days=1)
+        
+        df = es.history(start=start_date, end=end_date, interval='30m')
+        
+        if df.empty:
+            return None
+        
+        df.index = df.index.tz_convert(CT_TZ)
+        
+        # Filter to pre-market window (6am - 8:30am CT) on prior_date
+        premarket_start = CT_TZ.localize(datetime.combine(prior_date, PREMARKET_START_CT))
+        premarket_end = CT_TZ.localize(datetime.combine(prior_date, PREMARKET_END_CT))
+        
+        df_premarket = df[(df.index >= premarket_start) & (df.index < premarket_end)]
+        
+        if df_premarket.empty or len(df_premarket) < 2:
+            return None
+        
+        # Find pre-market high and low
+        premarket_high = df_premarket['High'].max()
+        premarket_low = df_premarket['Low'].min()
+        premarket_high_idx = df_premarket['High'].idxmax()
+        premarket_low_idx = df_premarket['Low'].idxmin()
+        
+        # Get ES-SPX offset to convert ES prices to SPX equivalent
+        # We'll use a typical offset of ~60 points, but this will be adjusted by user if needed
+        
+        return {
+            'premarket_high_es': premarket_high,
+            'premarket_low_es': premarket_low,
+            'premarket_high_time': premarket_high_idx,
+            'premarket_low_time': premarket_low_idx,
+            'date': prior_date
+        }
+        
+    except Exception as e:
         return None
 
 @st.cache_data(ttl=300)
@@ -1597,16 +1655,34 @@ def main():
         # Fetch data
         prior_session = fetch_prior_session_data(session_date)
         es_data = fetch_es_overnight_data(session_date)
+        premarket_data = fetch_premarket_pivots(session_date)
         current_price = fetch_current_spx() or (prior_session['close'] if prior_session else 6000)
         first_bar = fetch_first_30min_bar(session_date)
         
         st.markdown("---")
-        st.markdown("### ⚙️ Slope Parameters")
-        st.metric("Ascending", f"+{SLOPE_ASCENDING}")
-        st.metric("Descending", f"-{SLOPE_DESCENDING}")
+        st.markdown("### ⚙️ Parameters")
+        col_slope1, col_slope2 = st.columns(2)
+        with col_slope1:
+            st.metric("Ascending", f"+{SLOPE_ASCENDING}")
+        with col_slope2:
+            st.metric("Descending", f"-{SLOPE_DESCENDING}")
+        
+        # ========== PRICE CORRECTION OFFSET ==========
+        st.markdown("---")
+        st.markdown("### 🔧 Price Correction")
+        st.caption("Adjust for Yahoo/TradingView difference")
+        price_offset = st.number_input(
+            "Price Offset", 
+            value=0.0, 
+            min_value=-10.0, 
+            max_value=10.0, 
+            step=0.25,
+            format="%.2f",
+            help="Subtract this from Yahoo prices to match TradingView. E.g., if Yahoo shows 6052 but TV shows 6050, enter 2.0"
+        )
         
         st.markdown("---")
-        st.markdown("### 📍 Pivots")
+        st.markdown("### 📍 Primary Pivots")
         
         # Initialize secondary pivot variables
         secondary_high_price = None
@@ -1614,18 +1690,47 @@ def main():
         secondary_low_price = None
         secondary_low_time = None
         
+        # Initialize premarket pivot variables
+        premarket_high_price = None
+        premarket_high_time = None
+        premarket_low_price = None
+        premarket_low_time = None
+        use_premarket_high = False
+        use_premarket_low = False
+        
         if prior_session:
             st.caption(f"Source: {prior_session['date'].strftime('%Y-%m-%d')}")
             if prior_session.get('power_hour_filtered'):
                 st.warning("⚡ High filtered (power hour)")
             
-            use_manual = st.checkbox("Override", value=False)
+            # Apply price offset to auto-detected values
+            auto_high = prior_session['high'] - price_offset
+            auto_low = prior_session['low'] - price_offset
+            auto_close = prior_session['close'] - price_offset
             
-            high_price = st.number_input("High", value=float(prior_session['high']), disabled=not use_manual, format="%.2f")
-            high_time_str = st.text_input("High Time (CT)", value=prior_session['high_time'].strftime('%H:%M'), disabled=not use_manual)
-            low_price = st.number_input("Low", value=float(prior_session['low']), disabled=not use_manual, format="%.2f")
-            low_time_str = st.text_input("Low Time (CT)", value=prior_session['low_time'].strftime('%H:%M'), disabled=not use_manual)
-            close_price = st.number_input("Close", value=float(prior_session['close']), disabled=not use_manual, format="%.2f")
+            use_manual = st.checkbox("✏️ Manual Price Override", value=False, help="Enable to enter your TradingView prices directly")
+            
+            if use_manual:
+                st.info("Enter your TradingView prices below")
+                high_price = st.number_input("High", value=float(auto_high), format="%.2f")
+                high_time_str = st.text_input("High Time (CT)", value=prior_session['high_time'].strftime('%H:%M'))
+                low_price = st.number_input("Low", value=float(auto_low), format="%.2f")
+                low_time_str = st.text_input("Low Time (CT)", value=prior_session['low_time'].strftime('%H:%M'))
+                close_price = st.number_input("Close", value=float(auto_close), format="%.2f")
+            else:
+                # Show corrected values (with offset applied)
+                high_price = auto_high
+                low_price = auto_low
+                close_price = auto_close
+                high_time_str = prior_session['high_time'].strftime('%H:%M')
+                low_time_str = prior_session['low_time'].strftime('%H:%M')
+                
+                st.metric("High", f"{high_price:.2f}", f"@ {high_time_str} CT")
+                st.metric("Low", f"{low_price:.2f}", f"@ {low_time_str} CT")
+                st.metric("Close", f"{close_price:.2f}")
+                
+                if price_offset != 0:
+                    st.caption(f"📉 Offset applied: -{price_offset:.2f} pts")
             
             # Secondary Pivots Display
             if prior_session.get('secondary_high') is not None or prior_session.get('secondary_low') is not None:
@@ -1634,28 +1739,100 @@ def main():
             
             if prior_session.get('secondary_high') is not None:
                 st.success("🔄 Secondary High Detected!")
-                secondary_high_price = prior_session['secondary_high']
+                secondary_high_price = prior_session['secondary_high'] - price_offset
                 secondary_high_time = prior_session['secondary_high_time']
                 st.metric("2nd High (High²)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
             
             if prior_session.get('secondary_low') is not None:
                 st.success("🔄 Secondary Low Detected!")
-                secondary_low_price = prior_session['secondary_low']
+                secondary_low_price = prior_session['secondary_low'] - price_offset
                 secondary_low_time = prior_session['secondary_low_time']
                 st.metric("2nd Low (Low²)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
             
+            # ========== PRE-MARKET PIVOTS ==========
+            st.markdown("---")
+            st.markdown("### 🌅 Pre-Market Pivots")
+            st.caption("Previous day's pre-market (6am-8:30am CT)")
+            
+            if premarket_data:
+                # Apply ES-SPX offset if available
+                es_spx_offset = es_data.get('offset', 60) if es_data else 60
+                premarket_high_spx = premarket_data['premarket_high_es'] - es_spx_offset - price_offset
+                premarket_low_spx = premarket_data['premarket_low_es'] - es_spx_offset - price_offset
+                
+                col_pm1, col_pm2 = st.columns(2)
+                with col_pm1:
+                    use_premarket_high = st.checkbox("Use PM High", value=False)
+                with col_pm2:
+                    use_premarket_low = st.checkbox("Use PM Low", value=False)
+                
+                if use_premarket_high or use_premarket_low:
+                    st.info("Pre-market pivots will be added to analysis")
+                
+                if use_premarket_high:
+                    premarket_high_price = st.number_input(
+                        "PM High (SPX equiv)", 
+                        value=float(premarket_high_spx), 
+                        format="%.2f",
+                        help="Pre-market high converted to SPX equivalent"
+                    )
+                    premarket_high_time = premarket_data['premarket_high_time']
+                    st.caption(f"@ {premarket_high_time.strftime('%H:%M')} CT")
+                
+                if use_premarket_low:
+                    premarket_low_price = st.number_input(
+                        "PM Low (SPX equiv)", 
+                        value=float(premarket_low_spx), 
+                        format="%.2f",
+                        help="Pre-market low converted to SPX equivalent"
+                    )
+                    premarket_low_time = premarket_data['premarket_low_time']
+                    st.caption(f"@ {premarket_low_time.strftime('%H:%M')} CT")
+            else:
+                st.caption("No pre-market data available")
+                use_premarket_high = st.checkbox("Add PM High manually", value=False)
+                use_premarket_low = st.checkbox("Add PM Low manually", value=False)
+                
+                if use_premarket_high:
+                    premarket_high_price = st.number_input("PM High", value=6050.0, format="%.2f")
+                    pm_high_time_str = st.text_input("PM High Time", value="07:30")
+                    try:
+                        h, m = map(int, pm_high_time_str.split(':'))
+                        prior_date = session_date - timedelta(days=1)
+                        while prior_date.weekday() >= 5:
+                            prior_date -= timedelta(days=1)
+                        premarket_high_time = CT_TZ.localize(datetime.combine(prior_date, time(h, m)))
+                    except:
+                        premarket_high_time = None
+                
+                if use_premarket_low:
+                    premarket_low_price = st.number_input("PM Low", value=6000.0, format="%.2f")
+                    pm_low_time_str = st.text_input("PM Low Time", value="07:30")
+                    try:
+                        h, m = map(int, pm_low_time_str.split(':'))
+                        prior_date = session_date - timedelta(days=1)
+                        while prior_date.weekday() >= 5:
+                            prior_date -= timedelta(days=1)
+                        premarket_low_time = CT_TZ.localize(datetime.combine(prior_date, time(h, m)))
+                    except:
+                        premarket_low_time = None
+            
             # Debug: Show timing info
             with st.expander("🔍 Pivot Timing Details"):
-                st.write(f"**Primary High:** {prior_session['high']:.2f} @ {prior_session['high_time'].strftime('%H:%M')} CT")
-                st.write(f"**Primary Low:** {prior_session['low']:.2f} @ {prior_session['low_time'].strftime('%H:%M')} CT")
-                if prior_session.get('secondary_high') is not None:
-                    st.write(f"**Secondary High²:** {prior_session['secondary_high']:.2f} @ {prior_session['secondary_high_time'].strftime('%H:%M')} CT")
+                st.write(f"**Primary High:** {high_price:.2f} @ {high_time_str} CT")
+                st.write(f"**Primary Low:** {low_price:.2f} @ {low_time_str} CT")
+                if secondary_high_price is not None:
+                    st.write(f"**Secondary High²:** {secondary_high_price:.2f} @ {secondary_high_time.strftime('%H:%M')} CT")
                 else:
                     st.write("**Secondary High²:** Not detected")
-                if prior_session.get('secondary_low') is not None:
-                    st.write(f"**Secondary Low²:** {prior_session['secondary_low']:.2f} @ {prior_session['secondary_low_time'].strftime('%H:%M')} CT")
+                if secondary_low_price is not None:
+                    st.write(f"**Secondary Low²:** {secondary_low_price:.2f} @ {secondary_low_time.strftime('%H:%M')} CT")
                 else:
                     st.write("**Secondary Low²:** Not detected")
+                if use_premarket_high and premarket_high_price:
+                    st.write(f"**Pre-Market High:** {premarket_high_price:.2f} @ {premarket_high_time.strftime('%H:%M')} CT")
+                if use_premarket_low and premarket_low_price:
+                    st.write(f"**Pre-Market Low:** {premarket_low_price:.2f} @ {premarket_low_time.strftime('%H:%M')} CT")
             
             try:
                 h, m = map(int, high_time_str.split(':'))
@@ -1705,6 +1882,12 @@ def main():
         Pivot(price=close_price, time=close_time, name='Close'),
         Pivot(price=low_price, time=low_time, name='Low')
     ]
+    
+    # Add PRE-MARKET pivots if enabled
+    if use_premarket_high and premarket_high_price and premarket_high_time:
+        pivots.append(Pivot(price=premarket_high_price, time=premarket_high_time, name='PM High'))
+    if use_premarket_low and premarket_low_price and premarket_low_time:
+        pivots.append(Pivot(price=premarket_low_price, time=premarket_low_time, name='PM Low'))
     
     # ========== OVERNIGHT VALIDATION ==========
     # Validate which structures overnight ES respected
