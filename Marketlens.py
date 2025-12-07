@@ -235,94 +235,157 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
         close_price = df_intraday['Close'].iloc[-1]
         
         # ============================================================
-        # SECONDARY HIGH DETECTION (Independent of Low)
-        # Looking for: High -> Drop -> Lower High (Secondary High)
+        # SECONDARY HIGH DETECTION (Completely Independent)
+        # Looking for: Primary High -> Pullback -> Lower High (Secondary High)
+        # 
+        # IMPORTANT: This detection is independent of where the primary LOW is.
+        # The secondary high is about price structure after the primary high,
+        # not about the relationship to the low.
         # ============================================================
         secondary_high = None
         secondary_high_time = None
         
-        # Get data after primary high
-        df_after_high = df_intraday_ct[df_intraday_ct.index > high_idx]
+        # Get ALL data after primary high
+        df_after_high = df_intraday_ct[df_intraday_ct.index > high_idx].copy()
         
-        if not df_after_high.empty:
-            # Check if there was a significant pullback after the high
+        if len(df_after_high) >= 2:  # Need at least 2 bars after high
+            # Method: Find local highs after the primary high that are lower than primary
+            # A secondary high is a bounce that fails to make a new high
+            
+            # First, find if there was any significant pullback after the high
+            all_lows_after_high = df_after_high['Low'].values
+            all_highs_after_high = df_after_high['High'].values
+            
             min_after_high = df_after_high['Low'].min()
             pullback_pct = (high_price - min_after_high) / high_price
             
             if pullback_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                # Find the lowest point after the high (this is where pullback bottomed)
-                min_idx = df_after_high['Low'].idxmin()
+                # There was a significant pullback - now look for a bounce (secondary high)
                 
-                # Look for a bounce (secondary high) after the pullback
-                df_after_pullback = df_after_high[df_after_high.index > min_idx]
+                # Find the index of the minimum low after the primary high
+                min_low_idx = df_after_high['Low'].idxmin()
+                min_low_position = df_after_high.index.get_loc(min_low_idx)
                 
-                if not df_after_pullback.empty:
-                    # Find the highest point after the pullback
-                    secondary_high_idx = df_after_pullback['High'].idxmax()
-                    potential_secondary_high = df_after_pullback.loc[secondary_high_idx, 'High']
+                # Look at bars AFTER the minimum OR INCLUDING the minimum bar
+                # (because the same bar could have the low AND the bounce high)
+                
+                # Check if the bar that made the low also had a high that qualifies as secondary high
+                min_bar = df_after_high.loc[min_low_idx]
+                bar_high = min_bar['High']
+                
+                # This bar's high could be the secondary high if:
+                # 1. It's lower than primary high by at least 5 points
+                # 2. Price dropped after this point
+                if (bar_high < high_price and 
+                    (high_price - bar_high) >= SECONDARY_PIVOT_MIN_DISTANCE):
                     
-                    # Validate: must be LOWER than primary high and at least 5 points below
-                    if (potential_secondary_high < high_price and 
-                        (high_price - potential_secondary_high) >= SECONDARY_PIVOT_MIN_DISTANCE):
+                    # Check if there's downward movement after this bar
+                    df_after_this_bar = df_after_high[df_after_high.index > min_low_idx]
+                    
+                    if not df_after_this_bar.empty:
+                        # If ANY subsequent bar has a lower low, the secondary high is confirmed
+                        subsequent_lows = df_after_this_bar['Low'].min()
+                        if subsequent_lows < bar_high:
+                            secondary_high = bar_high
+                            secondary_high_time = to_ct(min_low_idx.to_pydatetime())
+                    else:
+                        # Last bar of day - check if it closed lower than its high
+                        if min_bar['Close'] < bar_high * 0.999:  # Closed at least 0.1% below high
+                            secondary_high = bar_high
+                            secondary_high_time = to_ct(min_low_idx.to_pydatetime())
+                
+                # If we didn't find it on the min bar, look at bars after the minimum
+                if secondary_high is None and min_low_position < len(df_after_high) - 1:
+                    df_after_min = df_after_high.iloc[min_low_position + 1:]
+                    
+                    if not df_after_min.empty:
+                        # Find the highest high after the minimum low
+                        max_high_idx = df_after_min['High'].idxmax()
+                        potential_secondary_high = df_after_min.loc[max_high_idx, 'High']
                         
-                        # Additional check: make sure this secondary high is followed by 
-                        # at least some downward movement (it's a real pivot, not just noise)
-                        df_after_sec_high = df_after_pullback[df_after_pullback.index > secondary_high_idx]
-                        if not df_after_sec_high.empty:
-                            min_after_sec_high = df_after_sec_high['Low'].min()
-                            # If price dropped at least 0.1% after the secondary high, it's valid
-                            if (potential_secondary_high - min_after_sec_high) / potential_secondary_high >= 0.001:
-                                secondary_high = potential_secondary_high
-                                secondary_high_time = to_ct(secondary_high_idx.to_pydatetime())
-                        else:
-                            # If it's near end of day, accept it
-                            secondary_high = potential_secondary_high
-                            secondary_high_time = to_ct(secondary_high_idx.to_pydatetime())
+                        if (potential_secondary_high < high_price and 
+                            (high_price - potential_secondary_high) >= SECONDARY_PIVOT_MIN_DISTANCE):
+                            
+                            # Confirm it's a pivot by checking for downward movement after
+                            df_after_potential = df_after_min[df_after_min.index > max_high_idx]
+                            
+                            if not df_after_potential.empty:
+                                if df_after_potential['Low'].min() < potential_secondary_high:
+                                    secondary_high = potential_secondary_high
+                                    secondary_high_time = to_ct(max_high_idx.to_pydatetime())
+                            else:
+                                # Last bar - accept if closed lower
+                                last_bar = df_after_min.loc[max_high_idx]
+                                if last_bar['Close'] < potential_secondary_high * 0.999:
+                                    secondary_high = potential_secondary_high
+                                    secondary_high_time = to_ct(max_high_idx.to_pydatetime())
         
         # ============================================================
-        # SECONDARY LOW DETECTION (Independent of High)
-        # Looking for: Low -> Bounce -> Higher Low (Secondary Low)
+        # SECONDARY LOW DETECTION (Completely Independent)
+        # Looking for: Primary Low -> Bounce -> Higher Low (Secondary Low)
+        # 
+        # IMPORTANT: If a secondary high was detected, we should NOT use
+        # the same candle for secondary low detection.
         # ============================================================
         secondary_low = None
         secondary_low_time = None
+        secondary_high_candle_idx = None  # Track which candle made secondary high
         
-        # Get data after primary low
-        df_after_low = df_intraday_ct[df_intraday_ct.index > low_idx]
+        # Store the secondary high candle index for exclusion
+        if secondary_high_time is not None:
+            # Find the candle index that corresponds to secondary_high_time
+            for idx in df_intraday_ct.index:
+                if to_ct(idx.to_pydatetime()) == secondary_high_time:
+                    secondary_high_candle_idx = idx
+                    break
         
-        if not df_after_low.empty:
-            # Check if there was a significant bounce after the low
-            max_after_low = df_after_low['High'].max()
+        # Get ALL data after primary low
+        df_after_low = df_intraday_ct[df_intraday_ct.index > low_idx].copy()
+        
+        # EXCLUDE the secondary high candle from consideration
+        if secondary_high_candle_idx is not None and secondary_high_candle_idx in df_after_low.index:
+            df_after_low_filtered = df_after_low[df_after_low.index != secondary_high_candle_idx]
+        else:
+            df_after_low_filtered = df_after_low
+        
+        if len(df_after_low_filtered) >= 2:  # Need at least 2 bars after low
+            # Find if there was any significant bounce after the low
+            max_after_low = df_after_low_filtered['High'].max()
             bounce_pct = (max_after_low - low_price) / low_price
             
             if bounce_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                # Find the highest point after the low (this is where bounce topped)
-                max_idx = df_after_low['High'].idxmax()
+                # There was a significant bounce - now look for a pullback (secondary low)
                 
-                # Look for a pullback (secondary low) after the bounce
-                df_after_bounce = df_after_low[df_after_low.index > max_idx]
+                # Find the index of the maximum high after the primary low (excluding secondary high candle)
+                max_high_idx = df_after_low_filtered['High'].idxmax()
+                max_high_position = df_after_low_filtered.index.get_loc(max_high_idx)
                 
-                if not df_after_bounce.empty:
-                    # Find the lowest point after the bounce
-                    secondary_low_idx = df_after_bounce['Low'].idxmin()
-                    potential_secondary_low = df_after_bounce.loc[secondary_low_idx, 'Low']
+                # Look at bars AFTER the bounce high for the secondary low
+                if max_high_position < len(df_after_low_filtered) - 1:
+                    df_after_max = df_after_low_filtered.iloc[max_high_position + 1:]
                     
-                    # Validate: must be HIGHER than primary low and at least 5 points above
-                    if (potential_secondary_low > low_price and 
-                        (potential_secondary_low - low_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
+                    # Also exclude secondary high candle from this subset
+                    if secondary_high_candle_idx is not None and secondary_high_candle_idx in df_after_max.index:
+                        df_after_max = df_after_max[df_after_max.index != secondary_high_candle_idx]
+                    
+                    if not df_after_max.empty:
+                        min_low_idx = df_after_max['Low'].idxmin()
+                        potential_secondary_low = df_after_max.loc[min_low_idx, 'Low']
                         
-                        # Additional check: make sure this secondary low is followed by 
-                        # at least some upward movement (it's a real pivot, not just noise)
-                        df_after_sec_low = df_after_bounce[df_after_bounce.index > secondary_low_idx]
-                        if not df_after_sec_low.empty:
-                            max_after_sec_low = df_after_sec_low['High'].max()
-                            # If price bounced at least 0.1% after the secondary low, it's valid
-                            if (max_after_sec_low - potential_secondary_low) / potential_secondary_low >= 0.001:
-                                secondary_low = potential_secondary_low
-                                secondary_low_time = to_ct(secondary_low_idx.to_pydatetime())
-                        else:
-                            # If it's near end of day, accept it
-                            secondary_low = potential_secondary_low
-                            secondary_low_time = to_ct(secondary_low_idx.to_pydatetime())
+                        if (potential_secondary_low > low_price and 
+                            (potential_secondary_low - low_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
+                            
+                            df_after_potential = df_after_max[df_after_max.index > min_low_idx]
+                            
+                            if not df_after_potential.empty:
+                                if df_after_potential['High'].max() > potential_secondary_low:
+                                    secondary_low = potential_secondary_low
+                                    secondary_low_time = to_ct(min_low_idx.to_pydatetime())
+                            else:
+                                last_bar = df_after_max.loc[min_low_idx]
+                                if last_bar['Close'] > potential_secondary_low * 1.001:
+                                    secondary_low = potential_secondary_low
+                                    secondary_low_time = to_ct(min_low_idx.to_pydatetime())
         
         return {
             'date': prior_date,
