@@ -676,13 +676,39 @@ def create_cone_chart(cones: List[Cone], current_price: float, session_date: dat
         annotation_font=dict(color='#ffd43b', size=14, family='Inter')
     )
     
-    # Decision window markers
-    fig.add_vline(x='08:30', line=dict(color='rgba(255,212,59,0.4)', width=2, dash='dash'),
-                  annotation_text='Open', annotation_position='top',
-                  annotation_font=dict(color='#ffd43b', size=11))
-    fig.add_vline(x='10:00', line=dict(color='#ffd43b', width=3),
-                  annotation_text='10:00 Decision', annotation_position='top',
-                  annotation_font=dict(color='#ffd43b', size=12, family='Inter'))
+    # Decision window markers - using shapes and annotations separately for categorical axis
+    # Find indices for the time labels
+    time_labels = [t.strftime('%H:%M') for t in time_points]
+    
+    # Add vertical lines as shapes
+    fig.add_shape(
+        type="line",
+        x0='08:30', x1='08:30',
+        y0=0, y1=1,
+        yref='paper',
+        line=dict(color='rgba(255,212,59,0.4)', width=2, dash='dash')
+    )
+    fig.add_shape(
+        type="line",
+        x0='10:00', x1='10:00',
+        y0=0, y1=1,
+        yref='paper',
+        line=dict(color='#ffd43b', width=3)
+    )
+    
+    # Add annotations separately
+    fig.add_annotation(
+        x='08:30', y=1.02, yref='paper',
+        text='Open',
+        showarrow=False,
+        font=dict(color='#ffd43b', size=11)
+    )
+    fig.add_annotation(
+        x='10:00', y=1.02, yref='paper',
+        text='10:00 Decision',
+        showarrow=False,
+        font=dict(color='#ffd43b', size=12, family='Inter')
+    )
     
     fig.update_layout(
         title=dict(
