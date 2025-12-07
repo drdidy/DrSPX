@@ -28,6 +28,11 @@ MAINTENANCE_START_CT = time(16, 0)
 MAINTENANCE_END_CT = time(17, 0)
 POWER_HOUR_START = time(14, 0)  # Avoid highs during power hour
 
+# Secondary Pivot Detection
+SECONDARY_PIVOT_MIN_PULLBACK_PCT = 0.003  # 0.3% pullback required
+SECONDARY_PIVOT_MIN_DISTANCE = 5.0  # At least 5 points from primary
+SECONDARY_PIVOT_START_TIME = time(13, 0)  # Secondary pivots after 1pm CT
+
 OVERNIGHT_RANGE_MAX_PCT = 0.40
 DEAD_ZONE_PCT = 0.40
 MIN_CONE_WIDTH_PCT = 0.0045
@@ -191,24 +196,27 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
                 'open': row['Open'],
                 'range': row['High'] - row['Low'],
                 'range_pct': (row['High'] - row['Low']) / row['Close'],
-                'power_hour_filtered': False
+                'power_hour_filtered': False,
+                'secondary_high': None,
+                'secondary_high_time': None,
+                'secondary_low': None,
+                'secondary_low_time': None
             }
         
         # Convert index to CT for filtering
         df_intraday_ct = df_intraday.copy()
         df_intraday_ct['ct_time'] = df_intraday_ct.index.tz_convert(CT_TZ).time
+        df_intraday_ct['ct_datetime'] = df_intraday_ct.index.tz_convert(CT_TZ)
         
         # POWER HOUR FILTER: Find high before 14:00 CT
         df_before_power_hour = df_intraday_ct[df_intraday_ct['ct_time'] < POWER_HOUR_START]
         
         power_hour_filtered = False
         if not df_before_power_hour.empty:
-            # Check if the overall high is during power hour
             overall_high_idx = df_intraday['High'].idxmax()
             overall_high_time = to_ct(overall_high_idx.to_pydatetime()).time()
             
             if overall_high_time >= POWER_HOUR_START:
-                # Use the high before power hour instead
                 high_idx = df_before_power_hour['High'].idxmax()
                 power_hour_filtered = True
             else:
@@ -223,19 +231,89 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
         close_time = CT_TZ.localize(datetime.combine(prior_date, time(15, 0)))
         
         high_price = df_intraday.loc[high_idx, 'High']
+        low_price = df_intraday['Low'].min()
+        close_price = df_intraday['Close'].iloc[-1]
+        
+        # ============================================================
+        # SECONDARY HIGH DETECTION
+        # ============================================================
+        secondary_high = None
+        secondary_high_time = None
+        
+        # Get data after primary high
+        df_after_high = df_intraday_ct[df_intraday_ct.index > high_idx]
+        
+        if not df_after_high.empty:
+            # Check if there was a significant pullback after the high
+            min_after_high = df_after_high['Low'].min()
+            pullback_pct = (high_price - min_after_high) / high_price
+            
+            if pullback_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
+                # Find the lowest point after the high
+                min_idx = df_after_high['Low'].idxmin()
+                
+                # Look for a bounce (secondary high) after the pullback
+                df_after_pullback = df_after_high[df_after_high.index > min_idx]
+                
+                if not df_after_pullback.empty:
+                    # Find the highest point after the pullback
+                    secondary_high_idx = df_after_pullback['High'].idxmax()
+                    potential_secondary_high = df_after_pullback.loc[secondary_high_idx, 'High']
+                    
+                    # Validate: must be lower than primary and at least 5 points below
+                    if (potential_secondary_high < high_price and 
+                        (high_price - potential_secondary_high) >= SECONDARY_PIVOT_MIN_DISTANCE):
+                        secondary_high = potential_secondary_high
+                        secondary_high_time = to_ct(secondary_high_idx.to_pydatetime())
+        
+        # ============================================================
+        # SECONDARY LOW DETECTION
+        # ============================================================
+        secondary_low = None
+        secondary_low_time = None
+        
+        # Get data after primary low
+        df_after_low = df_intraday_ct[df_intraday_ct.index > low_idx]
+        
+        if not df_after_low.empty:
+            # Check if there was a significant bounce after the low
+            max_after_low = df_after_low['High'].max()
+            bounce_pct = (max_after_low - low_price) / low_price
+            
+            if bounce_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
+                # Find the highest point after the low
+                max_idx = df_after_low['High'].idxmax()
+                
+                # Look for a pullback (secondary low) after the bounce
+                df_after_bounce = df_after_low[df_after_low.index > max_idx]
+                
+                if not df_after_bounce.empty:
+                    # Find the lowest point after the bounce
+                    secondary_low_idx = df_after_bounce['Low'].idxmin()
+                    potential_secondary_low = df_after_bounce.loc[secondary_low_idx, 'Low']
+                    
+                    # Validate: must be higher than primary and at least 5 points above
+                    if (potential_secondary_low > low_price and 
+                        (potential_secondary_low - low_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
+                        secondary_low = potential_secondary_low
+                        secondary_low_time = to_ct(secondary_low_idx.to_pydatetime())
         
         return {
             'date': prior_date,
             'high': high_price,
             'high_time': high_time,
-            'low': df_intraday['Low'].min(),
+            'low': low_price,
             'low_time': low_time,
-            'close': df_intraday['Close'].iloc[-1],
+            'close': close_price,
             'close_time': close_time,
             'open': df_intraday['Open'].iloc[0],
             'range': df_intraday['High'].max() - df_intraday['Low'].min(),
-            'range_pct': (df_intraday['High'].max() - df_intraday['Low'].min()) / df_intraday['Close'].iloc[-1],
-            'power_hour_filtered': power_hour_filtered
+            'range_pct': (df_intraday['High'].max() - df_intraday['Low'].min()) / close_price,
+            'power_hour_filtered': power_hour_filtered,
+            'secondary_high': secondary_high,
+            'secondary_high_time': secondary_high_time,
+            'secondary_low': secondary_low,
+            'secondary_low_time': secondary_low_time
         }
         
     except Exception as e:
@@ -259,7 +337,7 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         df_spx = spx.history(start=start_date, end=end_date, interval='30m')
         
         if df_es.empty:
-            return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0}
+            return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
         
         offset = 0
         if not df_spx.empty:
@@ -282,7 +360,7 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         df_overnight = df_es_tz[overnight_mask]
         
         if df_overnight.empty:
-            return {'offset': offset, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0}
+            return {'offset': offset, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
         
         overnight_high = df_overnight['High'].max()
         overnight_low = df_overnight['Low'].min()
@@ -293,11 +371,177 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
             'overnight_low': overnight_low,
             'overnight_high_spx': overnight_high - offset,
             'overnight_low_spx': overnight_low - offset,
-            'overnight_range': overnight_high - overnight_low
+            'overnight_range': overnight_high - overnight_low,
+            'df_overnight': df_overnight
         }
         
     except Exception as e:
-        return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0}
+        return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
+
+def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high: float, secondary_high_time: datetime, 
+                             secondary_low: float, secondary_low_time: datetime, session_date: datetime) -> Dict:
+    """
+    Validate which rails overnight ES touched and respected.
+    
+    Rules:
+    - "Touched and rejected" = came within 1 point and bounced
+    - If overnight broke secondary but held primary = skip secondary
+    - If neither tested = both are candidates
+    
+    Returns dict with validation status for each structure.
+    """
+    
+    validation = {
+        'high_primary_validated': False,
+        'high_primary_broken': False,
+        'high_secondary_validated': False,
+        'high_secondary_broken': False,
+        'low_primary_validated': False,
+        'low_primary_broken': False,
+        'low_secondary_validated': False,
+        'low_secondary_broken': False,
+        'active_high_structure': None,  # 'primary', 'secondary', 'both', or None
+        'active_low_structure': None,   # 'primary', 'secondary', 'both', or None
+        'high_structures_to_show': [],
+        'low_structures_to_show': [],
+        'validation_notes': []
+    }
+    
+    if not es_data or es_data.get('overnight_low_spx') is None:
+        validation['active_high_structure'] = 'both'
+        validation['active_low_structure'] = 'both'
+        validation['high_structures_to_show'] = ['primary', 'secondary'] if secondary_high else ['primary']
+        validation['low_structures_to_show'] = ['primary', 'secondary'] if secondary_low else ['primary']
+        validation['validation_notes'].append("No overnight data - showing all structures")
+        return validation
+    
+    overnight_low_spx = es_data['overnight_low_spx']
+    overnight_high_spx = es_data['overnight_high_spx']
+    
+    # Get primary pivot prices
+    high_pivot = next((p for p in pivots if p.name == 'High'), None)
+    low_pivot = next((p for p in pivots if p.name == 'Low'), None)
+    
+    if not high_pivot or not low_pivot:
+        return validation
+    
+    # Calculate projected rails at a reference time (use 8:30 AM next day)
+    eval_time = CT_TZ.localize(datetime.combine(session_date, time(8, 30)))
+    
+    # Primary High descending rail
+    blocks_high = count_30min_blocks(high_pivot.time, eval_time)
+    primary_high_desc = project_rail(high_pivot.price, blocks_high, 'descending')
+    
+    # Primary Low ascending rail  
+    blocks_low = count_30min_blocks(low_pivot.time, eval_time)
+    primary_low_asc = project_rail(low_pivot.price, blocks_low, 'ascending')
+    
+    # ========== HIGH STRUCTURE VALIDATION ==========
+    # Check if overnight low touched/broke primary high descending rail
+    
+    touch_threshold = 1.0  # Within 1 point = touched
+    
+    # Primary High Descending - did overnight low touch it?
+    dist_to_primary_high_desc = overnight_low_spx - primary_high_desc
+    
+    if dist_to_primary_high_desc <= touch_threshold and dist_to_primary_high_desc >= -touch_threshold:
+        # Touched within 1 point
+        validation['high_primary_validated'] = True
+        validation['validation_notes'].append(f"✓ Primary High desc ({primary_high_desc:.2f}) touched and held")
+    elif dist_to_primary_high_desc < -touch_threshold:
+        # Broke through (overnight low went below the rail)
+        validation['high_primary_broken'] = True
+        validation['validation_notes'].append(f"✗ Primary High desc ({primary_high_desc:.2f}) was broken")
+    
+    # Secondary High Descending (if exists)
+    if secondary_high is not None and secondary_high_time is not None:
+        blocks_sec_high = count_30min_blocks(secondary_high_time, eval_time)
+        secondary_high_desc = project_rail(secondary_high, blocks_sec_high, 'descending')
+        
+        dist_to_secondary_high_desc = overnight_low_spx - secondary_high_desc
+        
+        if dist_to_secondary_high_desc <= touch_threshold and dist_to_secondary_high_desc >= -touch_threshold:
+            validation['high_secondary_validated'] = True
+            validation['validation_notes'].append(f"✓ Secondary High² desc ({secondary_high_desc:.2f}) touched and held")
+        elif dist_to_secondary_high_desc < -touch_threshold:
+            validation['high_secondary_broken'] = True
+            validation['validation_notes'].append(f"✗ Secondary High² desc ({secondary_high_desc:.2f}) was broken")
+    
+    # Determine active HIGH structure
+    if secondary_high is not None:
+        if validation['high_secondary_broken'] and not validation['high_primary_broken']:
+            # Rule 3: Secondary broke, primary held - skip secondary
+            validation['active_high_structure'] = 'primary'
+            validation['high_structures_to_show'] = ['primary']
+            validation['validation_notes'].append("→ Using PRIMARY High only (secondary was broken)")
+        elif validation['high_secondary_validated']:
+            # Secondary was tested and held
+            validation['active_high_structure'] = 'secondary'
+            validation['high_structures_to_show'] = ['secondary', 'primary']  # Show both but secondary is active
+            validation['validation_notes'].append("→ SECONDARY High² is ACTIVE (touched and held)")
+        elif validation['high_primary_validated']:
+            # Primary was tested and held
+            validation['active_high_structure'] = 'primary'
+            validation['high_structures_to_show'] = ['primary', 'secondary']
+            validation['validation_notes'].append("→ PRIMARY High is ACTIVE (touched and held)")
+        else:
+            # Neither tested - show both as candidates
+            validation['active_high_structure'] = 'both'
+            validation['high_structures_to_show'] = ['primary', 'secondary']
+            validation['validation_notes'].append("→ Both High structures are candidates (neither tested overnight)")
+    else:
+        validation['active_high_structure'] = 'primary'
+        validation['high_structures_to_show'] = ['primary']
+    
+    # ========== LOW STRUCTURE VALIDATION ==========
+    # Check if overnight high touched/broke primary low ascending rail
+    
+    dist_to_primary_low_asc = primary_low_asc - overnight_high_spx
+    
+    if dist_to_primary_low_asc <= touch_threshold and dist_to_primary_low_asc >= -touch_threshold:
+        validation['low_primary_validated'] = True
+        validation['validation_notes'].append(f"✓ Primary Low asc ({primary_low_asc:.2f}) touched and held")
+    elif dist_to_primary_low_asc < -touch_threshold:
+        validation['low_primary_broken'] = True
+        validation['validation_notes'].append(f"✗ Primary Low asc ({primary_low_asc:.2f}) was broken")
+    
+    # Secondary Low Ascending (if exists)
+    if secondary_low is not None and secondary_low_time is not None:
+        blocks_sec_low = count_30min_blocks(secondary_low_time, eval_time)
+        secondary_low_asc = project_rail(secondary_low, blocks_sec_low, 'ascending')
+        
+        dist_to_secondary_low_asc = secondary_low_asc - overnight_high_spx
+        
+        if dist_to_secondary_low_asc <= touch_threshold and dist_to_secondary_low_asc >= -touch_threshold:
+            validation['low_secondary_validated'] = True
+            validation['validation_notes'].append(f"✓ Secondary Low² asc ({secondary_low_asc:.2f}) touched and held")
+        elif dist_to_secondary_low_asc < -touch_threshold:
+            validation['low_secondary_broken'] = True
+            validation['validation_notes'].append(f"✗ Secondary Low² asc ({secondary_low_asc:.2f}) was broken")
+    
+    # Determine active LOW structure
+    if secondary_low is not None:
+        if validation['low_secondary_broken'] and not validation['low_primary_broken']:
+            validation['active_low_structure'] = 'primary'
+            validation['low_structures_to_show'] = ['primary']
+            validation['validation_notes'].append("→ Using PRIMARY Low only (secondary was broken)")
+        elif validation['low_secondary_validated']:
+            validation['active_low_structure'] = 'secondary'
+            validation['low_structures_to_show'] = ['secondary', 'primary']
+            validation['validation_notes'].append("→ SECONDARY Low² is ACTIVE (touched and held)")
+        elif validation['low_primary_validated']:
+            validation['active_low_structure'] = 'primary'
+            validation['low_structures_to_show'] = ['primary', 'secondary']
+            validation['validation_notes'].append("→ PRIMARY Low is ACTIVE (touched and held)")
+        else:
+            validation['active_low_structure'] = 'both'
+            validation['low_structures_to_show'] = ['primary', 'secondary']
+            validation['validation_notes'].append("→ Both Low structures are candidates (neither tested overnight)")
+    else:
+        validation['active_low_structure'] = 'primary'
+        validation['low_structures_to_show'] = ['primary']
+    
+    return validation
 
 @st.cache_data(ttl=60)
 def fetch_current_spx() -> Optional[float]:
@@ -542,7 +786,7 @@ def calculate_confluence_score(nearest_distance, regime, cones, current_price, i
     
     return min(score, 100)
 
-def generate_action_card(cones, regime, current_price, is_10am) -> ActionCard:
+def generate_action_card(cones, regime, current_price, is_10am, overnight_validation=None) -> ActionCard:
     warnings = []
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
     confluence_score = calculate_confluence_score(nearest_distance, regime, cones, current_price, is_10am)
@@ -567,6 +811,52 @@ def generate_action_card(cones, regime, current_price, is_10am) -> ActionCard:
     if regime.first_bar_energy == 'weak':
         warnings.append("Weak first bar energy")
     
+    # ========== SMART STRUCTURE VALIDATION ==========
+    # Check if we're recommending based on a validated structure
+    structure_validated = False
+    active_structure_note = ""
+    
+    if overnight_validation:
+        # For CALLS (price near descending rails)
+        if position == 'lower_edge':
+            # Check if this is a High-based cone (descending rail = calls entry)
+            if 'High' in nearest_cone.name:
+                if nearest_cone.name == 'High²':
+                    if overnight_validation.get('high_secondary_validated'):
+                        structure_validated = True
+                        active_structure_note = "✓ Secondary High² VALIDATED overnight"
+                        confluence_score = min(100, confluence_score + 15)  # Boost score
+                    elif overnight_validation.get('active_high_structure') == 'both':
+                        active_structure_note = "⚠ High² not tested overnight - use caution"
+                elif nearest_cone.name == 'High':
+                    if overnight_validation.get('high_primary_validated'):
+                        structure_validated = True
+                        active_structure_note = "✓ Primary High VALIDATED overnight"
+                        confluence_score = min(100, confluence_score + 15)
+                    elif overnight_validation.get('active_high_structure') == 'both':
+                        active_structure_note = "⚠ Primary High not tested overnight - use caution"
+        
+        # For PUTS (price near ascending rails)
+        elif position == 'upper_edge':
+            if 'Low' in nearest_cone.name:
+                if nearest_cone.name == 'Low²':
+                    if overnight_validation.get('low_secondary_validated'):
+                        structure_validated = True
+                        active_structure_note = "✓ Secondary Low² VALIDATED overnight"
+                        confluence_score = min(100, confluence_score + 15)
+                    elif overnight_validation.get('active_low_structure') == 'both':
+                        active_structure_note = "⚠ Low² not tested overnight - use caution"
+                elif nearest_cone.name == 'Low':
+                    if overnight_validation.get('low_primary_validated'):
+                        structure_validated = True
+                        active_structure_note = "✓ Primary Low VALIDATED overnight"
+                        confluence_score = min(100, confluence_score + 15)
+                    elif overnight_validation.get('active_low_structure') == 'both':
+                        active_structure_note = "⚠ Primary Low not tested overnight - use caution"
+    
+    if active_structure_note:
+        warnings.insert(0, active_structure_note)
+    
     contract_exp = None
     
     if no_trade:
@@ -579,8 +869,13 @@ def generate_action_card(cones, regime, current_price, is_10am) -> ActionCard:
         warnings.append(f"PUTS activate at {nearest_cone.ascending_rail:.2f}")
     elif position == 'lower_edge':
         direction = 'CALLS'
-        color = 'green' if confluence_score >= 75 else 'yellow'
-        position_size = 'FULL' if confluence_score >= 75 else 'REDUCED'
+        # Boost confidence if structure was validated
+        if structure_validated:
+            color = 'green' if confluence_score >= 65 else 'yellow'  # Lower threshold for validated
+            position_size = 'FULL' if confluence_score >= 65 else 'REDUCED'
+        else:
+            color = 'green' if confluence_score >= 75 else 'yellow'
+            position_size = 'FULL' if confluence_score >= 75 else 'REDUCED'
         entry_level = nearest_cone.descending_rail
         target_100 = nearest_cone.ascending_rail
         cone_height = target_100 - entry_level
@@ -590,8 +885,12 @@ def generate_action_card(cones, regime, current_price, is_10am) -> ActionCard:
         contract_exp = calculate_contract_expectation('CALLS', entry_level, target_100, nearest_cone.name, 'descending')
     else:
         direction = 'PUTS'
-        color = 'green' if confluence_score >= 75 else 'yellow'
-        position_size = 'FULL' if confluence_score >= 75 else 'REDUCED'
+        if structure_validated:
+            color = 'green' if confluence_score >= 65 else 'yellow'
+            position_size = 'FULL' if confluence_score >= 65 else 'REDUCED'
+        else:
+            color = 'green' if confluence_score >= 75 else 'yellow'
+            position_size = 'FULL' if confluence_score >= 75 else 'REDUCED'
         entry_level = nearest_cone.ascending_rail
         target_100 = nearest_cone.descending_rail
         cone_height = entry_level - target_100
@@ -1098,6 +1397,12 @@ def main():
         st.markdown("---")
         st.markdown("### 📍 Pivots")
         
+        # Initialize secondary pivot variables
+        secondary_high_price = None
+        secondary_high_time = None
+        secondary_low_price = None
+        secondary_low_time = None
+        
         if prior_session:
             st.caption(f"Source: {prior_session['date'].strftime('%Y-%m-%d')}")
             if prior_session.get('power_hour_filtered'):
@@ -1110,6 +1415,24 @@ def main():
             low_price = st.number_input("Low", value=float(prior_session['low']), disabled=not use_manual, format="%.2f")
             low_time_str = st.text_input("Low Time (CT)", value=prior_session['low_time'].strftime('%H:%M'), disabled=not use_manual)
             close_price = st.number_input("Close", value=float(prior_session['close']), disabled=not use_manual, format="%.2f")
+            
+            # Secondary Pivots Display
+            if prior_session.get('secondary_high') is not None:
+                st.markdown("---")
+                st.markdown("### 📍 Secondary Pivots")
+                st.success("🔄 Secondary High Detected!")
+                secondary_high_price = prior_session['secondary_high']
+                secondary_high_time = prior_session['secondary_high_time']
+                st.metric("2nd High", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
+            
+            if prior_session.get('secondary_low') is not None:
+                if prior_session.get('secondary_high') is None:
+                    st.markdown("---")
+                    st.markdown("### 📍 Secondary Pivots")
+                st.success("🔄 Secondary Low Detected!")
+                secondary_low_price = prior_session['secondary_low']
+                secondary_low_time = prior_session['secondary_low_time']
+                st.metric("2nd Low", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
             
             try:
                 h, m = map(int, high_time_str.split(':'))
@@ -1153,12 +1476,40 @@ def main():
             st.markdown("### 🔄 ES-SPX Offset")
             st.metric("Offset", f"{es_data['offset']:.2f} pts")
     
-    # Build pivots and cones
+    # Build PRIMARY pivots
     pivots = [
         Pivot(price=high_price, time=high_time, name='High'),
         Pivot(price=close_price, time=close_time, name='Close'),
         Pivot(price=low_price, time=low_time, name='Low')
     ]
+    
+    # ========== OVERNIGHT VALIDATION ==========
+    # Validate which structures overnight ES respected
+    overnight_validation = validate_overnight_rails(
+        es_data=es_data,
+        pivots=pivots,
+        secondary_high=secondary_high_price,
+        secondary_high_time=secondary_high_time,
+        secondary_low=secondary_low_price,
+        secondary_low_time=secondary_low_time,
+        session_date=session_date
+    )
+    
+    # Build SECONDARY pivots only if they should be shown (not broken)
+    secondary_pivots = []
+    
+    # Add secondary high if it should be shown
+    if secondary_high_price is not None and secondary_high_time is not None:
+        if 'secondary' in overnight_validation.get('high_structures_to_show', []):
+            secondary_pivots.append(Pivot(price=secondary_high_price, time=secondary_high_time, name='High²'))
+    
+    # Add secondary low if it should be shown
+    if secondary_low_price is not None and secondary_low_time is not None:
+        if 'secondary' in overnight_validation.get('low_structures_to_show', []):
+            secondary_pivots.append(Pivot(price=secondary_low_price, time=secondary_low_time, name='Low²'))
+    
+    # Combine all pivots for analysis
+    all_pivots = pivots + secondary_pivots
     
     ct_now = get_ct_now()
     if session_date.date() == ct_now.date():
@@ -1168,12 +1519,12 @@ def main():
         eval_time = CT_TZ.localize(datetime.combine(session_date, time(10, 0)))
         is_10am = True
     
-    cones = build_cones_at_time(pivots, eval_time)
-    cones_830 = build_cones_at_time(pivots, CT_TZ.localize(datetime.combine(session_date, time(8, 30))))
-    cones_1000 = build_cones_at_time(pivots, CT_TZ.localize(datetime.combine(session_date, time(10, 0))))
+    cones = build_cones_at_time(all_pivots, eval_time)
+    cones_830 = build_cones_at_time(all_pivots, CT_TZ.localize(datetime.combine(session_date, time(8, 30))))
+    cones_1000 = build_cones_at_time(all_pivots, CT_TZ.localize(datetime.combine(session_date, time(10, 0))))
     
     regime = analyze_regime(cones, es_data, prior_session, first_bar, current_price)
-    action = generate_action_card(cones, regime, current_price, is_10am)
+    action = generate_action_card(cones, regime, current_price, is_10am, overnight_validation)
     confluence_zones = find_confluence_zones(cones_1000)
     
     # ===== MAIN LAYOUT =====
@@ -1235,6 +1586,54 @@ def main():
                 Convergence of {' + '.join(zone['rails'])}
             </div>
             """, unsafe_allow_html=True)
+    
+    # ========== OVERNIGHT VALIDATION DISPLAY ==========
+    if overnight_validation and overnight_validation.get('validation_notes'):
+        st.markdown("#### 🌙 Overnight Structure Validation")
+        
+        col_val1, col_val2 = st.columns(2)
+        
+        with col_val1:
+            # High structure status
+            active_high = overnight_validation.get('active_high_structure', 'primary')
+            if active_high == 'secondary':
+                st.success("🎯 **HIGH: Secondary (High²) is ACTIVE**")
+                st.caption("Overnight touched and respected the secondary high descending rail")
+            elif active_high == 'primary':
+                if overnight_validation.get('high_secondary_broken'):
+                    st.warning("⚠️ **HIGH: Primary only** (Secondary was broken)")
+                else:
+                    st.info("📍 **HIGH: Primary is active**")
+            elif active_high == 'both':
+                st.info("📍 **HIGH: Both structures are candidates**")
+                st.caption("Neither was tested overnight - watch both levels")
+        
+        with col_val2:
+            # Low structure status
+            active_low = overnight_validation.get('active_low_structure', 'primary')
+            if active_low == 'secondary':
+                st.success("🎯 **LOW: Secondary (Low²) is ACTIVE**")
+                st.caption("Overnight touched and respected the secondary low ascending rail")
+            elif active_low == 'primary':
+                if overnight_validation.get('low_secondary_broken'):
+                    st.warning("⚠️ **LOW: Primary only** (Secondary was broken)")
+                else:
+                    st.info("📍 **LOW: Primary is active**")
+            elif active_low == 'both':
+                st.info("📍 **LOW: Both structures are candidates**")
+                st.caption("Neither was tested overnight - watch both levels")
+        
+        # Show detailed validation notes in expander
+        with st.expander("📋 Detailed Overnight Analysis"):
+            for note in overnight_validation['validation_notes']:
+                if note.startswith("✓"):
+                    st.success(note)
+                elif note.startswith("✗"):
+                    st.error(note)
+                elif note.startswith("→"):
+                    st.info(note)
+                else:
+                    st.write(note)
     
     st.markdown("---")
     
@@ -1335,9 +1734,9 @@ def main():
     
     # Row 5: Full Projection Table
     st.markdown("### 📊 Full Cone Projection Table")
-    st.caption("💡 Yellow rows = Key decision windows (8:30 AM and 10:00 AM CT)")
+    st.caption("💡 Yellow rows = Key decision windows (8:30 AM and 10:00 AM CT) | High²/Low² = Secondary pivots")
     
-    df = build_projection_table(pivots, session_date)
+    df = build_projection_table(all_pivots, session_date)
     
     # Format numbers
     for col in df.columns:
@@ -1346,6 +1745,21 @@ def main():
     
     styled = df.style.apply(highlight_times, axis=1)
     st.dataframe(styled, use_container_width=True, hide_index=True)
+    
+    # Secondary pivot explanation
+    if secondary_pivots:
+        st.markdown("---")
+        st.markdown("### 🔄 Secondary Pivot Analysis")
+        st.info("""
+        **Secondary pivots detected!** These form when:
+        - Price makes a significant pullback (>0.3%) after the primary high/low
+        - Then bounces to create a lower high or higher low
+        
+        **How to use:**
+        - Check which structure overnight ES respected
+        - If overnight held at the secondary rail → that's likely the active structure
+        - Watch for confluence where primary and secondary rails converge
+        """)
     
     # Footer insight
     st.markdown("---")
