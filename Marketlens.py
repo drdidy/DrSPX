@@ -929,9 +929,10 @@ def calculate_confluence_score(nearest_distance, regime, cones, current_price, i
     elif nearest_distance <= 10: score += 15
     elif nearest_distance <= 15: score += 8
     
-    # Confluence bonus
-    zones = find_confluence_zones(cones)
-    for zone in zones:
+    # Confluence bonus - check both calls and puts zones
+    zones_data = find_confluence_zones(cones)
+    all_zones = zones_data.get('calls_confluence', []) + zones_data.get('puts_confluence', [])
+    for zone in all_zones:
         if abs(current_price - zone['price']) <= 10:
             score += 20
             break
