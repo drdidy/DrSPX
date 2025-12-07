@@ -901,13 +901,42 @@ def inject_premium_css():
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
     }
-    section[data-testid="stSidebar"] * {
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] .stMarkdown p,
+    section[data-testid="stSidebar"] .stMarkdown h3,
+    section[data-testid="stSidebar"] .stMarkdown h4,
+    section[data-testid="stSidebar"] .stCaption,
+    section[data-testid="stSidebar"] .stMetric label,
+    section[data-testid="stSidebar"] [data-testid="stMetricValue"],
+    section[data-testid="stSidebar"] [data-testid="stMetricLabel"] {
         color: #f8fafc !important;
     }
     section[data-testid="stSidebar"] .stSelectbox label,
     section[data-testid="stSidebar"] .stNumberInput label,
-    section[data-testid="stSidebar"] .stTextInput label {
+    section[data-testid="stSidebar"] .stTextInput label,
+    section[data-testid="stSidebar"] .stDateInput label,
+    section[data-testid="stSidebar"] .stCheckbox label {
         color: #94a3b8 !important;
+    }
+    /* Fix input fields to have dark text on light background */
+    section[data-testid="stSidebar"] input,
+    section[data-testid="stSidebar"] .stDateInput input,
+    section[data-testid="stSidebar"] .stNumberInput input,
+    section[data-testid="stSidebar"] .stTextInput input {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 8px !important;
+    }
+    section[data-testid="stSidebar"] .stSelectbox > div > div {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+    }
+    section[data-testid="stSidebar"] [data-baseweb="select"] {
+        background-color: #ffffff !important;
+    }
+    section[data-testid="stSidebar"] [data-baseweb="select"] * {
+        color: #0f172a !important;
     }
     </style>
     """, unsafe_allow_html=True)
