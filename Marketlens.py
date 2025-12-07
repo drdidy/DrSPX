@@ -746,27 +746,98 @@ def check_overnight_rail_touches(cones: List[Cone], es_data: Dict) -> List[str]:
     
     return touched
 
-def find_confluence_zones(cones: List[Cone], threshold: float = 5.0) -> List[Dict]:
-    """Find where multiple cone rails converge"""
-    zones = []
-    rails = []
+def find_confluence_zones(cones: List[Cone], threshold: float = 5.0) -> Dict[str, List[Dict]]:
+    """
+    Find where multiple cone rails converge.
+    Returns separate lists for CALLS zones (descending rails) and PUTS zones (ascending rails).
+    """
+    calls_zones = []  # Descending rail convergences (support levels)
+    puts_zones = []   # Ascending rail convergences (resistance levels)
+    
+    # Separate ascending and descending rails
+    ascending_rails = []  # For PUTS (resistance)
+    descending_rails = [] # For CALLS (support)
     
     for cone in cones:
-        rails.append({'price': cone.ascending_rail, 'name': f"{cone.name} ▲", 'type': 'puts'})
-        rails.append({'price': cone.descending_rail, 'name': f"{cone.name} ▼", 'type': 'calls'})
+        ascending_rails.append({
+            'price': cone.ascending_rail, 
+            'name': f"{cone.name} ▲", 
+            'cone': cone.name
+        })
+        descending_rails.append({
+            'price': cone.descending_rail, 
+            'name': f"{cone.name} ▼", 
+            'cone': cone.name
+        })
     
-    # Check for convergence
-    for i, r1 in enumerate(rails):
-        for r2 in rails[i+1:]:
+    # Find CALLS confluence (descending rails converging = strong support)
+    for i, r1 in enumerate(descending_rails):
+        for r2 in descending_rails[i+1:]:
             if abs(r1['price'] - r2['price']) <= threshold:
                 avg_price = (r1['price'] + r2['price']) / 2
-                zones.append({
-                    'price': avg_price,
-                    'rails': [r1['name'], r2['name']],
-                    'type': r1['type']
-                })
+                # Check if this zone already exists
+                existing = False
+                for zone in calls_zones:
+                    if abs(zone['price'] - avg_price) <= threshold:
+                        if r1['name'] not in zone['rails']:
+                            zone['rails'].append(r1['name'])
+                        if r2['name'] not in zone['rails']:
+                            zone['rails'].append(r2['name'])
+                        zone['price'] = sum([descending_rails[j]['price'] for j in range(len(descending_rails)) 
+                                            if descending_rails[j]['name'] in zone['rails']]) / len(zone['rails'])
+                        existing = True
+                        break
+                if not existing:
+                    calls_zones.append({
+                        'price': avg_price,
+                        'rails': [r1['name'], r2['name']],
+                        'strength': 2
+                    })
     
-    return zones
+    # Find PUTS confluence (ascending rails converging = strong resistance)
+    for i, r1 in enumerate(ascending_rails):
+        for r2 in ascending_rails[i+1:]:
+            if abs(r1['price'] - r2['price']) <= threshold:
+                avg_price = (r1['price'] + r2['price']) / 2
+                # Check if this zone already exists
+                existing = False
+                for zone in puts_zones:
+                    if abs(zone['price'] - avg_price) <= threshold:
+                        if r1['name'] not in zone['rails']:
+                            zone['rails'].append(r1['name'])
+                        if r2['name'] not in zone['rails']:
+                            zone['rails'].append(r2['name'])
+                        zone['price'] = sum([ascending_rails[j]['price'] for j in range(len(ascending_rails)) 
+                                            if ascending_rails[j]['name'] in zone['rails']]) / len(zone['rails'])
+                        existing = True
+                        break
+                if not existing:
+                    puts_zones.append({
+                        'price': avg_price,
+                        'rails': [r1['name'], r2['name']],
+                        'strength': 2
+                    })
+    
+    # Update strength based on number of converging rails
+    for zone in calls_zones:
+        zone['strength'] = len(zone['rails'])
+    for zone in puts_zones:
+        zone['strength'] = len(zone['rails'])
+    
+    # Sort by price
+    calls_zones.sort(key=lambda x: x['price'])
+    puts_zones.sort(key=lambda x: x['price'], reverse=True)
+    
+    # Also add individual strong levels (all rails) for reference
+    all_calls_levels = sorted(descending_rails, key=lambda x: x['price'])
+    all_puts_levels = sorted(ascending_rails, key=lambda x: x['price'], reverse=True)
+    
+    return {
+        'calls_confluence': calls_zones,
+        'puts_confluence': puts_zones,
+        'all_calls_levels': all_calls_levels,
+        'all_puts_levels': all_puts_levels
+    }
 
 # ============================================================================
 # CONTRACT EXPECTATION ENGINE
@@ -879,7 +950,23 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
     warnings = []
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
     confluence_score = calculate_confluence_score(nearest_distance, regime, cones, current_price, is_10am)
-    position, _ = get_position_in_cone(current_price, nearest_cone.ascending_rail, nearest_cone.descending_rail)
+    
+    # Determine position based on WHICH RAIL is nearest, not position within cone
+    # If nearest rail is descending → price is near support → CALLS
+    # If nearest rail is ascending → price is near resistance → PUTS
+    
+    # Check if price is actually close enough to the rail to trade
+    # Use a threshold based on cone width
+    cone_width = nearest_cone.ascending_rail - nearest_cone.descending_rail
+    edge_threshold = cone_width * EDGE_ZONE_PCT  # Within 30% of cone width from rail
+    
+    if nearest_distance <= edge_threshold:
+        if nearest_rail_type == 'descending':
+            position = 'lower_edge'  # Near support → CALLS
+        else:
+            position = 'upper_edge'  # Near resistance → PUTS
+    else:
+        position = 'dead_zone'  # Too far from any rail
     
     no_trade = False
     
@@ -906,7 +993,7 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
     active_structure_note = ""
     
     if overnight_validation:
-        # For CALLS (price near descending rails)
+        # For CALLS (price near descending rails - support)
         if position == 'lower_edge':
             # Check if this is a High-based cone (descending rail = calls entry)
             if 'High' in nearest_cone.name:
@@ -925,7 +1012,7 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
                     elif overnight_validation.get('active_high_structure') == 'both':
                         active_structure_note = "⚠ Primary High not tested overnight - use caution"
         
-        # For PUTS (price near ascending rails)
+        # For PUTS (price near ascending rails - resistance)
         elif position == 'upper_edge':
             if 'Low' in nearest_cone.name:
                 if nearest_cone.name == 'Low²':
@@ -942,6 +1029,12 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
                         confluence_score = min(100, confluence_score + 15)
                     elif overnight_validation.get('active_low_structure') == 'both':
                         active_structure_note = "⚠ Primary Low not tested overnight - use caution"
+            # Also check High cone ascending rails for PUTS
+            elif 'High' in nearest_cone.name:
+                if overnight_validation.get('high_primary_validated') or overnight_validation.get('high_secondary_validated'):
+                    structure_validated = True
+                    active_structure_note = "✓ High structure validated - ascending rail resistance"
+                    confluence_score = min(100, confluence_score + 10)
     
     if active_structure_note:
         warnings.insert(0, active_structure_note)
@@ -1677,16 +1770,64 @@ def main():
     with col_1000:
         render_decision_card("⏰ 10:00 AM CT — Key Decision", cones_1000)
     
-    # Confluence Zones
-    if confluence_zones:
-        st.markdown("#### 🔥 Confluence Zones (High Probability)")
-        for zone in confluence_zones:
-            st.markdown(f"""
-            <div class="info-badge">
-                <strong>{zone['type'].upper()}</strong> @ <strong>{zone['price']:.2f}</strong> — 
-                Convergence of {' + '.join(zone['rails'])}
-            </div>
-            """, unsafe_allow_html=True)
+    # Confluence Zones - Show BOTH Calls and Puts levels
+    st.markdown("#### 🔥 High Probability Entry Levels")
+    
+    col_calls, col_puts = st.columns(2)
+    
+    with col_calls:
+        st.markdown("##### 🟢 CALLS (Support Levels)")
+        
+        # Show confluence zones first (highest probability)
+        if confluence_zones.get('calls_confluence'):
+            for zone in confluence_zones['calls_confluence']:
+                strength_stars = "⭐" * zone['strength']
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%); 
+                            border: 2px solid #22c55e; border-radius: 10px; padding: 0.75rem; margin: 0.5rem 0;">
+                    <div style="font-weight: 700; color: #15803d; font-size: 1.1rem;">
+                        {zone['price']:.2f} {strength_stars}
+                    </div>
+                    <div style="font-size: 0.8rem; color: #166534;">
+                        Confluence: {' + '.join(zone['rails'])}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Show all individual levels
+        if confluence_zones.get('all_calls_levels'):
+            with st.expander("📋 All Support Rails"):
+                for level in confluence_zones['all_calls_levels']:
+                    st.write(f"**{level['price']:.2f}** — {level['name']}")
+    
+    with col_puts:
+        st.markdown("##### 🔴 PUTS (Resistance Levels)")
+        
+        # Show confluence zones first (highest probability)
+        if confluence_zones.get('puts_confluence'):
+            for zone in confluence_zones['puts_confluence']:
+                strength_stars = "⭐" * zone['strength']
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); 
+                            border: 2px solid #ef4444; border-radius: 10px; padding: 0.75rem; margin: 0.5rem 0;">
+                    <div style="font-weight: 700; color: #dc2626; font-size: 1.1rem;">
+                        {zone['price']:.2f} {strength_stars}
+                    </div>
+                    <div style="font-size: 0.8rem; color: #991b1b;">
+                        Confluence: {' + '.join(zone['rails'])}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Show all individual levels
+        if confluence_zones.get('all_puts_levels'):
+            with st.expander("📋 All Resistance Rails"):
+                for level in confluence_zones['all_puts_levels']:
+                    st.write(f"**{level['price']:.2f}** — {level['name']}")
+    
+    # Show message if no confluence found
+    if not confluence_zones.get('calls_confluence') and not confluence_zones.get('puts_confluence'):
+        st.info("No rail confluences detected at current time. Check individual rails in the expanders above.")
     
     # ========== OVERNIGHT VALIDATION DISPLAY ==========
     if overnight_validation and overnight_validation.get('validation_notes'):
