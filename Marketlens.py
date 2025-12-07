@@ -680,31 +680,35 @@ def create_cone_chart(cones: List[Cone], current_price: float, session_date: dat
     # Find indices for the time labels
     time_labels = [t.strftime('%H:%M') for t in time_points]
     
-    # Add vertical lines as shapes
+    # Find index positions for vertical lines
+    idx_830 = time_labels.index('08:30') if '08:30' in time_labels else 0
+    idx_1000 = time_labels.index('10:00') if '10:00' in time_labels else 3
+    
+    # Add vertical lines as shapes using index positions
     fig.add_shape(
         type="line",
-        x0='08:30', x1='08:30',
+        x0=idx_830, x1=idx_830,
         y0=0, y1=1,
-        yref='paper',
+        xref='x', yref='paper',
         line=dict(color='rgba(255,212,59,0.4)', width=2, dash='dash')
     )
     fig.add_shape(
         type="line",
-        x0='10:00', x1='10:00',
+        x0=idx_1000, x1=idx_1000,
         y0=0, y1=1,
-        yref='paper',
+        xref='x', yref='paper',
         line=dict(color='#ffd43b', width=3)
     )
     
     # Add annotations separately
     fig.add_annotation(
-        x='08:30', y=1.02, yref='paper',
+        x=idx_830, y=1.05, xref='x', yref='paper',
         text='Open',
         showarrow=False,
         font=dict(color='#ffd43b', size=11)
     )
     fig.add_annotation(
-        x='10:00', y=1.02, yref='paper',
+        x=idx_1000, y=1.05, xref='x', yref='paper',
         text='10:00 Decision',
         showarrow=False,
         font=dict(color='#ffd43b', size=12, family='Inter')
@@ -743,7 +747,7 @@ def create_cone_chart(cones: List[Cone], current_price: float, session_date: dat
             font=dict(color='#f8f9fa', size=11),
             bgcolor='rgba(0,0,0,0)'
         ),
-        hovermode='x unified',
+        hovermode='x',
         margin=dict(l=60, r=30, t=80, b=60)
     )
     
