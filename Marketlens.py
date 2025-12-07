@@ -124,6 +124,14 @@ def to_ct(dt: datetime) -> datetime:
     return dt.astimezone(CT_TZ)
 
 def count_30min_blocks(start_time: datetime, end_time: datetime) -> int:
+    """
+    Count 30-minute blocks between two times, skipping:
+    - Daily maintenance window: 4pm-5pm CT (16:00-17:00)
+    - Weekend closure: Friday 4pm CT to Sunday 5pm CT
+    
+    The market treats Monday as the next day after Friday.
+    Friday close (4pm CT) → Sunday open (5pm CT) = no blocks counted during weekend
+    """
     if start_time >= end_time:
         return 0
     
@@ -131,10 +139,30 @@ def count_30min_blocks(start_time: datetime, end_time: datetime) -> int:
     current = start_time
     
     while current < end_time:
-        current_ct_time = current.astimezone(CT_TZ).time()
+        current_ct = current.astimezone(CT_TZ)
+        current_ct_time = current_ct.time()
+        current_weekday = current_ct.weekday()  # 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
+        
+        # Skip weekend hours
+        # Saturday (5) - skip entirely
+        # Sunday (6) before 5pm CT - skip
+        # Friday (4) after 4pm CT - skip (this is covered by maintenance window)
+        
+        if current_weekday == 5:  # Saturday
+            # Skip to Sunday
+            current = current + timedelta(minutes=30)
+            continue
+        
+        if current_weekday == 6:  # Sunday
+            if current_ct_time < MAINTENANCE_END_CT:  # Before 5pm CT
+                current = current + timedelta(minutes=30)
+                continue
+        
+        # Skip daily maintenance window (4pm-5pm CT) on all days
         if MAINTENANCE_START_CT <= current_ct_time < MAINTENANCE_END_CT:
             current = current + timedelta(minutes=30)
             continue
+        
         blocks += 1
         current = current + timedelta(minutes=30)
     
