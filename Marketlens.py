@@ -1698,34 +1698,24 @@ def main():
             if prior_session.get('power_hour_filtered'):
                 st.warning("⚡ High filtered (power hour)")
             
-            # Chart type selection - Line chart (Close) is RECOMMENDED
-            chart_type = st.radio(
-                "📊 Pivot Detection Method",
-                options=["📈 Line Chart (Close)", "🕯️ Candlestick (Wicks)"],
-                index=0,  # Default to Line Chart
-                help="Line Chart uses Close prices (recommended for structure). Candlestick uses High/Low wicks."
-            )
-            use_line_chart = chart_type == "📈 Line Chart (Close)"
+            # ============================================================
+            # HYBRID PIVOT DETECTION (Recommended)
+            # Ascending rails (resistance) = Use WICKS (High) - shows rejection points
+            # Descending rails (support) = Use CLOSE - shows commitment points
+            # ============================================================
+            st.info("📊 **Hybrid Mode**: Highs use Wicks (resistance), Lows use Close (support)")
             
-            # Select the appropriate values based on chart type
-            if use_line_chart:
-                base_high = prior_session.get('high_line', prior_session['high'])
-                base_high_time = prior_session.get('high_line_time', prior_session['high_time'])
-                base_low = prior_session.get('low_line', prior_session['low'])
-                base_low_time = prior_session.get('low_line_time', prior_session['low_time'])
-                base_sec_high = prior_session.get('secondary_high_line')
-                base_sec_high_time = prior_session.get('secondary_high_line_time')
-                base_sec_low = prior_session.get('secondary_low_line')
-                base_sec_low_time = prior_session.get('secondary_low_line_time')
-            else:
-                base_high = prior_session['high']
-                base_high_time = prior_session['high_time']
-                base_low = prior_session['low']
-                base_low_time = prior_session['low_time']
-                base_sec_high = prior_session.get('secondary_high')
-                base_sec_high_time = prior_session.get('secondary_high_time')
-                base_sec_low = prior_session.get('secondary_low')
-                base_sec_low_time = prior_session.get('secondary_low_time')
+            # HIGH pivot → Use candle HIGH (wick) for ascending rail (resistance)
+            base_high = prior_session['high']  # Wick high
+            base_high_time = prior_session['high_time']
+            base_sec_high = prior_session.get('secondary_high')  # Wick-based secondary high
+            base_sec_high_time = prior_session.get('secondary_high_time')
+            
+            # LOW pivot → Use CLOSE for descending rail (support)
+            base_low = prior_session.get('low_line', prior_session['low'])  # Close-based low
+            base_low_time = prior_session.get('low_line_time', prior_session['low_time'])
+            base_sec_low = prior_session.get('secondary_low_line')  # Close-based secondary low
+            base_sec_low_time = prior_session.get('secondary_low_line_time')
             
             # Apply price offset
             auto_high = base_high - price_offset
@@ -1736,9 +1726,9 @@ def main():
             
             if use_manual:
                 st.info("Enter your TradingView prices below")
-                high_price = st.number_input("High", value=float(auto_high), format="%.2f")
+                high_price = st.number_input("High (Wick)", value=float(auto_high), format="%.2f", help="For ascending rails (resistance)")
                 high_time_str = st.text_input("High Time (CT)", value=base_high_time.strftime('%H:%M'))
-                low_price = st.number_input("Low", value=float(auto_low), format="%.2f")
+                low_price = st.number_input("Low (Close)", value=float(auto_low), format="%.2f", help="For descending rails (support)")
                 low_time_str = st.text_input("Low Time (CT)", value=base_low_time.strftime('%H:%M'))
                 close_price = st.number_input("Close", value=float(auto_close), format="%.2f")
             else:
@@ -1749,8 +1739,8 @@ def main():
                 high_time_str = base_high_time.strftime('%H:%M')
                 low_time_str = base_low_time.strftime('%H:%M')
                 
-                st.metric("High", f"{high_price:.2f}", f"@ {high_time_str} CT")
-                st.metric("Low", f"{low_price:.2f}", f"@ {low_time_str} CT")
+                st.metric("High (Wick)", f"{high_price:.2f}", f"@ {high_time_str} CT")
+                st.metric("Low (Close)", f"{low_price:.2f}", f"@ {low_time_str} CT")
                 st.metric("Close", f"{close_price:.2f}")
                 
                 if price_offset != 0:
@@ -1760,22 +1750,19 @@ def main():
             if base_sec_high is not None or base_sec_low is not None:
                 st.markdown("---")
                 st.markdown("### 📍 Secondary Pivots")
-                if use_line_chart:
-                    st.caption("Using Line Chart (Close) detection")
-                else:
-                    st.caption("Using Candlestick (Wick) detection")
+                st.caption("High² = Wick | Low² = Close")
             
             if base_sec_high is not None:
                 st.success("🔄 Secondary High Detected!")
                 secondary_high_price = base_sec_high - price_offset
                 secondary_high_time = base_sec_high_time
-                st.metric("2nd High (High²)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
+                st.metric("2nd High² (Wick)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
             
             if base_sec_low is not None:
                 st.success("🔄 Secondary Low Detected!")
                 secondary_low_price = base_sec_low - price_offset
                 secondary_low_time = base_sec_low_time
-                st.metric("2nd Low (Low²)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
+                st.metric("2nd Low² (Close)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
             
             # ========== PRE-MARKET PIVOTS ==========
             st.markdown("---")
@@ -1847,15 +1834,18 @@ def main():
             
             # Debug: Show timing info
             with st.expander("🔍 Pivot Timing Details"):
-                st.markdown(f"**Using:** {'Line Chart (Close)' if use_line_chart else 'Candlestick (Wicks)'}")
-                st.write(f"**Primary High:** {high_price:.2f} @ {high_time_str} CT")
-                st.write(f"**Primary Low:** {low_price:.2f} @ {low_time_str} CT")
+                st.markdown("**Using: HYBRID MODE**")
+                st.markdown("- Highs → Wick (for ascending/resistance)")
+                st.markdown("- Lows → Close (for descending/support)")
+                st.markdown("---")
+                st.write(f"**Primary High (Wick):** {high_price:.2f} @ {high_time_str} CT")
+                st.write(f"**Primary Low (Close):** {low_price:.2f} @ {low_time_str} CT")
                 if secondary_high_price is not None:
-                    st.write(f"**Secondary High²:** {secondary_high_price:.2f} @ {secondary_high_time.strftime('%H:%M')} CT")
+                    st.write(f"**Secondary High² (Wick):** {secondary_high_price:.2f} @ {secondary_high_time.strftime('%H:%M')} CT")
                 else:
                     st.write("**Secondary High²:** Not detected")
                 if secondary_low_price is not None:
-                    st.write(f"**Secondary Low²:** {secondary_low_price:.2f} @ {secondary_low_time.strftime('%H:%M')} CT")
+                    st.write(f"**Secondary Low² (Close):** {secondary_low_price:.2f} @ {secondary_low_time.strftime('%H:%M')} CT")
                 else:
                     st.write("**Secondary Low²:** Not detected")
                 if use_premarket_high and premarket_high_price:
@@ -1863,20 +1853,18 @@ def main():
                 if use_premarket_low and premarket_low_price:
                     st.write(f"**Pre-Market Low:** {premarket_low_price:.2f} @ {premarket_low_time.strftime('%H:%M')} CT")
                 
-                # Show comparison between Line and Candlestick
+                # Show all raw values for reference
                 st.markdown("---")
-                st.markdown("**📊 Comparison (Line vs Candle):**")
-                line_high = prior_session.get('high_line', prior_session['high'])
-                line_high_time = prior_session.get('high_line_time', prior_session['high_time'])
+                st.markdown("**📊 All Detected Values:**")
                 candle_high = prior_session['high']
                 candle_high_time = prior_session['high_time']
-                st.write(f"High - Line: {line_high - price_offset:.2f} @ {line_high_time.strftime('%H:%M')} | Candle: {candle_high - price_offset:.2f} @ {candle_high_time.strftime('%H:%M')}")
-                
                 line_low = prior_session.get('low_line', prior_session['low'])
                 line_low_time = prior_session.get('low_line_time', prior_session['low_time'])
                 candle_low = prior_session['low']
                 candle_low_time = prior_session['low_time']
-                st.write(f"Low - Line: {line_low - price_offset:.2f} @ {line_low_time.strftime('%H:%M')} | Candle: {candle_low - price_offset:.2f} @ {candle_low_time.strftime('%H:%M')}")
+                st.write(f"High Wick: {candle_high - price_offset:.2f} @ {candle_high_time.strftime('%H:%M')}")
+                st.write(f"Low Wick: {candle_low - price_offset:.2f} @ {candle_low_time.strftime('%H:%M')}")
+                st.write(f"Low Close: {line_low - price_offset:.2f} @ {line_low_time.strftime('%H:%M')}")
             
             try:
                 h, m = map(int, high_time_str.split(':'))
