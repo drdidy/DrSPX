@@ -1003,35 +1003,260 @@ def analyze_regime(cones, es_data, prior_session, first_bar, current_price) -> R
         es_spx_offset=es_data.get('offset', 0) if es_data else 0
     )
 
-def calculate_confluence_score(nearest_distance, regime, cones, current_price, is_10am) -> int:
-    score = 0
+def calculate_confluence_score(nearest_distance, regime, cones, current_price, is_10am, 
+                                nearest_rail_type=None, overnight_validation=None) -> dict:
+    """
+    Calculate a principled confluence score based on structural edge factors.
     
-    if nearest_distance <= 5: score += 25
-    elif nearest_distance <= 10: score += 15
-    elif nearest_distance <= 15: score += 8
+    The score represents EDGE QUALITY, not probability. Higher score = more factors align.
     
-    # Confluence bonus - check both calls and puts zones
+    SCORING PHILOSOPHY:
+    - Base: Start at 50 (neutral - no edge either way)
+    - Each factor adds or subtracts based on its importance
+    - Maximum theoretical score: 100
+    - Minimum practical score: ~20 (many negatives)
+    - Trade threshold: 65+ for full size, 50-65 reduced, <50 no trade
+    
+    FACTOR WEIGHTS (based on structural trading principles):
+    1. CONFLUENCE (35 pts max) - Multiple rails agreeing is the core edge
+    2. STRUCTURE VALIDATION (20 pts max) - Overnight behavior confirms/denies
+    3. DISTANCE TO RAIL (15 pts max) - Tighter entry = better R:R
+    4. TIME WINDOW (10 pts max) - Decision windows matter
+    5. REGIME QUALITY (10 pts max) - Market conditions
+    6. SECONDARY PIVOT ALIGNMENT (10 pts max) - Extra confirmation
+    
+    Returns dict with score and breakdown for transparency.
+    """
+    breakdown = {}
+    score = 50  # Neutral starting point
+    
+    # =========================================================================
+    # 1. CONFLUENCE - The Core Edge (up to +35 or -10)
+    # Multiple rails pointing to same level = structural agreement
+    # =========================================================================
     zones_data = find_confluence_zones(cones)
-    all_zones = zones_data.get('calls_confluence', []) + zones_data.get('puts_confluence', [])
-    for zone in all_zones:
-        if abs(current_price - zone['price']) <= 10:
-            score += 20
-            break
+    calls_zones = zones_data.get('calls_confluence', [])
+    puts_zones = zones_data.get('puts_confluence', [])
     
-    if regime.overnight_touched_rails: score += 15
-    if is_10am: score += 15
+    # Check if current price is near a confluence zone
+    best_confluence = None
+    best_confluence_distance = float('inf')
     
-    nearest_cone, _, _ = find_nearest_rail(current_price, cones)
-    if nearest_cone and (nearest_cone.width / current_price) > 0.006: score += 10
-    if regime.overnight_range_pct < 0.30: score += 10
-    if regime.first_bar_energy == 'strong': score += 5
+    # For CALLS, check descending rail confluences
+    if nearest_rail_type == 'descending':
+        for zone in calls_zones:
+            dist = abs(current_price - zone['price'])
+            if dist < best_confluence_distance:
+                best_confluence_distance = dist
+                best_confluence = zone
+    # For PUTS, check ascending rail confluences
+    elif nearest_rail_type == 'ascending':
+        for zone in puts_zones:
+            dist = abs(current_price - zone['price'])
+            if dist < best_confluence_distance:
+                best_confluence_distance = dist
+                best_confluence = zone
     
-    return min(score, 100)
+    if best_confluence and best_confluence_distance <= 10:
+        num_rails = best_confluence.get('strength', len(best_confluence.get('rails', [])))
+        if num_rails >= 4:
+            confluence_pts = 35  # Exceptional - 4+ rails converge
+            breakdown['confluence'] = f"+{confluence_pts} (4+ rails converge!)"
+        elif num_rails == 3:
+            confluence_pts = 28  # Excellent - 3 rails converge
+            breakdown['confluence'] = f"+{confluence_pts} (3 rails converge)"
+        elif num_rails == 2:
+            confluence_pts = 20  # Good - 2 rails converge
+            breakdown['confluence'] = f"+{confluence_pts} (2 rails converge)"
+        else:
+            confluence_pts = 10
+            breakdown['confluence'] = f"+{confluence_pts} (weak confluence)"
+        score += confluence_pts
+    elif nearest_distance <= 5:
+        # At a single rail but no confluence
+        confluence_pts = 5
+        score += confluence_pts
+        breakdown['confluence'] = f"+{confluence_pts} (single rail, no confluence)"
+    else:
+        confluence_pts = -10
+        score += confluence_pts
+        breakdown['confluence'] = f"{confluence_pts} (no confluence nearby)"
+    
+    # =========================================================================
+    # 2. STRUCTURE VALIDATION - Overnight Behavior (up to +20 or -15)
+    # Did ES respect or violate the structure overnight?
+    # =========================================================================
+    if overnight_validation:
+        validated_rails = overnight_validation.get('validated', [])
+        broken_rails = overnight_validation.get('broken', [])
+        
+        # Check if the rail we're trading was validated
+        rail_validated = False
+        rail_broken = False
+        
+        for v in validated_rails:
+            if nearest_rail_type == 'descending' and '▼' in v:
+                rail_validated = True
+            elif nearest_rail_type == 'ascending' and '▲' in v:
+                rail_validated = True
+        
+        for b in broken_rails:
+            if nearest_rail_type == 'descending' and '▼' in b:
+                rail_broken = True
+            elif nearest_rail_type == 'ascending' and '▲' in b:
+                rail_broken = True
+        
+        if rail_validated and not rail_broken:
+            validation_pts = 20
+            breakdown['validation'] = f"+{validation_pts} (rail validated overnight)"
+        elif rail_broken:
+            validation_pts = -15
+            breakdown['validation'] = f"{validation_pts} (rail BROKEN overnight!)"
+        elif len(validated_rails) > 0:
+            validation_pts = 10
+            breakdown['validation'] = f"+{validation_pts} (other rails validated)"
+        else:
+            validation_pts = 0
+            breakdown['validation'] = f"+{validation_pts} (no overnight validation)"
+        
+        score += validation_pts
+    else:
+        breakdown['validation'] = "+0 (no overnight data)"
+    
+    # =========================================================================
+    # 3. DISTANCE TO RAIL (up to +15 or -5)
+    # Tighter entry = better risk/reward
+    # =========================================================================
+    if nearest_distance <= 2:
+        distance_pts = 15
+        breakdown['distance'] = f"+{distance_pts} (excellent entry <2 pts)"
+    elif nearest_distance <= 5:
+        distance_pts = 12
+        breakdown['distance'] = f"+{distance_pts} (good entry <5 pts)"
+    elif nearest_distance <= 10:
+        distance_pts = 8
+        breakdown['distance'] = f"+{distance_pts} (acceptable <10 pts)"
+    elif nearest_distance <= 15:
+        distance_pts = 3
+        breakdown['distance'] = f"+{distance_pts} (wide entry <15 pts)"
+    else:
+        distance_pts = -5
+        breakdown['distance'] = f"{distance_pts} (too far from rail)"
+    score += distance_pts
+    
+    # =========================================================================
+    # 4. TIME WINDOW (up to +10)
+    # Decision windows provide cleaner entries
+    # =========================================================================
+    ct_now = get_ct_now()
+    ct_time = ct_now.time()
+    
+    # Check if within 30 mins of key decision times
+    is_830_window = time(8, 15) <= ct_time <= time(9, 0)
+    is_1000_window = time(9, 45) <= ct_time <= time(10, 15)
+    
+    if is_1000_window:
+        time_pts = 10
+        breakdown['time'] = f"+{time_pts} (10:00 AM decision window)"
+    elif is_830_window:
+        time_pts = 8
+        breakdown['time'] = f"+{time_pts} (8:30 AM open window)"
+    elif time(10, 15) < ct_time < time(14, 0):
+        time_pts = 3
+        breakdown['time'] = f"+{time_pts} (mid-day)"
+    else:
+        time_pts = 0
+        breakdown['time'] = f"+{time_pts} (outside optimal windows)"
+    score += time_pts
+    
+    # =========================================================================
+    # 5. REGIME QUALITY (up to +10 or -10)
+    # Market conditions affect reliability
+    # =========================================================================
+    regime_pts = 0
+    regime_notes = []
+    
+    if regime.overnight_range_pct < 0.25:
+        regime_pts += 5
+        regime_notes.append("tight overnight")
+    elif regime.overnight_range_pct > 0.50:
+        regime_pts -= 5
+        regime_notes.append("wide overnight")
+    
+    if regime.cone_width_adequate:
+        regime_pts += 3
+        regime_notes.append("good cone width")
+    else:
+        regime_pts -= 5
+        regime_notes.append("narrow cone")
+    
+    if regime.prior_day_range_adequate:
+        regime_pts += 2
+        regime_notes.append("healthy prior range")
+    
+    score += regime_pts
+    breakdown['regime'] = f"{'+' if regime_pts >= 0 else ''}{regime_pts} ({', '.join(regime_notes) if regime_notes else 'neutral'})"
+    
+    # =========================================================================
+    # 6. SECONDARY PIVOT ALIGNMENT (up to +10)
+    # If secondary pivots also project to this level, extra confirmation
+    # =========================================================================
+    # Check if any secondary pivot rails are near current price
+    secondary_alignment = False
+    for cone in cones:
+        if 'High²' in cone.name or 'Low²' in cone.name:
+            if nearest_rail_type == 'descending':
+                if abs(cone.descending_rail - current_price) <= 8:
+                    secondary_alignment = True
+            elif nearest_rail_type == 'ascending':
+                if abs(cone.ascending_rail - current_price) <= 8:
+                    secondary_alignment = True
+    
+    if secondary_alignment:
+        secondary_pts = 10
+        breakdown['secondary'] = f"+{secondary_pts} (secondary pivot confirms)"
+    else:
+        secondary_pts = 0
+        breakdown['secondary'] = f"+{secondary_pts} (no secondary confirmation)"
+    score += secondary_pts
+    
+    # =========================================================================
+    # FINAL SCORE
+    # =========================================================================
+    final_score = max(0, min(100, score))
+    
+    return {
+        'score': final_score,
+        'breakdown': breakdown,
+        'recommendation': get_score_recommendation(final_score)
+    }
+
+def get_score_recommendation(score: int) -> str:
+    """Convert score to actionable recommendation."""
+    if score >= 80:
+        return "STRONG SETUP - Full position, high confidence"
+    elif score >= 70:
+        return "GOOD SETUP - Full position"
+    elif score >= 60:
+        return "ACCEPTABLE - Reduced position"
+    elif score >= 50:
+        return "MARGINAL - Small position or wait"
+    else:
+        return "NO TRADE - Insufficient edge"
 
 def generate_action_card(cones, regime, current_price, is_10am, overnight_validation=None) -> ActionCard:
     warnings = []
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
-    confluence_score = calculate_confluence_score(nearest_distance, regime, cones, current_price, is_10am)
+    
+    # Get the new structured confluence score
+    score_result = calculate_confluence_score(
+        nearest_distance, regime, cones, current_price, is_10am,
+        nearest_rail_type=nearest_rail_type, 
+        overnight_validation=overnight_validation
+    )
+    confluence_score = score_result['score']
+    score_breakdown = score_result['breakdown']
+    score_recommendation = score_result['recommendation']
     
     # Determine position based on WHICH RAIL is nearest, not position within cone
     # If nearest rail is descending → price is near support → CALLS
@@ -1069,6 +1294,9 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
     if regime.first_bar_energy == 'weak':
         warnings.append("Weak first bar energy")
     
+    # Add score breakdown to warnings for transparency
+    warnings.append(f"Score: {score_recommendation}")
+    
     # ========== SMART STRUCTURE VALIDATION ==========
     # Check if we're recommending based on a validated structure
     structure_validated = False
@@ -1083,14 +1311,12 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
                     if overnight_validation.get('high_secondary_validated'):
                         structure_validated = True
                         active_structure_note = "✓ Secondary High² VALIDATED overnight"
-                        confluence_score = min(100, confluence_score + 15)  # Boost score
                     elif overnight_validation.get('active_high_structure') == 'both':
                         active_structure_note = "⚠ High² not tested overnight - use caution"
                 elif nearest_cone.name == 'High':
                     if overnight_validation.get('high_primary_validated'):
                         structure_validated = True
                         active_structure_note = "✓ Primary High VALIDATED overnight"
-                        confluence_score = min(100, confluence_score + 15)
                     elif overnight_validation.get('active_high_structure') == 'both':
                         active_structure_note = "⚠ Primary High not tested overnight - use caution"
         
@@ -1101,14 +1327,12 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
                     if overnight_validation.get('low_secondary_validated'):
                         structure_validated = True
                         active_structure_note = "✓ Secondary Low² VALIDATED overnight"
-                        confluence_score = min(100, confluence_score + 15)
                     elif overnight_validation.get('active_low_structure') == 'both':
                         active_structure_note = "⚠ Low² not tested overnight - use caution"
                 elif nearest_cone.name == 'Low':
                     if overnight_validation.get('low_primary_validated'):
                         structure_validated = True
                         active_structure_note = "✓ Primary Low VALIDATED overnight"
-                        confluence_score = min(100, confluence_score + 15)
                     elif overnight_validation.get('active_low_structure') == 'both':
                         active_structure_note = "⚠ Primary Low not tested overnight - use caution"
             # Also check High cone ascending rails for PUTS
@@ -1116,7 +1340,6 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
                 if overnight_validation.get('high_primary_validated') or overnight_validation.get('high_secondary_validated'):
                     structure_validated = True
                     active_structure_note = "✓ High structure validated - ascending rail resistance"
-                    confluence_score = min(100, confluence_score + 10)
     
     if active_structure_note:
         warnings.insert(0, active_structure_note)
@@ -1133,13 +1356,16 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
         warnings.append(f"PUTS activate at {nearest_cone.ascending_rail:.2f}")
     elif position == 'lower_edge':
         direction = 'CALLS'
-        # Boost confidence if structure was validated
-        if structure_validated:
-            color = 'green' if confluence_score >= 65 else 'yellow'  # Lower threshold for validated
-            position_size = 'FULL' if confluence_score >= 65 else 'REDUCED'
+        # Position sizing based on new principled score
+        # 70+ = FULL (green), 60-69 = FULL (yellow), 50-59 = REDUCED, <50 = NONE
+        if confluence_score >= 70:
+            color, position_size = 'green', 'FULL'
+        elif confluence_score >= 60:
+            color, position_size = 'yellow', 'FULL'
+        elif confluence_score >= 50:
+            color, position_size = 'yellow', 'REDUCED'
         else:
-            color = 'green' if confluence_score >= 75 else 'yellow'
-            position_size = 'FULL' if confluence_score >= 75 else 'REDUCED'
+            color, position_size = 'red', 'NONE'
         entry_level = nearest_cone.descending_rail
         target_100 = nearest_cone.ascending_rail
         cone_height = target_100 - entry_level
@@ -1149,12 +1375,15 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
         contract_exp = calculate_contract_expectation('CALLS', entry_level, target_100, nearest_cone.name, 'descending')
     else:
         direction = 'PUTS'
-        if structure_validated:
-            color = 'green' if confluence_score >= 65 else 'yellow'
-            position_size = 'FULL' if confluence_score >= 65 else 'REDUCED'
+        # Position sizing based on new principled score
+        if confluence_score >= 70:
+            color, position_size = 'green', 'FULL'
+        elif confluence_score >= 60:
+            color, position_size = 'yellow', 'FULL'
+        elif confluence_score >= 50:
+            color, position_size = 'yellow', 'REDUCED'
         else:
-            color = 'green' if confluence_score >= 75 else 'yellow'
-            position_size = 'FULL' if confluence_score >= 75 else 'REDUCED'
+            color, position_size = 'red', 'NONE'
         entry_level = nearest_cone.ascending_rail
         target_100 = nearest_cone.descending_rail
         cone_height = entry_level - target_100
@@ -1989,6 +2218,20 @@ def main():
     
     with col2:
         render_score_ring(action.confluence_score)
+        
+        # Add score breakdown expander
+        with st.expander("📊 Score Breakdown"):
+            # Recalculate to get breakdown
+            nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
+            score_result = calculate_confluence_score(
+                nearest_distance, regime, cones, current_price, is_10am,
+                nearest_rail_type=nearest_rail_type, 
+                overnight_validation=overnight_validation
+            )
+            for factor, detail in score_result['breakdown'].items():
+                st.markdown(f"**{factor.title()}:** {detail}")
+            st.markdown("---")
+            st.markdown(f"**{score_result['recommendation']}**")
     
     with col3:
         render_action_card(action)
