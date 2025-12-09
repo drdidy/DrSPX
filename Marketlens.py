@@ -304,128 +304,106 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
         
         # ============================================================
         # SECONDARY HIGH DETECTION - Using LINE CHART (Close prices)
-        # Pattern: Primary High Close -> Pullback -> Lower High Close
+        # Pattern: Primary High -> Drop -> LOCAL PEAK (Secondary High) -> Drop
+        # 
+        # Key insight: We need to find the FIRST local peak after the high,
+        # not the bounce after the absolute low. The secondary high is a
+        # failed attempt to make a new high.
         # ============================================================
         secondary_high_line = None
         secondary_high_line_time = None
         
         df_after_high = df[df.index > high_line_idx]
         
-        if len(df_after_high) >= 2:
-            # Find pullback (lowest close after the high)
-            min_close = df_after_high['Close'].min()
-            pullback_pct = (high_line_price - min_close) / high_line_price
+        if len(df_after_high) >= 3:
+            closes = df_after_high['Close'].values
+            indices = df_after_high.index.tolist()
             
-            if pullback_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                min_close_idx = df_after_high['Close'].idxmin()
+            # Look for local peaks: price higher than both neighbors
+            for i in range(1, len(closes) - 1):
+                prev_close = closes[i - 1]
+                curr_close = closes[i]
+                next_close = closes[i + 1]
                 
-                # Look for bounce after pullback
-                df_after_pullback = df_after_high[df_after_high.index > min_close_idx]
-                
-                if not df_after_pullback.empty:
-                    # Find highest close after pullback (secondary high)
-                    sec_high_idx = df_after_pullback['Close'].idxmax()
-                    sec_high_price = df_after_pullback.loc[sec_high_idx, 'Close']
-                    
-                    # Validate: must be lower than primary by at least 5 points
-                    if (sec_high_price < high_line_price and 
-                        (high_line_price - sec_high_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
-                        
-                        # Confirm by checking for decline after
-                        df_after_sec = df_after_pullback[df_after_pullback.index > sec_high_idx]
-                        
-                        if not df_after_sec.empty:
-                            if df_after_sec['Close'].min() < sec_high_price:
-                                secondary_high_line = sec_high_price
-                                secondary_high_line_time = sec_high_idx
-                        else:
-                            # Last bar - accept it
-                            secondary_high_line = sec_high_price
-                            secondary_high_line_time = sec_high_idx
+                # Is this a local peak? (higher than both neighbors)
+                if curr_close > prev_close and curr_close > next_close:
+                    # Is it lower than primary high? (required for secondary)
+                    if curr_close < high_line_price:
+                        # Is it at least 5 points below primary?
+                        if (high_line_price - curr_close) >= SECONDARY_PIVOT_MIN_DISTANCE:
+                            # Found the first valid secondary high
+                            secondary_high_line = curr_close
+                            secondary_high_line_time = indices[i]
+                            break
         
         # ============================================================
         # SECONDARY LOW DETECTION - Using LINE CHART (Close prices)
-        # Pattern: Primary Low Close -> Bounce -> Higher Low Close
+        # Pattern: Primary Low -> Rise -> LOCAL TROUGH (Secondary Low) -> Rise
+        # 
+        # Similar to secondary high, we find the FIRST local trough after
+        # the primary low, not the dip after the absolute high.
         # ============================================================
         secondary_low_line = None
         secondary_low_line_time = None
         
         df_after_low = df[df.index > low_line_idx]
         
-        # Exclude secondary high candle
+        # Exclude secondary high candle if it exists
         if secondary_high_line_time is not None:
             df_after_low = df_after_low[df_after_low.index != secondary_high_line_time]
         
-        if len(df_after_low) >= 2:
-            # Find bounce (highest close after the low)
-            max_close = df_after_low['Close'].max()
-            bounce_pct = (max_close - low_line_price) / low_line_price
+        if len(df_after_low) >= 3:
+            closes = df_after_low['Close'].values
+            indices = df_after_low.index.tolist()
             
-            if bounce_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                max_close_idx = df_after_low['Close'].idxmax()
+            # Look for local troughs: price lower than both neighbors
+            for i in range(1, len(closes) - 1):
+                prev_close = closes[i - 1]
+                curr_close = closes[i]
+                next_close = closes[i + 1]
                 
-                # Look for pullback after bounce
-                df_after_bounce = df_after_low[df_after_low.index > max_close_idx]
-                
-                if secondary_high_line_time is not None:
-                    df_after_bounce = df_after_bounce[df_after_bounce.index != secondary_high_line_time]
-                
-                if not df_after_bounce.empty:
-                    # Find lowest close after bounce (secondary low)
-                    sec_low_idx = df_after_bounce['Close'].idxmin()
-                    sec_low_price = df_after_bounce.loc[sec_low_idx, 'Close']
-                    
-                    # Validate: must be higher than primary by at least 5 points
-                    if (sec_low_price > low_line_price and 
-                        (sec_low_price - low_line_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
-                        
-                        # Confirm by checking for rise after
-                        df_after_sec = df_after_bounce[df_after_bounce.index > sec_low_idx]
-                        
-                        if not df_after_sec.empty:
-                            if df_after_sec['Close'].max() > sec_low_price:
-                                secondary_low_line = sec_low_price
-                                secondary_low_line_time = sec_low_idx
-                        else:
-                            # Last bar - accept it
-                            secondary_low_line = sec_low_price
-                            secondary_low_line_time = sec_low_idx
+                # Is this a local trough? (lower than both neighbors)
+                if curr_close < prev_close and curr_close < next_close:
+                    # Is it higher than primary low? (required for secondary)
+                    if curr_close > low_line_price:
+                        # Is it at least 5 points above primary?
+                        if (curr_close - low_line_price) >= SECONDARY_PIVOT_MIN_DISTANCE:
+                            # Found the first valid secondary low
+                            secondary_low_line = curr_close
+                            secondary_low_line_time = indices[i]
+                            break
         
-        # Candlestick secondary detection (for reference)
+        # Candlestick secondary detection (for reference) - using same local peak logic
         secondary_high = None
         secondary_high_time = None
         secondary_low = None
         secondary_low_time = None
         
         df_after_high_candle = df[df.index > high_idx]
-        if len(df_after_high_candle) >= 2:
-            min_low = df_after_high_candle['Low'].min()
-            if (high_price - min_low) / high_price >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                min_idx = df_after_high_candle['Low'].idxmin()
-                df_after_min = df_after_high_candle[df_after_high_candle.index > min_idx]
-                if not df_after_min.empty:
-                    sec_idx = df_after_min['High'].idxmax()
-                    sec_price = df_after_min.loc[sec_idx, 'High']
-                    if sec_price < high_price and (high_price - sec_price) >= SECONDARY_PIVOT_MIN_DISTANCE:
-                        secondary_high = sec_price
-                        secondary_high_time = sec_idx
+        if len(df_after_high_candle) >= 3:
+            highs = df_after_high_candle['High'].values
+            indices_candle = df_after_high_candle.index.tolist()
+            
+            for i in range(1, len(highs) - 1):
+                if highs[i] > highs[i-1] and highs[i] > highs[i+1]:
+                    if highs[i] < high_price and (high_price - highs[i]) >= SECONDARY_PIVOT_MIN_DISTANCE:
+                        secondary_high = highs[i]
+                        secondary_high_time = indices_candle[i]
+                        break
         
         df_after_low_candle = df[df.index > low_idx]
         if secondary_high_time is not None:
             df_after_low_candle = df_after_low_candle[df_after_low_candle.index != secondary_high_time]
-        if len(df_after_low_candle) >= 2:
-            max_high = df_after_low_candle['High'].max()
-            if (max_high - low_price) / low_price >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                max_idx = df_after_low_candle['High'].idxmax()
-                df_after_max = df_after_low_candle[df_after_low_candle.index > max_idx]
-                if secondary_high_time is not None and secondary_high_time in df_after_max.index:
-                    df_after_max = df_after_max[df_after_max.index != secondary_high_time]
-                if not df_after_max.empty:
-                    sec_idx = df_after_max['Low'].idxmin()
-                    sec_price = df_after_max.loc[sec_idx, 'Low']
-                    if sec_price > low_price and (sec_price - low_price) >= SECONDARY_PIVOT_MIN_DISTANCE:
-                        secondary_low = sec_price
-                        secondary_low_time = sec_idx
+        if len(df_after_low_candle) >= 3:
+            lows = df_after_low_candle['Low'].values
+            indices_candle = df_after_low_candle.index.tolist()
+            
+            for i in range(1, len(lows) - 1):
+                if lows[i] < lows[i-1] and lows[i] < lows[i+1]:
+                    if lows[i] > low_price and (lows[i] - low_price) >= SECONDARY_PIVOT_MIN_DISTANCE:
+                        secondary_low = lows[i]
+                        secondary_low_time = indices_candle[i]
+                        break
         
         return {
             'date': prior_date,
