@@ -1928,19 +1928,21 @@ def main():
                 st.warning("⚡ High filtered (power hour)")
             
             # ============================================================
-            # HYBRID PIVOT DETECTION (Recommended)
-            # Ascending rails (resistance) = Use WICKS (High) - shows rejection points
-            # Descending rails (support) = Use CLOSE - shows commitment points
+            # PIVOT DETECTION METHODOLOGY
+            # HIGH pivots (Primary & Secondary) = Use WICKS - rejection points
+            #   → Both ascending AND descending rails from High use wick value
+            # LOW pivots (Primary & Secondary) = Use CLOSE - commitment points
+            #   → Both ascending AND descending rails from Low use close value
             # ============================================================
-            st.info("📊 **Hybrid Mode**: Highs use Wicks (resistance), Lows use Close (support)")
+            st.info("📊 **HIGH pivots** → Wick (rejection) | **LOW pivots** → Close (commitment)")
             
-            # HIGH pivot → Use candle HIGH (wick) for ascending rail (resistance)
+            # HIGH pivot → Use candle HIGH (wick) - both rails project from this
             base_high = prior_session['high']  # Wick high
             base_high_time = prior_session['high_time']
             base_sec_high = prior_session.get('secondary_high')  # Wick-based secondary high
             base_sec_high_time = prior_session.get('secondary_high_time')
             
-            # LOW pivot → Use CLOSE for descending rail (support)
+            # LOW pivot → Use CLOSE - both rails project from this
             base_low = prior_session.get('low_line', prior_session['low'])  # Close-based low
             base_low_time = prior_session.get('low_line_time', prior_session['low_time'])
             base_sec_low = prior_session.get('secondary_low_line')  # Close-based secondary low
@@ -2063,9 +2065,10 @@ def main():
             
             # Debug: Show timing info
             with st.expander("🔍 Pivot Timing Details"):
-                st.markdown("**Using: HYBRID MODE**")
-                st.markdown("- Highs → Wick (for ascending/resistance)")
-                st.markdown("- Lows → Close (for descending/support)")
+                st.markdown("**Methodology:**")
+                st.markdown("- **HIGH pivots** → Use Wick (rejection point)")
+                st.markdown("- **LOW pivots** → Use Close (commitment point)")
+                st.markdown("- Each pivot projects BOTH ascending & descending rails")
                 st.markdown("---")
                 st.write(f"**Primary High (Wick):** {high_price:.2f} @ {high_time_str} CT")
                 st.write(f"**Primary Low (Close):** {low_price:.2f} @ {low_time_str} CT")
@@ -2084,16 +2087,16 @@ def main():
                 
                 # Show all raw values for reference
                 st.markdown("---")
-                st.markdown("**📊 All Detected Values:**")
+                st.markdown("**📊 Raw Detected Values (for comparison):**")
                 candle_high = prior_session['high']
                 candle_high_time = prior_session['high_time']
                 line_low = prior_session.get('low_line', prior_session['low'])
                 line_low_time = prior_session.get('low_line_time', prior_session['low_time'])
                 candle_low = prior_session['low']
                 candle_low_time = prior_session['low_time']
-                st.write(f"High Wick: {candle_high - price_offset:.2f} @ {candle_high_time.strftime('%H:%M')}")
-                st.write(f"Low Wick: {candle_low - price_offset:.2f} @ {candle_low_time.strftime('%H:%M')}")
-                st.write(f"Low Close: {line_low - price_offset:.2f} @ {line_low_time.strftime('%H:%M')}")
+                st.write(f"High (Wick): {candle_high - price_offset:.2f} @ {candle_high_time.strftime('%H:%M')} ✓ Used")
+                st.write(f"Low (Wick): {candle_low - price_offset:.2f} @ {candle_low_time.strftime('%H:%M')}")
+                st.write(f"Low (Close): {line_low - price_offset:.2f} @ {line_low_time.strftime('%H:%M')} ✓ Used")
             
             try:
                 h, m = map(int, high_time_str.split(':'))
