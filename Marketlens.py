@@ -203,6 +203,10 @@ def get_position_in_cone(price: float, ascending_rail: float, descending_rail: f
 
 @st.cache_data(ttl=300)
 def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
+    """
+    Fetch prior session data with both candlestick (wick) and line chart (close) pivot detection.
+    Line chart values are RECOMMENDED as they represent true structure turning points.
+    """
     try:
         prior_date = session_date - timedelta(days=1)
         while prior_date.weekday() >= 5:
@@ -237,209 +241,218 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
                 'secondary_high': None,
                 'secondary_high_time': None,
                 'secondary_low': None,
-                'secondary_low_time': None
+                'secondary_low_time': None,
+                # Line chart values
+                'high_line': row['Close'],
+                'high_line_time': close_time,
+                'low_line': row['Close'],
+                'low_line_time': close_time,
+                'secondary_high_line': None,
+                'secondary_high_line_time': None,
+                'secondary_low_line': None,
+                'secondary_low_line_time': None
             }
         
-        # Convert index to CT for filtering
-        df_intraday_ct = df_intraday.copy()
-        df_intraday_ct['ct_time'] = df_intraday_ct.index.tz_convert(CT_TZ).time
-        df_intraday_ct['ct_datetime'] = df_intraday_ct.index.tz_convert(CT_TZ)
+        # Convert index to CT
+        df = df_intraday.copy()
+        df.index = df.index.tz_convert(CT_TZ)
         
-        # POWER HOUR FILTER: Find high before 14:00 CT
-        df_before_power_hour = df_intraday_ct[df_intraday_ct['ct_time'] < POWER_HOUR_START]
+        # ============================================================
+        # CANDLESTICK (WICK) BASED DETECTION
+        # ============================================================
+        df_before_power = df[df.index.time < POWER_HOUR_START]
         
         power_hour_filtered = False
-        if not df_before_power_hour.empty:
-            overall_high_idx = df_intraday['High'].idxmax()
-            overall_high_time = to_ct(overall_high_idx.to_pydatetime()).time()
-            
-            if overall_high_time >= POWER_HOUR_START:
-                high_idx = df_before_power_hour['High'].idxmax()
+        if not df_before_power.empty:
+            overall_high_idx = df['High'].idxmax()
+            if overall_high_idx.time() >= POWER_HOUR_START:
+                high_idx = df_before_power['High'].idxmax()
                 power_hour_filtered = True
             else:
                 high_idx = overall_high_idx
         else:
-            high_idx = df_intraday['High'].idxmax()
+            high_idx = df['High'].idxmax()
         
-        low_idx = df_intraday['Low'].idxmin()
+        low_idx = df['Low'].idxmin()
         
-        high_time = to_ct(high_idx.to_pydatetime())
-        low_time = to_ct(low_idx.to_pydatetime())
+        high_price = df.loc[high_idx, 'High']
+        high_time = high_idx
+        low_price = df.loc[low_idx, 'Low']
+        low_time = low_idx
+        close_price = df['Close'].iloc[-1]
         close_time = CT_TZ.localize(datetime.combine(prior_date, time(15, 0)))
         
-        high_price = df_intraday.loc[high_idx, 'High']
-        low_price = df_intraday['Low'].min()
-        close_price = df_intraday['Close'].iloc[-1]
+        # ============================================================
+        # LINE CHART BASED DETECTION (Using Close prices)
+        # This is more accurate for structure detection
+        # ============================================================
+        if not df_before_power.empty:
+            overall_high_close_idx = df['Close'].idxmax()
+            if overall_high_close_idx.time() >= POWER_HOUR_START:
+                high_line_idx = df_before_power['Close'].idxmax()
+            else:
+                high_line_idx = overall_high_close_idx
+        else:
+            high_line_idx = df['Close'].idxmax()
+        
+        low_line_idx = df['Close'].idxmin()
+        
+        high_line_price = df.loc[high_line_idx, 'Close']
+        high_line_time = high_line_idx
+        low_line_price = df.loc[low_line_idx, 'Close']
+        low_line_time = low_line_idx
         
         # ============================================================
-        # SECONDARY HIGH DETECTION (Completely Independent)
-        # Looking for: Primary High -> Pullback -> Lower High (Secondary High)
-        # 
-        # IMPORTANT: This detection is independent of where the primary LOW is.
-        # The secondary high is about price structure after the primary high,
-        # not about the relationship to the low.
+        # SECONDARY HIGH DETECTION - Using LINE CHART (Close prices)
+        # Pattern: Primary High Close -> Pullback -> Lower High Close
         # ============================================================
-        secondary_high = None
-        secondary_high_time = None
+        secondary_high_line = None
+        secondary_high_line_time = None
         
-        # Get ALL data after primary high
-        df_after_high = df_intraday_ct[df_intraday_ct.index > high_idx].copy()
+        df_after_high = df[df.index > high_line_idx]
         
-        if len(df_after_high) >= 2:  # Need at least 2 bars after high
-            # Method: Find local highs after the primary high that are lower than primary
-            # A secondary high is a bounce that fails to make a new high
-            
-            # First, find if there was any significant pullback after the high
-            all_lows_after_high = df_after_high['Low'].values
-            all_highs_after_high = df_after_high['High'].values
-            
-            min_after_high = df_after_high['Low'].min()
-            pullback_pct = (high_price - min_after_high) / high_price
+        if len(df_after_high) >= 2:
+            # Find pullback (lowest close after the high)
+            min_close = df_after_high['Close'].min()
+            pullback_pct = (high_line_price - min_close) / high_line_price
             
             if pullback_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                # There was a significant pullback - now look for a bounce (secondary high)
+                min_close_idx = df_after_high['Close'].idxmin()
                 
-                # Find the index of the minimum low after the primary high
-                min_low_idx = df_after_high['Low'].idxmin()
-                min_low_position = df_after_high.index.get_loc(min_low_idx)
+                # Look for bounce after pullback
+                df_after_pullback = df_after_high[df_after_high.index > min_close_idx]
                 
-                # Look at bars AFTER the minimum OR INCLUDING the minimum bar
-                # (because the same bar could have the low AND the bounce high)
-                
-                # Check if the bar that made the low also had a high that qualifies as secondary high
-                min_bar = df_after_high.loc[min_low_idx]
-                bar_high = min_bar['High']
-                
-                # This bar's high could be the secondary high if:
-                # 1. It's lower than primary high by at least 5 points
-                # 2. Price dropped after this point
-                if (bar_high < high_price and 
-                    (high_price - bar_high) >= SECONDARY_PIVOT_MIN_DISTANCE):
+                if not df_after_pullback.empty:
+                    # Find highest close after pullback (secondary high)
+                    sec_high_idx = df_after_pullback['Close'].idxmax()
+                    sec_high_price = df_after_pullback.loc[sec_high_idx, 'Close']
                     
-                    # Check if there's downward movement after this bar
-                    df_after_this_bar = df_after_high[df_after_high.index > min_low_idx]
-                    
-                    if not df_after_this_bar.empty:
-                        # If ANY subsequent bar has a lower low, the secondary high is confirmed
-                        subsequent_lows = df_after_this_bar['Low'].min()
-                        if subsequent_lows < bar_high:
-                            secondary_high = bar_high
-                            secondary_high_time = to_ct(min_low_idx.to_pydatetime())
-                    else:
-                        # Last bar of day - check if it closed lower than its high
-                        if min_bar['Close'] < bar_high * 0.999:  # Closed at least 0.1% below high
-                            secondary_high = bar_high
-                            secondary_high_time = to_ct(min_low_idx.to_pydatetime())
-                
-                # If we didn't find it on the min bar, look at bars after the minimum
-                if secondary_high is None and min_low_position < len(df_after_high) - 1:
-                    df_after_min = df_after_high.iloc[min_low_position + 1:]
-                    
-                    if not df_after_min.empty:
-                        # Find the highest high after the minimum low
-                        max_high_idx = df_after_min['High'].idxmax()
-                        potential_secondary_high = df_after_min.loc[max_high_idx, 'High']
+                    # Validate: must be lower than primary by at least 5 points
+                    if (sec_high_price < high_line_price and 
+                        (high_line_price - sec_high_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
                         
-                        if (potential_secondary_high < high_price and 
-                            (high_price - potential_secondary_high) >= SECONDARY_PIVOT_MIN_DISTANCE):
-                            
-                            # Confirm it's a pivot by checking for downward movement after
-                            df_after_potential = df_after_min[df_after_min.index > max_high_idx]
-                            
-                            if not df_after_potential.empty:
-                                if df_after_potential['Low'].min() < potential_secondary_high:
-                                    secondary_high = potential_secondary_high
-                                    secondary_high_time = to_ct(max_high_idx.to_pydatetime())
-                            else:
-                                # Last bar - accept if closed lower
-                                last_bar = df_after_min.loc[max_high_idx]
-                                if last_bar['Close'] < potential_secondary_high * 0.999:
-                                    secondary_high = potential_secondary_high
-                                    secondary_high_time = to_ct(max_high_idx.to_pydatetime())
+                        # Confirm by checking for decline after
+                        df_after_sec = df_after_pullback[df_after_pullback.index > sec_high_idx]
+                        
+                        if not df_after_sec.empty:
+                            if df_after_sec['Close'].min() < sec_high_price:
+                                secondary_high_line = sec_high_price
+                                secondary_high_line_time = sec_high_idx
+                        else:
+                            # Last bar - accept it
+                            secondary_high_line = sec_high_price
+                            secondary_high_line_time = sec_high_idx
         
         # ============================================================
-        # SECONDARY LOW DETECTION (Completely Independent)
-        # Looking for: Primary Low -> Bounce -> Higher Low (Secondary Low)
-        # 
-        # IMPORTANT: If a secondary high was detected, we should NOT use
-        # the same candle for secondary low detection.
+        # SECONDARY LOW DETECTION - Using LINE CHART (Close prices)
+        # Pattern: Primary Low Close -> Bounce -> Higher Low Close
         # ============================================================
-        secondary_low = None
-        secondary_low_time = None
-        secondary_high_candle_idx = None  # Track which candle made secondary high
+        secondary_low_line = None
+        secondary_low_line_time = None
         
-        # Store the secondary high candle index for exclusion
-        if secondary_high_time is not None:
-            # Find the candle index that corresponds to secondary_high_time
-            for idx in df_intraday_ct.index:
-                if to_ct(idx.to_pydatetime()) == secondary_high_time:
-                    secondary_high_candle_idx = idx
-                    break
+        df_after_low = df[df.index > low_line_idx]
         
-        # Get ALL data after primary low
-        df_after_low = df_intraday_ct[df_intraday_ct.index > low_idx].copy()
+        # Exclude secondary high candle
+        if secondary_high_line_time is not None:
+            df_after_low = df_after_low[df_after_low.index != secondary_high_line_time]
         
-        # EXCLUDE the secondary high candle from consideration
-        if secondary_high_candle_idx is not None and secondary_high_candle_idx in df_after_low.index:
-            df_after_low_filtered = df_after_low[df_after_low.index != secondary_high_candle_idx]
-        else:
-            df_after_low_filtered = df_after_low
-        
-        if len(df_after_low_filtered) >= 2:  # Need at least 2 bars after low
-            # Find if there was any significant bounce after the low
-            max_after_low = df_after_low_filtered['High'].max()
-            bounce_pct = (max_after_low - low_price) / low_price
+        if len(df_after_low) >= 2:
+            # Find bounce (highest close after the low)
+            max_close = df_after_low['Close'].max()
+            bounce_pct = (max_close - low_line_price) / low_line_price
             
             if bounce_pct >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
-                # There was a significant bounce - now look for a pullback (secondary low)
+                max_close_idx = df_after_low['Close'].idxmax()
                 
-                # Find the index of the maximum high after the primary low (excluding secondary high candle)
-                max_high_idx = df_after_low_filtered['High'].idxmax()
-                max_high_position = df_after_low_filtered.index.get_loc(max_high_idx)
+                # Look for pullback after bounce
+                df_after_bounce = df_after_low[df_after_low.index > max_close_idx]
                 
-                # Look at bars AFTER the bounce high for the secondary low
-                if max_high_position < len(df_after_low_filtered) - 1:
-                    df_after_max = df_after_low_filtered.iloc[max_high_position + 1:]
+                if secondary_high_line_time is not None:
+                    df_after_bounce = df_after_bounce[df_after_bounce.index != secondary_high_line_time]
+                
+                if not df_after_bounce.empty:
+                    # Find lowest close after bounce (secondary low)
+                    sec_low_idx = df_after_bounce['Close'].idxmin()
+                    sec_low_price = df_after_bounce.loc[sec_low_idx, 'Close']
                     
-                    # Also exclude secondary high candle from this subset
-                    if secondary_high_candle_idx is not None and secondary_high_candle_idx in df_after_max.index:
-                        df_after_max = df_after_max[df_after_max.index != secondary_high_candle_idx]
-                    
-                    if not df_after_max.empty:
-                        min_low_idx = df_after_max['Low'].idxmin()
-                        potential_secondary_low = df_after_max.loc[min_low_idx, 'Low']
+                    # Validate: must be higher than primary by at least 5 points
+                    if (sec_low_price > low_line_price and 
+                        (sec_low_price - low_line_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
                         
-                        if (potential_secondary_low > low_price and 
-                            (potential_secondary_low - low_price) >= SECONDARY_PIVOT_MIN_DISTANCE):
-                            
-                            df_after_potential = df_after_max[df_after_max.index > min_low_idx]
-                            
-                            if not df_after_potential.empty:
-                                if df_after_potential['High'].max() > potential_secondary_low:
-                                    secondary_low = potential_secondary_low
-                                    secondary_low_time = to_ct(min_low_idx.to_pydatetime())
-                            else:
-                                last_bar = df_after_max.loc[min_low_idx]
-                                if last_bar['Close'] > potential_secondary_low * 1.001:
-                                    secondary_low = potential_secondary_low
-                                    secondary_low_time = to_ct(min_low_idx.to_pydatetime())
+                        # Confirm by checking for rise after
+                        df_after_sec = df_after_bounce[df_after_bounce.index > sec_low_idx]
+                        
+                        if not df_after_sec.empty:
+                            if df_after_sec['Close'].max() > sec_low_price:
+                                secondary_low_line = sec_low_price
+                                secondary_low_line_time = sec_low_idx
+                        else:
+                            # Last bar - accept it
+                            secondary_low_line = sec_low_price
+                            secondary_low_line_time = sec_low_idx
+        
+        # Candlestick secondary detection (for reference)
+        secondary_high = None
+        secondary_high_time = None
+        secondary_low = None
+        secondary_low_time = None
+        
+        df_after_high_candle = df[df.index > high_idx]
+        if len(df_after_high_candle) >= 2:
+            min_low = df_after_high_candle['Low'].min()
+            if (high_price - min_low) / high_price >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
+                min_idx = df_after_high_candle['Low'].idxmin()
+                df_after_min = df_after_high_candle[df_after_high_candle.index > min_idx]
+                if not df_after_min.empty:
+                    sec_idx = df_after_min['High'].idxmax()
+                    sec_price = df_after_min.loc[sec_idx, 'High']
+                    if sec_price < high_price and (high_price - sec_price) >= SECONDARY_PIVOT_MIN_DISTANCE:
+                        secondary_high = sec_price
+                        secondary_high_time = sec_idx
+        
+        df_after_low_candle = df[df.index > low_idx]
+        if secondary_high_time is not None:
+            df_after_low_candle = df_after_low_candle[df_after_low_candle.index != secondary_high_time]
+        if len(df_after_low_candle) >= 2:
+            max_high = df_after_low_candle['High'].max()
+            if (max_high - low_price) / low_price >= SECONDARY_PIVOT_MIN_PULLBACK_PCT:
+                max_idx = df_after_low_candle['High'].idxmax()
+                df_after_max = df_after_low_candle[df_after_low_candle.index > max_idx]
+                if secondary_high_time is not None and secondary_high_time in df_after_max.index:
+                    df_after_max = df_after_max[df_after_max.index != secondary_high_time]
+                if not df_after_max.empty:
+                    sec_idx = df_after_max['Low'].idxmin()
+                    sec_price = df_after_max.loc[sec_idx, 'Low']
+                    if sec_price > low_price and (sec_price - low_price) >= SECONDARY_PIVOT_MIN_DISTANCE:
+                        secondary_low = sec_price
+                        secondary_low_time = sec_idx
         
         return {
             'date': prior_date,
+            # Candlestick (wick) values
             'high': high_price,
             'high_time': high_time,
             'low': low_price,
             'low_time': low_time,
             'close': close_price,
             'close_time': close_time,
-            'open': df_intraday['Open'].iloc[0],
-            'range': df_intraday['High'].max() - df_intraday['Low'].min(),
-            'range_pct': (df_intraday['High'].max() - df_intraday['Low'].min()) / close_price,
+            'open': df['Open'].iloc[0],
+            'range': df['High'].max() - df['Low'].min(),
+            'range_pct': (df['High'].max() - df['Low'].min()) / close_price,
             'power_hour_filtered': power_hour_filtered,
             'secondary_high': secondary_high,
             'secondary_high_time': secondary_high_time,
             'secondary_low': secondary_low,
-            'secondary_low_time': secondary_low_time
+            'secondary_low_time': secondary_low_time,
+            # LINE CHART values (RECOMMENDED)
+            'high_line': high_line_price,
+            'high_line_time': high_line_time,
+            'low_line': low_line_price,
+            'low_line_time': low_line_time,
+            'secondary_high_line': secondary_high_line,
+            'secondary_high_line_time': secondary_high_line_time,
+            'secondary_low_line': secondary_low_line,
+            'secondary_low_line_time': secondary_low_line_time
         }
         
     except Exception as e:
@@ -1707,9 +1720,38 @@ def main():
             if prior_session.get('power_hour_filtered'):
                 st.warning("⚡ High filtered (power hour)")
             
-            # Apply price offset to auto-detected values
-            auto_high = prior_session['high'] - price_offset
-            auto_low = prior_session['low'] - price_offset
+            # Chart type selection - Line chart (Close) is RECOMMENDED
+            chart_type = st.radio(
+                "📊 Pivot Detection Method",
+                options=["📈 Line Chart (Close)", "🕯️ Candlestick (Wicks)"],
+                index=0,  # Default to Line Chart
+                help="Line Chart uses Close prices (recommended for structure). Candlestick uses High/Low wicks."
+            )
+            use_line_chart = chart_type == "📈 Line Chart (Close)"
+            
+            # Select the appropriate values based on chart type
+            if use_line_chart:
+                base_high = prior_session.get('high_line', prior_session['high'])
+                base_high_time = prior_session.get('high_line_time', prior_session['high_time'])
+                base_low = prior_session.get('low_line', prior_session['low'])
+                base_low_time = prior_session.get('low_line_time', prior_session['low_time'])
+                base_sec_high = prior_session.get('secondary_high_line')
+                base_sec_high_time = prior_session.get('secondary_high_line_time')
+                base_sec_low = prior_session.get('secondary_low_line')
+                base_sec_low_time = prior_session.get('secondary_low_line_time')
+            else:
+                base_high = prior_session['high']
+                base_high_time = prior_session['high_time']
+                base_low = prior_session['low']
+                base_low_time = prior_session['low_time']
+                base_sec_high = prior_session.get('secondary_high')
+                base_sec_high_time = prior_session.get('secondary_high_time')
+                base_sec_low = prior_session.get('secondary_low')
+                base_sec_low_time = prior_session.get('secondary_low_time')
+            
+            # Apply price offset
+            auto_high = base_high - price_offset
+            auto_low = base_low - price_offset
             auto_close = prior_session['close'] - price_offset
             
             use_manual = st.checkbox("✏️ Manual Price Override", value=False, help="Enable to enter your TradingView prices directly")
@@ -1717,17 +1759,17 @@ def main():
             if use_manual:
                 st.info("Enter your TradingView prices below")
                 high_price = st.number_input("High", value=float(auto_high), format="%.2f")
-                high_time_str = st.text_input("High Time (CT)", value=prior_session['high_time'].strftime('%H:%M'))
+                high_time_str = st.text_input("High Time (CT)", value=base_high_time.strftime('%H:%M'))
                 low_price = st.number_input("Low", value=float(auto_low), format="%.2f")
-                low_time_str = st.text_input("Low Time (CT)", value=prior_session['low_time'].strftime('%H:%M'))
+                low_time_str = st.text_input("Low Time (CT)", value=base_low_time.strftime('%H:%M'))
                 close_price = st.number_input("Close", value=float(auto_close), format="%.2f")
             else:
                 # Show corrected values (with offset applied)
                 high_price = auto_high
                 low_price = auto_low
                 close_price = auto_close
-                high_time_str = prior_session['high_time'].strftime('%H:%M')
-                low_time_str = prior_session['low_time'].strftime('%H:%M')
+                high_time_str = base_high_time.strftime('%H:%M')
+                low_time_str = base_low_time.strftime('%H:%M')
                 
                 st.metric("High", f"{high_price:.2f}", f"@ {high_time_str} CT")
                 st.metric("Low", f"{low_price:.2f}", f"@ {low_time_str} CT")
@@ -1737,20 +1779,24 @@ def main():
                     st.caption(f"📉 Offset applied: -{price_offset:.2f} pts")
             
             # Secondary Pivots Display
-            if prior_session.get('secondary_high') is not None or prior_session.get('secondary_low') is not None:
+            if base_sec_high is not None or base_sec_low is not None:
                 st.markdown("---")
                 st.markdown("### 📍 Secondary Pivots")
+                if use_line_chart:
+                    st.caption("Using Line Chart (Close) detection")
+                else:
+                    st.caption("Using Candlestick (Wick) detection")
             
-            if prior_session.get('secondary_high') is not None:
+            if base_sec_high is not None:
                 st.success("🔄 Secondary High Detected!")
-                secondary_high_price = prior_session['secondary_high'] - price_offset
-                secondary_high_time = prior_session['secondary_high_time']
+                secondary_high_price = base_sec_high - price_offset
+                secondary_high_time = base_sec_high_time
                 st.metric("2nd High (High²)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
             
-            if prior_session.get('secondary_low') is not None:
+            if base_sec_low is not None:
                 st.success("🔄 Secondary Low Detected!")
-                secondary_low_price = prior_session['secondary_low'] - price_offset
-                secondary_low_time = prior_session['secondary_low_time']
+                secondary_low_price = base_sec_low - price_offset
+                secondary_low_time = base_sec_low_time
                 st.metric("2nd Low (Low²)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
             
             # ========== PRE-MARKET PIVOTS ==========
@@ -1823,6 +1869,7 @@ def main():
             
             # Debug: Show timing info
             with st.expander("🔍 Pivot Timing Details"):
+                st.markdown(f"**Using:** {'Line Chart (Close)' if use_line_chart else 'Candlestick (Wicks)'}")
                 st.write(f"**Primary High:** {high_price:.2f} @ {high_time_str} CT")
                 st.write(f"**Primary Low:** {low_price:.2f} @ {low_time_str} CT")
                 if secondary_high_price is not None:
@@ -1837,18 +1884,33 @@ def main():
                     st.write(f"**Pre-Market High:** {premarket_high_price:.2f} @ {premarket_high_time.strftime('%H:%M')} CT")
                 if use_premarket_low and premarket_low_price:
                     st.write(f"**Pre-Market Low:** {premarket_low_price:.2f} @ {premarket_low_time.strftime('%H:%M')} CT")
+                
+                # Show comparison between Line and Candlestick
+                st.markdown("---")
+                st.markdown("**📊 Comparison (Line vs Candle):**")
+                line_high = prior_session.get('high_line', prior_session['high'])
+                line_high_time = prior_session.get('high_line_time', prior_session['high_time'])
+                candle_high = prior_session['high']
+                candle_high_time = prior_session['high_time']
+                st.write(f"High - Line: {line_high - price_offset:.2f} @ {line_high_time.strftime('%H:%M')} | Candle: {candle_high - price_offset:.2f} @ {candle_high_time.strftime('%H:%M')}")
+                
+                line_low = prior_session.get('low_line', prior_session['low'])
+                line_low_time = prior_session.get('low_line_time', prior_session['low_time'])
+                candle_low = prior_session['low']
+                candle_low_time = prior_session['low_time']
+                st.write(f"Low - Line: {line_low - price_offset:.2f} @ {line_low_time.strftime('%H:%M')} | Candle: {candle_low - price_offset:.2f} @ {candle_low_time.strftime('%H:%M')}")
             
             try:
                 h, m = map(int, high_time_str.split(':'))
                 high_time = CT_TZ.localize(datetime.combine(prior_session['date'], time(h, m)))
             except:
-                high_time = prior_session['high_time']
+                high_time = base_high_time
             
             try:
                 h, m = map(int, low_time_str.split(':'))
                 low_time = CT_TZ.localize(datetime.combine(prior_session['date'], time(h, m)))
             except:
-                low_time = prior_session['low_time']
+                low_time = base_low_time
             
             close_time = CT_TZ.localize(datetime.combine(prior_session['date'], time(15, 0)))
         else:
