@@ -1832,6 +1832,7 @@ def render_contract_recommendation(action: ActionCard):
     """Display detailed contract recommendation based on the action."""
     
     if not action.contract_expectation:
+        st.warning("No contract data available")
         return
     
     ce = action.contract_expectation
@@ -1841,77 +1842,46 @@ def render_contract_recommendation(action: ActionCard):
     if ce.direction == 'CALLS':
         strike = int(action.entry_level - 17.5)
         strike = (strike // 5) * 5  # Round down to nearest 5
-        strike_label = f"SPX {strike}C"
+        strike_label = f"SPX {strike}C (0DTE)"
+        border_color = "#22c55e"
     else:
         strike = int(action.entry_level + 17.5)
         strike = ((strike + 4) // 5) * 5  # Round up to nearest 5
-        strike_label = f"SPX {strike}P"
+        strike_label = f"SPX {strike}P (0DTE)"
+        border_color = "#ef4444"
     
-    # Colors based on direction
-    if action.direction == 'CALLS':
-        main_color = "#22c55e"
-        bg_color = "#22c55e15"
-    elif action.direction == 'PUTS':
-        main_color = "#ef4444"
-        bg_color = "#ef444415"
-    else:
-        main_color = "#f59e0b"
-        bg_color = "#f59e0b15"
-    
+    # Main contract card using native Streamlit
     st.markdown(f"""
-    <div style="background: {bg_color}; border: 2px solid {main_color}; border-radius: 12px; padding: 1.25rem; margin: 1rem 0;">
-        <div style="font-size: 1.5rem; font-weight: 700; color: {main_color}; text-align: center; margin-bottom: 1rem;">
-            {strike_label} (0DTE)
-        </div>
-        
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 8px;">
-                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase;">Entry Level</div>
-                <div style="font-size: 1.25rem; font-weight: 700;">{action.entry_level:.2f}</div>
-            </div>
-            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 8px;">
-                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase;">Stop Loss</div>
-                <div style="font-size: 1.25rem; font-weight: 700; color: #ef4444;">{action.stop_level:.2f}</div>
-            </div>
-        </div>
-        
-        <div style="margin-top: 1rem; padding: 0.75rem; background: white; border-radius: 8px;">
-            <div style="font-size: 0.85rem; font-weight: 600; color: #1e293b; margin-bottom: 0.5rem;">📊 Exit Strategy (60/20/20):</div>
-            <table style="width: 100%; font-size: 0.85rem;">
-                <tr style="border-bottom: 1px solid #e2e8f0;">
-                    <td style="padding: 0.4rem 0;"><strong>60%</strong> @ 50%</td>
-                    <td style="text-align: right;">{action.target_50:.2f}</td>
-                    <td style="text-align: right; color: #22c55e; font-weight: 600;">+${ce.contract_profit_50:.0f}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #e2e8f0;">
-                    <td style="padding: 0.4rem 0;"><strong>20%</strong> @ 75%</td>
-                    <td style="text-align: right;">{action.target_75:.2f}</td>
-                    <td style="text-align: right; color: #22c55e; font-weight: 600;">+${ce.contract_profit_75:.0f}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 0.4rem 0;"><strong>20%</strong> @ 100%</td>
-                    <td style="text-align: right;">{action.target_100:.2f}</td>
-                    <td style="text-align: right; color: #22c55e; font-weight: 600;">+${ce.contract_profit_100:.0f}</td>
-                </tr>
-            </table>
-        </div>
-        
-        <div style="margin-top: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-            <div style="text-align: center; padding: 0.5rem; background: #22c55e22; border-radius: 6px;">
-                <div style="font-size: 0.7rem; color: #64748b;">Cone Width</div>
-                <div style="font-weight: 700; color: #22c55e;">{cone_height:.0f} pts</div>
-            </div>
-            <div style="text-align: center; padding: 0.5rem; background: #3b82f622; border-radius: 6px;">
-                <div style="font-size: 0.7rem; color: #64748b;">R:R @ 50%</div>
-                <div style="font-weight: 700; color: #3b82f6;">{ce.risk_reward_50:.1f}:1</div>
-            </div>
-        </div>
-        
-        <div style="margin-top: 0.75rem; text-align: center; font-size: 0.75rem; color: #64748b;">
-            Contract moves ~0.33x underlying (15-20 pts OTM)
-        </div>
+    <div style="border: 3px solid {border_color}; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; background: linear-gradient(135deg, {border_color}11, {border_color}22);">
+        <h2 style="text-align: center; margin: 0; color: {border_color};">📋 {strike_label}</h2>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Entry and Stop in columns
+    col_entry, col_stop = st.columns(2)
+    with col_entry:
+        st.metric("🎯 Entry Level", f"{action.entry_level:.2f}")
+    with col_stop:
+        st.metric("🛑 Stop Loss", f"{action.stop_level:.2f}", delta="-3 pts", delta_color="inverse")
+    
+    # Exit Strategy
+    st.markdown("**📊 Exit Strategy (60/20/20):**")
+    
+    exit_data = {
+        "Exit": ["60% @ 50%", "20% @ 75%", "20% @ 100%"],
+        "SPX Level": [f"{action.target_50:.2f}", f"{action.target_75:.2f}", f"{action.target_100:.2f}"],
+        "Contract Profit": [f"+${ce.contract_profit_50:.0f}", f"+${ce.contract_profit_75:.0f}", f"+${ce.contract_profit_100:.0f}"]
+    }
+    st.dataframe(exit_data, use_container_width=True, hide_index=True)
+    
+    # Stats row
+    col_width, col_rr = st.columns(2)
+    with col_width:
+        st.metric("📏 Cone Width", f"{cone_height:.0f} pts")
+    with col_rr:
+        st.metric("⚖️ R:R @ 50%", f"{ce.risk_reward_50:.1f}:1")
+    
+    st.caption("💡 Contract moves ~0.33x underlying (strike 15-20 pts OTM)")
 
 def render_decision_card(title: str, cones: List[Cone]):
     st.markdown(f"""
