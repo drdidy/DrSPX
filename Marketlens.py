@@ -20,31 +20,38 @@ from typing import Optional, Tuple, List, Dict
 CT_TZ = pytz.timezone('America/Chicago')
 ET_TZ = pytz.timezone('America/New_York')
 
-# SLOPES - Symmetric ±0.45 pts per 30-min block
+# SLOPES - Symmetric ±0.45 pts per 30-min block (calibrated to TradingView)
 SLOPE_ASCENDING = 0.45
 SLOPE_DESCENDING = 0.45
+
+# CONTRACT FACTOR: A 15-20pt OTM option moves ~0.33x the underlying
 CONTRACT_FACTOR = 0.33
 
 MAINTENANCE_START_CT = time(16, 0)
 MAINTENANCE_END_CT = time(17, 0)
-POWER_HOUR_START = time(14, 0)  # Avoid highs during power hour
+POWER_HOUR_START = time(14, 0)  # Avoid highs during power hour (volatile/unpredictable)
 
-# Pre-market window (for detecting pre-market pivots)
+# Pre-market window (for detecting pre-market pivots from ES)
 PREMARKET_START_CT = time(6, 0)   # Pre-market starts 6am CT
 PREMARKET_END_CT = time(8, 30)    # Pre-market ends at SPX open
 
-# Secondary Pivot Detection
-SECONDARY_PIVOT_MIN_PULLBACK_PCT = 0.003  # 0.3% pullback required
-SECONDARY_PIVOT_MIN_DISTANCE = 5.0  # At least 5 points from primary
-SECONDARY_PIVOT_START_TIME = time(13, 0)  # Secondary pivots after 1pm CT
+# Secondary Pivot Detection - must be meaningful pullback, not noise
+SECONDARY_PIVOT_MIN_PULLBACK_PCT = 0.003  # 0.3% = ~18 pts on SPX 6000 - meaningful pullback
+SECONDARY_PIVOT_MIN_DISTANCE = 5.0  # At least 5 points from primary to matter
+SECONDARY_PIVOT_START_TIME = time(13, 0)  # Look for secondaries after structure develops
 
-OVERNIGHT_RANGE_MAX_PCT = 0.40
-DEAD_ZONE_PCT = 0.40
-MIN_CONE_WIDTH_PCT = 0.0045
-MIN_PRIOR_DAY_RANGE_PCT = 0.009
-MIN_CONTRACT_MOVE = 8.0
-RAIL_TOUCH_THRESHOLD = 1.0
-EDGE_ZONE_PCT = 0.30
+# TRADING THRESHOLDS - Based on structural logic
+MIN_CONE_WIDTH = 25.0  # Minimum 25 pts cone width for viable 0DTE trade (allows 12+ pt move to 50%)
+AT_RAIL_THRESHOLD = 10.0  # Within 10 pts of rail = "at the rail" for entry
+FAR_FROM_STRUCTURE = 15.0  # Beyond 15 pts from all rails = breakout/breakdown territory
+EDGE_ZONE_PCT = 0.30  # Within 30% of cone from a rail = edge zone (for position calc)
+
+# These are less critical but kept for regime analysis
+OVERNIGHT_RANGE_MAX_PCT = 0.50  # Overnight moved more than 50% of cone = wild session
+MIN_CONE_WIDTH_PCT = 0.004  # ~24 pts on 6000 SPX - ensures tradeable range
+MIN_PRIOR_DAY_RANGE_PCT = 0.008  # ~48 pts prior day range shows healthy movement
+MIN_CONTRACT_MOVE = 8.0  # Minimum $8 expected move to justify trade
+RAIL_TOUCH_THRESHOLD = 2.0  # Within 2 pts = "touching" the rail
 
 TIME_BLOCKS = [
     time(8, 30), time(9, 0), time(9, 30), time(10, 0), time(10, 30),
@@ -1245,6 +1252,16 @@ def get_score_recommendation(score: int) -> str:
         return "NO TRADE - Insufficient edge"
 
 def generate_action_card(cones, regime, current_price, is_10am, overnight_validation=None) -> ActionCard:
+    """
+    Generate trading action based on David's structural methodology:
+    
+    RULES:
+    1. Descending rails = BUY points (CALLS) - price finds support
+    2. Ascending rails = SELL points (PUTS) - price finds resistance
+    3. EXCEPTION: If price is FAR BELOW all descending rails → could be PUTS (breakdown)
+    4. EXCEPTION: If price is FAR ABOVE all ascending rails → could be CALLS (breakout)
+    5. Contract 15-20 pts OTM moves ~0.33x the underlying move
+    """
     warnings = []
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
     
@@ -1258,150 +1275,192 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
     score_breakdown = score_result['breakdown']
     score_recommendation = score_result['recommendation']
     
-    # Determine position based on WHICH RAIL is nearest, not position within cone
-    # If nearest rail is descending → price is near support → CALLS
-    # If nearest rail is ascending → price is near resistance → PUTS
+    # ==========================================================================
+    # DETERMINE DIRECTION based on David's rules
+    # ==========================================================================
     
-    # Check if price is actually close enough to the rail to trade
-    # Use a threshold based on cone width
+    # Get ALL rail levels to check for extreme positions
+    all_descending = sorted([c.descending_rail for c in cones])
+    all_ascending = sorted([c.ascending_rail for c in cones], reverse=True)
+    
+    lowest_descending = min(all_descending) if all_descending else current_price
+    highest_ascending = max(all_ascending) if all_ascending else current_price
+    
+    # Check for extreme positions (FAR outside all rails)
+    far_below_support = current_price < lowest_descending - 15  # More than 15 pts below ALL support
+    far_above_resistance = current_price > highest_ascending + 15  # More than 15 pts above ALL resistance
+    
+    # Cone width for position calculation
     cone_width = nearest_cone.ascending_rail - nearest_cone.descending_rail
-    edge_threshold = cone_width * EDGE_ZONE_PCT  # Within 30% of cone width from rail
     
-    if nearest_distance <= edge_threshold:
-        if nearest_rail_type == 'descending':
-            position = 'lower_edge'  # Near support → CALLS
-        else:
-            position = 'upper_edge'  # Near resistance → PUTS
-    else:
-        position = 'dead_zone'  # Too far from any rail
+    # Distance thresholds
+    at_rail_threshold = 10  # Within 10 pts = "at the rail"
     
-    no_trade = False
-    
-    if regime.overnight_range_pct > OVERNIGHT_RANGE_MAX_PCT:
-        warnings.append(f"Overnight range too wide ({regime.overnight_range_pct:.0%})")
-        no_trade = True
-    if position == 'dead_zone' and nearest_distance > 20:
-        warnings.append("Price in dead zone")
-        no_trade = True
-    if not regime.cone_width_adequate:
-        warnings.append("Cone width insufficient")
-        no_trade = True
-    if not regime.prior_day_range_adequate:
-        warnings.append("Prior day range weak")
-        no_trade = True
-    if regime.overnight_touched_rails:
-        warnings.append(f"Overnight touched: {', '.join(regime.overnight_touched_rails)}")
-    if regime.first_bar_energy == 'weak':
-        warnings.append("Weak first bar energy")
-    
-    # Add score breakdown to warnings for transparency
-    warnings.append(f"Score: {score_recommendation}")
-    
-    # ========== SMART STRUCTURE VALIDATION ==========
-    # Check if we're recommending based on a validated structure
-    structure_validated = False
-    active_structure_note = ""
-    
-    if overnight_validation:
-        # For CALLS (price near descending rails - support)
-        if position == 'lower_edge':
-            # Check if this is a High-based cone (descending rail = calls entry)
-            if 'High' in nearest_cone.name:
-                if nearest_cone.name == 'High²':
-                    if overnight_validation.get('high_secondary_validated'):
-                        structure_validated = True
-                        active_structure_note = "✓ Secondary High² VALIDATED overnight"
-                    elif overnight_validation.get('active_high_structure') == 'both':
-                        active_structure_note = "⚠ High² not tested overnight - use caution"
-                elif nearest_cone.name == 'High':
-                    if overnight_validation.get('high_primary_validated'):
-                        structure_validated = True
-                        active_structure_note = "✓ Primary High VALIDATED overnight"
-                    elif overnight_validation.get('active_high_structure') == 'both':
-                        active_structure_note = "⚠ Primary High not tested overnight - use caution"
-        
-        # For PUTS (price near ascending rails - resistance)
-        elif position == 'upper_edge':
-            if 'Low' in nearest_cone.name:
-                if nearest_cone.name == 'Low²':
-                    if overnight_validation.get('low_secondary_validated'):
-                        structure_validated = True
-                        active_structure_note = "✓ Secondary Low² VALIDATED overnight"
-                    elif overnight_validation.get('active_low_structure') == 'both':
-                        active_structure_note = "⚠ Low² not tested overnight - use caution"
-                elif nearest_cone.name == 'Low':
-                    if overnight_validation.get('low_primary_validated'):
-                        structure_validated = True
-                        active_structure_note = "✓ Primary Low VALIDATED overnight"
-                    elif overnight_validation.get('active_low_structure') == 'both':
-                        active_structure_note = "⚠ Primary Low not tested overnight - use caution"
-            # Also check High cone ascending rails for PUTS
-            elif 'High' in nearest_cone.name:
-                if overnight_validation.get('high_primary_validated') or overnight_validation.get('high_secondary_validated'):
-                    structure_validated = True
-                    active_structure_note = "✓ High structure validated - ascending rail resistance"
-    
-    if active_structure_note:
-        warnings.insert(0, active_structure_note)
-    
-    contract_exp = None
-    
-    if no_trade:
-        direction, color, position_size = 'NO TRADE', 'red', 'NONE'
-        entry_level = target_50 = target_75 = target_100 = stop_level = current_price
-    elif position == 'dead_zone':
-        direction, color, position_size = 'WAIT', 'yellow', 'NONE'
-        entry_level = target_50 = target_75 = target_100 = stop_level = current_price
-        warnings.append(f"CALLS activate at {nearest_cone.descending_rail:.2f}")
-        warnings.append(f"PUTS activate at {nearest_cone.ascending_rail:.2f}")
-    elif position == 'lower_edge':
+    # Determine position and direction
+    if far_below_support:
+        # Price broke down below all support - could be PUTS (continuation) or wait
+        position = 'breakdown'
+        direction = 'PUTS'
+        entry_level = current_price
+        target_100 = lowest_descending - cone_width  # Project further down
+        warnings.append("⚠️ Price below ALL support - breakdown mode")
+    elif far_above_resistance:
+        # Price broke above all resistance - could be CALLS (continuation) or wait
+        position = 'breakout'
         direction = 'CALLS'
-        # Position sizing based on new principled score
-        # 70+ = FULL (green), 60-69 = FULL (yellow), 50-59 = REDUCED, <50 = NONE
-        if confluence_score >= 70:
-            color, position_size = 'green', 'FULL'
-        elif confluence_score >= 60:
-            color, position_size = 'yellow', 'FULL'
-        elif confluence_score >= 50:
-            color, position_size = 'yellow', 'REDUCED'
-        else:
-            color, position_size = 'red', 'NONE'
+        entry_level = current_price
+        target_100 = highest_ascending + cone_width  # Project further up
+        warnings.append("⚠️ Price above ALL resistance - breakout mode")
+    elif nearest_rail_type == 'descending' and nearest_distance <= at_rail_threshold:
+        # At a descending rail = support = BUY CALLS
+        position = 'at_support'
+        direction = 'CALLS'
         entry_level = nearest_cone.descending_rail
         target_100 = nearest_cone.ascending_rail
-        cone_height = target_100 - entry_level
-        target_50 = entry_level + (cone_height * 0.50)
-        target_75 = entry_level + (cone_height * 0.75)
-        stop_level = entry_level - 2
-        contract_exp = calculate_contract_expectation('CALLS', entry_level, target_100, nearest_cone.name, 'descending')
-    else:
+    elif nearest_rail_type == 'ascending' and nearest_distance <= at_rail_threshold:
+        # At an ascending rail = resistance = BUY PUTS
+        position = 'at_resistance'
         direction = 'PUTS'
-        # Position sizing based on new principled score
-        if confluence_score >= 70:
-            color, position_size = 'green', 'FULL'
-        elif confluence_score >= 60:
-            color, position_size = 'yellow', 'FULL'
-        elif confluence_score >= 50:
-            color, position_size = 'yellow', 'REDUCED'
-        else:
-            color, position_size = 'red', 'NONE'
         entry_level = nearest_cone.ascending_rail
         target_100 = nearest_cone.descending_rail
-        cone_height = entry_level - target_100
+    else:
+        # In the middle - determine which rail to target
+        dist_to_desc = abs(current_price - nearest_cone.descending_rail)
+        dist_to_asc = abs(current_price - nearest_cone.ascending_rail)
+        
+        if dist_to_desc < dist_to_asc:
+            # Closer to support - wait for it or anticipate CALLS
+            position = 'approaching_support'
+            direction = 'WAIT'
+            entry_level = nearest_cone.descending_rail
+            target_100 = nearest_cone.ascending_rail
+            warnings.append(f"Wait for support at {nearest_cone.descending_rail:.2f} for CALLS")
+        else:
+            # Closer to resistance - wait for it or anticipate PUTS  
+            position = 'approaching_resistance'
+            direction = 'WAIT'
+            entry_level = nearest_cone.ascending_rail
+            target_100 = nearest_cone.descending_rail
+            warnings.append(f"Wait for resistance at {nearest_cone.ascending_rail:.2f} for PUTS")
+    
+    # ==========================================================================
+    # CALCULATE CONTRACT EXPECTATION (Always calculate, even for WAIT)
+    # ==========================================================================
+    
+    cone_height = abs(target_100 - entry_level)
+    
+    if direction == 'CALLS' or (direction == 'WAIT' and position == 'approaching_support'):
+        calc_direction = 'CALLS'
+        target_50 = entry_level + (cone_height * 0.50)
+        target_75 = entry_level + (cone_height * 0.75)
+        stop_level = entry_level - 3  # 3 pt stop
+        
+        # Strike recommendation: 15-20 pts OTM
+        recommended_strike = int(entry_level - 17.5)  # Round to nearest 5
+        recommended_strike = (recommended_strike // 5) * 5
+    else:
+        calc_direction = 'PUTS'
         target_50 = entry_level - (cone_height * 0.50)
         target_75 = entry_level - (cone_height * 0.75)
-        stop_level = entry_level + 2
-        contract_exp = calculate_contract_expectation('PUTS', entry_level, target_100, nearest_cone.name, 'ascending')
+        stop_level = entry_level + 3  # 3 pt stop
+        
+        # Strike recommendation: 15-20 pts OTM
+        recommended_strike = int(entry_level + 17.5)  # Round to nearest 5
+        recommended_strike = ((recommended_strike + 4) // 5) * 5
     
-    if contract_exp and contract_exp.contract_profit_50 / 100 < MIN_CONTRACT_MOVE:
-        warnings.append(f"Contract move below ${MIN_CONTRACT_MOVE:.0f} min")
-        if color == 'green':
-            color, position_size = 'yellow', 'REDUCED'
+    # Calculate expected contract moves
+    move_50 = cone_height * 0.50
+    move_75 = cone_height * 0.75
+    move_100 = cone_height
+    
+    contract_move_50 = move_50 * CONTRACT_FACTOR
+    contract_move_75 = move_75 * CONTRACT_FACTOR
+    contract_move_100 = move_100 * CONTRACT_FACTOR
+    
+    # Dollar values (assuming $100 per point for SPX options)
+    profit_50 = contract_move_50 * 100
+    profit_75 = contract_move_75 * 100
+    profit_100 = contract_move_100 * 100
+    
+    # Risk calculation (3 pt stop × 0.33 factor × $100)
+    risk_dollars = 3 * CONTRACT_FACTOR * 100  # ~$99 risk
+    rr_50 = profit_50 / risk_dollars if risk_dollars > 0 else 0
+    
+    contract_exp = ContractExpectation(
+        direction=calc_direction,
+        entry_price=entry_level,
+        entry_rail=f"{nearest_cone.name} {'▼' if nearest_rail_type == 'descending' else '▲'}",
+        target_50_underlying=target_50,
+        target_75_underlying=target_75,
+        target_100_underlying=target_100,
+        stop_underlying=stop_level,
+        expected_underlying_move_50=move_50,
+        expected_underlying_move_100=move_100,
+        contract_profit_50=profit_50,
+        contract_profit_75=profit_75,
+        contract_profit_100=profit_100,
+        risk_reward_50=rr_50
+    )
+    
+    # Store strike recommendation in warnings for display
+    if direction in ['CALLS', 'PUTS']:
+        warnings.insert(0, f"📋 Recommended: {calc_direction} @ {recommended_strike} strike")
+        warnings.insert(1, f"💰 Expected move: ${contract_move_50:.0f}-${contract_move_100:.0f} per contract")
+    
+    # ==========================================================================
+    # POSITION SIZING based on confluence score
+    # ==========================================================================
+    
+    if direction == 'WAIT':
+        color = 'yellow'
+        position_size = 'WAIT'
+    elif confluence_score >= 70:
+        color, position_size = 'green', 'FULL'
+    elif confluence_score >= 60:
+        color, position_size = 'yellow', 'FULL'
+    elif confluence_score >= 50:
+        color, position_size = 'yellow', 'REDUCED'
+    else:
+        color, position_size = 'red', 'SKIP'
+        warnings.append("Low confluence - consider skipping")
+    
+    # ==========================================================================
+    # STRUCTURE VALIDATION NOTES
+    # ==========================================================================
+    
+    if overnight_validation:
+        validated = overnight_validation.get('validated', [])
+        broken = overnight_validation.get('broken', [])
+        
+        if broken:
+            for b in broken:
+                if (direction == 'CALLS' and '▼' in b) or (direction == 'PUTS' and '▲' in b):
+                    warnings.insert(0, f"⛔ WARNING: {b} was BROKEN overnight")
+                    color = 'red'
+                    position_size = 'SKIP'
+        
+        if validated:
+            for v in validated:
+                if (direction == 'CALLS' and '▼' in v) or (direction == 'PUTS' and '▲' in v):
+                    warnings.insert(0, f"✅ {v} VALIDATED overnight")
+    
+    # Add score info
+    warnings.append(f"Score: {confluence_score} - {score_recommendation}")
     
     return ActionCard(
-        direction=direction, active_cone=nearest_cone.name, active_rail=nearest_rail_type,
-        entry_level=entry_level, target_50=target_50, target_75=target_75, target_100=target_100,
-        stop_level=stop_level, contract_expectation=contract_exp, position_size=position_size,
-        confluence_score=confluence_score, warnings=warnings, color=color
+        direction=direction, 
+        active_cone=nearest_cone.name, 
+        active_rail=nearest_rail_type,
+        entry_level=entry_level, 
+        target_50=target_50, 
+        target_75=target_75, 
+        target_100=target_100,
+        stop_level=stop_level, 
+        contract_expectation=contract_exp, 
+        position_size=position_size,
+        confluence_score=confluence_score, 
+        warnings=warnings, 
+        color=color
     )
 
 # ============================================================================
@@ -1766,6 +1825,91 @@ def render_action_card(action: ActionCard):
     st.markdown(f"""
     <div class="action-card {card_class}">
         <div class="direction-label {dir_class}">{emoji} {action.direction}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def render_contract_recommendation(action: ActionCard):
+    """Display detailed contract recommendation based on the action."""
+    
+    if not action.contract_expectation:
+        return
+    
+    ce = action.contract_expectation
+    cone_height = abs(action.target_100 - action.entry_level)
+    
+    # Calculate recommended strike (15-20 pts OTM)
+    if ce.direction == 'CALLS':
+        strike = int(action.entry_level - 17.5)
+        strike = (strike // 5) * 5  # Round down to nearest 5
+        strike_label = f"SPX {strike}C"
+    else:
+        strike = int(action.entry_level + 17.5)
+        strike = ((strike + 4) // 5) * 5  # Round up to nearest 5
+        strike_label = f"SPX {strike}P"
+    
+    # Colors based on direction
+    if action.direction == 'CALLS':
+        main_color = "#22c55e"
+        bg_color = "#22c55e15"
+    elif action.direction == 'PUTS':
+        main_color = "#ef4444"
+        bg_color = "#ef444415"
+    else:
+        main_color = "#f59e0b"
+        bg_color = "#f59e0b15"
+    
+    st.markdown(f"""
+    <div style="background: {bg_color}; border: 2px solid {main_color}; border-radius: 12px; padding: 1.25rem; margin: 1rem 0;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: {main_color}; text-align: center; margin-bottom: 1rem;">
+            {strike_label} (0DTE)
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 8px;">
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase;">Entry Level</div>
+                <div style="font-size: 1.25rem; font-weight: 700;">{action.entry_level:.2f}</div>
+            </div>
+            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 8px;">
+                <div style="font-size: 0.75rem; color: #64748b; text-transform: uppercase;">Stop Loss</div>
+                <div style="font-size: 1.25rem; font-weight: 700; color: #ef4444;">{action.stop_level:.2f}</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 1rem; padding: 0.75rem; background: white; border-radius: 8px;">
+            <div style="font-size: 0.85rem; font-weight: 600; color: #1e293b; margin-bottom: 0.5rem;">📊 Exit Strategy (60/20/20):</div>
+            <table style="width: 100%; font-size: 0.85rem;">
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 0.4rem 0;"><strong>60%</strong> @ 50%</td>
+                    <td style="text-align: right;">{action.target_50:.2f}</td>
+                    <td style="text-align: right; color: #22c55e; font-weight: 600;">+${ce.contract_profit_50:.0f}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 0.4rem 0;"><strong>20%</strong> @ 75%</td>
+                    <td style="text-align: right;">{action.target_75:.2f}</td>
+                    <td style="text-align: right; color: #22c55e; font-weight: 600;">+${ce.contract_profit_75:.0f}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 0.4rem 0;"><strong>20%</strong> @ 100%</td>
+                    <td style="text-align: right;">{action.target_100:.2f}</td>
+                    <td style="text-align: right; color: #22c55e; font-weight: 600;">+${ce.contract_profit_100:.0f}</td>
+                </tr>
+            </table>
+        </div>
+        
+        <div style="margin-top: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+            <div style="text-align: center; padding: 0.5rem; background: #22c55e22; border-radius: 6px;">
+                <div style="font-size: 0.7rem; color: #64748b;">Cone Width</div>
+                <div style="font-weight: 700; color: #22c55e;">{cone_height:.0f} pts</div>
+            </div>
+            <div style="text-align: center; padding: 0.5rem; background: #3b82f622; border-radius: 6px;">
+                <div style="font-size: 0.7rem; color: #64748b;">R:R @ 50%</div>
+                <div style="font-weight: 700; color: #3b82f6;">{ce.risk_reward_50:.1f}:1</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 0.75rem; text-align: center; font-size: 0.75rem; color: #64748b;">
+            Contract moves ~0.33x underlying (15-20 pts OTM)
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2465,6 +2609,30 @@ def main():
             """, unsafe_allow_html=True)
     
     st.markdown("---")
+    
+    # CONTRACT RECOMMENDATION - Prominent display
+    if action.direction in ['CALLS', 'PUTS', 'WAIT']:
+        st.markdown("### 📋 Contract Recommendation")
+        col_contract, col_alerts = st.columns([2, 1])
+        
+        with col_contract:
+            render_contract_recommendation(action)
+        
+        with col_alerts:
+            st.markdown("#### ⚠️ Key Alerts")
+            for w in action.warnings:
+                if "📋" in w or "💰" in w:
+                    continue  # Skip these as they're shown in contract card
+                elif "✅" in w or "VALIDATED" in w.upper():
+                    st.success(w)
+                elif "⛔" in w or "BROKEN" in w.upper() or "WARNING" in w.upper():
+                    st.error(w)
+                elif "Wait" in w or "activate" in w.lower():
+                    st.info(w)
+                else:
+                    st.warning(w)
+        
+        st.markdown("---")
     
     # Row 2: Decision Windows
     st.markdown("### 🎯 Decision Window Entry Levels")
