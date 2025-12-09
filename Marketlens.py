@@ -928,6 +928,317 @@ def find_confluence_zones(cones: List[Cone], threshold: float = 5.0) -> Dict[str
     }
 
 # ============================================================================
+# TRADE SETUP GENERATOR - Creates complete trade plans from confluence zones
+# ============================================================================
+
+@dataclass
+@dataclass
+class TradeSetup:
+    """Complete trade setup for a confluence zone."""
+    direction: str  # CALLS or PUTS
+    entry_price: float  # The confluence zone price
+    confluence_rails: List[str]  # Which rails form this confluence
+    confluence_strength: int  # Number of rails converging
+    strike: int  # Recommended option strike
+    strike_label: str  # e.g., "SPX 6810C"
+    stop_loss: float  # Stop level in underlying
+    target_50: float  # 50% target
+    target_75: float  # 75% target  
+    target_100: float  # 100% target (opposite side of cone)
+    profit_50: float  # Expected $ profit at 50%
+    profit_75: float  # Expected $ profit at 75%
+    profit_100: float  # Expected $ profit at 100%
+    risk_dollars: float  # Risk in dollars
+    rr_ratio: float  # Risk/reward at 50%
+    cone_width: float  # Width of the trading range
+    quality_score: int  # Overall setup quality 1-100
+    distance: float = 0.0  # Distance from current price (set dynamically)
+
+def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dict:
+    """
+    Generate complete trade setups for all confluence zones.
+    
+    This is the MAIN function that connects everything:
+    - Finds confluence zones
+    - Calculates exact entry, stop, targets
+    - Recommends specific contract strike
+    - Calculates expected profit/risk
+    
+    Returns dict with 'calls_setups' and 'puts_setups' lists.
+    """
+    
+    confluence_data = find_confluence_zones(cones)
+    calls_setups = []
+    puts_setups = []
+    
+    # Get average cone width for target calculation
+    avg_cone_width = sum(c.ascending_rail - c.descending_rail for c in cones) / len(cones) if cones else 30
+    
+    # =========================================================================
+    # CALLS SETUPS - From descending rail confluences (support zones)
+    # =========================================================================
+    for zone in confluence_data.get('calls_confluence', []):
+        entry_price = zone['price']
+        rails = zone['rails']
+        strength = zone.get('strength', len(rails))
+        
+        # Find the corresponding ascending rail for target (opposite side)
+        # Use the average of ascending rails from the cones that form this confluence
+        target_prices = []
+        for cone in cones:
+            for rail in rails:
+                if cone.name in rail:
+                    target_prices.append(cone.ascending_rail)
+                    break
+        
+        if target_prices:
+            target_100 = sum(target_prices) / len(target_prices)
+        else:
+            target_100 = entry_price + avg_cone_width
+        
+        cone_width = target_100 - entry_price
+        
+        # Skip if cone width is too small
+        if cone_width < 20:
+            continue
+        
+        # Calculate targets
+        target_50 = entry_price + (cone_width * 0.50)
+        target_75 = entry_price + (cone_width * 0.75)
+        stop_loss = entry_price - 3  # 3 point stop
+        
+        # Calculate strike (15-20 pts OTM for calls = below entry)
+        strike = int(entry_price - 17.5)
+        strike = (strike // 5) * 5  # Round to nearest 5
+        strike_label = f"SPX {strike}C"
+        
+        # Calculate profits (contract moves 0.33x underlying)
+        move_50 = cone_width * 0.50
+        move_75 = cone_width * 0.75
+        move_100 = cone_width
+        
+        profit_50 = move_50 * CONTRACT_FACTOR * 100
+        profit_75 = move_75 * CONTRACT_FACTOR * 100
+        profit_100 = move_100 * CONTRACT_FACTOR * 100
+        risk_dollars = 3 * CONTRACT_FACTOR * 100  # 3 pt stop
+        
+        rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
+        
+        # Quality score based on confluence strength and cone width
+        quality_score = min(100, 
+            (strength * 20) +  # 2 rails = 40, 3 rails = 60, 4 rails = 80
+            (10 if cone_width >= 30 else 5) +  # Bonus for good width
+            (10 if rr_ratio >= 5 else 5)  # Bonus for good R:R
+        )
+        
+        setup = TradeSetup(
+            direction='CALLS',
+            entry_price=entry_price,
+            confluence_rails=rails,
+            confluence_strength=strength,
+            strike=strike,
+            strike_label=strike_label,
+            stop_loss=stop_loss,
+            target_50=target_50,
+            target_75=target_75,
+            target_100=target_100,
+            profit_50=profit_50,
+            profit_75=profit_75,
+            profit_100=profit_100,
+            risk_dollars=risk_dollars,
+            rr_ratio=rr_ratio,
+            cone_width=cone_width,
+            quality_score=quality_score
+        )
+        calls_setups.append(setup)
+    
+    # =========================================================================
+    # PUTS SETUPS - From ascending rail confluences (resistance zones)
+    # =========================================================================
+    for zone in confluence_data.get('puts_confluence', []):
+        entry_price = zone['price']
+        rails = zone['rails']
+        strength = zone.get('strength', len(rails))
+        
+        # Find the corresponding descending rail for target (opposite side)
+        target_prices = []
+        for cone in cones:
+            for rail in rails:
+                if cone.name in rail:
+                    target_prices.append(cone.descending_rail)
+                    break
+        
+        if target_prices:
+            target_100 = sum(target_prices) / len(target_prices)
+        else:
+            target_100 = entry_price - avg_cone_width
+        
+        cone_width = entry_price - target_100
+        
+        # Skip if cone width is too small
+        if cone_width < 20:
+            continue
+        
+        # Calculate targets
+        target_50 = entry_price - (cone_width * 0.50)
+        target_75 = entry_price - (cone_width * 0.75)
+        stop_loss = entry_price + 3  # 3 point stop
+        
+        # Calculate strike (15-20 pts OTM for puts = above entry)
+        strike = int(entry_price + 17.5)
+        strike = ((strike + 4) // 5) * 5  # Round up to nearest 5
+        strike_label = f"SPX {strike}P"
+        
+        # Calculate profits
+        move_50 = cone_width * 0.50
+        move_75 = cone_width * 0.75
+        move_100 = cone_width
+        
+        profit_50 = move_50 * CONTRACT_FACTOR * 100
+        profit_75 = move_75 * CONTRACT_FACTOR * 100
+        profit_100 = move_100 * CONTRACT_FACTOR * 100
+        risk_dollars = 3 * CONTRACT_FACTOR * 100
+        
+        rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
+        
+        quality_score = min(100,
+            (strength * 20) +
+            (10 if cone_width >= 30 else 5) +
+            (10 if rr_ratio >= 5 else 5)
+        )
+        
+        setup = TradeSetup(
+            direction='PUTS',
+            entry_price=entry_price,
+            confluence_rails=rails,
+            confluence_strength=strength,
+            strike=strike,
+            strike_label=strike_label,
+            stop_loss=stop_loss,
+            target_50=target_50,
+            target_75=target_75,
+            target_100=target_100,
+            profit_50=profit_50,
+            profit_75=profit_75,
+            profit_100=profit_100,
+            risk_dollars=risk_dollars,
+            rr_ratio=rr_ratio,
+            cone_width=cone_width,
+            quality_score=quality_score
+        )
+        puts_setups.append(setup)
+    
+    # Sort by quality score (best first)
+    calls_setups.sort(key=lambda x: x.quality_score, reverse=True)
+    puts_setups.sort(key=lambda x: x.quality_score, reverse=True)
+    
+    # Also include single-rail setups for reference (lower priority)
+    # These are individual rails without confluence
+    single_calls = []
+    single_puts = []
+    
+    for level in confluence_data.get('all_calls_levels', []):
+        # Check if this level is already in a confluence
+        is_in_confluence = any(
+            abs(level['price'] - setup.entry_price) < 5 
+            for setup in calls_setups
+        )
+        if not is_in_confluence:
+            single_calls.append({
+                'price': level['price'],
+                'rail': level['name'],
+                'type': 'single'
+            })
+    
+    for level in confluence_data.get('all_puts_levels', []):
+        is_in_confluence = any(
+            abs(level['price'] - setup.entry_price) < 5 
+            for setup in puts_setups
+        )
+        if not is_in_confluence:
+            single_puts.append({
+                'price': level['price'],
+                'rail': level['name'],
+                'type': 'single'
+            })
+    
+    return {
+        'calls_setups': calls_setups,
+        'puts_setups': puts_setups,
+        'single_calls': single_calls,
+        'single_puts': single_puts
+    }
+
+def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
+    """Render a complete trade setup card."""
+    
+    # Determine colors and proximity
+    if setup.direction == 'CALLS':
+        color = "#22c55e"
+        emoji = "🟢"
+    else:
+        color = "#ef4444"
+        emoji = "🔴"
+    
+    # Calculate distance from current price if provided
+    distance_text = ""
+    if current_price:
+        distance = abs(current_price - setup.entry_price)
+        if distance <= 5:
+            distance_text = f"🎯 {distance:.1f} pts away - READY!"
+        elif distance <= 15:
+            distance_text = f"⏳ {distance:.1f} pts away - WATCH"
+        else:
+            distance_text = f"📍 {distance:.1f} pts away"
+    
+    # Quality indicator
+    if setup.quality_score >= 80:
+        quality = "⭐⭐⭐ PREMIUM"
+    elif setup.quality_score >= 60:
+        quality = "⭐⭐ GOOD"
+    else:
+        quality = "⭐ STANDARD"
+    
+    st.markdown(f"""
+    <div style="border: 3px solid {color}; border-radius: 12px; padding: 1rem; margin: 0.5rem 0; 
+                background: linear-gradient(135deg, {color}08, {color}15);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <span style="font-size: 1.4rem; font-weight: 800; color: {color};">{emoji} {setup.strike_label}</span>
+            <span style="font-size: 0.85rem; color: #64748b;">{quality}</span>
+        </div>
+        <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 0.5rem;">
+            Confluence: {' + '.join(setup.confluence_rails)}
+        </div>
+        {f'<div style="font-weight: 600; color: {color}; margin-bottom: 0.5rem;">{distance_text}</div>' if distance_text else ''}
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Entry and Stop
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Entry", f"{setup.entry_price:.2f}")
+    with col2:
+        st.metric("Stop", f"{setup.stop_loss:.2f}")
+    
+    # Targets and Profits
+    st.markdown("**Exit Strategy:**")
+    target_data = {
+        "Exit": ["60% @ 50%", "20% @ 75%", "20% @ 100%"],
+        "Level": [f"{setup.target_50:.2f}", f"{setup.target_75:.2f}", f"{setup.target_100:.2f}"],
+        "Profit": [f"+${setup.profit_50:.0f}", f"+${setup.profit_75:.0f}", f"+${setup.profit_100:.0f}"]
+    }
+    st.dataframe(target_data, use_container_width=True, hide_index=True)
+    
+    # Stats
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.metric("Width", f"{setup.cone_width:.0f}")
+    with col_b:
+        st.metric("R:R", f"{setup.rr_ratio:.1f}:1")
+    with col_c:
+        st.metric("Risk", f"${setup.risk_dollars:.0f}")
+
+# ============================================================================
 # CONTRACT EXPECTATION ENGINE
 # ============================================================================
 
@@ -2527,298 +2838,231 @@ def main():
     action = generate_action_card(cones, regime, current_price, is_10am, overnight_validation)
     confluence_zones = find_confluence_zones(cones_1000)
     
+    # Generate complete trade setups for all confluence zones
+    trade_setups_830 = generate_trade_setups(cones_830, current_price)
+    trade_setups_1000 = generate_trade_setups(cones_1000, current_price)
+    
     # ===== MAIN LAYOUT =====
     
-    # Row 1: Live Price + Score + Action
-    col1, col2, col3 = st.columns([1.5, 1, 1.5])
+    # Row 1: Live Price + Time
+    col_price, col_time = st.columns([2, 1])
     
-    with col1:
+    with col_price:
         st.markdown(f"""
         <div class="premium-card">
             <div class="card-header">SPX Live Price</div>
             <div class="card-value">{current_price:,.2f}</div>
         </div>
         """, unsafe_allow_html=True)
-        
-        # Live clock
+    
+    with col_time:
         ct_time = get_ct_now()
+        # Determine which window we're in
+        if ct_time.time() < time(8, 30):
+            window_status = "🔜 Pre-Market (8:30 AM setups active)"
+        elif ct_time.time() < time(10, 0):
+            window_status = "📊 8:30 AM Window Active"
+        elif ct_time.time() < time(12, 30):
+            window_status = "🎯 10:00 AM Window Active"
+        else:
+            window_status = "⏰ Late Session"
+        
         st.markdown(f"""
         <div class="live-clock">
             <div class="clock-label">Central Time</div>
             <div class="clock-time">{ct_time.strftime('%H:%M:%S')}</div>
+            <div style="font-size: 0.85rem; color: #64748b; margin-top: 0.5rem;">{window_status}</div>
         </div>
         """, unsafe_allow_html=True)
     
-    with col2:
-        render_score_ring(action.confluence_score)
-        
-        # Add score breakdown expander
-        with st.expander("📊 Score Breakdown"):
-            # Recalculate to get breakdown
-            nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
-            score_result = calculate_confluence_score(
-                nearest_distance, regime, cones, current_price, is_10am,
-                nearest_rail_type=nearest_rail_type, 
-                overnight_validation=overnight_validation
-            )
-            for factor, detail in score_result['breakdown'].items():
-                st.markdown(f"**{factor.title()}:** {detail}")
-            st.markdown("---")
-            st.markdown(f"**{score_result['recommendation']}**")
+    st.markdown("---")
     
-    with col3:
-        render_action_card(action)
-        if action.direction in ['CALLS', 'PUTS']:
-            st.markdown(f"""
-            <div style="text-align: center; margin-top: -0.5rem;">
-                <span style="font-size: 0.9rem; color: #64748b;">Structure: </span>
-                <span style="font-weight: 600;">{action.active_cone} Cone</span>
-                <span style="font-size: 0.9rem; color: #64748b;"> | Size: </span>
-                <span style="font-weight: 600;">{action.position_size}</span>
-            </div>
-            """, unsafe_allow_html=True)
+    # ==========================================================================
+    # MAIN SECTION: TODAY'S TRADE SETUPS
+    # ==========================================================================
+    
+    st.markdown("## 🎯 Today's Trade Setups")
+    st.caption("Complete trade plans based on confluence zones. Each setup shows exact contract, entry, stops, and targets.")
+    
+    # Use 10:00 AM setups as primary (more developed structure)
+    active_setups = trade_setups_1000
+    
+    # Check if we have any setups
+    has_calls = len(active_setups.get('calls_setups', [])) > 0
+    has_puts = len(active_setups.get('puts_setups', [])) > 0
+    
+    if not has_calls and not has_puts:
+        st.warning("⚠️ No confluence zones detected for today. Check individual rails below.")
+    else:
+        # Show CALLS and PUTS side by side
+        col_calls, col_puts = st.columns(2)
+        
+        with col_calls:
+            st.markdown("### 🟢 CALLS Setups (Buy at Support)")
+            if has_calls:
+                for setup in active_setups['calls_setups']:
+                    render_trade_setup_card(setup, current_price)
+            else:
+                st.info("No CALLS confluence zones today")
+            
+            # Show single rails as backup
+            if active_setups.get('single_calls'):
+                with st.expander(f"📋 Single Rails ({len(active_setups['single_calls'])})"):
+                    for rail in active_setups['single_calls'][:5]:  # Show top 5
+                        st.write(f"**{rail['price']:.2f}** — {rail['rail']}")
+        
+        with col_puts:
+            st.markdown("### 🔴 PUTS Setups (Sell at Resistance)")
+            if has_puts:
+                for setup in active_setups['puts_setups']:
+                    render_trade_setup_card(setup, current_price)
+            else:
+                st.info("No PUTS confluence zones today")
+            
+            # Show single rails as backup
+            if active_setups.get('single_puts'):
+                with st.expander(f"📋 Single Rails ({len(active_setups['single_puts'])})"):
+                    for rail in active_setups['single_puts'][:5]:
+                        st.write(f"**{rail['price']:.2f}** — {rail['rail']}")
     
     st.markdown("---")
     
-    # CONTRACT RECOMMENDATION - Prominent display
-    if action.direction in ['CALLS', 'PUTS', 'WAIT']:
-        st.markdown("### 📋 Contract Recommendation")
-        col_contract, col_alerts = st.columns([2, 1])
+    # ==========================================================================
+    # QUICK REFERENCE: Which setup is closest?
+    # ==========================================================================
+    
+    st.markdown("### 📍 Quick Reference: Nearest Setups")
+    
+    # Find closest CALLS and PUTS setup to current price
+    all_setups = active_setups.get('calls_setups', []) + active_setups.get('puts_setups', [])
+    
+    if all_setups:
+        # Sort by distance to current price
+        for setup in all_setups:
+            setup.distance = abs(current_price - setup.entry_price)
+        all_setups_sorted = sorted(all_setups, key=lambda x: x.distance)
         
-        with col_contract:
-            render_contract_recommendation(action)
+        nearest = all_setups_sorted[0]
         
-        with col_alerts:
-            st.markdown("#### ⚠️ Key Alerts")
-            for w in action.warnings:
-                if "📋" in w or "💰" in w:
-                    continue  # Skip these as they're shown in contract card
-                elif "✅" in w or "VALIDATED" in w.upper():
-                    st.success(w)
-                elif "⛔" in w or "BROKEN" in w.upper() or "WARNING" in w.upper():
-                    st.error(w)
-                elif "Wait" in w or "activate" in w.lower():
-                    st.info(w)
-                else:
-                    st.warning(w)
+        # Prominent display of nearest setup
+        if nearest.direction == 'CALLS':
+            color = "#22c55e"
+        else:
+            color = "#ef4444"
         
-        st.markdown("---")
-    
-    # Row 2: Decision Windows
-    st.markdown("### 🎯 Decision Window Entry Levels")
-    col_830, col_1000 = st.columns(2)
-    
-    with col_830:
-        render_decision_card("⏰ 8:30 AM CT — Market Open", cones_830)
-    
-    with col_1000:
-        render_decision_card("⏰ 10:00 AM CT — Key Decision", cones_1000)
-    
-    # Confluence Zones - Show BOTH Calls and Puts levels
-    st.markdown("#### 🔥 High Probability Entry Levels")
-    
-    col_calls, col_puts = st.columns(2)
-    
-    with col_calls:
-        st.markdown("##### 🟢 CALLS (Support Levels)")
-        
-        # Show confluence zones first (highest probability)
-        if confluence_zones.get('calls_confluence'):
-            for zone in confluence_zones['calls_confluence']:
-                strength_stars = "⭐" * zone['strength']
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%); 
-                            border: 2px solid #22c55e; border-radius: 10px; padding: 0.75rem; margin: 0.5rem 0;">
-                    <div style="font-weight: 700; color: #15803d; font-size: 1.1rem;">
-                        {zone['price']:.2f} {strength_stars}
-                    </div>
-                    <div style="font-size: 0.8rem; color: #166534;">
-                        Confluence: {' + '.join(zone['rails'])}
-                    </div>
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, {color}15, {color}25); 
+                    border: 3px solid {color}; border-radius: 16px; padding: 1.5rem; margin: 1rem 0;">
+            <div style="text-align: center;">
+                <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem;">NEAREST SETUP</div>
+                <div style="font-size: 2rem; font-weight: 800; color: {color};">{nearest.strike_label}</div>
+                <div style="font-size: 1.1rem; margin: 0.5rem 0;">
+                    Entry: <strong>{nearest.entry_price:.2f}</strong> | 
+                    Distance: <strong>{nearest.distance:.1f} pts</strong>
                 </div>
-                """, unsafe_allow_html=True)
-        
-        # Show all individual levels
-        if confluence_zones.get('all_calls_levels'):
-            with st.expander("📋 All Support Rails"):
-                for level in confluence_zones['all_calls_levels']:
-                    st.write(f"**{level['price']:.2f}** — {level['name']}")
-    
-    with col_puts:
-        st.markdown("##### 🔴 PUTS (Resistance Levels)")
-        
-        # Show confluence zones first (highest probability)
-        if confluence_zones.get('puts_confluence'):
-            for zone in confluence_zones['puts_confluence']:
-                strength_stars = "⭐" * zone['strength']
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); 
-                            border: 2px solid #ef4444; border-radius: 10px; padding: 0.75rem; margin: 0.5rem 0;">
-                    <div style="font-weight: 700; color: #dc2626; font-size: 1.1rem;">
-                        {zone['price']:.2f} {strength_stars}
-                    </div>
-                    <div style="font-size: 0.8rem; color: #991b1b;">
-                        Confluence: {' + '.join(zone['rails'])}
-                    </div>
+                <div style="font-size: 0.9rem; color: #64748b;">
+                    Confluence: {' + '.join(nearest.confluence_rails)}
                 </div>
-                """, unsafe_allow_html=True)
+                <div style="margin-top: 1rem; font-size: 1rem;">
+                    Target: <span style="color: #22c55e; font-weight: 600;">{nearest.target_50:.2f}</span> → 
+                    <span style="color: #22c55e; font-weight: 600;">{nearest.target_100:.2f}</span> | 
+                    Potential: <span style="color: #22c55e; font-weight: 700;">+${nearest.profit_50:.0f} to +${nearest.profit_100:.0f}</span>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # Show all individual levels
-        if confluence_zones.get('all_puts_levels'):
-            with st.expander("📋 All Resistance Rails"):
-                for level in confluence_zones['all_puts_levels']:
-                    st.write(f"**{level['price']:.2f}** — {level['name']}")
+        # Show distance to both nearest CALLS and PUTS
+        col_near_c, col_near_p = st.columns(2)
+        
+        nearest_call = next((s for s in all_setups_sorted if s.direction == 'CALLS'), None)
+        nearest_put = next((s for s in all_setups_sorted if s.direction == 'PUTS'), None)
+        
+        with col_near_c:
+            if nearest_call:
+                direction = "↓" if current_price > nearest_call.entry_price else "↑"
+                st.metric(
+                    f"🟢 Nearest CALLS", 
+                    f"{nearest_call.entry_price:.2f}",
+                    f"{direction} {nearest_call.distance:.1f} pts"
+                )
+                st.caption(f"Strike: {nearest_call.strike_label}")
+        
+        with col_near_p:
+            if nearest_put:
+                direction = "↑" if current_price < nearest_put.entry_price else "↓"
+                st.metric(
+                    f"🔴 Nearest PUTS", 
+                    f"{nearest_put.entry_price:.2f}",
+                    f"{direction} {nearest_put.distance:.1f} pts"
+                )
+                st.caption(f"Strike: {nearest_put.strike_label}")
     
-    # Show message if no confluence found
-    if not confluence_zones.get('calls_confluence') and not confluence_zones.get('puts_confluence'):
-        st.info("No rail confluences detected at current time. Check individual rails in the expanders above.")
+    st.markdown("---")
     
-    # ========== OVERNIGHT VALIDATION DISPLAY ==========
-    if overnight_validation and overnight_validation.get('validation_notes'):
-        st.markdown("#### 🌙 Overnight Structure Validation")
+    # ==========================================================================
+    # SECONDARY: Decision Windows Comparison
+    # ==========================================================================
+    
+    with st.expander("🕐 Compare 8:30 AM vs 10:00 AM Setups"):
+        col_830_exp, col_1000_exp = st.columns(2)
         
-        col_val1, col_val2 = st.columns(2)
+        with col_830_exp:
+            st.markdown("**8:30 AM Setups:**")
+            if trade_setups_830.get('calls_setups'):
+                for s in trade_setups_830['calls_setups']:
+                    st.write(f"🟢 {s.strike_label} @ {s.entry_price:.2f}")
+            if trade_setups_830.get('puts_setups'):
+                for s in trade_setups_830['puts_setups']:
+                    st.write(f"🔴 {s.strike_label} @ {s.entry_price:.2f}")
         
-        with col_val1:
+        with col_1000_exp:
+            st.markdown("**10:00 AM Setups:**")
+            if trade_setups_1000.get('calls_setups'):
+                for s in trade_setups_1000['calls_setups']:
+                    st.write(f"🟢 {s.strike_label} @ {s.entry_price:.2f}")
+            if trade_setups_1000.get('puts_setups'):
+                for s in trade_setups_1000['puts_setups']:
+                    st.write(f"🔴 {s.strike_label} @ {s.entry_price:.2f}")
+    
+    # ==========================================================================
+    # CHECKLIST & VALIDATION INFO
+    # ==========================================================================
+    
+    col_check, col_val = st.columns(2)
+    
+    with col_check:
+        render_checklist(regime, action, cones, current_price, overnight_validation)
+    
+    with col_val:
+        # Overnight Validation Display
+        if overnight_validation and overnight_validation.get('validation_notes'):
+            st.markdown("#### 🌙 Overnight Validation")
+            
             # High structure status
             active_high = overnight_validation.get('active_high_structure', 'primary')
             if active_high == 'secondary':
-                st.success("🎯 **HIGH: Secondary (High²) is ACTIVE**")
-                st.caption("Overnight touched and respected the secondary high descending rail")
-            elif active_high == 'primary':
-                if overnight_validation.get('high_secondary_broken'):
-                    st.warning("⚠️ **HIGH: Primary only** (Secondary was broken)")
-                else:
-                    st.info("📍 **HIGH: Primary is active**")
-            elif active_high == 'both':
-                st.info("📍 **HIGH: Both structures are candidates**")
-                st.caption("Neither was tested overnight - watch both levels")
-        
-        with col_val2:
+                st.success("✓ HIGH: Secondary (High²) validated")
+            elif overnight_validation.get('high_secondary_broken'):
+                st.warning("⚠ HIGH: Secondary broken overnight")
+            
             # Low structure status
             active_low = overnight_validation.get('active_low_structure', 'primary')
             if active_low == 'secondary':
-                st.success("🎯 **LOW: Secondary (Low²) is ACTIVE**")
-                st.caption("Overnight touched and respected the secondary low ascending rail")
-            elif active_low == 'primary':
-                if overnight_validation.get('low_secondary_broken'):
-                    st.warning("⚠️ **LOW: Primary only** (Secondary was broken)")
-                else:
-                    st.info("📍 **LOW: Primary is active**")
-            elif active_low == 'both':
-                st.info("📍 **LOW: Both structures are candidates**")
-                st.caption("Neither was tested overnight - watch both levels")
-        
-        # Show detailed validation notes in expander
-        with st.expander("📋 Detailed Overnight Analysis"):
-            for note in overnight_validation['validation_notes']:
-                if note.startswith("✓"):
-                    st.success(note)
-                elif note.startswith("✗"):
-                    st.error(note)
-                elif note.startswith("→"):
-                    st.info(note)
-                else:
-                    st.write(note)
-    
-    st.markdown("---")
-    
-    # Row 3: Trade Setup + Contract Expectations
-    if action.direction in ['CALLS', 'PUTS']:
-        col_setup, col_contract = st.columns(2)
-        
-        with col_setup:
-            st.markdown("""
-            <div class="premium-card">
-                <div class="card-header">📋 Trade Setup</div>
-            </div>
-            """, unsafe_allow_html=True)
+                st.success("✓ LOW: Secondary (Low²) validated")
+            elif overnight_validation.get('low_secondary_broken'):
+                st.warning("⚠ LOW: Secondary broken overnight")
             
-            st.markdown(f"""
-            | Level | Price |
-            |-------|-------|
-            | **Entry** | {action.entry_level:.2f} |
-            | **Target 50%** (60% out) | {action.target_50:.2f} |
-            | **Target 75%** (20% out) | {action.target_75:.2f} |
-            | **Target 100%** (20% out) | {action.target_100:.2f} |
-            | **Stop Loss** | {action.stop_level:.2f} |
-            """)
-        
-        with col_contract:
-            if action.contract_expectation:
-                ce = action.contract_expectation
-                st.markdown(f"""
-                <div class="contract-card">
-                    <div class="contract-header">💰 Contract Expectations (ATM 0DTE)</div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                        <div>
-                            <div style="font-size: 0.75rem; color: #64748b;">Underlying Move (50%)</div>
-                            <div style="font-size: 1.25rem; font-weight: 700; color: #1e40af;">{ce.expected_underlying_move_50:.2f} pts</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 0.75rem; color: #64748b;">Underlying Move (100%)</div>
-                            <div style="font-size: 1.25rem; font-weight: 700; color: #1e40af;">{ce.expected_underlying_move_100:.2f} pts</div>
-                        </div>
-                    </div>
-                    <hr style="margin: 1rem 0; border-color: #93c5fd;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; text-align: center;">
-                        <div>
-                            <div style="font-size: 0.7rem; color: #64748b;">Profit @ 50%</div>
-                            <div style="font-size: 1.5rem; font-weight: 800; color: #15803d;">${ce.contract_profit_50:.0f}</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 0.7rem; color: #64748b;">Profit @ 75%</div>
-                            <div style="font-size: 1.5rem; font-weight: 800; color: #15803d;">${ce.contract_profit_75:.0f}</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 0.7rem; color: #64748b;">Profit @ 100%</div>
-                            <div style="font-size: 1.5rem; font-weight: 800; color: #15803d;">${ce.contract_profit_100:.0f}</div>
-                        </div>
-                    </div>
-                    <hr style="margin: 1rem 0; border-color: #93c5fd;">
-                    <div style="text-align: center;">
-                        <span style="font-size: 0.85rem; color: #64748b;">Risk/Reward (to 50%): </span>
-                        <span style="font-size: 1.1rem; font-weight: 700; color: #1e40af;">{ce.risk_reward_50:.1f}:1</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Contract calculator
-                st.markdown("#### 🧮 P&L Calculator")
-                num_contracts = st.number_input("Number of Contracts", min_value=1, max_value=100, value=10)
-                st.markdown(f"""
-                | Target | Profit ({num_contracts} contracts) |
-                |--------|-------------------------------------|
-                | **50%** | **${ce.contract_profit_50 * num_contracts:,.0f}** |
-                | **75%** | **${ce.contract_profit_75 * num_contracts:,.0f}** |
-                | **100%** | **${ce.contract_profit_100 * num_contracts:,.0f}** |
-                """)
+            # Validation notes in expander
+            with st.expander("📋 Detailed Notes"):
+                for note in overnight_validation['validation_notes']:
+                    st.write(note)
+        else:
+            st.info("No overnight validation data available")
     
     st.markdown("---")
     
-    # Row 4: Proximity + Checklist
-    col_prox, col_check = st.columns(2)
-    
-    with col_prox:
-        render_proximity_meters(cones_1000, current_price)
-    
-    with col_check:
-        st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        render_checklist(regime, action, cones, current_price, overnight_validation)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Warnings
-        if action.warnings:
-            st.markdown("#### ⚠️ Alerts")
-            for w in action.warnings:
-                if "activate" in w.lower():
-                    st.markdown(f'<div class="info-badge">{w}</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="warning-badge">{w}</div>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Row 5: Full Projection Table
+    # Row: Full Projection Table
     st.markdown("### 📊 Full Cone Projection Table")
     st.caption("💡 Yellow rows = Key decision windows (8:30 AM and 10:00 AM CT) | High²/Low² = Secondary pivots")
     
