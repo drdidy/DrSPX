@@ -1828,27 +1828,243 @@ def render_proximity_meters(cones: List[Cone], current_price: float):
         </div>
         """, unsafe_allow_html=True)
 
-def render_checklist(regime: RegimeAnalysis, action: ActionCard):
-    checks = [
-        ("Overnight Range", regime.overnight_range_pct <= 0.40, f"{regime.overnight_range_pct:.0%} of cone"),
-        ("Cone Width", regime.cone_width_adequate, "Adequate" if regime.cone_width_adequate else "Too narrow"),
-        ("Prior Day Range", regime.prior_day_range_adequate, "Adequate" if regime.prior_day_range_adequate else "Weak"),
-        ("First Bar Energy", regime.first_bar_energy != 'weak', regime.first_bar_energy.title()),
-        ("Price Position", regime.opening_position != 'dead_zone', regime.opening_position.replace('_', ' ').title()),
-    ]
+def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Cone], current_price: float, overnight_validation: dict = None):
+    """
+    Principled Trade Checklist based on Structural Cone Methodology.
     
-    st.markdown("#### ✅ Trade Checklist")
+    FRAMEWORK LOGIC:
+    
+    1. STRUCTURE INTEGRITY - Is the cone structure valid?
+       - Cone width must provide enough room for profit (min 25 pts for 0DTE)
+       - Overnight must not have broken the rails you're trading
+    
+    2. ENTRY QUALITY - Is this a good entry point?
+       - Price must be AT a rail (within 5 pts)
+       - Confluence (2+ rails) significantly increases edge
+    
+    3. TIMING - Are we at a decision point?
+       - 8:30 AM = React to overnight + open
+       - 10:00 AM = Primary decision window (structure has developed)
+       - After 12:00 PM = Less time for move to play out (0DTE)
+    
+    4. RISK/REWARD - Does the math work?
+       - Target must be achievable (cone width vs time remaining)
+       - Contract move must be worth the risk (min $8-10 expected)
+    
+    5. CONFIRMATION - Extra factors that boost confidence
+       - Overnight validated the rail (ES touched and bounced)
+       - Secondary pivot confirms the level
+    """
+    
+    st.markdown("#### 📋 Trade Checklist")
+    
+    # Get current time
+    ct_now = get_ct_now()
+    ct_time = ct_now.time()
+    
+    # Find nearest rail info
+    nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
+    cone_width = nearest_cone.ascending_rail - nearest_cone.descending_rail if nearest_cone else 0
+    
+    # Find confluence
+    zones_data = find_confluence_zones(cones)
+    calls_zones = zones_data.get('calls_confluence', [])
+    puts_zones = zones_data.get('puts_confluence', [])
+    
+    # Check if at confluence
+    at_confluence = False
+    confluence_strength = 0
+    if nearest_rail_type == 'descending':
+        for zone in calls_zones:
+            if abs(current_price - zone['price']) <= 10:
+                at_confluence = True
+                confluence_strength = zone.get('strength', len(zone.get('rails', [])))
+                break
+    elif nearest_rail_type == 'ascending':
+        for zone in puts_zones:
+            if abs(current_price - zone['price']) <= 10:
+                at_confluence = True
+                confluence_strength = zone.get('strength', len(zone.get('rails', [])))
+                break
+    
+    # Check overnight validation
+    rail_validated = False
+    rail_broken = False
+    if overnight_validation:
+        validated = overnight_validation.get('validated', [])
+        broken = overnight_validation.get('broken', [])
+        
+        for v in validated:
+            if nearest_rail_type == 'descending' and '▼' in v:
+                rail_validated = True
+            elif nearest_rail_type == 'ascending' and '▲' in v:
+                rail_validated = True
+        
+        for b in broken:
+            if nearest_rail_type == 'descending' and '▼' in b:
+                rail_broken = True
+            elif nearest_rail_type == 'ascending' and '▲' in b:
+                rail_broken = True
+    
+    # =========================================================================
+    # CHECKLIST ITEMS
+    # =========================================================================
+    
+    checks = []
+    
+    # 1. STRUCTURE INTEGRITY
+    structure_ok = cone_width >= 25 and not rail_broken
+    if cone_width >= 35:
+        structure_detail = f"Excellent ({cone_width:.0f} pts)"
+    elif cone_width >= 25:
+        structure_detail = f"Adequate ({cone_width:.0f} pts)"
+    else:
+        structure_detail = f"Too narrow ({cone_width:.0f} pts) - SKIP"
+    
+    if rail_broken:
+        structure_detail = "Rail BROKEN overnight - SKIP"
+        structure_ok = False
+    
+    checks.append(("1. Structure Intact", structure_ok, structure_detail))
+    
+    # 2. ENTRY QUALITY
+    if nearest_distance <= 3:
+        entry_quality = True
+        entry_detail = f"Excellent - {nearest_distance:.1f} pts from rail"
+    elif nearest_distance <= 5:
+        entry_quality = True
+        entry_detail = f"Good - {nearest_distance:.1f} pts from rail"
+    elif nearest_distance <= 10:
+        entry_quality = True
+        entry_detail = f"Acceptable - {nearest_distance:.1f} pts from rail"
+    else:
+        entry_quality = False
+        entry_detail = f"Too far - {nearest_distance:.1f} pts (wait for rail)"
+    
+    checks.append(("2. At Rail", entry_quality, entry_detail))
+    
+    # 3. CONFLUENCE
+    if at_confluence and confluence_strength >= 3:
+        confluence_ok = True
+        confluence_detail = f"Strong - {confluence_strength} rails converge"
+    elif at_confluence:
+        confluence_ok = True
+        confluence_detail = f"Present - {confluence_strength} rails"
+    else:
+        confluence_ok = False
+        confluence_detail = "None - single rail only"
+    
+    checks.append(("3. Confluence", confluence_ok, confluence_detail))
+    
+    # 4. TIMING
+    is_830_window = time(8, 15) <= ct_time <= time(9, 0)
+    is_1000_window = time(9, 45) <= ct_time <= time(10, 30)
+    is_late = ct_time >= time(12, 30)
+    
+    if is_1000_window:
+        timing_ok = True
+        timing_detail = "10:00 Decision Window ★"
+    elif is_830_window:
+        timing_ok = True
+        timing_detail = "8:30 Open Window"
+    elif is_late:
+        timing_ok = False
+        timing_detail = "Late (less time for move)"
+    else:
+        timing_ok = True
+        timing_detail = "Mid-session"
+    
+    checks.append(("4. Timing", timing_ok, timing_detail))
+    
+    # 5. OVERNIGHT VALIDATION (Bonus)
+    if rail_validated:
+        validation_ok = True
+        validation_detail = "Rail validated overnight ★"
+    elif overnight_validation and len(overnight_validation.get('validated', [])) > 0:
+        validation_ok = True
+        validation_detail = "Other rails validated"
+    else:
+        validation_ok = False
+        validation_detail = "Not tested overnight"
+    
+    checks.append(("5. Validated", validation_ok, validation_detail))
+    
+    # 6. R:R CHECK
+    if action.contract_expectation:
+        expected_profit = action.contract_expectation.contract_profit_50
+        if expected_profit >= 15:
+            rr_ok = True
+            rr_detail = f"Good - ${expected_profit:.0f} @ 50%"
+        elif expected_profit >= 8:
+            rr_ok = True
+            rr_detail = f"Acceptable - ${expected_profit:.0f} @ 50%"
+        else:
+            rr_ok = False
+            rr_detail = f"Weak - ${expected_profit:.0f} @ 50%"
+    else:
+        rr_ok = False
+        rr_detail = "N/A"
+    
+    checks.append(("6. R:R Worth It", rr_ok, rr_detail))
+    
+    # =========================================================================
+    # RENDER CHECKLIST
+    # =========================================================================
+    
+    passed_count = sum(1 for _, passed, _ in checks if passed)
+    total_checks = len(checks)
+    
+    # Overall assessment
+    if passed_count >= 5:
+        overall = "🟢 STRONG SETUP"
+        overall_color = "#22c55e"
+    elif passed_count >= 4:
+        overall = "🟡 ACCEPTABLE"
+        overall_color = "#eab308"
+    elif passed_count >= 3:
+        overall = "🟠 MARGINAL"
+        overall_color = "#f97316"
+    else:
+        overall = "🔴 SKIP"
+        overall_color = "#ef4444"
+    
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, {overall_color}22, {overall_color}11); 
+                border-left: 4px solid {overall_color}; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem;">
+        <span style="font-weight: 700; font-size: 1.1rem;">{overall}</span>
+        <span style="color: #64748b; margin-left: 0.5rem;">({passed_count}/{total_checks} passed)</span>
+    </div>
+    """, unsafe_allow_html=True)
     
     for label, passed, detail in checks:
         icon = "✓" if passed else "✗"
-        color_class = "check-pass" if passed else "check-fail"
+        color = "#22c55e" if passed else "#ef4444"
+        bg = "#22c55e11" if passed else "#ef444411"
         st.markdown(f"""
-        <div class="check-item">
-            <span class="{color_class}" style="font-size: 1.25rem; font-weight: bold;">{icon}</span>
+        <div style="display: flex; align-items: center; padding: 0.5rem; margin: 0.25rem 0; 
+                    background: {bg}; border-radius: 6px;">
+            <span style="color: {color}; font-size: 1.1rem; font-weight: bold; width: 1.5rem;">{icon}</span>
             <span style="flex: 1; font-weight: 500;">{label}</span>
             <span style="color: #64748b; font-size: 0.85rem;">{detail}</span>
         </div>
         """, unsafe_allow_html=True)
+    
+    # KEY INSIGHT
+    st.markdown("---")
+    st.markdown("**💡 Key Insight:**")
+    
+    if rail_broken:
+        st.error("Rail was broken overnight - structure is compromised. Wait for new setup.")
+    elif not entry_quality:
+        st.warning(f"Price is {nearest_distance:.1f} pts from nearest rail. Wait for price to reach {nearest_cone.descending_rail:.2f} (calls) or {nearest_cone.ascending_rail:.2f} (puts).")
+    elif at_confluence and rail_validated:
+        st.success("Strong setup: Confluence + Overnight validation. This is your highest probability trade.")
+    elif at_confluence:
+        st.info("Confluence present but not validated overnight. Good setup, standard size.")
+    elif rail_validated:
+        st.info("Rail validated but no confluence. Acceptable setup, consider reduced size.")
+    else:
+        st.warning("Single rail, no validation. Lower probability - reduce size or skip.")
 
 def highlight_times(row):
     if row['Time'] in ['08:30', '10:00']:
@@ -2450,7 +2666,7 @@ def main():
     
     with col_check:
         st.markdown('<div class="premium-card">', unsafe_allow_html=True)
-        render_checklist(regime, action)
+        render_checklist(regime, action, cones, current_price, overnight_validation)
         st.markdown('</div>', unsafe_allow_html=True)
         
         # Warnings
