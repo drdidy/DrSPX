@@ -2066,25 +2066,25 @@ def inject_premium_css():
     .terminal-logo-icon {
         width: 48px;
         height: 48px;
-        background: linear-gradient(135deg, var(--accent-gold) 0%, #d97706 100%);
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
         border-radius: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
         font-size: 1.5rem;
         font-weight: 800;
-        color: var(--bg-primary);
+        color: #1e293b;
     }
     .terminal-title {
         font-size: 1.75rem;
         font-weight: 700;
-        color: var(--text-primary);
+        color: #f8fafc;
         letter-spacing: -0.02em;
         font-family: 'Inter', sans-serif;
     }
     .terminal-subtitle {
         font-size: 0.8rem;
-        color: var(--accent-gold);
+        color: #fbbf24;
         text-transform: uppercase;
         letter-spacing: 0.15em;
         font-weight: 500;
@@ -2099,14 +2099,14 @@ def inject_premium_css():
     }
     .status-label {
         font-size: 0.65rem;
-        color: var(--text-muted);
+        color: #94a3b8;
         text-transform: uppercase;
         letter-spacing: 0.1em;
     }
     .status-value {
         font-size: 1.1rem;
         font-weight: 600;
-        color: var(--text-primary);
+        color: #f8fafc;
         font-family: 'JetBrains Mono', monospace;
     }
     .status-live {
@@ -2117,7 +2117,7 @@ def inject_premium_css():
     .live-dot {
         width: 8px;
         height: 8px;
-        background: var(--accent-green);
+        background: #10b981;
         border-radius: 50%;
         animation: pulse 2s infinite;
     }
@@ -2390,9 +2390,12 @@ def inject_premium_css():
     /* Override Streamlit dataframe */
     .stDataFrame { background: var(--bg-card) !important; border-radius: 8px !important; }
     
-    /* SIDEBAR STYLING - Keep readable */
+    /* SIDEBAR STYLING - Dark sidebar with light text */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%) !important;
+    }
+    section[data-testid="stSidebar"] * {
+        color: #e2e8f0 !important;
     }
     section[data-testid="stSidebar"] .stMarkdown,
     section[data-testid="stSidebar"] .stMarkdown p,
@@ -2402,7 +2405,9 @@ def inject_premium_css():
     section[data-testid="stSidebar"] .stMarkdown h4,
     section[data-testid="stSidebar"] label,
     section[data-testid="stSidebar"] .stCaption,
-    section[data-testid="stSidebar"] span {
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] div {
         color: #f8fafc !important;
     }
     section[data-testid="stSidebar"] .stSelectbox label,
@@ -2436,6 +2441,16 @@ def inject_premium_css():
     }
     section[data-testid="stSidebar"] .streamlit-expanderContent {
         color: #e2e8f0 !important;
+    }
+    /* Metric values in sidebar */
+    section[data-testid="stSidebar"] [data-testid="stMetricValue"] {
+        color: #f8fafc !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stMetricLabel"] {
+        color: #94a3b8 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stMetricDelta"] {
+        color: #10b981 !important;
     }
     
     /* MAIN AREA - ensure text is visible */
