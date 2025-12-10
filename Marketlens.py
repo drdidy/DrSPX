@@ -2971,47 +2971,92 @@ def main():
     
     # ===== MAIN LAYOUT =====
     
-    # Row 1: Live Price + Time
+    # ==========================================================================
+    # TODAY'S SUMMARY (at the very top)
+    # ==========================================================================
+    
+    # Count setups
+    num_calls = len(trade_setups_1000.get('calls_setups', []))
+    num_puts = len(trade_setups_1000.get('puts_setups', []))
+    
+    st.markdown("## 📊 Today's Summary")
+    
+    col_summary1, col_summary2, col_summary3 = st.columns(3)
+    
+    with col_summary1:
+        st.metric("🟢 CALLS Entries", f"{num_calls} levels", help="High-probability support levels to buy CALLS")
+    
+    with col_summary2:
+        st.metric("🔴 PUTS Entries", f"{num_puts} levels", help="High-probability resistance levels to buy PUTS")
+    
+    with col_summary3:
+        ct_time = get_ct_now()
+        if ct_time.time() < LAST_ENTRY_TIME:
+            st.metric("⏰ Trading Window", "OPEN", help="Safe to enter new trades")
+        else:
+            st.metric("⏰ Trading Window", "CLOSED", delta="Too late for 0DTE", delta_color="inverse", help="After 1:30pm - avoid new entries")
+    
+    # Quick glance at all entry levels
+    if num_calls > 0 or num_puts > 0:
+        st.markdown("**Quick Glance — All 10:00 AM Entry Levels:**")
+        
+        quick_col1, quick_col2 = st.columns(2)
+        
+        with quick_col1:
+            if num_calls > 0:
+                for setup in trade_setups_1000['calls_setups']:
+                    dist = abs(current_price - setup.entry_price)
+                    marker = "🎯" if dist <= AT_RAIL_THRESHOLD else ("⏳" if dist <= 15 else "")
+                    st.write(f"{marker} **CALLS @ {setup.entry_price:.2f}** → {setup.strike_label} ({dist:.0f} pts away)")
+            else:
+                st.write("No CALLS entries")
+        
+        with quick_col2:
+            if num_puts > 0:
+                for setup in trade_setups_1000['puts_setups']:
+                    dist = abs(current_price - setup.entry_price)
+                    marker = "🎯" if dist <= AT_RAIL_THRESHOLD else ("⏳" if dist <= 15 else "")
+                    st.write(f"{marker} **PUTS @ {setup.entry_price:.2f}** → {setup.strike_label} ({dist:.0f} pts away)")
+            else:
+                st.write("No PUTS entries")
+    
+    st.markdown("---")
+    
+    # Row: Live Price + Time
     col_price, col_time = st.columns([2, 1])
     
     with col_price:
-        st.markdown(f"""
-        <div class="premium-card">
-            <div class="card-header">SPX Live Price</div>
-            <div class="card-value">{current_price:,.2f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("SPX Live Price", f"{current_price:,.2f}")
     
     with col_time:
-        ct_time = get_ct_now()
         # Determine which window we're in
         if ct_time.time() < time(8, 30):
-            window_status = "🔜 Pre-Market (8:30 AM setups active)"
+            window_status = "🔜 Pre-Market"
         elif ct_time.time() < time(10, 0):
-            window_status = "📊 8:30 AM Window Active"
-        elif ct_time.time() < time(12, 30):
-            window_status = "🎯 10:00 AM Window Active"
+            window_status = "📊 8:30 Window"
+        elif ct_time.time() < time(13, 30):
+            window_status = "🎯 10:00 Window"
         else:
-            window_status = "⏰ Late Session"
+            window_status = "⛔ Late (avoid)"
         
-        st.markdown(f"""
-        <div class="live-clock">
-            <div class="clock-label">Central Time</div>
-            <div class="clock-time">{ct_time.strftime('%H:%M:%S')}</div>
-            <div style="font-size: 0.85rem; color: #64748b; margin-top: 0.5rem;">{window_status}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("Time (CT)", ct_time.strftime('%H:%M:%S'), delta=window_status)
     
     st.markdown("---")
     
     # ==========================================================================
-    # MAIN SECTION: TODAY'S TRADE SETUPS
+    # MAIN SECTION: 10:00 AM ENTRIES (PRIMARY)
     # ==========================================================================
     
-    st.markdown("## 🎯 Today's Trade Setups")
-    st.caption("Complete trade plans based on confluence zones. Each setup shows exact contract, entry, stops, and targets.")
+    st.markdown("## 🎯 10:00 AM Entry Levels")
+    st.markdown("""
+    **How to use this:** These are your primary entries for today. 
+    - **HIGH PROBABILITY** = 2 or more price levels from different sources all point to the same entry (confluence)
+    - **BACKUP LEVELS** = Only one price level - lower probability, use smaller size or skip
     
-    # Use 10:00 AM setups as primary (more developed structure)
+    Wait for SPX to reach these levels, then enter the recommended contract.
+    """)
+    
+    # Use 10:00 AM setups
     active_setups = trade_setups_1000
     
     # Check if we have any setups
@@ -3019,85 +3064,102 @@ def main():
     has_puts = len(active_setups.get('puts_setups', [])) > 0
     
     if not has_calls and not has_puts:
-        st.warning("⚠️ No confluence zones detected for today. Check individual rails below.")
+        st.warning("⚠️ No high-probability entry levels detected for today. See backup levels below.")
+    
+    # ==========================================================================
+    # CALLS ENTRIES (Buy when price drops to support)
+    # ==========================================================================
+    
+    st.markdown("### 🟢 CALLS — Buy When Price Drops To These Levels")
+    st.caption("Price dropping to these support levels = buy CALLS (betting price bounces up)")
+    
+    if has_calls:
+        st.success(f"✅ Found {len(active_setups['calls_setups'])} HIGH PROBABILITY entry level(s)")
+        for setup in active_setups['calls_setups']:
+            render_trade_setup_card(setup, current_price)
     else:
-        # Show CALLS and PUTS side by side
-        col_calls, col_puts = st.columns(2)
-        
-        with col_calls:
-            st.markdown("### 🟢 CALLS Setups (Buy at Support)")
-            if has_calls:
-                for setup in active_setups['calls_setups']:
-                    render_trade_setup_card(setup, current_price)
-            else:
-                st.info("No CALLS confluence zones today")
-            
-            # Show single rails as backup
-            if active_setups.get('single_calls'):
-                with st.expander(f"📋 Single Rails ({len(active_setups['single_calls'])})"):
-                    for rail in active_setups['single_calls'][:5]:  # Show top 5
-                        st.write(f"**{rail['price']:.2f}** — {rail['rail']}")
-        
-        with col_puts:
-            st.markdown("### 🔴 PUTS Setups (Sell at Resistance)")
-            if has_puts:
-                for setup in active_setups['puts_setups']:
-                    render_trade_setup_card(setup, current_price)
-            else:
-                st.info("No PUTS confluence zones today")
-            
-            # Show single rails as backup
-            if active_setups.get('single_puts'):
-                with st.expander(f"📋 Single Rails ({len(active_setups['single_puts'])})"):
-                    for rail in active_setups['single_puts'][:5]:
-                        st.write(f"**{rail['price']:.2f}** — {rail['rail']}")
+        st.info("No high-probability CALLS entries today")
+    
+    # Backup single rails for CALLS
+    if active_setups.get('single_calls'):
+        with st.expander(f"📋 BACKUP LEVELS — Lower Probability ({len(active_setups['single_calls'])} levels)"):
+            st.caption("These are single price levels without confirmation. Use smaller size or skip.")
+            for rail in active_setups['single_calls'][:5]:
+                distance = abs(current_price - rail['price'])
+                st.write(f"**{rail['price']:.2f}** — {rail['rail']} ({distance:.0f} pts away)")
     
     st.markdown("---")
     
     # ==========================================================================
-    # QUICK REFERENCE: Which setup is closest?
+    # PUTS ENTRIES (Buy when price rises to resistance)
     # ==========================================================================
     
-    st.markdown("### 📍 Quick Reference: Nearest Setups")
+    st.markdown("### 🔴 PUTS — Buy When Price Rises To These Levels")
+    st.caption("Price rising to these resistance levels = buy PUTS (betting price drops down)")
     
-    # Find closest CALLS and PUTS setup to current price
+    if has_puts:
+        st.success(f"✅ Found {len(active_setups['puts_setups'])} HIGH PROBABILITY entry level(s)")
+        for setup in active_setups['puts_setups']:
+            render_trade_setup_card(setup, current_price)
+    else:
+        st.info("No high-probability PUTS entries today")
+    
+    # Backup single rails for PUTS
+    if active_setups.get('single_puts'):
+        with st.expander(f"📋 BACKUP LEVELS — Lower Probability ({len(active_setups['single_puts'])} levels)"):
+            st.caption("These are single price levels without confirmation. Use smaller size or skip.")
+            for rail in active_setups['single_puts'][:5]:
+                distance = abs(current_price - rail['price'])
+                st.write(f"**{rail['price']:.2f}** — {rail['rail']} ({distance:.0f} pts away)")
+    
+    st.markdown("---")
+    
+    # ==========================================================================
+    # WHAT TO DO RIGHT NOW
+    # ==========================================================================
+    
+    st.markdown("### 📍 What To Do Right Now")
+    
+    # Find closest setups
     all_setups = active_setups.get('calls_setups', []) + active_setups.get('puts_setups', [])
     
     if all_setups:
-        # Sort by distance to current price
+        # Calculate distances
         for setup in all_setups:
             setup.distance = abs(current_price - setup.entry_price)
         all_setups_sorted = sorted(all_setups, key=lambda x: x.distance)
         
         nearest = all_setups_sorted[0]
         
-        # Prominent display of nearest setup
-        if nearest.direction == 'CALLS':
-            color = "#22c55e"
+        # Check if at entry
+        if nearest.distance <= AT_RAIL_THRESHOLD:
+            st.success(f"""
+            🎯 **YOU ARE AT AN ENTRY LEVEL!**
+            
+            **Contract:** {nearest.strike_label}  
+            **Entry:** {nearest.entry_price:.2f} (current: {current_price:.2f})  
+            **Stop:** {nearest.stop_loss:.2f}  
+            **Target 50%:** {nearest.target_50:.2f} → **+${nearest.profit_50_theta_adjusted:.0f}**
+            """)
+        elif nearest.distance <= 15:
+            st.warning(f"""
+            ⏳ **WATCH THIS LEVEL — {nearest.distance:.0f} pts away**
+            
+            **Contract:** {nearest.strike_label}  
+            **Wait for:** {nearest.entry_price:.2f}  
+            **Current price:** {current_price:.2f}
+            """)
         else:
-            color = "#ef4444"
-        
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, {color}15, {color}25); 
-                    border: 3px solid {color}; border-radius: 16px; padding: 1.5rem; margin: 1rem 0;">
-            <div style="text-align: center;">
-                <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem;">NEAREST SETUP</div>
-                <div style="font-size: 2rem; font-weight: 800; color: {color};">{nearest.strike_label}</div>
-                <div style="font-size: 1.1rem; margin: 0.5rem 0;">
-                    Entry: <strong>{nearest.entry_price:.2f}</strong> | 
-                    Distance: <strong>{nearest.distance:.1f} pts</strong>
-                </div>
-                <div style="font-size: 0.9rem; color: #64748b;">
-                    Confluence: {' + '.join(nearest.confluence_rails)}
-                </div>
-                <div style="margin-top: 1rem; font-size: 1rem;">
-                    Target: <span style="color: #22c55e; font-weight: 600;">{nearest.target_50:.2f}</span> → 
-                    <span style="color: #22c55e; font-weight: 600;">{nearest.target_100:.2f}</span> | 
-                    Potential: <span style="color: #22c55e; font-weight: 700;">+${nearest.profit_50:.0f} to +${nearest.profit_100:.0f}</span>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+            st.info(f"""
+            📍 **WAIT — Nearest entry is {nearest.distance:.0f} pts away**
+            
+            **Nearest setup:** {nearest.strike_label} at {nearest.entry_price:.2f}  
+            **Current price:** {current_price:.2f}
+            
+            Set an alert at {nearest.entry_price:.2f} and wait.
+            """)
+    else:
+        st.warning("No high-probability setups today. Check backup levels or skip today.")
         
         # Show distance to both nearest CALLS and PUTS
         col_near_c, col_near_p = st.columns(2)
