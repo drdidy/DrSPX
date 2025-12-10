@@ -1383,6 +1383,119 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     
     st.markdown("---")
 
+
+def render_institutional_trade_card(setup: TradeSetup, current_price: float):
+    """Render a professional institutional-style trade card."""
+    
+    # Calculate distance
+    distance = abs(current_price - setup.entry_price)
+    
+    # Determine status
+    if distance <= AT_RAIL_THRESHOLD:
+        status = "ACTIVE"
+        status_class = "badge-go"
+    elif distance <= 15:
+        status = "WATCH"
+        status_class = "badge-wait"
+    else:
+        status = "STANDBY"
+        status_class = "badge-nogo"
+    
+    # Direction styling
+    direction_class = "badge-calls" if setup.direction == "CALLS" else "badge-puts"
+    
+    # GO/NO-GO
+    ct_now = get_ct_now().time()
+    time_ok = ct_now < LAST_ENTRY_TIME
+    rr_ok = setup.rr_ratio_theta_adjusted >= MIN_RR_RATIO
+    width_ok = setup.cone_width >= MIN_CONE_WIDTH
+    confluence_ok = setup.confluence_strength >= 2
+    
+    if rr_ok and width_ok and confluence_ok and time_ok:
+        decision = "GO"
+        decision_class = "badge-go"
+    else:
+        decision = "NO-GO"
+        decision_class = "badge-nogo"
+    
+    # Theta multiplier for display
+    theta_mult = THETA_MULTIPLIER.get(setup.theta_period, 1.0)
+    
+    st.markdown(f"""
+    <div class="trade-panel">
+        <div class="trade-panel-header">
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <span class="trade-panel-badge {direction_class}">{setup.direction}</span>
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--accent-gold); font-weight: 600;">{setup.strike_label}</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <span class="trade-panel-badge {status_class}">{status}</span>
+                <span class="trade-panel-badge {decision_class}">{decision}</span>
+            </div>
+        </div>
+        <div class="trade-panel-body">
+            <div class="entry-row">
+                <div class="entry-item">
+                    <div class="entry-label">Entry</div>
+                    <div class="entry-value gold">{setup.entry_price:,.2f}</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">Stop Loss</div>
+                    <div class="entry-value red">{setup.stop_loss:,.2f}</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">Target 50%</div>
+                    <div class="entry-value green">{setup.target_50:,.2f}</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">Target 100%</div>
+                    <div class="entry-value green">{setup.target_100:,.2f}</div>
+                </div>
+            </div>
+            <div class="entry-row">
+                <div class="entry-item">
+                    <div class="entry-label">Distance</div>
+                    <div class="entry-value">{distance:.1f} pts</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">Confluence</div>
+                    <div class="entry-value">{setup.confluence_strength} Rails</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">R:R (θ-adj)</div>
+                    <div class="entry-value">{setup.rr_ratio_theta_adjusted:.1f}:1</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">Delta</div>
+                    <div class="entry-value">{setup.delta_estimate:.2f}</div>
+                </div>
+            </div>
+            <div class="entry-row" style="border-bottom: none;">
+                <div class="entry-item">
+                    <div class="entry-label">Profit @ 50%</div>
+                    <div class="entry-value green">+${setup.profit_50_theta_adjusted:,.0f}</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">Profit @ 75%</div>
+                    <div class="entry-value green">+${setup.profit_75 * theta_mult:,.0f}</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">Profit @ 100%</div>
+                    <div class="entry-value green">+${setup.profit_100 * theta_mult:,.0f}</div>
+                </div>
+                <div class="entry-item">
+                    <div class="entry-label">Risk</div>
+                    <div class="entry-value red">-${setup.risk_dollars:,.0f}</div>
+                </div>
+            </div>
+            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.75rem; color: var(--text-muted);">
+                <strong>Sources:</strong> {' + '.join(setup.confluence_rails)}
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 # ============================================================================
 # CONTRACT EXPECTATION ENGINE
 # ============================================================================
@@ -1906,325 +2019,377 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
 def inject_premium_css():
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
     
-    * { font-family: 'Inter', sans-serif; }
+    :root {
+        --bg-primary: #0a0e17;
+        --bg-secondary: #111827;
+        --bg-tertiary: #1f2937;
+        --bg-card: #161d2e;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
+        --accent-gold: #f59e0b;
+        --accent-green: #10b981;
+        --accent-red: #ef4444;
+        --accent-blue: #3b82f6;
+        --border-color: #374151;
+    }
     
     .stApp {
-        background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+        background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
     }
     
-    /* HEADER */
-    .prophet-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
-        padding: 2.5rem 2rem;
-        border-radius: 20px;
-        margin-bottom: 2rem;
-        text-align: center;
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-        border: 1px solid rgba(255,255,255,0.1);
-        position: relative;
-        overflow: hidden;
+    /* Override Streamlit defaults for dark theme */
+    .stApp > header { background: transparent; }
+    .stMarkdown, .stText, p, span, label { color: var(--text-primary) !important; }
+    h1, h2, h3, h4, h5, h6 { color: var(--text-primary) !important; }
+    .stMetric label { color: var(--text-secondary) !important; }
+    .stMetric [data-testid="stMetricValue"] { color: var(--text-primary) !important; font-family: 'JetBrains Mono', monospace !important; }
+    
+    /* INSTITUTIONAL HEADER */
+    .terminal-header {
+        background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1.5rem 2rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
-    .prophet-header::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 3px;
-        background: linear-gradient(90deg, #f59e0b, #eab308, #f59e0b);
+    .terminal-logo {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
     }
-    .prophet-title {
-        font-size: 2.75rem;
+    .terminal-logo-icon {
+        width: 48px;
+        height: 48px;
+        background: linear-gradient(135deg, var(--accent-gold) 0%, #d97706 100%);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
         font-weight: 800;
-        background: linear-gradient(135deg, #ffffff 0%, #fbbf24 50%, #f59e0b 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        margin: 0;
-        letter-spacing: -0.03em;
+        color: var(--bg-primary);
     }
-    .prophet-tagline {
+    .terminal-title {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        letter-spacing: -0.02em;
+        font-family: 'Inter', sans-serif;
+    }
+    .terminal-subtitle {
+        font-size: 0.8rem;
+        color: var(--accent-gold);
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        font-weight: 500;
+    }
+    .terminal-status {
+        display: flex;
+        gap: 2rem;
+        align-items: center;
+    }
+    .status-item {
+        text-align: right;
+    }
+    .status-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+    }
+    .status-value {
         font-size: 1.1rem;
-        color: #94a3b8;
-        margin-top: 0.5rem;
-        font-weight: 400;
+        font-weight: 600;
+        color: var(--text-primary);
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .status-live {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .live-dot {
+        width: 8px;
+        height: 8px;
+        background: var(--accent-green);
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    
+    /* DATA GRID */
+    .data-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    /* METRIC CARDS */
+    .metric-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1.25rem;
+        transition: all 0.2s ease;
+    }
+    .metric-card:hover {
+        border-color: var(--accent-gold);
+        box-shadow: 0 0 20px rgba(245, 158, 11, 0.1);
+    }
+    .metric-label {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.5rem;
+    }
+    .metric-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--text-primary);
+    }
+    .metric-value.positive { color: var(--accent-green); }
+    .metric-value.negative { color: var(--accent-red); }
+    .metric-value.gold { color: var(--accent-gold); }
+    .metric-delta {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+    
+    /* TRADE PANEL */
+    .trade-panel {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 1rem;
+    }
+    .trade-panel-header {
+        background: linear-gradient(90deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .trade-panel-title {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .trade-panel-badge {
+        padding: 0.25rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .badge-calls {
+        background: rgba(16, 185, 129, 0.2);
+        color: var(--accent-green);
+        border: 1px solid var(--accent-green);
+    }
+    .badge-puts {
+        background: rgba(239, 68, 68, 0.2);
+        color: var(--accent-red);
+        border: 1px solid var(--accent-red);
+    }
+    .badge-go {
+        background: rgba(16, 185, 129, 0.2);
+        color: var(--accent-green);
+        border: 1px solid var(--accent-green);
+    }
+    .badge-nogo {
+        background: rgba(239, 68, 68, 0.2);
+        color: var(--accent-red);
+        border: 1px solid var(--accent-red);
+    }
+    .badge-wait {
+        background: rgba(245, 158, 11, 0.2);
+        color: var(--accent-gold);
+        border: 1px solid var(--accent-gold);
+    }
+    .trade-panel-body {
+        padding: 1.25rem;
+    }
+    
+    /* ENTRY ROW */
+    .entry-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        gap: 1rem;
+        padding: 1rem 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .entry-row:last-child { border-bottom: none; }
+    .entry-item {
+        text-align: center;
+    }
+    .entry-label {
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 0.25rem;
+    }
+    .entry-value {
+        font-size: 1.1rem;
+        font-weight: 600;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--text-primary);
+    }
+    .entry-value.green { color: var(--accent-green); }
+    .entry-value.red { color: var(--accent-red); }
+    .entry-value.gold { color: var(--accent-gold); }
+    
+    /* CONTRACT DISPLAY */
+    .contract-display {
+        background: linear-gradient(135deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
+        border: 2px solid var(--accent-gold);
+        border-radius: 8px;
+        padding: 1.5rem;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    .contract-strike {
+        font-size: 2rem;
+        font-weight: 700;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--accent-gold);
+        letter-spacing: -0.02em;
+    }
+    .contract-type {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-top: 0.25rem;
+    }
+    
+    /* TABLE STYLES */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+    }
+    .data-table th {
+        background: var(--bg-tertiary);
+        color: var(--text-muted);
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        padding: 0.75rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .data-table td {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--border-color);
+        color: var(--text-primary);
+    }
+    .data-table tr:hover { background: rgba(255,255,255,0.02); }
+    
+    /* SECTION HEADERS */
+    .section-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin: 2rem 0 1rem 0;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .section-icon {
+        width: 32px;
+        height: 32px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+    }
+    .section-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        text-transform: uppercase;
         letter-spacing: 0.05em;
     }
     
-    /* CARDS */
-    .premium-card {
-        background: white;
-        border-radius: 16px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-        border: 1px solid #e2e8f0;
-        margin-bottom: 1rem;
-        transition: all 0.3s ease;
+    /* QUICK STATS BAR */
+    .stats-bar {
+        display: flex;
+        gap: 2rem;
+        padding: 1rem 1.5rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
     }
-    .premium-card:hover {
-        box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
-        transform: translateY(-2px);
-    }
-    .card-header {
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        color: #64748b;
-        margin-bottom: 0.75rem;
-    }
-    .card-value {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #0f172a;
-    }
-    .card-value-sm {
-        font-size: 1.25rem;
-        font-weight: 600;
-        color: #0f172a;
-    }
-    
-    /* ACTION CARDS */
-    .action-card {
-        border-radius: 20px;
-        padding: 2rem;
-        text-align: center;
-        box-shadow: 0 25px 50px -12px rgba(0,0,0,0.15);
-        margin: 1rem 0;
-        position: relative;
-        overflow: hidden;
-    }
-    .action-card::before {
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        height: 4px;
-    }
-    .action-green {
-        background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
-        border: 2px solid #22c55e;
-    }
-    .action-green::before { background: #22c55e; }
-    .action-yellow {
-        background: linear-gradient(135deg, #fef9c3 0%, #fef08a 100%);
-        border: 2px solid #eab308;
-    }
-    .action-yellow::before { background: #eab308; }
-    .action-red {
-        background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-        border: 2px solid #ef4444;
-    }
-    .action-red::before { background: #ef4444; }
-    
-    .direction-label {
-        font-size: 2.5rem;
-        font-weight: 800;
-        letter-spacing: -0.02em;
-    }
-    .direction-green { color: #15803d; }
-    .direction-yellow { color: #a16207; }
-    .direction-red { color: #dc2626; }
-    
-    /* DECISION TIME CARDS */
-    .decision-card {
-        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-        border-radius: 16px;
-        padding: 1.5rem;
-        color: white;
-        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.2);
-        border: 1px solid #475569;
-    }
-    .decision-time {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #fbbf24;
-        margin-bottom: 1rem;
-    }
-    .decision-label {
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        color: #94a3b8;
-        margin-bottom: 0.25rem;
-    }
-    .decision-value {
-        font-size: 1.1rem;
-        font-weight: 600;
-        color: #f8fafc;
-    }
-    .decision-puts { color: #f87171; }
-    .decision-calls { color: #4ade80; }
-    
-    /* CONTRACT BOX */
-    .contract-card {
-        background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-        border: 2px solid #3b82f6;
-        border-radius: 16px;
-        padding: 1.5rem;
-        box-shadow: 0 10px 15px -3px rgba(59,130,246,0.2);
-    }
-    .contract-header {
-        font-size: 1rem;
-        font-weight: 700;
-        color: #1e40af;
-        margin-bottom: 1rem;
+    .stat-item {
         display: flex;
         align-items: center;
         gap: 0.5rem;
     }
-    
-    /* SCORE RING */
-    .score-container {
-        text-align: center;
-        padding: 1rem;
+    .stat-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
     }
-    .score-ring {
-        width: 120px;
-        height: 120px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 0 auto;
-        position: relative;
-        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2);
+    .stat-indicator.green { background: var(--accent-green); }
+    .stat-indicator.red { background: var(--accent-red); }
+    .stat-indicator.gold { background: var(--accent-gold); }
+    .stat-text {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
     }
-    .score-high { background: linear-gradient(135deg, #22c55e, #16a34a); }
-    .score-medium { background: linear-gradient(135deg, #eab308, #ca8a04); }
-    .score-low { background: linear-gradient(135deg, #ef4444, #dc2626); }
-    .score-value {
-        font-size: 2.5rem;
-        font-weight: 800;
-        color: white;
-    }
-    .score-label {
-        font-size: 0.75rem;
-        color: #64748b;
-        margin-top: 0.5rem;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
+    .stat-text strong {
+        color: var(--text-primary);
+        font-family: 'JetBrains Mono', monospace;
     }
     
-    /* TABLE STYLING */
-    .highlight-row {
-        background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%) !important;
-        font-weight: 600 !important;
-    }
-    
-    /* CHECKLIST */
-    .check-item {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.5rem 0;
-        border-bottom: 1px solid #e2e8f0;
-    }
-    .check-pass { color: #22c55e; }
-    .check-fail { color: #ef4444; }
-    .check-warn { color: #eab308; }
-    
-    /* WARNING BADGES */
-    .warning-badge {
-        background: #fef3c7;
-        border: 1px solid #f59e0b;
-        color: #92400e;
-        padding: 0.5rem 1rem;
-        border-radius: 8px;
-        font-size: 0.85rem;
-        margin: 0.25rem 0;
-    }
-    .info-badge {
-        background: #dbeafe;
-        border: 1px solid #3b82f6;
-        color: #1e40af;
-        padding: 0.5rem 1rem;
-        border-radius: 8px;
-        font-size: 0.85rem;
-        margin: 0.25rem 0;
-    }
-    
-    /* PROXIMITY METER */
-    .proximity-bar {
-        height: 8px;
-        border-radius: 4px;
-        background: #e2e8f0;
+    /* DISTANCE INDICATOR */
+    .distance-bar {
+        height: 4px;
+        background: var(--bg-tertiary);
+        border-radius: 2px;
         overflow: hidden;
         margin-top: 0.5rem;
     }
-    .proximity-fill {
+    .distance-fill {
         height: 100%;
-        border-radius: 4px;
+        border-radius: 2px;
         transition: width 0.3s ease;
     }
-    .proximity-close { background: linear-gradient(90deg, #22c55e, #4ade80); }
-    .proximity-medium { background: linear-gradient(90deg, #eab308, #facc15); }
-    .proximity-far { background: linear-gradient(90deg, #ef4444, #f87171); }
+    .distance-fill.close { background: var(--accent-green); }
+    .distance-fill.medium { background: var(--accent-gold); }
+    .distance-fill.far { background: var(--accent-red); }
     
-    /* LIVE CLOCK */
-    .live-clock {
-        background: linear-gradient(135deg, #0f172a, #1e293b);
-        border-radius: 12px;
-        padding: 1rem;
-        text-align: center;
-        color: white;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.2);
-    }
-    .clock-time {
-        font-size: 2rem;
-        font-weight: 700;
-        font-family: 'SF Mono', monospace;
-        color: #fbbf24;
-    }
-    .clock-label {
-        font-size: 0.7rem;
-        color: #94a3b8;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-    }
+    /* Hide Streamlit elements */
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    .stDeployButton { display: none; }
     
-    /* SIDEBAR */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-    }
-    section[data-testid="stSidebar"] .stMarkdown,
-    section[data-testid="stSidebar"] .stMarkdown p,
-    section[data-testid="stSidebar"] .stMarkdown h3,
-    section[data-testid="stSidebar"] .stMarkdown h4,
-    section[data-testid="stSidebar"] .stCaption,
-    section[data-testid="stSidebar"] .stMetric label,
-    section[data-testid="stSidebar"] [data-testid="stMetricValue"],
-    section[data-testid="stSidebar"] [data-testid="stMetricLabel"] {
-        color: #f8fafc !important;
-    }
-    section[data-testid="stSidebar"] .stSelectbox label,
-    section[data-testid="stSidebar"] .stNumberInput label,
-    section[data-testid="stSidebar"] .stTextInput label,
-    section[data-testid="stSidebar"] .stDateInput label,
-    section[data-testid="stSidebar"] .stCheckbox label {
-        color: #94a3b8 !important;
-    }
-    /* Fix input fields to have dark text on light background */
-    section[data-testid="stSidebar"] input,
-    section[data-testid="stSidebar"] .stDateInput input,
-    section[data-testid="stSidebar"] .stNumberInput input,
-    section[data-testid="stSidebar"] .stTextInput input {
-        background-color: #ffffff !important;
-        color: #0f172a !important;
-        border: 1px solid #cbd5e1 !important;
-        border-radius: 8px !important;
-    }
-    section[data-testid="stSidebar"] .stSelectbox > div > div {
-        background-color: #ffffff !important;
-        color: #0f172a !important;
-    }
-    section[data-testid="stSidebar"] [data-baseweb="select"] {
-        background-color: #ffffff !important;
-    }
-    section[data-testid="stSidebar"] [data-baseweb="select"] * {
-        color: #0f172a !important;
-    }
+    /* Override Streamlit dataframe */
+    .stDataFrame { background: var(--bg-card) !important; border-radius: 8px !important; }
+    
     </style>
     """, unsafe_allow_html=True)
 
@@ -2969,223 +3134,175 @@ def main():
     trade_setups_830 = generate_trade_setups(cones_830, current_price)
     trade_setups_1000 = generate_trade_setups(cones_1000, current_price)
     
-    # ===== MAIN LAYOUT =====
-    
-    # ==========================================================================
-    # TODAY'S SUMMARY (at the very top)
-    # ==========================================================================
+    # ===== INSTITUTIONAL TERMINAL LAYOUT =====
     
     # Count setups
     num_calls = len(trade_setups_1000.get('calls_setups', []))
     num_puts = len(trade_setups_1000.get('puts_setups', []))
+    ct_time = get_ct_now()
     
-    st.markdown("## 📊 Today's Summary")
+    # TERMINAL HEADER
+    st.markdown(f"""
+    <div class="terminal-header">
+        <div class="terminal-logo">
+            <div class="terminal-logo-icon">SP</div>
+            <div>
+                <div class="terminal-title">SPX PROPHET</div>
+                <div class="terminal-subtitle">Institutional Options Intelligence</div>
+            </div>
+        </div>
+        <div class="terminal-status">
+            <div class="status-item">
+                <div class="status-label">SPX Index</div>
+                <div class="status-value">{current_price:,.2f}</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Session</div>
+                <div class="status-value status-live">
+                    <span class="live-dot"></span>
+                    {ct_time.strftime('%H:%M:%S')} CT
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    col_summary1, col_summary2, col_summary3 = st.columns(3)
+    # QUICK STATS BAR
+    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME else "CLOSED"
+    window_color = "green" if trading_window == "OPEN" else "red"
     
-    with col_summary1:
-        st.metric("🟢 CALLS Entries", f"{num_calls} levels", help="High-probability support levels to buy CALLS")
-    
-    with col_summary2:
-        st.metric("🔴 PUTS Entries", f"{num_puts} levels", help="High-probability resistance levels to buy PUTS")
-    
-    with col_summary3:
-        ct_time = get_ct_now()
-        if ct_time.time() < LAST_ENTRY_TIME:
-            st.metric("⏰ Trading Window", "OPEN", help="Safe to enter new trades")
-        else:
-            st.metric("⏰ Trading Window", "CLOSED", delta="Too late for 0DTE", delta_color="inverse", help="After 1:30pm - avoid new entries")
-    
-    # Quick glance at all entry levels
-    if num_calls > 0 or num_puts > 0:
-        st.markdown("**Quick Glance — All 10:00 AM Entry Levels:**")
-        
-        quick_col1, quick_col2 = st.columns(2)
-        
-        with quick_col1:
-            if num_calls > 0:
-                for setup in trade_setups_1000['calls_setups']:
-                    dist = abs(current_price - setup.entry_price)
-                    marker = "🎯" if dist <= AT_RAIL_THRESHOLD else ("⏳" if dist <= 15 else "")
-                    st.write(f"{marker} **CALLS @ {setup.entry_price:.2f}** → {setup.strike_label} ({dist:.0f} pts away)")
-            else:
-                st.write("No CALLS entries")
-        
-        with quick_col2:
-            if num_puts > 0:
-                for setup in trade_setups_1000['puts_setups']:
-                    dist = abs(current_price - setup.entry_price)
-                    marker = "🎯" if dist <= AT_RAIL_THRESHOLD else ("⏳" if dist <= 15 else "")
-                    st.write(f"{marker} **PUTS @ {setup.entry_price:.2f}** → {setup.strike_label} ({dist:.0f} pts away)")
-            else:
-                st.write("No PUTS entries")
-    
-    st.markdown("---")
-    
-    # Row: Live Price + Time
-    col_price, col_time = st.columns([2, 1])
-    
-    with col_price:
-        st.metric("SPX Live Price", f"{current_price:,.2f}")
-    
-    with col_time:
-        # Determine which window we're in
-        if ct_time.time() < time(8, 30):
-            window_status = "🔜 Pre-Market"
-        elif ct_time.time() < time(10, 0):
-            window_status = "📊 8:30 Window"
-        elif ct_time.time() < time(13, 30):
-            window_status = "🎯 10:00 Window"
-        else:
-            window_status = "⛔ Late (avoid)"
-        
-        st.metric("Time (CT)", ct_time.strftime('%H:%M:%S'), delta=window_status)
-    
-    st.markdown("---")
+    st.markdown(f"""
+    <div class="stats-bar">
+        <div class="stat-item">
+            <div class="stat-indicator green"></div>
+            <div class="stat-text"><strong>{num_calls}</strong> CALLS Setups</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-indicator red"></div>
+            <div class="stat-text"><strong>{num_puts}</strong> PUTS Setups</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-indicator {window_color}"></div>
+            <div class="stat-text">Trading Window: <strong>{trading_window}</strong></div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-indicator gold"></div>
+            <div class="stat-text">Decision: <strong>10:00 AM CT</strong></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # ==========================================================================
-    # MAIN SECTION: 10:00 AM ENTRIES (PRIMARY)
+    # ACTIVE TRADE SETUPS
     # ==========================================================================
     
-    st.markdown("## 🎯 10:00 AM Entry Levels")
+    # CALLS SECTION
     st.markdown("""
-    **How to use this:** These are your primary entries for today. 
-    - **HIGH PROBABILITY** = 2 or more price levels from different sources all point to the same entry (confluence)
-    - **BACKUP LEVELS** = Only one price level - lower probability, use smaller size or skip
+    <div class="section-header">
+        <div class="section-icon">📈</div>
+        <div class="section-title">Calls Entry Levels — Long Positions</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    Wait for SPX to reach these levels, then enter the recommended contract.
-    """)
-    
-    # Use 10:00 AM setups
-    active_setups = trade_setups_1000
-    
-    # Check if we have any setups
-    has_calls = len(active_setups.get('calls_setups', [])) > 0
-    has_puts = len(active_setups.get('puts_setups', [])) > 0
-    
-    if not has_calls and not has_puts:
-        st.warning("⚠️ No high-probability entry levels detected for today. See backup levels below.")
-    
-    # ==========================================================================
-    # CALLS ENTRIES (Buy when price drops to support)
-    # ==========================================================================
-    
-    st.markdown("### 🟢 CALLS — Buy When Price Drops To These Levels")
-    st.caption("Price dropping to these support levels = buy CALLS (betting price bounces up)")
-    
-    if has_calls:
-        st.success(f"✅ Found {len(active_setups['calls_setups'])} HIGH PROBABILITY entry level(s)")
-        for setup in active_setups['calls_setups']:
-            render_trade_setup_card(setup, current_price)
+    if num_calls > 0:
+        for setup in trade_setups_1000['calls_setups']:
+            render_institutional_trade_card(setup, current_price)
     else:
-        st.info("No high-probability CALLS entries today")
+        st.markdown("""
+        <div class="trade-panel">
+            <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
+                No high-probability CALLS entries detected for this session
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Backup single rails for CALLS
-    if active_setups.get('single_calls'):
-        with st.expander(f"📋 BACKUP LEVELS — Lower Probability ({len(active_setups['single_calls'])} levels)"):
-            st.caption("These are single price levels without confirmation. Use smaller size or skip.")
-            for rail in active_setups['single_calls'][:5]:
-                distance = abs(current_price - rail['price'])
-                st.write(f"**{rail['price']:.2f}** — {rail['rail']} ({distance:.0f} pts away)")
+    # PUTS SECTION
+    st.markdown("""
+    <div class="section-header">
+        <div class="section-icon">📉</div>
+        <div class="section-title">Puts Entry Levels — Short Positions</div>
+    </div>
+    """, unsafe_allow_html=True)
     
-    st.markdown("---")
-    
-    # ==========================================================================
-    # PUTS ENTRIES (Buy when price rises to resistance)
-    # ==========================================================================
-    
-    st.markdown("### 🔴 PUTS — Buy When Price Rises To These Levels")
-    st.caption("Price rising to these resistance levels = buy PUTS (betting price drops down)")
-    
-    if has_puts:
-        st.success(f"✅ Found {len(active_setups['puts_setups'])} HIGH PROBABILITY entry level(s)")
-        for setup in active_setups['puts_setups']:
-            render_trade_setup_card(setup, current_price)
+    if num_puts > 0:
+        for setup in trade_setups_1000['puts_setups']:
+            render_institutional_trade_card(setup, current_price)
     else:
-        st.info("No high-probability PUTS entries today")
-    
-    # Backup single rails for PUTS
-    if active_setups.get('single_puts'):
-        with st.expander(f"📋 BACKUP LEVELS — Lower Probability ({len(active_setups['single_puts'])} levels)"):
-            st.caption("These are single price levels without confirmation. Use smaller size or skip.")
-            for rail in active_setups['single_puts'][:5]:
-                distance = abs(current_price - rail['price'])
-                st.write(f"**{rail['price']:.2f}** — {rail['rail']} ({distance:.0f} pts away)")
-    
-    st.markdown("---")
+        st.markdown("""
+        <div class="trade-panel">
+            <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
+                No high-probability PUTS entries detected for this session
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     # ==========================================================================
-    # WHAT TO DO RIGHT NOW
+    # POSITION MONITOR
     # ==========================================================================
     
-    st.markdown("### 📍 What To Do Right Now")
-    
-    # Find closest setups
-    all_setups = active_setups.get('calls_setups', []) + active_setups.get('puts_setups', [])
+    all_setups = trade_setups_1000.get('calls_setups', []) + trade_setups_1000.get('puts_setups', [])
     
     if all_setups:
-        # Calculate distances
+        st.markdown("""
+        <div class="section-header">
+            <div class="section-icon">🎯</div>
+            <div class="section-title">Position Monitor — Nearest Entry</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Find nearest
         for setup in all_setups:
             setup.distance = abs(current_price - setup.entry_price)
-        all_setups_sorted = sorted(all_setups, key=lambda x: x.distance)
+        nearest = min(all_setups, key=lambda x: x.distance)
         
-        nearest = all_setups_sorted[0]
-        
-        # Check if at entry
+        # Determine status
         if nearest.distance <= AT_RAIL_THRESHOLD:
-            st.success(f"""
-            🎯 **YOU ARE AT AN ENTRY LEVEL!**
-            
-            **Contract:** {nearest.strike_label}  
-            **Entry:** {nearest.entry_price:.2f} (current: {current_price:.2f})  
-            **Stop:** {nearest.stop_loss:.2f}  
-            **Target 50%:** {nearest.target_50:.2f} → **+${nearest.profit_50_theta_adjusted:.0f}**
-            """)
+            status = "AT ENTRY"
+            status_class = "badge-go"
         elif nearest.distance <= 15:
-            st.warning(f"""
-            ⏳ **WATCH THIS LEVEL — {nearest.distance:.0f} pts away**
-            
-            **Contract:** {nearest.strike_label}  
-            **Wait for:** {nearest.entry_price:.2f}  
-            **Current price:** {current_price:.2f}
-            """)
+            status = "APPROACHING"
+            status_class = "badge-wait"
         else:
-            st.info(f"""
-            📍 **WAIT — Nearest entry is {nearest.distance:.0f} pts away**
-            
-            **Nearest setup:** {nearest.strike_label} at {nearest.entry_price:.2f}  
-            **Current price:** {current_price:.2f}
-            
-            Set an alert at {nearest.entry_price:.2f} and wait.
-            """)
-    else:
-        st.warning("No high-probability setups today. Check backup levels or skip today.")
+            status = "WAITING"
+            status_class = "badge-nogo"
         
-        # Show distance to both nearest CALLS and PUTS
-        col_near_c, col_near_p = st.columns(2)
+        direction_class = "badge-calls" if nearest.direction == "CALLS" else "badge-puts"
         
-        nearest_call = next((s for s in all_setups_sorted if s.direction == 'CALLS'), None)
-        nearest_put = next((s for s in all_setups_sorted if s.direction == 'PUTS'), None)
-        
-        with col_near_c:
-            if nearest_call:
-                direction = "↓" if current_price > nearest_call.entry_price else "↑"
-                st.metric(
-                    f"🟢 Nearest CALLS", 
-                    f"{nearest_call.entry_price:.2f}",
-                    f"{direction} {nearest_call.distance:.1f} pts"
-                )
-                st.caption(f"Strike: {nearest_call.strike_label}")
-        
-        with col_near_p:
-            if nearest_put:
-                direction = "↑" if current_price < nearest_put.entry_price else "↓"
-                st.metric(
-                    f"🔴 Nearest PUTS", 
-                    f"{nearest_put.entry_price:.2f}",
-                    f"{direction} {nearest_put.distance:.1f} pts"
-                )
-                st.caption(f"Strike: {nearest_put.strike_label}")
+        st.markdown(f"""
+        <div class="trade-panel">
+            <div class="trade-panel-header">
+                <div class="trade-panel-title">Priority Target</div>
+                <div>
+                    <span class="trade-panel-badge {direction_class}">{nearest.direction}</span>
+                    <span class="trade-panel-badge {status_class}">{status}</span>
+                </div>
+            </div>
+            <div class="trade-panel-body">
+                <div class="contract-display">
+                    <div class="contract-strike">{nearest.strike_label}</div>
+                    <div class="contract-type">0DTE SPX Option</div>
+                </div>
+                <div class="entry-row">
+                    <div class="entry-item">
+                        <div class="entry-label">Current Price</div>
+                        <div class="entry-value">{current_price:,.2f}</div>
+                    </div>
+                    <div class="entry-item">
+                        <div class="entry-label">Entry Level</div>
+                        <div class="entry-value gold">{nearest.entry_price:,.2f}</div>
+                    </div>
+                    <div class="entry-item">
+                        <div class="entry-label">Distance</div>
+                        <div class="entry-value {'green' if nearest.distance <= 5 else 'gold' if nearest.distance <= 15 else ''}">{nearest.distance:.1f} pts</div>
+                    </div>
+                    <div class="entry-item">
+                        <div class="entry-label">Target (50%)</div>
+                        <div class="entry-value green">+${nearest.profit_50_theta_adjusted:,.0f}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
