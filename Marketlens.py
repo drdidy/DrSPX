@@ -2919,23 +2919,41 @@ def main():
             if st.session_state.session_low is None or current_price < st.session_state.session_low:
                 st.session_state.session_low = current_price
         
-        # Show session tracking info
+        # Show session tracking info with MANUAL OVERRIDE
         st.markdown("---")
         st.markdown("### 📊 Session Tracker")
+        st.caption("Auto-updates during market hours. Manual override below.")
+        
         sess_col1, sess_col2 = st.columns(2)
         with sess_col1:
-            if st.session_state.session_high:
-                st.metric("Session High", f"{st.session_state.session_high:,.2f}")
-            else:
-                st.metric("Session High", "—")
+            display_high = st.session_state.session_high if st.session_state.session_high else current_price
+            st.metric("Session High", f"{display_high:,.2f}" if display_high else "—")
         with sess_col2:
-            if st.session_state.session_low:
-                st.metric("Session Low", f"{st.session_state.session_low:,.2f}")
-            else:
-                st.metric("Session Low", "—")
+            display_low = st.session_state.session_low if st.session_state.session_low else current_price
+            st.metric("Session Low", f"{display_low:,.2f}" if display_low else "—")
         
-        if not is_market_hours:
-            st.caption("Updates during market hours (8:30-3:00 CT)")
+        # Manual override inputs - ALWAYS visible so user can correct
+        with st.expander("✏️ Manual Session Override"):
+            st.caption("Enter actual session high/low from TradingView if auto-tracking is off")
+            manual_high = st.number_input(
+                "Session High", 
+                value=float(st.session_state.session_high) if st.session_state.session_high else float(current_price),
+                step=0.5,
+                format="%.2f",
+                key="manual_high_input"
+            )
+            manual_low = st.number_input(
+                "Session Low", 
+                value=float(st.session_state.session_low) if st.session_state.session_low else float(current_price),
+                step=0.5,
+                format="%.2f",
+                key="manual_low_input"
+            )
+            if st.button("Update Session Range"):
+                st.session_state.session_high = manual_high
+                st.session_state.session_low = manual_low
+                st.success(f"✅ Updated: High={manual_high:.2f}, Low={manual_low:.2f}")
+                st.rerun()
         
         st.markdown("---")
         st.markdown("### ⚙️ Parameters")
