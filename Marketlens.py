@@ -1328,23 +1328,30 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     elif setup.theta_period == 'late':
         theta_warning = "🛑 Late session - avoid new entries"
     
-    st.markdown(f"""
-    <div style="border: 3px solid {color}; border-radius: 12px; padding: 1rem; margin: 0.5rem 0; 
-                background: linear-gradient(135deg, {color}08, {color}15);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-            <span style="font-size: 1.4rem; font-weight: 800; color: {color};">{emoji} {setup.strike_label}</span>
-            <span style="font-size: 1rem; font-weight: 700; color: {decision_color};">{decision}</span>
-        </div>
-        <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 0.5rem;">
-            Confluence: {' + '.join(setup.confluence_rails)}
-        </div>
-        <div style="font-size: 0.75rem; color: {decision_color}; margin-bottom: 0.5rem;">
-            {decision_reason}
-        </div>
-        {f'<div style="font-size: 0.75rem; color: #f59e0b; margin-bottom: 0.5rem;">{theta_warning}</div>' if theta_warning else ''}
-        {f'<div style="font-weight: 600; color: {color}; margin-bottom: 0.5rem;">{distance_text}</div>' if distance_text else ''}
-    </div>
-    """, unsafe_allow_html=True)
+    # Card header with strike and decision
+    if setup.direction == 'CALLS':
+        st.success(f"**{emoji} {setup.strike_label}** — {decision}")
+    else:
+        st.error(f"**{emoji} {setup.strike_label}** — {decision}")
+    
+    # Confluence info
+    st.caption(f"Confluence: {' + '.join(setup.confluence_rails)}")
+    
+    # Decision reason
+    if "GO" in decision:
+        st.markdown(f"✅ {decision_reason}")
+    elif "NO-GO" in decision or "LATE" in decision:
+        st.markdown(f"❌ {decision_reason}")
+    else:
+        st.markdown(f"⚠️ {decision_reason}")
+    
+    # Theta warning if applicable
+    if theta_warning:
+        st.warning(theta_warning)
+    
+    # Distance from current price
+    if distance_text:
+        st.info(distance_text)
     
     # Entry and Stop
     col1, col2 = st.columns(2)
@@ -1355,11 +1362,11 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     
     # Targets and Profits - show both theoretical and theta-adjusted
     st.markdown("**Exit Strategy:**")
+    theta_mult = THETA_MULTIPLIER.get(setup.theta_period, 1.0)
     target_data = {
         "Exit": ["60% @ 50%", "20% @ 75%", "20% @ 100%"],
         "Level": [f"{setup.target_50:.2f}", f"{setup.target_75:.2f}", f"{setup.target_100:.2f}"],
-        "Profit (theory)": [f"+${setup.profit_50:.0f}", f"+${setup.profit_75:.0f}", f"+${setup.profit_100:.0f}"],
-        "Profit (θ-adj)": [f"+${setup.profit_50_theta_adjusted:.0f}", f"+${setup.profit_75 * THETA_MULTIPLIER.get(setup.theta_period, 1.0):.0f}", f"+${setup.profit_100 * THETA_MULTIPLIER.get(setup.theta_period, 1.0):.0f}"]
+        "Profit (θ-adj)": [f"+${setup.profit_50_theta_adjusted:.0f}", f"+${setup.profit_75 * theta_mult:.0f}", f"+${setup.profit_100 * theta_mult:.0f}"]
     }
     st.dataframe(target_data, use_container_width=True, hide_index=True)
     
@@ -1373,6 +1380,8 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
         st.metric("R:R (θ-adj)", f"{setup.rr_ratio_theta_adjusted:.1f}:1")
     with col_d:
         st.metric("Risk", f"${setup.risk_dollars:.0f}")
+    
+    st.markdown("---")
 
 # ============================================================================
 # CONTRACT EXPECTATION ENGINE
