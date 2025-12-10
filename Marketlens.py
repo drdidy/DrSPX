@@ -3392,6 +3392,9 @@ def main():
         session_high = st.session_state.get('session_high')
         session_low = st.session_state.get('session_low')
         
+        # Buffer for "close enough" triggers (accounts for spreads/slippage)
+        TRIGGER_BUFFER = 1.0  # 1 point buffer
+        
         active_setups = []
         triggered_setups = []
         
@@ -3400,17 +3403,17 @@ def main():
             setup.triggered = False
             
             if setup.direction == "CALLS":
-                # CALLS entry triggers when price dips TO or BELOW entry level
-                # Check if session low reached the entry
-                if session_low is not None and session_low <= setup.entry_price:
+                # CALLS entry triggers when price dips TO or NEAR entry level
+                # Check if session low reached within buffer of entry
+                if session_low is not None and session_low <= setup.entry_price + TRIGGER_BUFFER:
                     setup.triggered = True
                     triggered_setups.append(setup)
                 else:
                     active_setups.append(setup)
             else:  # PUTS
-                # PUTS entry triggers when price rises TO or ABOVE entry level
-                # Check if session high reached the entry
-                if session_high is not None and session_high >= setup.entry_price:
+                # PUTS entry triggers when price rises TO or NEAR entry level
+                # Check if session high reached within buffer of entry
+                if session_high is not None and session_high >= setup.entry_price - TRIGGER_BUFFER:
                     setup.triggered = True
                     triggered_setups.append(setup)
                 else:
