@@ -24,34 +24,53 @@ ET_TZ = pytz.timezone('America/New_York')
 SLOPE_ASCENDING = 0.45
 SLOPE_DESCENDING = 0.45
 
-# CONTRACT FACTOR: A 15-20pt OTM option moves ~0.33x the underlying
+# CONTRACT FACTOR: A 15-20pt OTM option moves ~0.30-0.35x the underlying
+# Using 0.33 as middle estimate. Actual delta varies with time and distance OTM.
 CONTRACT_FACTOR = 0.33
 
+# Market hours
 MAINTENANCE_START_CT = time(16, 0)
 MAINTENANCE_END_CT = time(17, 0)
-POWER_HOUR_START = time(14, 0)  # Avoid highs during power hour (volatile/unpredictable)
+POWER_HOUR_START = time(14, 0)  # Highs after 2pm are less reliable pivots
 
 # Pre-market window (for detecting pre-market pivots from ES)
-PREMARKET_START_CT = time(6, 0)   # Pre-market starts 6am CT
-PREMARKET_END_CT = time(8, 30)    # Pre-market ends at SPX open
+PREMARKET_START_CT = time(6, 0)
+PREMARKET_END_CT = time(8, 30)
 
-# Secondary Pivot Detection - must be meaningful pullback, not noise
-SECONDARY_PIVOT_MIN_PULLBACK_PCT = 0.003  # 0.3% = ~18 pts on SPX 6000 - meaningful pullback
-SECONDARY_PIVOT_MIN_DISTANCE = 5.0  # At least 5 points from primary to matter
-SECONDARY_PIVOT_START_TIME = time(13, 0)  # Look for secondaries after structure develops
+# Secondary Pivot Detection
+SECONDARY_PIVOT_MIN_PULLBACK_PCT = 0.003  # 0.3% = ~18 pts on SPX 6000
+SECONDARY_PIVOT_MIN_DISTANCE = 5.0  # At least 5 points from primary
+SECONDARY_PIVOT_START_TIME = time(13, 0)  # After structure develops
 
-# TRADING THRESHOLDS - Based on structural logic
-MIN_CONE_WIDTH = 25.0  # Minimum 25 pts cone width for viable 0DTE trade (allows 12+ pt move to 50%)
-AT_RAIL_THRESHOLD = 10.0  # Within 10 pts of rail = "at the rail" for entry
-FAR_FROM_STRUCTURE = 15.0  # Beyond 15 pts from all rails = breakout/breakdown territory
-EDGE_ZONE_PCT = 0.30  # Within 30% of cone from a rail = edge zone (for position calc)
+# ============================================================================
+# CORE TRADING THRESHOLDS - These directly affect trade decisions
+# ============================================================================
 
-# These are less critical but kept for regime analysis
-OVERNIGHT_RANGE_MAX_PCT = 0.50  # Overnight moved more than 50% of cone = wild session
-MIN_CONE_WIDTH_PCT = 0.004  # ~24 pts on 6000 SPX - ensures tradeable range
-MIN_PRIOR_DAY_RANGE_PCT = 0.008  # ~48 pts prior day range shows healthy movement
-MIN_CONTRACT_MOVE = 8.0  # Minimum $8 expected move to justify trade
-RAIL_TOUCH_THRESHOLD = 2.0  # Within 2 pts = "touching" the rail
+# Cone width: Need at least 25 pts to have meaningful 0DTE trade
+# Math: 25 pts × 50% target = 12.5 pt move × 0.33 delta × $100 = $412 profit
+# This justifies the risk of a $100 stop
+MIN_CONE_WIDTH = 25.0
+
+# Entry threshold: Within 5 pts of rail = actionable entry
+# Beyond 5 pts = wait for price to come to you
+AT_RAIL_THRESHOLD = 5.0
+
+# Stop loss: 3 pts from entry
+# Math: 3 pts × 0.33 delta × $100 = ~$100 risk per contract
+STOP_LOSS_PTS = 3.0
+
+# Strike offset: 15-20 pts OTM for ~0.30-0.35 delta
+STRIKE_OFFSET = 17.5
+
+# Minimum R:R to take a trade: At least 3:1 at 50% target
+# Below this, risk doesn't justify reward
+MIN_RR_RATIO = 3.0
+
+# Rail touch threshold: Within 2 pts = ES "touched" the rail
+RAIL_TOUCH_THRESHOLD = 2.0
+
+# Confluence: Rails within 5 pts of each other = converging
+CONFLUENCE_THRESHOLD = 5.0
 
 TIME_BLOCKS = [
     time(8, 30), time(9, 0), time(9, 30), time(10, 0), time(10, 30),
@@ -98,14 +117,12 @@ class ContractExpectation:
 
 @dataclass
 class RegimeAnalysis:
-    overnight_range: float
-    overnight_range_pct: float
-    overnight_touched_rails: List[str]
-    opening_position: str
-    first_bar_energy: str
-    cone_width_adequate: bool
-    prior_day_range_adequate: bool
-    es_spx_offset: float
+    """Simplified regime - only keep what matters for trading decisions."""
+    overnight_range: float  # How much ES moved overnight
+    overnight_range_pct: float  # As percentage of cone
+    overnight_touched_rails: List[str]  # Which rails ES touched
+    opening_position: str  # Where price opened relative to cone
+    es_spx_offset: float  # Current ES-SPX spread
 
 @dataclass 
 class ActionCard:
@@ -191,18 +208,21 @@ def project_rail(pivot_price: float, blocks: int, direction: str) -> float:
         return pivot_price - (blocks * SLOPE_DESCENDING)
 
 def get_position_in_cone(price: float, ascending_rail: float, descending_rail: float) -> Tuple[str, float]:
+    """Determine if price is at a rail or in dead zone."""
     cone_width = ascending_rail - descending_rail
     if cone_width <= 0:
         return 'invalid', 0
     
-    position_pct = (price - descending_rail) / cone_width
+    distance_to_lower = abs(price - descending_rail)
+    distance_to_upper = abs(price - ascending_rail)
     
-    if position_pct <= EDGE_ZONE_PCT:
-        return 'lower_edge', abs(price - descending_rail)
-    elif position_pct >= (1 - EDGE_ZONE_PCT):
-        return 'upper_edge', abs(price - ascending_rail)
+    # At rail = within AT_RAIL_THRESHOLD (5 pts)
+    if distance_to_lower <= AT_RAIL_THRESHOLD:
+        return 'lower_edge', distance_to_lower
+    elif distance_to_upper <= AT_RAIL_THRESHOLD:
+        return 'upper_edge', distance_to_upper
     else:
-        return 'dead_zone', min(abs(price - ascending_rail), abs(price - descending_rail))
+        return 'dead_zone', min(distance_to_upper, distance_to_lower)
 
 # ============================================================================
 # DATA FETCHING WITH POWER HOUR FILTER
@@ -1007,9 +1027,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         target_75 = entry_price + (cone_width * 0.75)
         stop_loss = entry_price - 3  # 3 point stop
         
-        # Calculate strike (15-20 pts OTM for calls = below entry)
-        strike = int(entry_price - 17.5)
-        strike = (strike // 5) * 5  # Round to nearest 5
+        # Calculate strike (OTM CALLS = strike ABOVE entry price)
+        # 15-20 pts OTM gives ~0.33 delta
+        strike = int(entry_price + 17.5)
+        strike = ((strike + 4) // 5) * 5  # Round UP to nearest 5
         strike_label = f"SPX {strike}C"
         
         # Calculate profits (contract moves 0.33x underlying)
@@ -1024,12 +1045,22 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         
         rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
         
-        # Quality score based on confluence strength and cone width
-        quality_score = min(100, 
-            (strength * 20) +  # 2 rails = 40, 3 rails = 60, 4 rails = 80
-            (10 if cone_width >= 30 else 5) +  # Bonus for good width
-            (10 if rr_ratio >= 5 else 5)  # Bonus for good R:R
-        )
+        # Quality score based ONLY on calculable factors:
+        # 1. Confluence strength: More rails = more structural agreement
+        #    2 rails = base, 3 rails = +25, 4+ rails = +50
+        # 2. R:R ratio: Higher = better risk-adjusted return
+        #    R:R >= 5 = +25, R:R >= 3 = +15
+        # 3. Cone width: Wider = more room for profit
+        #    >= 35 pts = +25, >= 25 pts = +15
+        
+        confluence_points = 25 + ((strength - 2) * 25)  # 2=25, 3=50, 4=75
+        confluence_points = min(75, confluence_points)
+        
+        rr_points = 25 if rr_ratio >= 5 else (15 if rr_ratio >= 3 else 0)
+        
+        width_points = 25 if cone_width >= 35 else (15 if cone_width >= 25 else 0)
+        
+        quality_score = min(100, confluence_points + rr_points + width_points)
         
         setup = TradeSetup(
             direction='CALLS',
@@ -1084,9 +1115,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         target_75 = entry_price - (cone_width * 0.75)
         stop_loss = entry_price + 3  # 3 point stop
         
-        # Calculate strike (15-20 pts OTM for puts = above entry)
-        strike = int(entry_price + 17.5)
-        strike = ((strike + 4) // 5) * 5  # Round up to nearest 5
+        # Calculate strike (OTM PUTS = strike BELOW entry price)
+        # 15-20 pts OTM gives ~0.33 delta
+        strike = int(entry_price - 17.5)
+        strike = (strike // 5) * 5  # Round DOWN to nearest 5
         strike_label = f"SPX {strike}P"
         
         # Calculate profits
@@ -1101,11 +1133,15 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         
         rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
         
-        quality_score = min(100,
-            (strength * 20) +
-            (10 if cone_width >= 30 else 5) +
-            (10 if rr_ratio >= 5 else 5)
-        )
+        # Quality score - same logic as CALLS
+        confluence_points = 25 + ((strength - 2) * 25)
+        confluence_points = min(75, confluence_points)
+        
+        rr_points = 25 if rr_ratio >= 5 else (15 if rr_ratio >= 3 else 0)
+        
+        width_points = 25 if cone_width >= 35 else (15 if cone_width >= 25 else 0)
+        
+        quality_score = min(100, confluence_points + rr_points + width_points)
         
         setup = TradeSetup(
             direction='PUTS',
@@ -1170,7 +1206,7 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
     }
 
 def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
-    """Render a complete trade setup card."""
+    """Render a complete trade setup card with GO/NO-GO decision."""
     
     # Determine colors and proximity
     if setup.direction == 'CALLS':
@@ -1182,32 +1218,55 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     
     # Calculate distance from current price if provided
     distance_text = ""
+    at_entry = False
     if current_price:
         distance = abs(current_price - setup.entry_price)
-        if distance <= 5:
-            distance_text = f"🎯 {distance:.1f} pts away - READY!"
+        if distance <= AT_RAIL_THRESHOLD:
+            distance_text = f"🎯 {distance:.1f} pts away - AT ENTRY"
+            at_entry = True
         elif distance <= 15:
             distance_text = f"⏳ {distance:.1f} pts away - WATCH"
         else:
             distance_text = f"📍 {distance:.1f} pts away"
     
-    # Quality indicator
-    if setup.quality_score >= 80:
-        quality = "⭐⭐⭐ PREMIUM"
-    elif setup.quality_score >= 60:
-        quality = "⭐⭐ GOOD"
+    # GO/NO-GO Decision based on calculable factors:
+    # 1. R:R must be >= 3:1 (minimum acceptable)
+    # 2. Cone width must be >= 25 pts
+    # 3. Must have confluence (2+ rails)
+    
+    rr_ok = setup.rr_ratio >= MIN_RR_RATIO
+    width_ok = setup.cone_width >= MIN_CONE_WIDTH
+    confluence_ok = setup.confluence_strength >= 2
+    
+    if rr_ok and width_ok and confluence_ok:
+        decision = "✅ GO"
+        decision_color = "#22c55e"
+        decision_reason = f"R:R {setup.rr_ratio:.1f}:1, {setup.confluence_strength} rails, {setup.cone_width:.0f}pt range"
+    elif not rr_ok:
+        decision = "❌ NO-GO"
+        decision_color = "#ef4444"
+        decision_reason = f"R:R only {setup.rr_ratio:.1f}:1 (need {MIN_RR_RATIO}:1)"
+    elif not width_ok:
+        decision = "❌ NO-GO"
+        decision_color = "#ef4444"
+        decision_reason = f"Cone only {setup.cone_width:.0f} pts (need {MIN_CONE_WIDTH})"
     else:
-        quality = "⭐ STANDARD"
+        decision = "⚠️ WEAK"
+        decision_color = "#f59e0b"
+        decision_reason = f"Single rail only - reduced probability"
     
     st.markdown(f"""
     <div style="border: 3px solid {color}; border-radius: 12px; padding: 1rem; margin: 0.5rem 0; 
                 background: linear-gradient(135deg, {color}08, {color}15);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
             <span style="font-size: 1.4rem; font-weight: 800; color: {color};">{emoji} {setup.strike_label}</span>
-            <span style="font-size: 0.85rem; color: #64748b;">{quality}</span>
+            <span style="font-size: 1rem; font-weight: 700; color: {decision_color};">{decision}</span>
         </div>
         <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 0.5rem;">
             Confluence: {' + '.join(setup.confluence_rails)}
+        </div>
+        <div style="font-size: 0.75rem; color: {decision_color}; margin-bottom: 0.5rem;">
+            {decision_reason}
         </div>
         {f'<div style="font-weight: 600; color: {color}; margin-bottom: 0.5rem;">{distance_text}</div>' if distance_text else ''}
     </div>
@@ -1298,6 +1357,7 @@ def calculate_contract_expectation(
 # ============================================================================
 
 def analyze_regime(cones, es_data, prior_session, first_bar, current_price) -> RegimeAnalysis:
+    """Analyze market regime - only factors that matter for trading."""
     nearest_cone, _, _ = find_nearest_rail(current_price, cones)
     
     overnight_range = es_data.get('overnight_range', 0) if es_data else 0
@@ -1305,19 +1365,12 @@ def analyze_regime(cones, es_data, prior_session, first_bar, current_price) -> R
     overnight_touched = check_overnight_rail_touches(cones, es_data)
     
     position, _ = get_position_in_cone(current_price, nearest_cone.ascending_rail, nearest_cone.descending_rail)
-    first_bar_energy = first_bar.get('energy', 'neutral') if first_bar else 'neutral'
-    
-    cone_width_pct = nearest_cone.width / current_price if current_price > 0 else 0
-    prior_range_pct = prior_session.get('range_pct', 0) if prior_session else 0
     
     return RegimeAnalysis(
         overnight_range=overnight_range,
         overnight_range_pct=overnight_range_pct,
         overnight_touched_rails=overnight_touched,
         opening_position=position,
-        first_bar_energy=first_bar_energy,
-        cone_width_adequate=cone_width_pct >= MIN_CONE_WIDTH_PCT,
-        prior_day_range_adequate=prior_range_pct >= MIN_PRIOR_DAY_RANGE_PCT,
         es_spx_offset=es_data.get('offset', 0) if es_data else 0
     )
 
@@ -1488,46 +1541,32 @@ def calculate_confluence_score(nearest_distance, regime, cones, current_price, i
     score += time_pts
     
     # =========================================================================
-    # 5. REGIME QUALITY (up to +10 or -10)
-    # Market conditions affect reliability
+    # 5. OVERNIGHT BEHAVIOR (simple: tight = good, wide = neutral)
+    # Only matters if extreme - minor variations don't predict outcome
     # =========================================================================
-    regime_pts = 0
-    regime_notes = []
-    
     if regime.overnight_range_pct < 0.25:
-        regime_pts += 5
-        regime_notes.append("tight overnight")
-    elif regime.overnight_range_pct > 0.50:
-        regime_pts -= 5
-        regime_notes.append("wide overnight")
-    
-    if regime.cone_width_adequate:
-        regime_pts += 3
-        regime_notes.append("good cone width")
+        regime_pts = 5
+        breakdown['overnight'] = f"+{regime_pts} (tight overnight - structure respected)"
+    elif regime.overnight_range_pct > 0.60:
+        regime_pts = -5
+        breakdown['overnight'] = f"{regime_pts} (wide overnight - volatile)"
     else:
-        regime_pts -= 5
-        regime_notes.append("narrow cone")
-    
-    if regime.prior_day_range_adequate:
-        regime_pts += 2
-        regime_notes.append("healthy prior range")
-    
+        regime_pts = 0
+        breakdown['overnight'] = f"+{regime_pts} (normal overnight range)"
     score += regime_pts
-    breakdown['regime'] = f"{'+' if regime_pts >= 0 else ''}{regime_pts} ({', '.join(regime_notes) if regime_notes else 'neutral'})"
     
     # =========================================================================
     # 6. SECONDARY PIVOT ALIGNMENT (up to +10)
-    # If secondary pivots also project to this level, extra confirmation
+    # If secondary pivots also project to this level = extra confluence
     # =========================================================================
-    # Check if any secondary pivot rails are near current price
     secondary_alignment = False
     for cone in cones:
         if 'High²' in cone.name or 'Low²' in cone.name:
             if nearest_rail_type == 'descending':
-                if abs(cone.descending_rail - current_price) <= 8:
+                if abs(cone.descending_rail - current_price) <= CONFLUENCE_THRESHOLD:
                     secondary_alignment = True
             elif nearest_rail_type == 'ascending':
-                if abs(cone.ascending_rail - current_price) <= 8:
+                if abs(cone.ascending_rail - current_price) <= CONFLUENCE_THRESHOLD:
                     secondary_alignment = True
     
     if secondary_alignment:
@@ -1666,18 +1705,18 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
         target_75 = entry_level + (cone_height * 0.75)
         stop_level = entry_level - 3  # 3 pt stop
         
-        # Strike recommendation: 15-20 pts OTM
-        recommended_strike = int(entry_level - 17.5)  # Round to nearest 5
-        recommended_strike = (recommended_strike // 5) * 5
+        # OTM CALLS = strike ABOVE entry (15-20 pts OTM for ~0.33 delta)
+        recommended_strike = int(entry_level + 17.5)
+        recommended_strike = ((recommended_strike + 4) // 5) * 5  # Round UP to nearest 5
     else:
         calc_direction = 'PUTS'
         target_50 = entry_level - (cone_height * 0.50)
         target_75 = entry_level - (cone_height * 0.75)
         stop_level = entry_level + 3  # 3 pt stop
         
-        # Strike recommendation: 15-20 pts OTM
-        recommended_strike = int(entry_level + 17.5)  # Round to nearest 5
-        recommended_strike = ((recommended_strike + 4) // 5) * 5
+        # OTM PUTS = strike BELOW entry (15-20 pts OTM for ~0.33 delta)
+        recommended_strike = int(entry_level - 17.5)
+        recommended_strike = (recommended_strike // 5) * 5  # Round DOWN to nearest 5
     
     # Calculate expected contract moves
     move_50 = cone_height * 0.50
@@ -2151,13 +2190,15 @@ def render_contract_recommendation(action: ActionCard):
     
     # Calculate recommended strike (15-20 pts OTM)
     if ce.direction == 'CALLS':
-        strike = int(action.entry_level - 17.5)
-        strike = (strike // 5) * 5  # Round down to nearest 5
+        # OTM CALLS = strike ABOVE entry price
+        strike = int(action.entry_level + 17.5)
+        strike = ((strike + 4) // 5) * 5  # Round UP to nearest 5
         strike_label = f"SPX {strike}C (0DTE)"
         border_color = "#22c55e"
     else:
-        strike = int(action.entry_level + 17.5)
-        strike = ((strike + 4) // 5) * 5  # Round up to nearest 5
+        # OTM PUTS = strike BELOW entry price
+        strike = int(action.entry_level - 17.5)
+        strike = (strike // 5) * 5  # Round DOWN to nearest 5
         strike_label = f"SPX {strike}P (0DTE)"
         border_color = "#ef4444"
     
