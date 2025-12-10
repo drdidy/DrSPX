@@ -3392,8 +3392,8 @@ def main():
         session_high = st.session_state.get('session_high')
         session_low = st.session_state.get('session_low')
         
-        # Buffer for "close enough" triggers (accounts for spreads/slippage)
-        TRIGGER_BUFFER = 1.0  # 1 point buffer
+        # Buffer for "close enough" triggers (accounts for spreads/slippage/data source differences)
+        TRIGGER_BUFFER = 2.0  # 2 point buffer
         
         active_setups = []
         triggered_setups = []
