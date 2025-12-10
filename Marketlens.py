@@ -2022,35 +2022,35 @@ def inject_premium_css():
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
     
     :root {
-        --bg-primary: #0a0e17;
-        --bg-secondary: #111827;
-        --bg-tertiary: #1f2937;
-        --bg-card: #161d2e;
-        --text-primary: #f1f5f9;
-        --text-secondary: #94a3b8;
+        --bg-primary: #f8fafc;
+        --bg-secondary: #f1f5f9;
+        --bg-tertiary: #e2e8f0;
+        --bg-card: #ffffff;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
         --text-muted: #64748b;
-        --accent-gold: #f59e0b;
-        --accent-green: #10b981;
-        --accent-red: #ef4444;
-        --accent-blue: #3b82f6;
-        --border-color: #374151;
+        --accent-gold: #d97706;
+        --accent-green: #059669;
+        --accent-red: #dc2626;
+        --accent-blue: #2563eb;
+        --border-color: #cbd5e1;
     }
     
     .stApp {
         background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
     }
     
-    /* Override Streamlit defaults for dark theme */
+    /* Override Streamlit defaults for light theme */
     .stApp > header { background: transparent; }
     .stMarkdown, .stText, p, span, label { color: var(--text-primary) !important; }
     h1, h2, h3, h4, h5, h6 { color: var(--text-primary) !important; }
     .stMetric label { color: var(--text-secondary) !important; }
     .stMetric [data-testid="stMetricValue"] { color: var(--text-primary) !important; font-family: 'JetBrains Mono', monospace !important; }
     
-    /* INSTITUTIONAL HEADER */
+    /* INSTITUTIONAL HEADER - dark header on light background */
     .terminal-header {
-        background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
-        border: 1px solid var(--border-color);
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        border: 1px solid #475569;
         border-radius: 8px;
         padding: 1.5rem 2rem;
         margin-bottom: 1.5rem;
@@ -3250,6 +3250,23 @@ def main():
         </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # ==========================================================================
+    # OVERNIGHT ES DATA (shows SPX implied from ES futures)
+    # ==========================================================================
+    if es_data and es_data.get('current') and es_data.get('offset'):
+        es_current = es_data['current']
+        es_offset = es_data['offset']
+        spx_implied = es_current - es_offset
+        
+        st.markdown("#### 📊 ES Futures → SPX Implied")
+        es_c1, es_c2, es_c3 = st.columns(3)
+        with es_c1:
+            st.metric("ES Futures", f"{es_current:,.2f}")
+        with es_c2:
+            st.metric("Offset", f"{es_offset:+.2f}")
+        with es_c3:
+            st.metric("SPX Implied", f"{spx_implied:,.2f}")
     
     # ==========================================================================
     # ACTIVE TRADE SETUPS
