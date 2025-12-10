@@ -3141,50 +3141,6 @@ def main():
     num_puts = len(trade_setups_1000.get('puts_setups', []))
     ct_time = get_ct_now()
     
-    # Determine if market is open (8:30 AM - 3:00 PM CT on weekdays)
-    is_weekday = ct_time.weekday() < 5
-    market_open = time(8, 30)
-    market_close = time(15, 0)
-    is_market_hours = is_weekday and market_open <= ct_time.time() <= market_close
-    
-    # Calculate ES-derived SPX estimate for overnight
-    es_spx_estimate = None
-    if es_data and es_data.get('current') and es_data.get('offset'):
-        es_spx_estimate = es_data['current'] - es_data['offset']
-    
-    # Determine which price to show and the label
-    if is_market_hours:
-        display_price = current_price
-        price_label = "SPX Index"
-        price_source = "LIVE"
-        price_dot_class = "live-dot"
-    else:
-        # Outside market hours - use ES-derived estimate if available
-        if es_spx_estimate:
-            display_price = es_spx_estimate
-            price_label = "SPX Est. (from ES)"
-            price_source = "FUTURES"
-            price_dot_class = "live-dot"  # Still pulsing since ES is live
-        else:
-            display_price = current_price
-            price_label = "SPX (Last Close)"
-            price_source = "CLOSED"
-            price_dot_class = ""  # No pulse when market closed and no ES data
-    
-    # Market status text
-    if is_market_hours:
-        market_status = "Market Open"
-    elif ct_time.time() < market_open:
-        market_status = "Pre-Market"
-    elif ct_time.time() > market_close:
-        market_status = "After Hours"
-    else:
-        market_status = "Weekend"
-    
-    # Build components for cleaner HTML
-    price_color = "var(--accent-green)" if price_source == "LIVE" else "var(--accent-gold)"
-    live_dot_html = f'<span class="{price_dot_class}"></span>' if price_dot_class else ""
-    
     # TERMINAL HEADER
     st.markdown(f"""
     <div class="terminal-header">
@@ -3197,14 +3153,13 @@ def main():
         </div>
         <div class="terminal-status">
             <div class="status-item">
-                <div class="status-label">{price_label}</div>
-                <div class="status-value">{display_price:,.2f}</div>
-                <div style="font-size: 0.6rem; color: {price_color}; text-transform: uppercase; letter-spacing: 0.1em;">{price_source}</div>
+                <div class="status-label">SPX Index</div>
+                <div class="status-value">{current_price:,.2f}</div>
             </div>
             <div class="status-item">
-                <div class="status-label">{market_status}</div>
+                <div class="status-label">Session</div>
                 <div class="status-value status-live">
-                    {live_dot_html}
+                    <span class="live-dot"></span>
                     {ct_time.strftime('%H:%M:%S')} CT
                 </div>
             </div>
@@ -3212,60 +3167,74 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Show ES data panel if outside market hours and ES data available
-    if not is_market_hours and es_spx_estimate:
-        es_current = es_data.get('current', 0)
-        es_offset = es_data.get('offset', 0)
-        
-        st.markdown("#### 📊 Overnight Futures Data")
-        es_col1, es_col2, es_col3 = st.columns(3)
-        with es_col1:
-            st.metric("ES Futures", f"{es_current:,.2f}")
-        with es_col2:
-            st.metric("ES-SPX Offset", f"{es_offset:+.2f}")
-        with es_col3:
-            st.metric("SPX Implied", f"{es_spx_estimate:,.2f}")
+    # QUICK STATS BAR
+    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME else "CLOSED"
+    window_color = "green" if trading_window == "OPEN" else "red"
     
-    # QUICK STATS BAR - Using native Streamlit
-    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME and is_market_hours else "CLOSED"
-    
-    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-    with stat_col1:
-        st.metric("🟢 CALLS", f"{num_calls} setups")
-    with stat_col2:
-        st.metric("🔴 PUTS", f"{num_puts} setups")
-    with stat_col3:
-        st.metric("Trading Window", trading_window)
-    with stat_col4:
-        st.metric("Decision Time", "10:00 AM CT")
+    st.markdown(f"""
+    <div class="stats-bar">
+        <div class="stat-item">
+            <div class="stat-indicator green"></div>
+            <div class="stat-text"><strong>{num_calls}</strong> CALLS Setups</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-indicator red"></div>
+            <div class="stat-text"><strong>{num_puts}</strong> PUTS Setups</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-indicator {window_color}"></div>
+            <div class="stat-text">Trading Window: <strong>{trading_window}</strong></div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-indicator gold"></div>
+            <div class="stat-text">Decision: <strong>10:00 AM CT</strong></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     
     # ==========================================================================
     # ACTIVE TRADE SETUPS
     # ==========================================================================
     
-    st.markdown("---")
-    
     # CALLS SECTION
-    st.subheader("📈 Calls Entry Levels — Long Positions")
+    st.markdown("""
+    <div class="section-header">
+        <div class="section-icon">📈</div>
+        <div class="section-title">Calls Entry Levels — Long Positions</div>
+    </div>
+    """, unsafe_allow_html=True)
     
     if num_calls > 0:
         for setup in trade_setups_1000['calls_setups']:
             render_institutional_trade_card(setup, current_price)
     else:
-        st.info("No high-probability CALLS entries detected for this session")
-    
-    st.markdown("---")
+        st.markdown("""
+        <div class="trade-panel">
+            <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
+                No high-probability CALLS entries detected for this session
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     # PUTS SECTION
-    st.subheader("📉 Puts Entry Levels — Short Positions")
+    st.markdown("""
+    <div class="section-header">
+        <div class="section-icon">📉</div>
+        <div class="section-title">Puts Entry Levels — Short Positions</div>
+    </div>
+    """, unsafe_allow_html=True)
     
     if num_puts > 0:
         for setup in trade_setups_1000['puts_setups']:
             render_institutional_trade_card(setup, current_price)
     else:
-        st.info("No high-probability PUTS entries detected for this session")
-    
-    st.markdown("---")
+        st.markdown("""
+        <div class="trade-panel">
+            <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
+                No high-probability PUTS entries detected for this session
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     # ==========================================================================
     # POSITION MONITOR
@@ -3274,7 +3243,12 @@ def main():
     all_setups = trade_setups_1000.get('calls_setups', []) + trade_setups_1000.get('puts_setups', [])
     
     if all_setups:
-        st.subheader("🎯 Position Monitor — Nearest Entry")
+        st.markdown("""
+        <div class="section-header">
+            <div class="section-icon">🎯</div>
+            <div class="section-title">Position Monitor — Nearest Entry</div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Find nearest
         for setup in all_setups:
@@ -3283,29 +3257,52 @@ def main():
         
         # Determine status
         if nearest.distance <= AT_RAIL_THRESHOLD:
-            status = "🟢 AT ENTRY"
+            status = "AT ENTRY"
+            status_class = "badge-go"
         elif nearest.distance <= 15:
-            status = "🟡 APPROACHING"
+            status = "APPROACHING"
+            status_class = "badge-wait"
         else:
-            status = "⚪ WAITING"
+            status = "WAITING"
+            status_class = "badge-nogo"
         
-        # Display nearest setup prominently
-        col_contract, col_status = st.columns([2, 1])
+        direction_class = "badge-calls" if nearest.direction == "CALLS" else "badge-puts"
         
-        with col_contract:
-            st.metric("Priority Contract", nearest.strike_label, delta=f"{nearest.direction}")
-        with col_status:
-            st.metric("Status", status)
-        
-        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-        with col_m1:
-            st.metric("Current Price", f"{current_price:,.2f}")
-        with col_m2:
-            st.metric("Entry Level", f"{nearest.entry_price:,.2f}")
-        with col_m3:
-            st.metric("Distance", f"{nearest.distance:.1f} pts")
-        with col_m4:
-            st.metric("Target Profit", f"+${nearest.profit_50_theta_adjusted:,.0f}")
+        st.markdown(f"""
+        <div class="trade-panel">
+            <div class="trade-panel-header">
+                <div class="trade-panel-title">Priority Target</div>
+                <div>
+                    <span class="trade-panel-badge {direction_class}">{nearest.direction}</span>
+                    <span class="trade-panel-badge {status_class}">{status}</span>
+                </div>
+            </div>
+            <div class="trade-panel-body">
+                <div class="contract-display">
+                    <div class="contract-strike">{nearest.strike_label}</div>
+                    <div class="contract-type">0DTE SPX Option</div>
+                </div>
+                <div class="entry-row">
+                    <div class="entry-item">
+                        <div class="entry-label">Current Price</div>
+                        <div class="entry-value">{current_price:,.2f}</div>
+                    </div>
+                    <div class="entry-item">
+                        <div class="entry-label">Entry Level</div>
+                        <div class="entry-value gold">{nearest.entry_price:,.2f}</div>
+                    </div>
+                    <div class="entry-item">
+                        <div class="entry-label">Distance</div>
+                        <div class="entry-value">{nearest.distance:.1f} pts</div>
+                    </div>
+                    <div class="entry-item">
+                        <div class="entry-label">Target (50%)</div>
+                        <div class="entry-value green">+${nearest.profit_50_theta_adjusted:,.0f}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
     
