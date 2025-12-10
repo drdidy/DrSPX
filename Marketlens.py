@@ -72,6 +72,67 @@ RAIL_TOUCH_THRESHOLD = 2.0
 # Confluence: Rails within 5 pts of each other = converging
 CONFLUENCE_THRESHOLD = 5.0
 
+# ============================================================================
+# TIME DECAY (THETA) - Critical for 0DTE
+# ============================================================================
+# 0DTE options lose value rapidly. These multipliers adjust expected profit
+# based on time remaining. Derived from typical theta decay curves.
+#
+# Morning (8:30-10:00): Full value, theta hasn't kicked in hard yet
+# Mid-day (10:00-12:00): ~85% of theoretical value (theta accelerating)
+# Afternoon (12:00-14:00): ~65% of theoretical value (theta crushing)
+# Late (14:00+): ~40% of theoretical value (avoid new entries)
+
+THETA_MULTIPLIER = {
+    'morning': 1.0,      # 8:30-10:00 CT
+    'mid_day': 0.85,     # 10:00-12:00 CT  
+    'afternoon': 0.65,   # 12:00-14:00 CT
+    'late': 0.40,        # 14:00+ CT - generally avoid
+}
+
+# Last reasonable entry time for 0DTE
+LAST_ENTRY_TIME = time(13, 30)  # After 1:30pm, theta too aggressive
+
+# ============================================================================
+# DELTA APPROXIMATION BY DISTANCE OTM
+# ============================================================================
+# More accurate than fixed 0.33 - delta decreases as you go further OTM
+# These are approximate for SPX 0DTE options mid-morning
+
+DELTA_BY_OTM = {
+    10: 0.42,   # 10 pts OTM
+    15: 0.35,   # 15 pts OTM  
+    20: 0.30,   # 20 pts OTM (our target zone)
+    25: 0.25,   # 25 pts OTM
+    30: 0.20,   # 30 pts OTM
+}
+
+def get_delta_estimate(otm_distance: float) -> float:
+    """Estimate delta based on distance OTM."""
+    if otm_distance <= 10:
+        return 0.42
+    elif otm_distance <= 15:
+        return 0.35
+    elif otm_distance <= 20:
+        return 0.30
+    elif otm_distance <= 25:
+        return 0.25
+    else:
+        return 0.20
+
+def get_theta_multiplier() -> Tuple[float, str]:
+    """Get current theta multiplier based on time of day."""
+    ct_now = get_ct_now().time()
+    
+    if ct_now < time(10, 0):
+        return THETA_MULTIPLIER['morning'], 'morning'
+    elif ct_now < time(12, 0):
+        return THETA_MULTIPLIER['mid_day'], 'mid_day'
+    elif ct_now < time(14, 0):
+        return THETA_MULTIPLIER['afternoon'], 'afternoon'
+    else:
+        return THETA_MULTIPLIER['late'], 'late'
+
 TIME_BLOCKS = [
     time(8, 30), time(9, 0), time(9, 30), time(10, 0), time(10, 30),
     time(11, 0), time(11, 30), time(12, 0), time(12, 30), time(13, 0),
@@ -965,13 +1026,16 @@ class TradeSetup:
     target_50: float  # 50% target
     target_75: float  # 75% target  
     target_100: float  # 100% target (opposite side of cone)
-    profit_50: float  # Expected $ profit at 50%
-    profit_75: float  # Expected $ profit at 75%
-    profit_100: float  # Expected $ profit at 100%
+    profit_50: float  # Expected $ profit at 50% (theoretical)
+    profit_75: float  # Expected $ profit at 75% (theoretical)
+    profit_100: float  # Expected $ profit at 100% (theoretical)
+    profit_50_theta_adjusted: float  # Theta-adjusted profit at 50%
     risk_dollars: float  # Risk in dollars
-    rr_ratio: float  # Risk/reward at 50%
+    rr_ratio: float  # Risk/reward at 50% (theoretical)
+    rr_ratio_theta_adjusted: float  # R:R accounting for theta
     cone_width: float  # Width of the trading range
-    quality_score: int  # Overall setup quality 1-100
+    delta_estimate: float  # Estimated delta for this strike
+    theta_period: str  # Time period for theta (morning, mid_day, etc.)
     distance: float = 0.0  # Distance from current price (set dynamically)
 
 def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dict:
@@ -1019,48 +1083,39 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         cone_width = target_100 - entry_price
         
         # Skip if cone width is too small
-        if cone_width < 20:
+        if cone_width < MIN_CONE_WIDTH:
             continue
         
         # Calculate targets
         target_50 = entry_price + (cone_width * 0.50)
         target_75 = entry_price + (cone_width * 0.75)
-        stop_loss = entry_price - 3  # 3 point stop
+        stop_loss = entry_price - STOP_LOSS_PTS
         
         # Calculate strike (OTM CALLS = strike ABOVE entry price)
-        # 15-20 pts OTM gives ~0.33 delta
-        strike = int(entry_price + 17.5)
+        strike = int(entry_price + STRIKE_OFFSET)
         strike = ((strike + 4) // 5) * 5  # Round UP to nearest 5
         strike_label = f"SPX {strike}C"
         
-        # Calculate profits (contract moves 0.33x underlying)
+        # Get accurate delta estimate based on OTM distance
+        otm_distance = strike - entry_price
+        delta_estimate = get_delta_estimate(otm_distance)
+        
+        # Calculate profits using accurate delta
         move_50 = cone_width * 0.50
         move_75 = cone_width * 0.75
         move_100 = cone_width
         
-        profit_50 = move_50 * CONTRACT_FACTOR * 100
-        profit_75 = move_75 * CONTRACT_FACTOR * 100
-        profit_100 = move_100 * CONTRACT_FACTOR * 100
-        risk_dollars = 3 * CONTRACT_FACTOR * 100  # 3 pt stop
+        profit_50 = move_50 * delta_estimate * 100
+        profit_75 = move_75 * delta_estimate * 100
+        profit_100 = move_100 * delta_estimate * 100
+        risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
+        
+        # Apply theta adjustment for realistic profit expectation
+        theta_mult, theta_period = get_theta_multiplier()
+        profit_50_theta = profit_50 * theta_mult
         
         rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
-        
-        # Quality score based ONLY on calculable factors:
-        # 1. Confluence strength: More rails = more structural agreement
-        #    2 rails = base, 3 rails = +25, 4+ rails = +50
-        # 2. R:R ratio: Higher = better risk-adjusted return
-        #    R:R >= 5 = +25, R:R >= 3 = +15
-        # 3. Cone width: Wider = more room for profit
-        #    >= 35 pts = +25, >= 25 pts = +15
-        
-        confluence_points = 25 + ((strength - 2) * 25)  # 2=25, 3=50, 4=75
-        confluence_points = min(75, confluence_points)
-        
-        rr_points = 25 if rr_ratio >= 5 else (15 if rr_ratio >= 3 else 0)
-        
-        width_points = 25 if cone_width >= 35 else (15 if cone_width >= 25 else 0)
-        
-        quality_score = min(100, confluence_points + rr_points + width_points)
+        rr_ratio_theta = profit_50_theta / risk_dollars if risk_dollars > 0 else 0
         
         setup = TradeSetup(
             direction='CALLS',
@@ -1076,10 +1131,13 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
             profit_50=profit_50,
             profit_75=profit_75,
             profit_100=profit_100,
+            profit_50_theta_adjusted=profit_50_theta,
             risk_dollars=risk_dollars,
             rr_ratio=rr_ratio,
+            rr_ratio_theta_adjusted=rr_ratio_theta,
             cone_width=cone_width,
-            quality_score=quality_score
+            delta_estimate=delta_estimate,
+            theta_period=theta_period
         )
         calls_setups.append(setup)
     
@@ -1107,41 +1165,39 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         cone_width = entry_price - target_100
         
         # Skip if cone width is too small
-        if cone_width < 20:
+        if cone_width < MIN_CONE_WIDTH:
             continue
         
         # Calculate targets
         target_50 = entry_price - (cone_width * 0.50)
         target_75 = entry_price - (cone_width * 0.75)
-        stop_loss = entry_price + 3  # 3 point stop
+        stop_loss = entry_price + STOP_LOSS_PTS
         
         # Calculate strike (OTM PUTS = strike BELOW entry price)
-        # 15-20 pts OTM gives ~0.33 delta
-        strike = int(entry_price - 17.5)
+        strike = int(entry_price - STRIKE_OFFSET)
         strike = (strike // 5) * 5  # Round DOWN to nearest 5
         strike_label = f"SPX {strike}P"
         
-        # Calculate profits
+        # Get accurate delta estimate based on OTM distance
+        otm_distance = entry_price - strike
+        delta_estimate = get_delta_estimate(otm_distance)
+        
+        # Calculate profits using accurate delta
         move_50 = cone_width * 0.50
         move_75 = cone_width * 0.75
         move_100 = cone_width
         
-        profit_50 = move_50 * CONTRACT_FACTOR * 100
-        profit_75 = move_75 * CONTRACT_FACTOR * 100
-        profit_100 = move_100 * CONTRACT_FACTOR * 100
-        risk_dollars = 3 * CONTRACT_FACTOR * 100
+        profit_50 = move_50 * delta_estimate * 100
+        profit_75 = move_75 * delta_estimate * 100
+        profit_100 = move_100 * delta_estimate * 100
+        risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
+        
+        # Apply theta adjustment
+        theta_mult, theta_period = get_theta_multiplier()
+        profit_50_theta = profit_50 * theta_mult
         
         rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
-        
-        # Quality score - same logic as CALLS
-        confluence_points = 25 + ((strength - 2) * 25)
-        confluence_points = min(75, confluence_points)
-        
-        rr_points = 25 if rr_ratio >= 5 else (15 if rr_ratio >= 3 else 0)
-        
-        width_points = 25 if cone_width >= 35 else (15 if cone_width >= 25 else 0)
-        
-        quality_score = min(100, confluence_points + rr_points + width_points)
+        rr_ratio_theta = profit_50_theta / risk_dollars if risk_dollars > 0 else 0
         
         setup = TradeSetup(
             direction='PUTS',
@@ -1157,16 +1213,19 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
             profit_50=profit_50,
             profit_75=profit_75,
             profit_100=profit_100,
+            profit_50_theta_adjusted=profit_50_theta,
             risk_dollars=risk_dollars,
             rr_ratio=rr_ratio,
+            rr_ratio_theta_adjusted=rr_ratio_theta,
             cone_width=cone_width,
-            quality_score=quality_score
+            delta_estimate=delta_estimate,
+            theta_period=theta_period
         )
         puts_setups.append(setup)
     
-    # Sort by quality score (best first)
-    calls_setups.sort(key=lambda x: x.quality_score, reverse=True)
-    puts_setups.sort(key=lambda x: x.quality_score, reverse=True)
+    # Sort by R:R (theta-adjusted) - best first
+    calls_setups.sort(key=lambda x: x.rr_ratio_theta_adjusted, reverse=True)
+    puts_setups.sort(key=lambda x: x.rr_ratio_theta_adjusted, reverse=True)
     
     # Also include single-rail setups for reference (lower priority)
     # These are individual rails without confluence
@@ -1230,22 +1289,29 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
             distance_text = f"📍 {distance:.1f} pts away"
     
     # GO/NO-GO Decision based on calculable factors:
-    # 1. R:R must be >= 3:1 (minimum acceptable)
+    # 1. R:R (theta-adjusted) must be >= 3:1
     # 2. Cone width must be >= 25 pts
     # 3. Must have confluence (2+ rails)
+    # 4. Time must be before LAST_ENTRY_TIME
     
-    rr_ok = setup.rr_ratio >= MIN_RR_RATIO
+    ct_now = get_ct_now().time()
+    time_ok = ct_now < LAST_ENTRY_TIME
+    rr_ok = setup.rr_ratio_theta_adjusted >= MIN_RR_RATIO
     width_ok = setup.cone_width >= MIN_CONE_WIDTH
     confluence_ok = setup.confluence_strength >= 2
     
-    if rr_ok and width_ok and confluence_ok:
+    if rr_ok and width_ok and confluence_ok and time_ok:
         decision = "✅ GO"
         decision_color = "#22c55e"
-        decision_reason = f"R:R {setup.rr_ratio:.1f}:1, {setup.confluence_strength} rails, {setup.cone_width:.0f}pt range"
+        decision_reason = f"R:R {setup.rr_ratio_theta_adjusted:.1f}:1 (θ-adj), {setup.confluence_strength} rails, Δ≈{setup.delta_estimate:.2f}"
+    elif not time_ok:
+        decision = "⛔ TOO LATE"
+        decision_color = "#ef4444"
+        decision_reason = f"After {LAST_ENTRY_TIME.strftime('%H:%M')} - theta decay too aggressive"
     elif not rr_ok:
         decision = "❌ NO-GO"
         decision_color = "#ef4444"
-        decision_reason = f"R:R only {setup.rr_ratio:.1f}:1 (need {MIN_RR_RATIO}:1)"
+        decision_reason = f"R:R only {setup.rr_ratio_theta_adjusted:.1f}:1 after θ (need {MIN_RR_RATIO}:1)"
     elif not width_ok:
         decision = "❌ NO-GO"
         decision_color = "#ef4444"
@@ -1254,6 +1320,13 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
         decision = "⚠️ WEAK"
         decision_color = "#f59e0b"
         decision_reason = f"Single rail only - reduced probability"
+    
+    # Theta period warning
+    theta_warning = ""
+    if setup.theta_period == 'afternoon':
+        theta_warning = "⚠️ Afternoon - profits reduced ~35% by theta"
+    elif setup.theta_period == 'late':
+        theta_warning = "🛑 Late session - avoid new entries"
     
     st.markdown(f"""
     <div style="border: 3px solid {color}; border-radius: 12px; padding: 1rem; margin: 0.5rem 0; 
@@ -1268,6 +1341,7 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
         <div style="font-size: 0.75rem; color: {decision_color}; margin-bottom: 0.5rem;">
             {decision_reason}
         </div>
+        {f'<div style="font-size: 0.75rem; color: #f59e0b; margin-bottom: 0.5rem;">{theta_warning}</div>' if theta_warning else ''}
         {f'<div style="font-weight: 600; color: {color}; margin-bottom: 0.5rem;">{distance_text}</div>' if distance_text else ''}
     </div>
     """, unsafe_allow_html=True)
@@ -1279,22 +1353,25 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     with col2:
         st.metric("Stop", f"{setup.stop_loss:.2f}")
     
-    # Targets and Profits
+    # Targets and Profits - show both theoretical and theta-adjusted
     st.markdown("**Exit Strategy:**")
     target_data = {
         "Exit": ["60% @ 50%", "20% @ 75%", "20% @ 100%"],
         "Level": [f"{setup.target_50:.2f}", f"{setup.target_75:.2f}", f"{setup.target_100:.2f}"],
-        "Profit": [f"+${setup.profit_50:.0f}", f"+${setup.profit_75:.0f}", f"+${setup.profit_100:.0f}"]
+        "Profit (theory)": [f"+${setup.profit_50:.0f}", f"+${setup.profit_75:.0f}", f"+${setup.profit_100:.0f}"],
+        "Profit (θ-adj)": [f"+${setup.profit_50_theta_adjusted:.0f}", f"+${setup.profit_75 * THETA_MULTIPLIER.get(setup.theta_period, 1.0):.0f}", f"+${setup.profit_100 * THETA_MULTIPLIER.get(setup.theta_period, 1.0):.0f}"]
     }
     st.dataframe(target_data, use_container_width=True, hide_index=True)
     
-    # Stats
-    col_a, col_b, col_c = st.columns(3)
+    # Stats - show delta and theta-adjusted R:R
+    col_a, col_b, col_c, col_d = st.columns(4)
     with col_a:
-        st.metric("Width", f"{setup.cone_width:.0f}")
+        st.metric("Width", f"{setup.cone_width:.0f} pts")
     with col_b:
-        st.metric("R:R", f"{setup.rr_ratio:.1f}:1")
+        st.metric("Delta", f"{setup.delta_estimate:.2f}")
     with col_c:
+        st.metric("R:R (θ-adj)", f"{setup.rr_ratio_theta_adjusted:.1f}:1")
+    with col_d:
         st.metric("Risk", f"${setup.risk_dollars:.0f}")
 
 # ============================================================================
