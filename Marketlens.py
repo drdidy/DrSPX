@@ -2390,6 +2390,65 @@ def inject_premium_css():
     /* Override Streamlit dataframe */
     .stDataFrame { background: var(--bg-card) !important; border-radius: 8px !important; }
     
+    /* SIDEBAR STYLING - Keep readable */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    }
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] .stMarkdown p,
+    section[data-testid="stSidebar"] .stMarkdown h1,
+    section[data-testid="stSidebar"] .stMarkdown h2,
+    section[data-testid="stSidebar"] .stMarkdown h3,
+    section[data-testid="stSidebar"] .stMarkdown h4,
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stCaption,
+    section[data-testid="stSidebar"] span {
+        color: #f8fafc !important;
+    }
+    section[data-testid="stSidebar"] .stSelectbox label,
+    section[data-testid="stSidebar"] .stNumberInput label,
+    section[data-testid="stSidebar"] .stTextInput label,
+    section[data-testid="stSidebar"] .stDateInput label,
+    section[data-testid="stSidebar"] .stCheckbox label {
+        color: #cbd5e1 !important;
+    }
+    /* Input fields - dark text on light background */
+    section[data-testid="stSidebar"] input,
+    section[data-testid="stSidebar"] .stTextInput input,
+    section[data-testid="stSidebar"] .stNumberInput input {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid #475569 !important;
+    }
+    section[data-testid="stSidebar"] .stSelectbox > div > div {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+    }
+    section[data-testid="stSidebar"] [data-baseweb="select"] {
+        background-color: #ffffff !important;
+    }
+    section[data-testid="stSidebar"] [data-baseweb="select"] * {
+        color: #0f172a !important;
+    }
+    /* Expander styling in sidebar */
+    section[data-testid="stSidebar"] .streamlit-expanderHeader {
+        color: #f8fafc !important;
+    }
+    section[data-testid="stSidebar"] .streamlit-expanderContent {
+        color: #e2e8f0 !important;
+    }
+    
+    /* MAIN AREA - ensure text is visible */
+    .main .block-container {
+        color: var(--text-primary);
+    }
+    .stExpander {
+        border-color: var(--border-color) !important;
+    }
+    .streamlit-expanderHeader {
+        color: var(--text-primary) !important;
+    }
+    
     </style>
     """, unsafe_allow_html=True)
 
