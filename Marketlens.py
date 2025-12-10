@@ -812,6 +812,21 @@ def fetch_current_spx() -> Optional[float]:
     except:
         return None
 
+def fetch_todays_session_range() -> Dict:
+    """Fetch today's actual session high and low from Yahoo Finance."""
+    try:
+        spx = yf.Ticker("^GSPC")
+        data = spx.history(period='1d', interval='1m')
+        if not data.empty:
+            return {
+                'high': float(data['High'].max()),
+                'low': float(data['Low'].min()),
+                'current': float(data['Close'].iloc[-1])
+            }
+        return {'high': None, 'low': None, 'current': None}
+    except:
+        return {'high': None, 'low': None, 'current': None}
+
 @st.cache_data(ttl=300)
 def fetch_first_30min_bar(session_date: datetime) -> Optional[Dict]:
     try:
@@ -2887,12 +2902,14 @@ def main():
         st.session_state.session_date = today_str
         st.session_state.session_high = None
         st.session_state.session_low = None
+        st.session_state.manual_override = False
     
     # Reset if new trading day
     if st.session_state.session_date != today_str:
         st.session_state.session_date = today_str
         st.session_state.session_high = None
         st.session_state.session_low = None
+        st.session_state.manual_override = False
     
     # ===== SIDEBAR =====
     with st.sidebar:
@@ -2907,34 +2924,41 @@ def main():
         current_price = fetch_current_spx() or (prior_session['close'] if prior_session else 6000)
         first_bar = fetch_first_30min_bar(session_date)
         
-        # Update session high/low tracking (only during market hours for today's session)
+        # Fetch TODAY'S ACTUAL session high/low from Yahoo (not just current price)
         market_open = time(8, 30)
         market_close = time(15, 0)
         is_market_hours = market_open <= ct_now.time() <= market_close
         is_today = session_date.date() == ct_now.date()
         
-        if is_today and is_market_hours and current_price:
-            if st.session_state.session_high is None or current_price > st.session_state.session_high:
-                st.session_state.session_high = current_price
-            if st.session_state.session_low is None or current_price < st.session_state.session_low:
-                st.session_state.session_low = current_price
+        # Only auto-update if no manual override
+        if is_today and not st.session_state.get('manual_override', False):
+            todays_range = fetch_todays_session_range()
+            if todays_range['high'] is not None:
+                st.session_state.session_high = todays_range['high']
+            if todays_range['low'] is not None:
+                st.session_state.session_low = todays_range['low']
         
         # Show session tracking info with MANUAL OVERRIDE
         st.markdown("---")
         st.markdown("### 📊 Session Tracker")
-        st.caption("Auto-updates during market hours. Manual override below.")
         
+        # Display current values
         sess_col1, sess_col2 = st.columns(2)
         with sess_col1:
-            display_high = st.session_state.session_high if st.session_state.session_high else current_price
+            display_high = st.session_state.session_high
             st.metric("Session High", f"{display_high:,.2f}" if display_high else "—")
         with sess_col2:
-            display_low = st.session_state.session_low if st.session_state.session_low else current_price
+            display_low = st.session_state.session_low
             st.metric("Session Low", f"{display_low:,.2f}" if display_low else "—")
         
-        # Manual override inputs - ALWAYS visible so user can correct
-        with st.expander("✏️ Manual Session Override"):
-            st.caption("Enter actual session high/low from TradingView if auto-tracking is off")
+        if st.session_state.get('manual_override'):
+            st.caption("⚠️ Manual override active")
+        else:
+            st.caption("📡 Auto-updating from Yahoo Finance")
+        
+        # Manual override inputs
+        with st.expander("✏️ Manual Override"):
+            st.caption("Use if Yahoo data differs from TradingView")
             manual_high = st.number_input(
                 "Session High", 
                 value=float(st.session_state.session_high) if st.session_state.session_high else float(current_price),
@@ -2949,11 +2973,17 @@ def main():
                 format="%.2f",
                 key="manual_low_input"
             )
-            if st.button("Update Session Range"):
-                st.session_state.session_high = manual_high
-                st.session_state.session_low = manual_low
-                st.success(f"✅ Updated: High={manual_high:.2f}, Low={manual_low:.2f}")
-                st.rerun()
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("✅ Set Manual"):
+                    st.session_state.session_high = manual_high
+                    st.session_state.session_low = manual_low
+                    st.session_state.manual_override = True
+                    st.rerun()
+            with col_btn2:
+                if st.button("🔄 Reset Auto"):
+                    st.session_state.manual_override = False
+                    st.rerun()
         
         st.markdown("---")
         st.markdown("### ⚙️ Parameters")
