@@ -2877,6 +2877,23 @@ def main():
     inject_premium_css()
     render_header()
     
+    # ===== INTRADAY SESSION TRACKING =====
+    # Track session high/low to detect triggered entries
+    ct_now = get_ct_now()
+    today_str = ct_now.strftime('%Y-%m-%d')
+    
+    # Initialize session state if needed
+    if 'session_date' not in st.session_state:
+        st.session_state.session_date = today_str
+        st.session_state.session_high = None
+        st.session_state.session_low = None
+    
+    # Reset if new trading day
+    if st.session_state.session_date != today_str:
+        st.session_state.session_date = today_str
+        st.session_state.session_high = None
+        st.session_state.session_low = None
+    
     # ===== SIDEBAR =====
     with st.sidebar:
         st.markdown("### 📅 Session")
@@ -2889,6 +2906,36 @@ def main():
         premarket_data = fetch_premarket_pivots(session_date)
         current_price = fetch_current_spx() or (prior_session['close'] if prior_session else 6000)
         first_bar = fetch_first_30min_bar(session_date)
+        
+        # Update session high/low tracking (only during market hours for today's session)
+        market_open = time(8, 30)
+        market_close = time(15, 0)
+        is_market_hours = market_open <= ct_now.time() <= market_close
+        is_today = session_date.date() == ct_now.date()
+        
+        if is_today and is_market_hours and current_price:
+            if st.session_state.session_high is None or current_price > st.session_state.session_high:
+                st.session_state.session_high = current_price
+            if st.session_state.session_low is None or current_price < st.session_state.session_low:
+                st.session_state.session_low = current_price
+        
+        # Show session tracking info
+        st.markdown("---")
+        st.markdown("### 📊 Session Tracker")
+        sess_col1, sess_col2 = st.columns(2)
+        with sess_col1:
+            if st.session_state.session_high:
+                st.metric("Session High", f"{st.session_state.session_high:,.2f}")
+            else:
+                st.metric("Session High", "—")
+        with sess_col2:
+            if st.session_state.session_low:
+                st.metric("Session Low", f"{st.session_state.session_low:,.2f}")
+            else:
+                st.metric("Session Low", "—")
+        
+        if not is_market_hours:
+            st.caption("Updates during market hours (8:30-3:00 CT)")
         
         st.markdown("---")
         st.markdown("### ⚙️ Parameters")
@@ -3337,63 +3384,110 @@ def main():
         st.markdown("""
         <div class="section-header">
             <div class="section-icon">🎯</div>
-            <div class="section-title">Position Monitor — Nearest Entry</div>
+            <div class="section-title">Position Monitor — Next Entry</div>
         </div>
         """, unsafe_allow_html=True)
         
-        # Find nearest
+        # Get session high/low for trigger detection
+        session_high = st.session_state.get('session_high')
+        session_low = st.session_state.get('session_low')
+        
+        active_setups = []
+        triggered_setups = []
+        
         for setup in all_setups:
             setup.distance = abs(current_price - setup.entry_price)
-        nearest = min(all_setups, key=lambda x: x.distance)
+            setup.triggered = False
+            
+            if setup.direction == "CALLS":
+                # CALLS entry triggers when price dips TO or BELOW entry level
+                # Check if session low reached the entry
+                if session_low is not None and session_low <= setup.entry_price:
+                    setup.triggered = True
+                    triggered_setups.append(setup)
+                else:
+                    active_setups.append(setup)
+            else:  # PUTS
+                # PUTS entry triggers when price rises TO or ABOVE entry level
+                # Check if session high reached the entry
+                if session_high is not None and session_high >= setup.entry_price:
+                    setup.triggered = True
+                    triggered_setups.append(setup)
+                else:
+                    active_setups.append(setup)
         
-        # Determine status
-        if nearest.distance <= AT_RAIL_THRESHOLD:
-            status = "AT ENTRY"
-            status_class = "badge-go"
-        elif nearest.distance <= 15:
-            status = "APPROACHING"
-            status_class = "badge-wait"
-        else:
-            status = "WAITING"
-            status_class = "badge-nogo"
-        
-        direction_class = "badge-calls" if nearest.direction == "CALLS" else "badge-puts"
-        
-        st.markdown(f"""
-        <div class="trade-panel">
-            <div class="trade-panel-header">
-                <div class="trade-panel-title">Priority Target</div>
-                <div>
-                    <span class="trade-panel-badge {direction_class}">{nearest.direction}</span>
-                    <span class="trade-panel-badge {status_class}">{status}</span>
+        # Show next active entry (not yet triggered)
+        if active_setups:
+            nearest = min(active_setups, key=lambda x: x.distance)
+            
+            # Determine status
+            if nearest.distance <= AT_RAIL_THRESHOLD:
+                status = "AT ENTRY"
+                status_class = "badge-go"
+            elif nearest.distance <= 15:
+                status = "APPROACHING"
+                status_class = "badge-wait"
+            else:
+                status = "WAITING"
+                status_class = "badge-nogo"
+            
+            direction_class = "badge-calls" if nearest.direction == "CALLS" else "badge-puts"
+            
+            st.markdown(f"""
+            <div class="trade-panel">
+                <div class="trade-panel-header">
+                    <div class="trade-panel-title">Priority Target</div>
+                    <div>
+                        <span class="trade-panel-badge {direction_class}">{nearest.direction}</span>
+                        <span class="trade-panel-badge {status_class}">{status}</span>
+                    </div>
+                </div>
+                <div class="trade-panel-body">
+                    <div class="contract-display">
+                        <div class="contract-strike">{nearest.strike_label}</div>
+                        <div class="contract-type">0DTE SPX Option</div>
+                    </div>
+                    <div class="entry-row">
+                        <div class="entry-item">
+                            <div class="entry-label">Current Price</div>
+                            <div class="entry-value">{current_price:,.2f}</div>
+                        </div>
+                        <div class="entry-item">
+                            <div class="entry-label">Entry Level</div>
+                            <div class="entry-value gold">{nearest.entry_price:,.2f}</div>
+                        </div>
+                        <div class="entry-item">
+                            <div class="entry-label">Distance</div>
+                            <div class="entry-value">{nearest.distance:.1f} pts</div>
+                        </div>
+                        <div class="entry-item">
+                            <div class="entry-label">Target (50%)</div>
+                            <div class="entry-value green">+${nearest.profit_50_theta_adjusted:,.0f}</div>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="trade-panel-body">
-                <div class="contract-display">
-                    <div class="contract-strike">{nearest.strike_label}</div>
-                    <div class="contract-type">0DTE SPX Option</div>
-                </div>
-                <div class="entry-row">
-                    <div class="entry-item">
-                        <div class="entry-label">Current Price</div>
-                        <div class="entry-value">{current_price:,.2f}</div>
-                    </div>
-                    <div class="entry-item">
-                        <div class="entry-label">Entry Level</div>
-                        <div class="entry-value gold">{nearest.entry_price:,.2f}</div>
-                    </div>
-                    <div class="entry-item">
-                        <div class="entry-label">Distance</div>
-                        <div class="entry-value">{nearest.distance:.1f} pts</div>
-                    </div>
-                    <div class="entry-item">
-                        <div class="entry-label">Target (50%)</div>
-                        <div class="entry-value green">+${nearest.profit_50_theta_adjusted:,.0f}</div>
-                    </div>
+            """, unsafe_allow_html=True)
+        
+        # Show triggered entries (completed trades)
+        if triggered_setups:
+            st.markdown(f"""
+            <div style="margin-top: 0.5rem; padding: 0.75rem 1rem; background: var(--bg-tertiary); border-radius: 6px; border-left: 3px solid var(--accent-green);">
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">✅ TRIGGERED TODAY</div>
+                <div style="font-size: 0.85rem; color: var(--text-primary);">
+                    {', '.join([f"{s.direction} @ {s.entry_price:.2f}" for s in triggered_setups])}
                 </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
+        
+        if not active_setups:
+            st.markdown("""
+            <div class="trade-panel">
+                <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
+                    All entries triggered for today — no active setups remaining
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     
     st.markdown("---")
     
