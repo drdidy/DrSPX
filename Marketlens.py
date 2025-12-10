@@ -3141,6 +3141,46 @@ def main():
     num_puts = len(trade_setups_1000.get('puts_setups', []))
     ct_time = get_ct_now()
     
+    # Determine if market is open (8:30 AM - 3:00 PM CT on weekdays)
+    is_weekday = ct_time.weekday() < 5
+    market_open = time(8, 30)
+    market_close = time(15, 0)
+    is_market_hours = is_weekday and market_open <= ct_time.time() <= market_close
+    
+    # Calculate ES-derived SPX estimate for overnight
+    es_spx_estimate = None
+    if es_data and es_data.get('current') and es_data.get('offset'):
+        es_spx_estimate = es_data['current'] - es_data['offset']
+    
+    # Determine which price to show and the label
+    if is_market_hours:
+        display_price = current_price
+        price_label = "SPX Index"
+        price_source = "LIVE"
+        price_dot_class = "live-dot"
+    else:
+        # Outside market hours - use ES-derived estimate if available
+        if es_spx_estimate:
+            display_price = es_spx_estimate
+            price_label = "SPX Est. (from ES)"
+            price_source = "FUTURES"
+            price_dot_class = "live-dot"  # Still pulsing since ES is live
+        else:
+            display_price = current_price
+            price_label = "SPX (Last Close)"
+            price_source = "CLOSED"
+            price_dot_class = ""  # No pulse when market closed and no ES data
+    
+    # Market status text
+    if is_market_hours:
+        market_status = "Market Open"
+    elif ct_time.time() < market_open:
+        market_status = "Pre-Market"
+    elif ct_time.time() > market_close:
+        market_status = "After Hours"
+    else:
+        market_status = "Weekend"
+    
     # TERMINAL HEADER
     st.markdown(f"""
     <div class="terminal-header">
@@ -3153,13 +3193,14 @@ def main():
         </div>
         <div class="terminal-status">
             <div class="status-item">
-                <div class="status-label">SPX Index</div>
-                <div class="status-value">{current_price:,.2f}</div>
+                <div class="status-label">{price_label}</div>
+                <div class="status-value">{display_price:,.2f}</div>
+                <div style="font-size: 0.6rem; color: {'var(--accent-green)' if price_source == 'LIVE' else 'var(--accent-gold)'}; text-transform: uppercase; letter-spacing: 0.1em;">{price_source}</div>
             </div>
             <div class="status-item">
-                <div class="status-label">Session</div>
+                <div class="status-label">{market_status}</div>
                 <div class="status-value status-live">
-                    <span class="live-dot"></span>
+                    {'<span class="' + price_dot_class + '"></span>' if price_dot_class else ''}
                     {ct_time.strftime('%H:%M:%S')} CT
                 </div>
             </div>
@@ -3167,8 +3208,29 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
+    # Show ES data panel if outside market hours and ES data available
+    if not is_market_hours and es_spx_estimate:
+        es_current = es_data.get('current', 0)
+        es_offset = es_data.get('offset', 0)
+        st.markdown(f"""
+        <div class="stats-bar" style="background: var(--bg-tertiary); border-color: var(--accent-gold);">
+            <div class="stat-item">
+                <div class="stat-indicator gold"></div>
+                <div class="stat-text">ES Futures: <strong>{es_current:,.2f}</strong></div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-indicator gold"></div>
+                <div class="stat-text">ES-SPX Offset: <strong>{es_offset:+.2f}</strong></div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-indicator gold"></div>
+                <div class="stat-text">SPX Implied: <strong>{es_spx_estimate:,.2f}</strong></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
     # QUICK STATS BAR
-    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME else "CLOSED"
+    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME and is_market_hours else "CLOSED"
     window_color = "green" if trading_window == "OPEN" else "red"
     
     st.markdown(f"""
