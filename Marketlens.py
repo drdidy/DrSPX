@@ -3181,6 +3181,10 @@ def main():
     else:
         market_status = "Weekend"
     
+    # Build components for cleaner HTML
+    price_color = "var(--accent-green)" if price_source == "LIVE" else "var(--accent-gold)"
+    live_dot_html = f'<span class="{price_dot_class}"></span>' if price_dot_class else ""
+    
     # TERMINAL HEADER
     st.markdown(f"""
     <div class="terminal-header">
@@ -3195,12 +3199,12 @@ def main():
             <div class="status-item">
                 <div class="status-label">{price_label}</div>
                 <div class="status-value">{display_price:,.2f}</div>
-                <div style="font-size: 0.6rem; color: {'var(--accent-green)' if price_source == 'LIVE' else 'var(--accent-gold)'}; text-transform: uppercase; letter-spacing: 0.1em;">{price_source}</div>
+                <div style="font-size: 0.6rem; color: {price_color}; text-transform: uppercase; letter-spacing: 0.1em;">{price_source}</div>
             </div>
             <div class="status-item">
                 <div class="status-label">{market_status}</div>
                 <div class="status-value status-live">
-                    {'<span class="' + price_dot_class + '"></span>' if price_dot_class else ''}
+                    {live_dot_html}
                     {ct_time.strftime('%H:%M:%S')} CT
                 </div>
             </div>
