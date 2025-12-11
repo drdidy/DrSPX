@@ -600,31 +600,26 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         offset = 0
         if not df_spx.empty and not df_es.empty:
             try:
-                # Get SPX close price (last bar of the regular session)
-                spx_close = df_spx['Close'].iloc[-1]
+                # Compare ES and SPX at the same time (2:30 PM CT)
+                # Both are actively trading at this time = reliable comparison
                 
-                # Get ES price at market close (3pm CT = 15:00)
-                # ES and SPX should be very close at this time
                 df_es_ct = df_es.copy()
                 df_es_ct.index = df_es_ct.index.tz_convert(CT_TZ)
                 
-                # Find ES price around market close (2:55-3:05 PM CT)
-                close_window = df_es_ct[
-                    (df_es_ct.index.time >= time(14, 55)) & 
-                    (df_es_ct.index.time <= time(15, 5))
-                ]
+                df_spx_ct = df_spx.copy()
+                df_spx_ct.index = df_spx_ct.index.tz_convert(CT_TZ)
                 
-                if not close_window.empty:
-                    es_at_close = close_window['Close'].iloc[-1]
-                    offset = es_at_close - spx_close
+                # Get ES at 2:30 PM CT
+                es_at_230 = df_es_ct[df_es_ct.index.time <= time(14, 30)]
+                # Get SPX at 2:30 PM CT  
+                spx_at_230 = df_spx_ct[df_spx_ct.index.time <= time(14, 30)]
+                
+                if not es_at_230.empty and not spx_at_230.empty:
+                    es_price = es_at_230['Close'].iloc[-1]
+                    spx_price = spx_at_230['Close'].iloc[-1]
+                    offset = es_price - spx_price
                 else:
-                    # Fallback: use last available ES before 3pm
-                    es_before_close = df_es_ct[df_es_ct.index.time <= time(15, 0)]
-                    if not es_before_close.empty:
-                        es_at_close = es_before_close['Close'].iloc[-1]
-                        offset = es_at_close - spx_close
-                    else:
-                        offset = 8  # Default ES-SPX spread if can't calculate
+                    offset = 8  # Default ES-SPX spread
             except:
                 offset = 8  # Default spread
         
