@@ -20,7 +20,7 @@ from typing import Optional, Tuple, List, Dict
 CT_TZ = pytz.timezone('America/Chicago')
 ET_TZ = pytz.timezone('America/New_York')
 
-# SLOPES - Symmetric ±0.45 pts per 30-min block (calibrated to TradingView)
+# SLOPES - Symmetric Â±0.45 pts per 30-min block (calibrated to TradingView)
 SLOPE_ASCENDING = 0.45
 SLOPE_DESCENDING = 0.45
 
@@ -47,7 +47,7 @@ SECONDARY_PIVOT_START_TIME = time(13, 0)  # After structure develops
 # ============================================================================
 
 # Cone width: Need at least 25 pts to have meaningful 0DTE trade
-# Math: 25 pts × 50% target = 12.5 pt move × 0.33 delta × $100 = $412 profit
+# Math: 25 pts Ã— 50% target = 12.5 pt move Ã— 0.33 delta Ã— $100 = $412 profit
 # This justifies the risk of a $100 stop
 MIN_CONE_WIDTH = 25.0
 
@@ -56,7 +56,7 @@ MIN_CONE_WIDTH = 25.0
 AT_RAIL_THRESHOLD = 5.0
 
 # Stop loss: 3 pts from entry
-# Math: 3 pts × 0.33 delta × $100 = ~$100 risk per contract
+# Math: 3 pts Ã— 0.33 delta Ã— $100 = ~$100 risk per contract
 STOP_LOSS_PTS = 3.0
 
 # Strike offset: 15-20 pts OTM for ~0.30-0.35 delta
@@ -705,11 +705,11 @@ def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high:
     if dist_to_primary_high_desc <= touch_threshold and dist_to_primary_high_desc >= -touch_threshold:
         # Touched within 1 point
         validation['high_primary_validated'] = True
-        validation['validation_notes'].append(f"✓ Primary High desc ({primary_high_desc:.2f}) touched and held")
+        validation['validation_notes'].append(f"âœ“ Primary High desc ({primary_high_desc:.2f}) touched and held")
     elif dist_to_primary_high_desc < -touch_threshold:
         # Broke through (overnight low went below the rail)
         validation['high_primary_broken'] = True
-        validation['validation_notes'].append(f"✗ Primary High desc ({primary_high_desc:.2f}) was broken")
+        validation['validation_notes'].append(f"âœ— Primary High desc ({primary_high_desc:.2f}) was broken")
     
     # Secondary High Descending (if exists)
     if secondary_high is not None and secondary_high_time is not None:
@@ -720,10 +720,10 @@ def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high:
         
         if dist_to_secondary_high_desc <= touch_threshold and dist_to_secondary_high_desc >= -touch_threshold:
             validation['high_secondary_validated'] = True
-            validation['validation_notes'].append(f"✓ Secondary High² desc ({secondary_high_desc:.2f}) touched and held")
+            validation['validation_notes'].append(f"âœ“ Secondary HighÂ² desc ({secondary_high_desc:.2f}) touched and held")
         elif dist_to_secondary_high_desc < -touch_threshold:
             validation['high_secondary_broken'] = True
-            validation['validation_notes'].append(f"✗ Secondary High² desc ({secondary_high_desc:.2f}) was broken")
+            validation['validation_notes'].append(f"âœ— Secondary HighÂ² desc ({secondary_high_desc:.2f}) was broken")
     
     # Determine active HIGH structure
     if secondary_high is not None:
@@ -731,22 +731,22 @@ def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high:
             # Rule 3: Secondary broke, primary held - skip secondary
             validation['active_high_structure'] = 'primary'
             validation['high_structures_to_show'] = ['primary']
-            validation['validation_notes'].append("→ Using PRIMARY High only (secondary was broken)")
+            validation['validation_notes'].append("â†’ Using PRIMARY High only (secondary was broken)")
         elif validation['high_secondary_validated']:
             # Secondary was tested and held
             validation['active_high_structure'] = 'secondary'
             validation['high_structures_to_show'] = ['secondary', 'primary']  # Show both but secondary is active
-            validation['validation_notes'].append("→ SECONDARY High² is ACTIVE (touched and held)")
+            validation['validation_notes'].append("â†’ SECONDARY HighÂ² is ACTIVE (touched and held)")
         elif validation['high_primary_validated']:
             # Primary was tested and held
             validation['active_high_structure'] = 'primary'
             validation['high_structures_to_show'] = ['primary', 'secondary']
-            validation['validation_notes'].append("→ PRIMARY High is ACTIVE (touched and held)")
+            validation['validation_notes'].append("â†’ PRIMARY High is ACTIVE (touched and held)")
         else:
             # Neither tested - show both as candidates
             validation['active_high_structure'] = 'both'
             validation['high_structures_to_show'] = ['primary', 'secondary']
-            validation['validation_notes'].append("→ Both High structures are candidates (neither tested overnight)")
+            validation['validation_notes'].append("â†’ Both High structures are candidates (neither tested overnight)")
     else:
         validation['active_high_structure'] = 'primary'
         validation['high_structures_to_show'] = ['primary']
@@ -758,10 +758,10 @@ def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high:
     
     if dist_to_primary_low_asc <= touch_threshold and dist_to_primary_low_asc >= -touch_threshold:
         validation['low_primary_validated'] = True
-        validation['validation_notes'].append(f"✓ Primary Low asc ({primary_low_asc:.2f}) touched and held")
+        validation['validation_notes'].append(f"âœ“ Primary Low asc ({primary_low_asc:.2f}) touched and held")
     elif dist_to_primary_low_asc < -touch_threshold:
         validation['low_primary_broken'] = True
-        validation['validation_notes'].append(f"✗ Primary Low asc ({primary_low_asc:.2f}) was broken")
+        validation['validation_notes'].append(f"âœ— Primary Low asc ({primary_low_asc:.2f}) was broken")
     
     # Secondary Low Ascending (if exists)
     if secondary_low is not None and secondary_low_time is not None:
@@ -772,29 +772,29 @@ def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high:
         
         if dist_to_secondary_low_asc <= touch_threshold and dist_to_secondary_low_asc >= -touch_threshold:
             validation['low_secondary_validated'] = True
-            validation['validation_notes'].append(f"✓ Secondary Low² asc ({secondary_low_asc:.2f}) touched and held")
+            validation['validation_notes'].append(f"âœ“ Secondary LowÂ² asc ({secondary_low_asc:.2f}) touched and held")
         elif dist_to_secondary_low_asc < -touch_threshold:
             validation['low_secondary_broken'] = True
-            validation['validation_notes'].append(f"✗ Secondary Low² asc ({secondary_low_asc:.2f}) was broken")
+            validation['validation_notes'].append(f"âœ— Secondary LowÂ² asc ({secondary_low_asc:.2f}) was broken")
     
     # Determine active LOW structure
     if secondary_low is not None:
         if validation['low_secondary_broken'] and not validation['low_primary_broken']:
             validation['active_low_structure'] = 'primary'
             validation['low_structures_to_show'] = ['primary']
-            validation['validation_notes'].append("→ Using PRIMARY Low only (secondary was broken)")
+            validation['validation_notes'].append("â†’ Using PRIMARY Low only (secondary was broken)")
         elif validation['low_secondary_validated']:
             validation['active_low_structure'] = 'secondary'
             validation['low_structures_to_show'] = ['secondary', 'primary']
-            validation['validation_notes'].append("→ SECONDARY Low² is ACTIVE (touched and held)")
+            validation['validation_notes'].append("â†’ SECONDARY LowÂ² is ACTIVE (touched and held)")
         elif validation['low_primary_validated']:
             validation['active_low_structure'] = 'primary'
             validation['low_structures_to_show'] = ['primary', 'secondary']
-            validation['validation_notes'].append("→ PRIMARY Low is ACTIVE (touched and held)")
+            validation['validation_notes'].append("â†’ PRIMARY Low is ACTIVE (touched and held)")
         else:
             validation['active_low_structure'] = 'both'
             validation['low_structures_to_show'] = ['primary', 'secondary']
-            validation['validation_notes'].append("→ Both Low structures are candidates (neither tested overnight)")
+            validation['validation_notes'].append("â†’ Both Low structures are candidates (neither tested overnight)")
     else:
         validation['active_low_structure'] = 'primary'
         validation['low_structures_to_show'] = ['primary']
@@ -891,8 +891,8 @@ def build_projection_table(pivots: List[Pivot], session_date: datetime) -> pd.Da
         
         row = {'Time': t.strftime('%H:%M')}
         for cone in cones:
-            row[f'{cone.name} ▲'] = cone.ascending_rail
-            row[f'{cone.name} ▼'] = cone.descending_rail
+            row[f'{cone.name} â–²'] = cone.ascending_rail
+            row[f'{cone.name} â–¼'] = cone.descending_rail
         data.append(row)
     
     return pd.DataFrame(data)
@@ -924,9 +924,9 @@ def check_overnight_rail_touches(cones: List[Cone], es_data: Dict) -> List[str]:
     
     for cone in cones:
         if abs(es_data['overnight_high_spx'] - cone.ascending_rail) <= RAIL_TOUCH_THRESHOLD:
-            touched.append(f"{cone.name} ▲")
+            touched.append(f"{cone.name} â–²")
         if abs(es_data['overnight_low_spx'] - cone.descending_rail) <= RAIL_TOUCH_THRESHOLD:
-            touched.append(f"{cone.name} ▼")
+            touched.append(f"{cone.name} â–¼")
     
     return touched
 
@@ -945,12 +945,12 @@ def find_confluence_zones(cones: List[Cone], threshold: float = 5.0) -> Dict[str
     for cone in cones:
         ascending_rails.append({
             'price': cone.ascending_rail, 
-            'name': f"{cone.name} ▲", 
+            'name': f"{cone.name} â–²", 
             'cone': cone.name
         })
         descending_rails.append({
             'price': cone.descending_rail, 
-            'name': f"{cone.name} ▼", 
+            'name': f"{cone.name} â–¼", 
             'cone': cone.name
         })
     
@@ -1032,6 +1032,7 @@ def find_confluence_zones(cones: List[Cone], threshold: float = 5.0) -> Dict[str
 class TradeSetup:
     """Complete trade setup for a confluence zone."""
     direction: str  # CALLS or PUTS
+    trade_type: str  # BUY POINT or SELL POINT
     entry_price: float  # The confluence zone price
     confluence_rails: List[str]  # Which rails form this confluence
     confluence_strength: int  # Number of rails converging
@@ -1051,9 +1052,13 @@ class TradeSetup:
     cone_width: float  # Width of the trading range
     delta_estimate: float  # Estimated delta for this strike
     theta_period: str  # Time period for theta (morning, mid_day, etc.)
+    rail_type: str = ""  # ASCENDING or DESCENDING
+    overnight_broken: bool = False  # True if ES broke this level overnight
+    follow_through_pct: float = 1.0  # Expected follow-through (0.70-0.75 if 8:30 already touched)
     distance: float = 0.0  # Distance from current price (set dynamically)
 
-def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dict:
+def generate_trade_setups(cones: List[Cone], current_price: float = None, 
+                          es_data: Dict = None, session_830_touched: Dict = None) -> Dict:
     """
     Generate complete trade setups for all confluence zones.
     
@@ -1062,6 +1067,14 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
     - Calculates exact entry, stop, targets
     - Recommends specific contract strike
     - Calculates expected profit/risk
+    - Marks entries broken overnight
+    - Applies 70-75% follow-through if 8:30 already touched
+    
+    Args:
+        cones: List of Cone objects at the evaluation time
+        current_price: Current SPX price
+        es_data: Overnight ES data with overnight_high_spx and overnight_low_spx
+        session_830_touched: Dict with 'high_touched' and 'low_touched' booleans for 8:30am touch
     
     Returns dict with 'calls_setups' and 'puts_setups' lists.
     """
@@ -1069,6 +1082,17 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
     confluence_data = find_confluence_zones(cones)
     calls_setups = []
     puts_setups = []
+    
+    # Get overnight levels for validation
+    overnight_high_spx = None
+    overnight_low_spx = None
+    if es_data:
+        overnight_high_spx = es_data.get('overnight_high_spx')
+        overnight_low_spx = es_data.get('overnight_low_spx')
+    
+    # Check if 8:30 already touched an edge (for 70-75% follow-through rule)
+    touched_830_high = session_830_touched.get('high_touched', False) if session_830_touched else False
+    touched_830_low = session_830_touched.get('low_touched', False) if session_830_touched else False
     
     # Get average cone width for target calculation
     avg_cone_width = sum(c.ascending_rail - c.descending_rail for c in cones) / len(cones) if cones else 30
@@ -1080,6 +1104,17 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         entry_price = zone['price']
         rails = zone['rails']
         strength = zone.get('strength', len(rails))
+        
+        # Check if this entry was BROKEN overnight (ES went below it)
+        overnight_broken = False
+        if overnight_low_spx is not None and overnight_low_spx < entry_price - 2:
+            overnight_broken = True
+        
+        # Check for reduced follow-through (8:30 already touched this zone)
+        # If 8:30 bounced from descending rail, 10am touch has 70-75% follow-through
+        follow_through_pct = 1.0
+        if touched_830_low:
+            follow_through_pct = 0.725  # Average of 70-75%
         
         # Find the corresponding ascending rail for target (opposite side)
         # Use the average of ascending rails from the cones that form this confluence
@@ -1101,9 +1136,11 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         if cone_width < MIN_CONE_WIDTH:
             continue
         
-        # Calculate targets
-        target_50 = entry_price + (cone_width * 0.50)
-        target_75 = entry_price + (cone_width * 0.75)
+        # Calculate targets (apply follow-through adjustment)
+        effective_width = cone_width * follow_through_pct
+        target_50 = entry_price + (effective_width * 0.50)
+        target_75 = entry_price + (effective_width * 0.75)
+        target_100 = entry_price + effective_width
         stop_loss = entry_price - STOP_LOSS_PTS
         
         # Calculate strike (OTM CALLS = strike ABOVE entry price)
@@ -1115,10 +1152,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         otm_distance = strike - entry_price
         delta_estimate = get_delta_estimate(otm_distance)
         
-        # Calculate profits using accurate delta
-        move_50 = cone_width * 0.50
-        move_75 = cone_width * 0.75
-        move_100 = cone_width
+        # Calculate profits using accurate delta (with follow-through adjustment)
+        move_50 = effective_width * 0.50
+        move_75 = effective_width * 0.75
+        move_100 = effective_width
         
         profit_50 = move_50 * delta_estimate * 100
         profit_75 = move_75 * delta_estimate * 100
@@ -1134,6 +1171,7 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         
         setup = TradeSetup(
             direction='CALLS',
+            trade_type='BUY POINT',  # Descending rails are buy points
             entry_price=entry_price,
             confluence_rails=rails,
             confluence_strength=strength,
@@ -1152,7 +1190,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
             rr_ratio_theta_adjusted=rr_ratio_theta,
             cone_width=cone_width,
             delta_estimate=delta_estimate,
-            theta_period=theta_period
+            theta_period=theta_period,
+            rail_type='DESCENDING',
+            overnight_broken=overnight_broken,
+            follow_through_pct=follow_through_pct
         )
         calls_setups.append(setup)
     
@@ -1163,6 +1204,17 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         entry_price = zone['price']
         rails = zone['rails']
         strength = zone.get('strength', len(rails))
+        
+        # Check if this entry was BROKEN overnight (ES went above it)
+        overnight_broken = False
+        if overnight_high_spx is not None and overnight_high_spx > entry_price + 2:
+            overnight_broken = True
+        
+        # Check for reduced follow-through (8:30 already touched this zone)
+        # If 8:30 rejected from ascending rail, 10am touch has 70-75% follow-through
+        follow_through_pct = 1.0
+        if touched_830_high:
+            follow_through_pct = 0.725  # Average of 70-75%
         
         # Find the corresponding descending rail for target (opposite side)
         target_prices = []
@@ -1184,8 +1236,11 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
             continue
         
         # Calculate targets
-        target_50 = entry_price - (cone_width * 0.50)
-        target_75 = entry_price - (cone_width * 0.75)
+        # Calculate targets (apply follow-through adjustment)
+        effective_width = cone_width * follow_through_pct
+        target_50 = entry_price - (effective_width * 0.50)
+        target_75 = entry_price - (effective_width * 0.75)
+        target_100 = entry_price - effective_width
         stop_loss = entry_price + STOP_LOSS_PTS
         
         # Calculate strike (OTM PUTS = strike BELOW entry price)
@@ -1197,10 +1252,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         otm_distance = entry_price - strike
         delta_estimate = get_delta_estimate(otm_distance)
         
-        # Calculate profits using accurate delta
-        move_50 = cone_width * 0.50
-        move_75 = cone_width * 0.75
-        move_100 = cone_width
+        # Calculate profits using accurate delta (with follow-through adjustment)
+        move_50 = effective_width * 0.50
+        move_75 = effective_width * 0.75
+        move_100 = effective_width
         
         profit_50 = move_50 * delta_estimate * 100
         profit_75 = move_75 * delta_estimate * 100
@@ -1216,6 +1271,7 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         
         setup = TradeSetup(
             direction='PUTS',
+            trade_type='SELL POINT',  # Ascending rails are sell points
             entry_price=entry_price,
             confluence_rails=rails,
             confluence_strength=strength,
@@ -1234,7 +1290,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
             rr_ratio_theta_adjusted=rr_ratio_theta,
             cone_width=cone_width,
             delta_estimate=delta_estimate,
-            theta_period=theta_period
+            theta_period=theta_period,
+            rail_type='ASCENDING',
+            overnight_broken=overnight_broken,
+            follow_through_pct=follow_through_pct
         )
         puts_setups.append(setup)
     
@@ -1285,10 +1344,10 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     # Determine colors and proximity
     if setup.direction == 'CALLS':
         color = "#22c55e"
-        emoji = "🟢"
+        emoji = "ðŸŸ¢"
     else:
         color = "#ef4444"
-        emoji = "🔴"
+        emoji = "ðŸ”´"
     
     # Calculate distance from current price if provided
     distance_text = ""
@@ -1296,12 +1355,12 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     if current_price:
         distance = abs(current_price - setup.entry_price)
         if distance <= AT_RAIL_THRESHOLD:
-            distance_text = f"🎯 {distance:.1f} pts away - AT ENTRY"
+            distance_text = f"ðŸŽ¯ {distance:.1f} pts away - AT ENTRY"
             at_entry = True
         elif distance <= 15:
-            distance_text = f"⏳ {distance:.1f} pts away - WATCH"
+            distance_text = f"â³ {distance:.1f} pts away - WATCH"
         else:
-            distance_text = f"📍 {distance:.1f} pts away"
+            distance_text = f"ðŸ“ {distance:.1f} pts away"
     
     # GO/NO-GO Decision based on calculable factors:
     # 1. R:R (theta-adjusted) must be >= 3:1
@@ -1316,49 +1375,49 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     confluence_ok = setup.confluence_strength >= 2
     
     if rr_ok and width_ok and confluence_ok and time_ok:
-        decision = "✅ GO"
+        decision = "âœ… GO"
         decision_color = "#22c55e"
-        decision_reason = f"R:R {setup.rr_ratio_theta_adjusted:.1f}:1 (θ-adj), {setup.confluence_strength} rails, Δ≈{setup.delta_estimate:.2f}"
+        decision_reason = f"R:R {setup.rr_ratio_theta_adjusted:.1f}:1 (Î¸-adj), {setup.confluence_strength} rails, Î”â‰ˆ{setup.delta_estimate:.2f}"
     elif not time_ok:
-        decision = "⛔ TOO LATE"
+        decision = "â›” TOO LATE"
         decision_color = "#ef4444"
         decision_reason = f"After {LAST_ENTRY_TIME.strftime('%H:%M')} - theta decay too aggressive"
     elif not rr_ok:
-        decision = "❌ NO-GO"
+        decision = "âŒ NO-GO"
         decision_color = "#ef4444"
-        decision_reason = f"R:R only {setup.rr_ratio_theta_adjusted:.1f}:1 after θ (need {MIN_RR_RATIO}:1)"
+        decision_reason = f"R:R only {setup.rr_ratio_theta_adjusted:.1f}:1 after Î¸ (need {MIN_RR_RATIO}:1)"
     elif not width_ok:
-        decision = "❌ NO-GO"
+        decision = "âŒ NO-GO"
         decision_color = "#ef4444"
         decision_reason = f"Cone only {setup.cone_width:.0f} pts (need {MIN_CONE_WIDTH})"
     else:
-        decision = "⚠️ WEAK"
+        decision = "âš ï¸ WEAK"
         decision_color = "#f59e0b"
         decision_reason = f"Single rail only - reduced probability"
     
     # Theta period warning
     theta_warning = ""
     if setup.theta_period == 'afternoon':
-        theta_warning = "⚠️ Afternoon - profits reduced ~35% by theta"
+        theta_warning = "âš ï¸ Afternoon - profits reduced ~35% by theta"
     elif setup.theta_period == 'late':
-        theta_warning = "🛑 Late session - avoid new entries"
+        theta_warning = "ðŸ›‘ Late session - avoid new entries"
     
     # Card header with strike and decision
     if setup.direction == 'CALLS':
-        st.success(f"**{emoji} {setup.strike_label}** — {decision}")
+        st.success(f"**{emoji} {setup.strike_label}** â€” {decision}")
     else:
-        st.error(f"**{emoji} {setup.strike_label}** — {decision}")
+        st.error(f"**{emoji} {setup.strike_label}** â€” {decision}")
     
     # Confluence info
     st.caption(f"Confluence: {' + '.join(setup.confluence_rails)}")
     
     # Decision reason
     if "GO" in decision:
-        st.markdown(f"✅ {decision_reason}")
+        st.markdown(f"âœ… {decision_reason}")
     elif "NO-GO" in decision or "LATE" in decision:
-        st.markdown(f"❌ {decision_reason}")
+        st.markdown(f"âŒ {decision_reason}")
     else:
-        st.markdown(f"⚠️ {decision_reason}")
+        st.markdown(f"âš ï¸ {decision_reason}")
     
     # Theta warning if applicable
     if theta_warning:
@@ -1381,7 +1440,7 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     target_data = {
         "Exit": ["60% @ 50%", "20% @ 75%", "20% @ 100%"],
         "Level": [f"{setup.target_50:.2f}", f"{setup.target_75:.2f}", f"{setup.target_100:.2f}"],
-        "Profit (θ-adj)": [f"+${setup.profit_50_theta_adjusted:.0f}", f"+${setup.profit_75 * theta_mult:.0f}", f"+${setup.profit_100 * theta_mult:.0f}"]
+        "Profit (Î¸-adj)": [f"+${setup.profit_50_theta_adjusted:.0f}", f"+${setup.profit_75 * theta_mult:.0f}", f"+${setup.profit_100 * theta_mult:.0f}"]
     }
     st.dataframe(target_data, use_container_width=True, hide_index=True)
     
@@ -1392,7 +1451,7 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
     with col_b:
         st.metric("Delta", f"{setup.delta_estimate:.2f}")
     with col_c:
-        st.metric("R:R (θ-adj)", f"{setup.rr_ratio_theta_adjusted:.1f}:1")
+        st.metric("R:R (Î¸-adj)", f"{setup.rr_ratio_theta_adjusted:.1f}:1")
     with col_d:
         st.metric("Risk", f"${setup.risk_dollars:.0f}")
     
@@ -1406,7 +1465,10 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     distance = abs(current_price - setup.entry_price)
     
     # Determine status
-    if distance <= AT_RAIL_THRESHOLD:
+    if setup.overnight_broken:
+        status = "INVALID"
+        status_class = "badge-nogo"
+    elif distance <= AT_RAIL_THRESHOLD:
         status = "ACTIVE"
         status_class = "badge-go"
     elif distance <= 15:
@@ -1419,14 +1481,15 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     # Direction styling
     direction_class = "badge-calls" if setup.direction == "CALLS" else "badge-puts"
     
-    # GO/NO-GO
+    # GO/NO-GO (broken overnight = automatic NO-GO)
     ct_now = get_ct_now().time()
     time_ok = ct_now < LAST_ENTRY_TIME
     rr_ok = setup.rr_ratio_theta_adjusted >= MIN_RR_RATIO
     width_ok = setup.cone_width >= MIN_CONE_WIDTH
     confluence_ok = setup.confluence_strength >= 2
+    not_broken = not setup.overnight_broken
     
-    if rr_ok and width_ok and confluence_ok and time_ok:
+    if rr_ok and width_ok and confluence_ok and time_ok and not_broken:
         decision = "GO"
         decision_class = "badge-go"
     else:
@@ -1436,11 +1499,21 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     # Theta multiplier for display
     theta_mult = THETA_MULTIPLIER.get(setup.theta_period, 1.0)
     
+    # Follow-through warning
+    follow_through_note = ""
+    if setup.follow_through_pct < 1.0:
+        follow_through_note = f'<div style="background: rgba(245, 158, 11, 0.2); border: 1px solid var(--accent-gold); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">âš ï¸ 8:30 already touched â€” Expect {setup.follow_through_pct*100:.0f}% follow-through</div>'
+    
+    # Overnight broken warning
+    broken_note = ""
+    if setup.overnight_broken:
+        broken_note = f'<div style="background: rgba(239, 68, 68, 0.2); border: 1px solid var(--accent-red); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-red);">âŒ BROKEN OVERNIGHT â€” Entry invalidated</div>'
+    
     st.markdown(f"""
     <div class="trade-panel">
         <div class="trade-panel-header">
             <div style="display: flex; align-items: center; gap: 1rem;">
-                <span class="trade-panel-badge {direction_class}">{setup.direction}</span>
+                <span class="trade-panel-badge {direction_class}">{setup.trade_type}</span>
                 <span style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--accent-gold); font-weight: 600;">{setup.strike_label}</span>
             </div>
             <div style="display: flex; gap: 0.5rem;">
@@ -1449,9 +1522,11 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
             </div>
         </div>
         <div class="trade-panel-body">
+            {broken_note}
+            {follow_through_note}
             <div class="entry-row">
                 <div class="entry-item">
-                    <div class="entry-label">Entry</div>
+                    <div class="entry-label">Entry ({setup.rail_type})</div>
                     <div class="entry-value gold">{setup.entry_price:,.2f}</div>
                 </div>
                 <div class="entry-item">
@@ -1477,7 +1552,7 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
                     <div class="entry-value">{setup.confluence_strength} Rails</div>
                 </div>
                 <div class="entry-item">
-                    <div class="entry-label">R:R (θ-adj)</div>
+                    <div class="entry-label">R:R (Î¸-adj)</div>
                     <div class="entry-value">{setup.rr_ratio_theta_adjusted:.1f}:1</div>
                 </div>
                 <div class="entry-item">
@@ -1505,6 +1580,9 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
             </div>
             <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.75rem; color: var(--text-muted);">
                 <strong>Sources:</strong> {' + '.join(setup.confluence_rails)}
+            </div>
+            <div style="margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: var(--bg-tertiary); border-radius: 4px; font-size: 0.7rem; color: var(--text-secondary);">
+                {'<strong>âœ… Valid BUY:</strong> Bearish candle touches entry, closes &lt;5pts above, no drop &gt;5pts below' if setup.trade_type == 'BUY POINT' else '<strong>âœ… Valid SELL:</strong> Bullish candle touches entry, closes &lt;5pts below, no rise &gt;5pts above'}
             </div>
         </div>
     </div>
@@ -1553,7 +1631,7 @@ def calculate_contract_expectation(
     return ContractExpectation(
         direction=direction,
         entry_price=entry_rail,
-        entry_rail=f"{cone_name} {'▼' if rail_type == 'descending' else '▲'}",
+        entry_rail=f"{cone_name} {'â–¼' if rail_type == 'descending' else 'â–²'}",
         target_50_underlying=target_50,
         target_75_underlying=target_75,
         target_100_underlying=target_100,
@@ -1680,15 +1758,15 @@ def calculate_confluence_score(nearest_distance, regime, cones, current_price, i
         rail_broken = False
         
         for v in validated_rails:
-            if nearest_rail_type == 'descending' and '▼' in v:
+            if nearest_rail_type == 'descending' and 'â–¼' in v:
                 rail_validated = True
-            elif nearest_rail_type == 'ascending' and '▲' in v:
+            elif nearest_rail_type == 'ascending' and 'â–²' in v:
                 rail_validated = True
         
         for b in broken_rails:
-            if nearest_rail_type == 'descending' and '▼' in b:
+            if nearest_rail_type == 'descending' and 'â–¼' in b:
                 rail_broken = True
-            elif nearest_rail_type == 'ascending' and '▲' in b:
+            elif nearest_rail_type == 'ascending' and 'â–²' in b:
                 rail_broken = True
         
         if rail_validated and not rail_broken:
@@ -1775,7 +1853,7 @@ def calculate_confluence_score(nearest_distance, regime, cones, current_price, i
     # =========================================================================
     secondary_alignment = False
     for cone in cones:
-        if 'High²' in cone.name or 'Low²' in cone.name:
+        if 'HighÂ²' in cone.name or 'LowÂ²' in cone.name:
             if nearest_rail_type == 'descending':
                 if abs(cone.descending_rail - current_price) <= CONFLUENCE_THRESHOLD:
                     secondary_alignment = True
@@ -1822,8 +1900,8 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
     RULES:
     1. Descending rails = BUY points (CALLS) - price finds support
     2. Ascending rails = SELL points (PUTS) - price finds resistance
-    3. EXCEPTION: If price is FAR BELOW all descending rails → could be PUTS (breakdown)
-    4. EXCEPTION: If price is FAR ABOVE all ascending rails → could be CALLS (breakout)
+    3. EXCEPTION: If price is FAR BELOW all descending rails â†’ could be PUTS (breakdown)
+    4. EXCEPTION: If price is FAR ABOVE all ascending rails â†’ could be CALLS (breakout)
     5. Contract 15-20 pts OTM moves ~0.33x the underlying move
     """
     warnings = []
@@ -1867,14 +1945,14 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
         direction = 'PUTS'
         entry_level = current_price
         target_100 = lowest_descending - cone_width  # Project further down
-        warnings.append("⚠️ Price below ALL support - breakdown mode")
+        warnings.append("âš ï¸ Price below ALL support - breakdown mode")
     elif far_above_resistance:
         # Price broke above all resistance - could be CALLS (continuation) or wait
         position = 'breakout'
         direction = 'CALLS'
         entry_level = current_price
         target_100 = highest_ascending + cone_width  # Project further up
-        warnings.append("⚠️ Price above ALL resistance - breakout mode")
+        warnings.append("âš ï¸ Price above ALL resistance - breakout mode")
     elif nearest_rail_type == 'descending' and nearest_distance <= at_rail_threshold:
         # At a descending rail = support = BUY CALLS
         position = 'at_support'
@@ -1946,14 +2024,14 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
     profit_75 = contract_move_75 * 100
     profit_100 = contract_move_100 * 100
     
-    # Risk calculation (3 pt stop × 0.33 factor × $100)
+    # Risk calculation (3 pt stop Ã— 0.33 factor Ã— $100)
     risk_dollars = 3 * CONTRACT_FACTOR * 100  # ~$99 risk
     rr_50 = profit_50 / risk_dollars if risk_dollars > 0 else 0
     
     contract_exp = ContractExpectation(
         direction=calc_direction,
         entry_price=entry_level,
-        entry_rail=f"{nearest_cone.name} {'▼' if nearest_rail_type == 'descending' else '▲'}",
+        entry_rail=f"{nearest_cone.name} {'â–¼' if nearest_rail_type == 'descending' else 'â–²'}",
         target_50_underlying=target_50,
         target_75_underlying=target_75,
         target_100_underlying=target_100,
@@ -1968,8 +2046,8 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
     
     # Store strike recommendation in warnings for display
     if direction in ['CALLS', 'PUTS']:
-        warnings.insert(0, f"📋 Recommended: {calc_direction} @ {recommended_strike} strike")
-        warnings.insert(1, f"💰 Expected move: ${contract_move_50:.0f}-${contract_move_100:.0f} per contract")
+        warnings.insert(0, f"ðŸ“‹ Recommended: {calc_direction} @ {recommended_strike} strike")
+        warnings.insert(1, f"ðŸ’° Expected move: ${contract_move_50:.0f}-${contract_move_100:.0f} per contract")
     
     # ==========================================================================
     # POSITION SIZING based on confluence score
@@ -1998,15 +2076,15 @@ def generate_action_card(cones, regime, current_price, is_10am, overnight_valida
         
         if broken:
             for b in broken:
-                if (direction == 'CALLS' and '▼' in b) or (direction == 'PUTS' and '▲' in b):
-                    warnings.insert(0, f"⛔ WARNING: {b} was BROKEN overnight")
+                if (direction == 'CALLS' and 'â–¼' in b) or (direction == 'PUTS' and 'â–²' in b):
+                    warnings.insert(0, f"â›” WARNING: {b} was BROKEN overnight")
                     color = 'red'
                     position_size = 'SKIP'
         
         if validated:
             for v in validated:
-                if (direction == 'CALLS' and '▼' in v) or (direction == 'PUTS' and '▲' in v):
-                    warnings.insert(0, f"✅ {v} VALIDATED overnight")
+                if (direction == 'CALLS' and 'â–¼' in v) or (direction == 'PUTS' and 'â–²' in v):
+                    warnings.insert(0, f"âœ… {v} VALIDATED overnight")
     
     # Add score info
     warnings.append(f"Score: {confluence_score} - {score_recommendation}")
@@ -2508,7 +2586,7 @@ def render_score_ring(score: int):
     """, unsafe_allow_html=True)
 
 def render_action_card(action: ActionCard):
-    emoji = '🟢' if action.direction == 'CALLS' else ('🔴' if action.direction == 'PUTS' else ('🟡' if action.direction == 'WAIT' else '⛔'))
+    emoji = 'ðŸŸ¢' if action.direction == 'CALLS' else ('ðŸ”´' if action.direction == 'PUTS' else ('ðŸŸ¡' if action.direction == 'WAIT' else 'â›”'))
     card_class = f"action-{action.color}"
     dir_class = f"direction-{action.color}"
     
@@ -2545,19 +2623,19 @@ def render_contract_recommendation(action: ActionCard):
     # Main contract card using native Streamlit
     st.markdown(f"""
     <div style="border: 3px solid {border_color}; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; background: linear-gradient(135deg, {border_color}11, {border_color}22);">
-        <h2 style="text-align: center; margin: 0; color: {border_color};">📋 {strike_label}</h2>
+        <h2 style="text-align: center; margin: 0; color: {border_color};">ðŸ“‹ {strike_label}</h2>
     </div>
     """, unsafe_allow_html=True)
     
     # Entry and Stop in columns
     col_entry, col_stop = st.columns(2)
     with col_entry:
-        st.metric("🎯 Entry Level", f"{action.entry_level:.2f}")
+        st.metric("ðŸŽ¯ Entry Level", f"{action.entry_level:.2f}")
     with col_stop:
-        st.metric("🛑 Stop Loss", f"{action.stop_level:.2f}", delta="-3 pts", delta_color="inverse")
+        st.metric("ðŸ›‘ Stop Loss", f"{action.stop_level:.2f}", delta="-3 pts", delta_color="inverse")
     
     # Exit Strategy
-    st.markdown("**📊 Exit Strategy (60/20/20):**")
+    st.markdown("**ðŸ“Š Exit Strategy (60/20/20):**")
     
     exit_data = {
         "Exit": ["60% @ 50%", "20% @ 75%", "20% @ 100%"],
@@ -2569,11 +2647,11 @@ def render_contract_recommendation(action: ActionCard):
     # Stats row
     col_width, col_rr = st.columns(2)
     with col_width:
-        st.metric("📏 Cone Width", f"{cone_height:.0f} pts")
+        st.metric("ðŸ“ Cone Width", f"{cone_height:.0f} pts")
     with col_rr:
-        st.metric("⚖️ R:R @ 50%", f"{ce.risk_reward_50:.1f}:1")
+        st.metric("âš–ï¸ R:R @ 50%", f"{ce.risk_reward_50:.1f}:1")
     
-    st.caption("💡 Contract moves ~0.33x underlying (strike 15-20 pts OTM)")
+    st.caption("ðŸ’¡ Contract moves ~0.33x underlying (strike 15-20 pts OTM)")
 
 def render_decision_card(title: str, cones: List[Cone]):
     st.markdown(f"""
@@ -2592,17 +2670,17 @@ def render_decision_card(title: str, cones: List[Cone]):
         col_puts, col_calls = st.columns(2)
         with col_puts:
             st.metric(
-                label="🔴 Puts Entry ▲",
+                label="ðŸ”´ Puts Entry â–²",
                 value=f"{cone.ascending_rail:.2f}"
             )
         with col_calls:
             st.metric(
-                label="🟢 Calls Entry ▼", 
+                label="ðŸŸ¢ Calls Entry â–¼", 
                 value=f"{cone.descending_rail:.2f}"
             )
 
 def render_proximity_meters(cones: List[Cone], current_price: float):
-    st.markdown("#### 📍 Distance to Entry Rails")
+    st.markdown("#### ðŸ“ Distance to Entry Rails")
     
     for cone in cones:
         dist_asc = abs(current_price - cone.ascending_rail)
@@ -2621,12 +2699,12 @@ def render_proximity_meters(cones: List[Cone], current_price: float):
             <div style="font-weight: 600; margin-bottom: 0.75rem;">{cone.name} Cone</div>
             <div style="display: flex; gap: 1rem;">
                 <div style="flex: 1;">
-                    <div style="font-size: 0.75rem; color: #64748b;">To ▲ {cone.ascending_rail:.2f}</div>
+                    <div style="font-size: 0.75rem; color: #64748b;">To â–² {cone.ascending_rail:.2f}</div>
                     <div style="font-weight: 600; color: #ef4444;">{dist_asc:.1f} pts</div>
                     <div class="proximity-bar"><div class="proximity-fill {prox_class_asc}" style="width: {100-pct_asc}%;"></div></div>
                 </div>
                 <div style="flex: 1;">
-                    <div style="font-size: 0.75rem; color: #64748b;">To ▼ {cone.descending_rail:.2f}</div>
+                    <div style="font-size: 0.75rem; color: #64748b;">To â–¼ {cone.descending_rail:.2f}</div>
                     <div style="font-weight: 600; color: #22c55e;">{dist_desc:.1f} pts</div>
                     <div class="proximity-bar"><div class="proximity-fill {prox_class_desc}" style="width: {100-pct_desc}%;"></div></div>
                 </div>
@@ -2662,7 +2740,7 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
        - Secondary pivot confirms the level
     """
     
-    st.markdown("#### 📋 Trade Checklist")
+    st.markdown("#### ðŸ“‹ Trade Checklist")
     
     # Get current time
     ct_now = get_ct_now()
@@ -2701,15 +2779,15 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
         broken = overnight_validation.get('broken', [])
         
         for v in validated:
-            if nearest_rail_type == 'descending' and '▼' in v:
+            if nearest_rail_type == 'descending' and 'â–¼' in v:
                 rail_validated = True
-            elif nearest_rail_type == 'ascending' and '▲' in v:
+            elif nearest_rail_type == 'ascending' and 'â–²' in v:
                 rail_validated = True
         
         for b in broken:
-            if nearest_rail_type == 'descending' and '▼' in b:
+            if nearest_rail_type == 'descending' and 'â–¼' in b:
                 rail_broken = True
-            elif nearest_rail_type == 'ascending' and '▲' in b:
+            elif nearest_rail_type == 'ascending' and 'â–²' in b:
                 rail_broken = True
     
     # =========================================================================
@@ -2769,7 +2847,7 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     
     if is_1000_window:
         timing_ok = True
-        timing_detail = "10:00 Decision Window ★"
+        timing_detail = "10:00 Decision Window â˜…"
     elif is_830_window:
         timing_ok = True
         timing_detail = "8:30 Open Window"
@@ -2785,7 +2863,7 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     # 5. OVERNIGHT VALIDATION (Bonus)
     if rail_validated:
         validation_ok = True
-        validation_detail = "Rail validated overnight ★"
+        validation_detail = "Rail validated overnight â˜…"
     elif overnight_validation and len(overnight_validation.get('validated', [])) > 0:
         validation_ok = True
         validation_detail = "Other rails validated"
@@ -2822,16 +2900,16 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     
     # Overall assessment
     if passed_count >= 5:
-        overall = "🟢 STRONG SETUP"
+        overall = "ðŸŸ¢ STRONG SETUP"
         overall_color = "#22c55e"
     elif passed_count >= 4:
-        overall = "🟡 ACCEPTABLE"
+        overall = "ðŸŸ¡ ACCEPTABLE"
         overall_color = "#eab308"
     elif passed_count >= 3:
-        overall = "🟠 MARGINAL"
+        overall = "ðŸŸ  MARGINAL"
         overall_color = "#f97316"
     else:
-        overall = "🔴 SKIP"
+        overall = "ðŸ”´ SKIP"
         overall_color = "#ef4444"
     
     st.markdown(f"""
@@ -2843,7 +2921,7 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     """, unsafe_allow_html=True)
     
     for label, passed, detail in checks:
-        icon = "✓" if passed else "✗"
+        icon = "âœ“" if passed else "âœ—"
         color = "#22c55e" if passed else "#ef4444"
         bg = "#22c55e11" if passed else "#ef444411"
         st.markdown(f"""
@@ -2857,7 +2935,7 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     
     # KEY INSIGHT
     st.markdown("---")
-    st.markdown("**💡 Key Insight:**")
+    st.markdown("**ðŸ’¡ Key Insight:**")
     
     if rail_broken:
         st.error("Rail was broken overnight - structure is compromised. Wait for new setup.")
@@ -2884,7 +2962,7 @@ def highlight_times(row):
 def main():
     st.set_page_config(
         page_title="SPX Prophet",
-        page_icon="📈",
+        page_icon="ðŸ“ˆ",
         layout="wide",
         initial_sidebar_state="expanded"
     )
@@ -2913,7 +2991,7 @@ def main():
     
     # ===== SIDEBAR =====
     with st.sidebar:
-        st.markdown("### 📅 Session")
+        st.markdown("### ðŸ“… Session")
         session_date = st.date_input("Trading Date", value=datetime.now().date())
         session_date = datetime.combine(session_date, time(0, 0))
         
@@ -2940,24 +3018,24 @@ def main():
         
         # Show session tracking info with MANUAL OVERRIDE
         st.markdown("---")
-        st.markdown("### 📊 Session Tracker")
+        st.markdown("### ðŸ“Š Session Tracker")
         
         # Display current values
         sess_col1, sess_col2 = st.columns(2)
         with sess_col1:
             display_high = st.session_state.session_high
-            st.metric("Session High", f"{display_high:,.2f}" if display_high else "—")
+            st.metric("Session High", f"{display_high:,.2f}" if display_high else "â€”")
         with sess_col2:
             display_low = st.session_state.session_low
-            st.metric("Session Low", f"{display_low:,.2f}" if display_low else "—")
+            st.metric("Session Low", f"{display_low:,.2f}" if display_low else "â€”")
         
         if st.session_state.get('manual_override'):
-            st.caption("⚠️ Manual override active")
+            st.caption("âš ï¸ Manual override active")
         else:
-            st.caption("📡 Auto-updating from Yahoo Finance")
+            st.caption("ðŸ“¡ Auto-updating from Yahoo Finance")
         
         # Manual override inputs
-        with st.expander("✏️ Manual Override"):
+        with st.expander("âœï¸ Manual Override"):
             st.caption("Use if Yahoo data differs from TradingView")
             manual_high = st.number_input(
                 "Session High", 
@@ -2975,18 +3053,44 @@ def main():
             )
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("✅ Set Manual"):
+                if st.button("âœ… Set Manual"):
                     st.session_state.session_high = manual_high
                     st.session_state.session_low = manual_low
                     st.session_state.manual_override = True
                     st.rerun()
             with col_btn2:
-                if st.button("🔄 Reset Auto"):
+                if st.button("ðŸ”„ Reset Auto"):
                     st.session_state.manual_override = False
                     st.rerun()
         
+        # Show ES â†’ SPX implied price (useful for overnight planning)
+        if es_data and es_data.get('offset'):
+            st.markdown("---")
+            st.markdown("### ðŸŒ™ ES â†’ SPX Estimate")
+            es_offset = es_data.get('offset', 0)
+            
+            # Get current ES if available
+            try:
+                es_ticker = yf.Ticker("ES=F")
+                es_current_data = es_ticker.history(period='1d', interval='1m')
+                if not es_current_data.empty:
+                    es_current = es_current_data['Close'].iloc[-1]
+                    spx_implied = es_current - es_offset
+                    
+                    es_col1, es_col2 = st.columns(2)
+                    with es_col1:
+                        st.metric("ES Futures", f"{es_current:,.2f}")
+                    with es_col2:
+                        st.metric("SPX Implied", f"{spx_implied:,.2f}")
+                    st.caption(f"Offset: {es_offset:+.2f} pts")
+                    
+                    if not is_market_hours:
+                        st.info("ðŸ’¡ Use SPX Implied to check overnight levels")
+            except:
+                pass
+        
         st.markdown("---")
-        st.markdown("### ⚙️ Parameters")
+        st.markdown("### âš™ï¸ Parameters")
         col_slope1, col_slope2 = st.columns(2)
         with col_slope1:
             st.metric("Ascending", f"+{SLOPE_ASCENDING}")
@@ -2995,7 +3099,7 @@ def main():
         
         # ========== PRICE CORRECTION OFFSET ==========
         st.markdown("---")
-        st.markdown("### 🔧 Price Correction")
+        st.markdown("### ðŸ”§ Price Correction")
         st.caption("Adjust for Yahoo/TradingView difference")
         price_offset = st.number_input(
             "Price Offset", 
@@ -3008,7 +3112,7 @@ def main():
         )
         
         st.markdown("---")
-        st.markdown("### 📍 Primary Pivots")
+        st.markdown("### ðŸ“ Primary Pivots")
         
         # Initialize secondary pivot variables
         secondary_high_price = None
@@ -3027,24 +3131,24 @@ def main():
         if prior_session:
             st.caption(f"Source: {prior_session['date'].strftime('%Y-%m-%d')}")
             if prior_session.get('power_hour_filtered'):
-                st.warning("⚡ High filtered (power hour)")
+                st.warning("âš¡ High filtered (power hour)")
             
             # ============================================================
             # PIVOT DETECTION METHODOLOGY
             # HIGH pivots (Primary & Secondary) = Use WICKS - rejection points
-            #   → Both ascending AND descending rails from High use wick value
+            #   â†’ Both ascending AND descending rails from High use wick value
             # LOW pivots (Primary & Secondary) = Use CLOSE - commitment points
-            #   → Both ascending AND descending rails from Low use close value
+            #   â†’ Both ascending AND descending rails from Low use close value
             # ============================================================
-            st.info("📊 **HIGH pivots** → Wick (rejection) | **LOW pivots** → Close (commitment)")
+            st.info("ðŸ“Š **HIGH pivots** â†’ Wick (rejection) | **LOW pivots** â†’ Close (commitment)")
             
-            # HIGH pivot → Use candle HIGH (wick) - both rails project from this
+            # HIGH pivot â†’ Use candle HIGH (wick) - both rails project from this
             base_high = prior_session['high']  # Wick high
             base_high_time = prior_session['high_time']
             base_sec_high = prior_session.get('secondary_high')  # Wick-based secondary high
             base_sec_high_time = prior_session.get('secondary_high_time')
             
-            # LOW pivot → Use CLOSE - both rails project from this
+            # LOW pivot â†’ Use CLOSE - both rails project from this
             base_low = prior_session.get('low_line', prior_session['low'])  # Close-based low
             base_low_time = prior_session.get('low_line_time', prior_session['low_time'])
             base_sec_low = prior_session.get('secondary_low_line')  # Close-based secondary low
@@ -3055,7 +3159,7 @@ def main():
             auto_low = base_low - price_offset
             auto_close = prior_session['close'] - price_offset
             
-            use_manual = st.checkbox("✏️ Manual Price Override", value=False, help="Enable to enter your TradingView prices directly")
+            use_manual = st.checkbox("âœï¸ Manual Price Override", value=False, help="Enable to enter your TradingView prices directly")
             
             if use_manual:
                 st.info("Enter your TradingView prices below")
@@ -3077,29 +3181,29 @@ def main():
                 st.metric("Close", f"{close_price:.2f}")
                 
                 if price_offset != 0:
-                    st.caption(f"📉 Offset applied: -{price_offset:.2f} pts")
+                    st.caption(f"ðŸ“‰ Offset applied: -{price_offset:.2f} pts")
             
             # Secondary Pivots Display
             if base_sec_high is not None or base_sec_low is not None:
                 st.markdown("---")
-                st.markdown("### 📍 Secondary Pivots")
-                st.caption("High² = Wick | Low² = Close")
+                st.markdown("### ðŸ“ Secondary Pivots")
+                st.caption("HighÂ² = Wick | LowÂ² = Close")
             
             if base_sec_high is not None:
-                st.success("🔄 Secondary High Detected!")
+                st.success("ðŸ”„ Secondary High Detected!")
                 secondary_high_price = base_sec_high - price_offset
                 secondary_high_time = base_sec_high_time
-                st.metric("2nd High² (Wick)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
+                st.metric("2nd HighÂ² (Wick)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
             
             if base_sec_low is not None:
-                st.success("🔄 Secondary Low Detected!")
+                st.success("ðŸ”„ Secondary Low Detected!")
                 secondary_low_price = base_sec_low - price_offset
                 secondary_low_time = base_sec_low_time
-                st.metric("2nd Low² (Close)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
+                st.metric("2nd LowÂ² (Close)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
             
             # ========== PRE-MARKET PIVOTS ==========
             st.markdown("---")
-            st.markdown("### 🌅 Pre-Market Pivots")
+            st.markdown("### ðŸŒ… Pre-Market Pivots")
             st.caption("Previous day's pre-market (6am-8:30am CT)")
             
             if premarket_data:
@@ -3166,22 +3270,22 @@ def main():
                         premarket_low_time = None
             
             # Debug: Show timing info
-            with st.expander("🔍 Pivot Timing Details"):
+            with st.expander("ðŸ” Pivot Timing Details"):
                 st.markdown("**Methodology:**")
-                st.markdown("- **HIGH pivots** → Use Wick (rejection point)")
-                st.markdown("- **LOW pivots** → Use Close (commitment point)")
+                st.markdown("- **HIGH pivots** â†’ Use Wick (rejection point)")
+                st.markdown("- **LOW pivots** â†’ Use Close (commitment point)")
                 st.markdown("- Each pivot projects BOTH ascending & descending rails")
                 st.markdown("---")
                 st.write(f"**Primary High (Wick):** {high_price:.2f} @ {high_time_str} CT")
                 st.write(f"**Primary Low (Close):** {low_price:.2f} @ {low_time_str} CT")
                 if secondary_high_price is not None:
-                    st.write(f"**Secondary High² (Wick):** {secondary_high_price:.2f} @ {secondary_high_time.strftime('%H:%M')} CT")
+                    st.write(f"**Secondary HighÂ² (Wick):** {secondary_high_price:.2f} @ {secondary_high_time.strftime('%H:%M')} CT")
                 else:
-                    st.write("**Secondary High²:** Not detected")
+                    st.write("**Secondary HighÂ²:** Not detected")
                 if secondary_low_price is not None:
-                    st.write(f"**Secondary Low² (Close):** {secondary_low_price:.2f} @ {secondary_low_time.strftime('%H:%M')} CT")
+                    st.write(f"**Secondary LowÂ² (Close):** {secondary_low_price:.2f} @ {secondary_low_time.strftime('%H:%M')} CT")
                 else:
-                    st.write("**Secondary Low²:** Not detected")
+                    st.write("**Secondary LowÂ²:** Not detected")
                 if use_premarket_high and premarket_high_price:
                     st.write(f"**Pre-Market High:** {premarket_high_price:.2f} @ {premarket_high_time.strftime('%H:%M')} CT")
                 if use_premarket_low and premarket_low_price:
@@ -3189,16 +3293,16 @@ def main():
                 
                 # Show all raw values for reference
                 st.markdown("---")
-                st.markdown("**📊 Raw Detected Values (for comparison):**")
+                st.markdown("**ðŸ“Š Raw Detected Values (for comparison):**")
                 candle_high = prior_session['high']
                 candle_high_time = prior_session['high_time']
                 line_low = prior_session.get('low_line', prior_session['low'])
                 line_low_time = prior_session.get('low_line_time', prior_session['low_time'])
                 candle_low = prior_session['low']
                 candle_low_time = prior_session['low_time']
-                st.write(f"High (Wick): {candle_high - price_offset:.2f} @ {candle_high_time.strftime('%H:%M')} ✓ Used")
+                st.write(f"High (Wick): {candle_high - price_offset:.2f} @ {candle_high_time.strftime('%H:%M')} âœ“ Used")
                 st.write(f"Low (Wick): {candle_low - price_offset:.2f} @ {candle_low_time.strftime('%H:%M')}")
-                st.write(f"Low (Close): {line_low - price_offset:.2f} @ {line_low_time.strftime('%H:%M')} ✓ Used")
+                st.write(f"Low (Close): {line_low - price_offset:.2f} @ {line_low_time.strftime('%H:%M')} âœ“ Used")
             
             try:
                 h, m = map(int, high_time_str.split(':'))
@@ -3239,7 +3343,7 @@ def main():
         
         if es_data and es_data.get('offset'):
             st.markdown("---")
-            st.markdown("### 🔄 ES-SPX Offset")
+            st.markdown("### ðŸ”„ ES-SPX Offset")
             st.metric("Offset", f"{es_data['offset']:.2f} pts")
     
     # Build PRIMARY pivots
@@ -3273,12 +3377,12 @@ def main():
     # Add secondary high if it should be shown
     if secondary_high_price is not None and secondary_high_time is not None:
         if 'secondary' in overnight_validation.get('high_structures_to_show', []):
-            secondary_pivots.append(Pivot(price=secondary_high_price, time=secondary_high_time, name='High²'))
+            secondary_pivots.append(Pivot(price=secondary_high_price, time=secondary_high_time, name='HighÂ²'))
     
     # Add secondary low if it should be shown
     if secondary_low_price is not None and secondary_low_time is not None:
         if 'secondary' in overnight_validation.get('low_structures_to_show', []):
-            secondary_pivots.append(Pivot(price=secondary_low_price, time=secondary_low_time, name='Low²'))
+            secondary_pivots.append(Pivot(price=secondary_low_price, time=secondary_low_time, name='LowÂ²'))
     
     # Combine all pivots for analysis
     all_pivots = pivots + secondary_pivots
@@ -3299,9 +3403,25 @@ def main():
     action = generate_action_card(cones, regime, current_price, is_10am, overnight_validation)
     confluence_zones = find_confluence_zones(cones_1000)
     
+    # Detect if 8:30 already touched cone edges (for 70-75% follow-through rule)
+    # If 8:30 bounced from support, 10am support touch has reduced expectation
+    session_830_touched = {'high_touched': False, 'low_touched': False}
+    if cones_830:
+        # Get 8:30 cone edges (using Close cone as the primary reference)
+        close_cone_830 = next((c for c in cones_830 if c.name == 'Close'), None)
+        if close_cone_830 and st.session_state.get('session_low') and st.session_state.get('session_high'):
+            sess_low = st.session_state.session_low
+            sess_high = st.session_state.session_high
+            # Check if session came within 5 pts of descending rail (support)
+            if sess_low <= close_cone_830.descending_rail + 5:
+                session_830_touched['low_touched'] = True
+            # Check if session came within 5 pts of ascending rail (resistance)
+            if sess_high >= close_cone_830.ascending_rail - 5:
+                session_830_touched['high_touched'] = True
+    
     # Generate complete trade setups for all confluence zones
-    trade_setups_830 = generate_trade_setups(cones_830, current_price)
-    trade_setups_1000 = generate_trade_setups(cones_1000, current_price)
+    trade_setups_830 = generate_trade_setups(cones_830, current_price, es_data=es_data, session_830_touched=None)
+    trade_setups_1000 = generate_trade_setups(cones_1000, current_price, es_data=es_data, session_830_touched=session_830_touched)
     
     # ===== INSTITUTIONAL TERMINAL LAYOUT =====
     
@@ -3309,6 +3429,28 @@ def main():
     num_calls = len(trade_setups_1000.get('calls_setups', []))
     num_puts = len(trade_setups_1000.get('puts_setups', []))
     ct_time = get_ct_now()
+    
+    # Determine market status
+    market_open_time = time(8, 30)
+    market_close_time = time(15, 0)
+    is_weekend = ct_time.weekday() >= 5
+    is_market_open = not is_weekend and market_open_time <= ct_time.time() <= market_close_time
+    
+    # Determine display price (use ES-derived when market closed)
+    if is_market_open:
+        display_price = current_price
+        price_label = "SPX Index"
+        market_status = "LIVE"
+    else:
+        # Use ES-derived SPX if available
+        if es_data and es_data.get('current') and es_data.get('offset'):
+            display_price = es_data['current'] - es_data['offset']
+            price_label = "SPX (from ES)"
+            market_status = "FUTURES"
+        else:
+            display_price = current_price
+            price_label = "SPX (Last)"
+            market_status = "CLOSED"
     
     # TERMINAL HEADER
     st.markdown(f"""
@@ -3322,8 +3464,9 @@ def main():
         </div>
         <div class="terminal-status">
             <div class="status-item">
-                <div class="status-label">SPX Index</div>
-                <div class="status-value">{current_price:,.2f}</div>
+                <div class="status-label">{price_label}</div>
+                <div class="status-value">{display_price:,.2f}</div>
+                <div style="font-size: 0.55rem; color: {'#10b981' if market_status == 'LIVE' else '#f59e0b'}; text-transform: uppercase;">{market_status}</div>
             </div>
             <div class="status-item">
                 <div class="status-label">Session</div>
@@ -3337,7 +3480,7 @@ def main():
     """, unsafe_allow_html=True)
     
     # QUICK STATS BAR
-    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME else "CLOSED"
+    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME and is_market_open else "CLOSED"
     window_color = "green" if trading_window == "OPEN" else "red"
     
     st.markdown(f"""
@@ -3369,7 +3512,7 @@ def main():
         es_offset = es_data['offset']
         spx_implied = es_current - es_offset
         
-        st.markdown("#### 📊 ES Futures → SPX Implied")
+        st.markdown("#### ðŸ“Š ES Futures â†’ SPX Implied")
         es_c1, es_c2, es_c3 = st.columns(3)
         with es_c1:
             st.metric("ES Futures", f"{es_current:,.2f}")
@@ -3379,14 +3522,17 @@ def main():
             st.metric("SPX Implied", f"{spx_implied:,.2f}")
     
     # ==========================================================================
-    # ACTIVE TRADE SETUPS
+    # ACTIVE TRADE SETUPS (10:00 AM - PRIMARY)
     # ==========================================================================
+    
+    st.markdown("### ðŸŽ¯ 10:00 AM Setups (Primary)")
+    st.caption("These are the primary setups. 8:30 AM setups are in the expander below.")
     
     # CALLS SECTION
     st.markdown("""
     <div class="section-header">
-        <div class="section-icon">📈</div>
-        <div class="section-title">Calls Entry Levels — Long Positions</div>
+        <div class="section-icon">ðŸ“ˆ</div>
+        <div class="section-title">BUY Points â€” Descending Rails (CALLS)</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3397,7 +3543,7 @@ def main():
         st.markdown("""
         <div class="trade-panel">
             <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
-                No high-probability CALLS entries detected for this session
+                No high-probability BUY entries detected for this session
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -3405,8 +3551,8 @@ def main():
     # PUTS SECTION
     st.markdown("""
     <div class="section-header">
-        <div class="section-icon">📉</div>
-        <div class="section-title">Puts Entry Levels — Short Positions</div>
+        <div class="section-icon">ðŸ“‰</div>
+        <div class="section-title">SELL Points â€” Ascending Rails (PUTS)</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3417,7 +3563,7 @@ def main():
         st.markdown("""
         <div class="trade-panel">
             <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
-                No high-probability PUTS entries detected for this session
+                No high-probability SELL entries detected for this session
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -3431,8 +3577,8 @@ def main():
     if all_setups:
         st.markdown("""
         <div class="section-header">
-            <div class="section-icon">🎯</div>
-            <div class="section-title">Position Monitor — Next Entry</div>
+            <div class="section-icon">ðŸŽ¯</div>
+            <div class="section-title">Position Monitor â€” Next Entry</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -3524,7 +3670,7 @@ def main():
         if triggered_setups:
             st.markdown(f"""
             <div style="margin-top: 0.5rem; padding: 0.75rem 1rem; background: var(--bg-tertiary); border-radius: 6px; border-left: 3px solid var(--accent-green);">
-                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">✅ TRIGGERED TODAY</div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">âœ… TRIGGERED TODAY</div>
                 <div style="font-size: 0.85rem; color: var(--text-primary);">
                     {', '.join([f"{s.direction} @ {s.entry_price:.2f}" for s in triggered_setups])}
                 </div>
@@ -3535,7 +3681,7 @@ def main():
             st.markdown("""
             <div class="trade-panel">
                 <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
-                    All entries triggered for today — no active setups remaining
+                    All entries triggered for today â€” no active setups remaining
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -3543,29 +3689,64 @@ def main():
     st.markdown("---")
     
     # ==========================================================================
+    # CANDLE VALIDATION CHECKLIST
+    # ==========================================================================
+    
+    with st.expander("ðŸ“‹ Entry Validation Checklist"):
+        st.markdown("""
+        ### âœ… Valid BUY Entry (CALLS at Descending Rail)
+        
+        The candle that touches the BUY POINT must be:
+        1. **Bearish candle** (red/down candle)
+        2. **Closes less than 5 points ABOVE** the entry level
+        3. **Does NOT drop more than 5 points BELOW** the entry level
+        
+        ---
+        
+        ### âœ… Valid SELL Entry (PUTS at Ascending Rail)
+        
+        The candle that touches the SELL POINT must be:
+        1. **Bullish candle** (green/up candle)
+        2. **Closes less than 5 points BELOW** the entry level
+        3. **Does NOT rise more than 5 points ABOVE** the entry level
+        
+        ---
+        
+        ### âš ï¸ Important Notes
+        
+        - **Descending Rails** = BUY points (except on strong DOWN days)
+        - **Ascending Rails** = SELL points (except on strong UP days)
+        - On **strong UP days**: Ascending rail can become temporary BUY point
+        - On **strong DOWN days**: Descending rail can become temporary SELL point
+        - **Close Cone** is best for range/chop days (most common)
+        - **High Cone** is best for strong UP trend days
+        - **Low Cone** is best for strong DOWN trend days
+        """)
+    
+    # ==========================================================================
     # SECONDARY: Decision Windows Comparison
     # ==========================================================================
     
-    with st.expander("🕐 Compare 8:30 AM vs 10:00 AM Setups"):
+    with st.expander("ðŸ• Compare 8:30 AM vs 10:00 AM Setups"):
         col_830_exp, col_1000_exp = st.columns(2)
         
         with col_830_exp:
             st.markdown("**8:30 AM Setups:**")
             if trade_setups_830.get('calls_setups'):
                 for s in trade_setups_830['calls_setups']:
-                    st.write(f"🟢 {s.strike_label} @ {s.entry_price:.2f}")
+                    st.write(f"ðŸŸ¢ {s.strike_label} @ {s.entry_price:.2f}")
             if trade_setups_830.get('puts_setups'):
                 for s in trade_setups_830['puts_setups']:
-                    st.write(f"🔴 {s.strike_label} @ {s.entry_price:.2f}")
+                    st.write(f"ðŸ”´ {s.strike_label} @ {s.entry_price:.2f}")
         
         with col_1000_exp:
             st.markdown("**10:00 AM Setups:**")
             if trade_setups_1000.get('calls_setups'):
                 for s in trade_setups_1000['calls_setups']:
-                    st.write(f"🟢 {s.strike_label} @ {s.entry_price:.2f}")
+                    st.write(f"ðŸŸ¢ {s.strike_label} @ {s.entry_price:.2f}")
             if trade_setups_1000.get('puts_setups'):
                 for s in trade_setups_1000['puts_setups']:
-                    st.write(f"🔴 {s.strike_label} @ {s.entry_price:.2f}")
+                    st.write(f"ðŸ”´ {s.strike_label} @ {s.entry_price:.2f}")
     
     # ==========================================================================
     # CHECKLIST & VALIDATION INFO
@@ -3579,24 +3760,24 @@ def main():
     with col_val:
         # Overnight Validation Display
         if overnight_validation and overnight_validation.get('validation_notes'):
-            st.markdown("#### 🌙 Overnight Validation")
+            st.markdown("#### ðŸŒ™ Overnight Validation")
             
             # High structure status
             active_high = overnight_validation.get('active_high_structure', 'primary')
             if active_high == 'secondary':
-                st.success("✓ HIGH: Secondary (High²) validated")
+                st.success("âœ“ HIGH: Secondary (HighÂ²) validated")
             elif overnight_validation.get('high_secondary_broken'):
-                st.warning("⚠ HIGH: Secondary broken overnight")
+                st.warning("âš  HIGH: Secondary broken overnight")
             
             # Low structure status
             active_low = overnight_validation.get('active_low_structure', 'primary')
             if active_low == 'secondary':
-                st.success("✓ LOW: Secondary (Low²) validated")
+                st.success("âœ“ LOW: Secondary (LowÂ²) validated")
             elif overnight_validation.get('low_secondary_broken'):
-                st.warning("⚠ LOW: Secondary broken overnight")
+                st.warning("âš  LOW: Secondary broken overnight")
             
             # Validation notes in expander
-            with st.expander("📋 Detailed Notes"):
+            with st.expander("ðŸ“‹ Detailed Notes"):
                 for note in overnight_validation['validation_notes']:
                     st.write(note)
         else:
@@ -3605,8 +3786,8 @@ def main():
     st.markdown("---")
     
     # Row: Full Projection Table
-    st.markdown("### 📊 Full Cone Projection Table")
-    st.caption("💡 Yellow rows = Key decision windows (8:30 AM and 10:00 AM CT) | High²/Low² = Secondary pivots")
+    st.markdown("### ðŸ“Š Full Cone Projection Table")
+    st.caption("ðŸ’¡ Yellow rows = Key decision windows (8:30 AM and 10:00 AM CT) | HighÂ²/LowÂ² = Secondary pivots")
     
     df = build_projection_table(all_pivots, session_date)
     
@@ -3621,7 +3802,7 @@ def main():
     # Secondary pivot explanation
     if secondary_pivots:
         st.markdown("---")
-        st.markdown("### 🔄 Secondary Pivot Analysis")
+        st.markdown("### ðŸ”„ Secondary Pivot Analysis")
         st.info("""
         **Secondary pivots detected!** These form when:
         - Price makes a significant pullback (>0.3%) after the primary high/low
@@ -3629,13 +3810,13 @@ def main():
         
         **How to use:**
         - Check which structure overnight ES respected
-        - If overnight held at the secondary rail → that's likely the active structure
+        - If overnight held at the secondary rail â†’ that's likely the active structure
         - Watch for confluence where primary and secondary rails converge
         """)
     
     # Footer insight
     st.markdown("---")
-    st.info("💡 **Pro Tip:** Your highest-probability trades occur when price touches a rail at the 10:00 AM CT decision window AND that rail shows confluence with another cone.")
+    st.info("ðŸ’¡ **Pro Tip:** Your highest-probability trades occur when price touches a rail at the 10:00 AM CT decision window AND that rail shows confluence with another cone.")
 
 if __name__ == "__main__":
     main()
