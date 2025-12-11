@@ -595,18 +595,38 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         df_spx = spx.history(start=start_date, end=end_date, interval='30m')
         
         if df_es.empty:
-            return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
+            return {'offset': 0, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
         
         offset = 0
-        if not df_spx.empty:
+        if not df_spx.empty and not df_es.empty:
             try:
+                # Get SPX close price (last bar of the regular session)
                 spx_close = df_spx['Close'].iloc[-1]
-                es_at_time = df_es[df_es.index.tz_convert(CT_TZ).time <= time(14, 30)]
-                if not es_at_time.empty:
-                    es_price = es_at_time['Close'].iloc[-1]
-                    offset = es_price - spx_close
+                
+                # Get ES price at market close (3pm CT = 15:00)
+                # ES and SPX should be very close at this time
+                df_es_ct = df_es.copy()
+                df_es_ct.index = df_es_ct.index.tz_convert(CT_TZ)
+                
+                # Find ES price around market close (2:55-3:05 PM CT)
+                close_window = df_es_ct[
+                    (df_es_ct.index.time >= time(14, 55)) & 
+                    (df_es_ct.index.time <= time(15, 5))
+                ]
+                
+                if not close_window.empty:
+                    es_at_close = close_window['Close'].iloc[-1]
+                    offset = es_at_close - spx_close
+                else:
+                    # Fallback: use last available ES before 3pm
+                    es_before_close = df_es_ct[df_es_ct.index.time <= time(15, 0)]
+                    if not es_before_close.empty:
+                        es_at_close = es_before_close['Close'].iloc[-1]
+                        offset = es_at_close - spx_close
+                    else:
+                        offset = 8  # Default ES-SPX spread if can't calculate
             except:
-                offset = 0
+                offset = 8  # Default spread
         
         overnight_start = CT_TZ.localize(datetime.combine(prior_date, time(17, 0)))
         overnight_end = CT_TZ.localize(datetime.combine(session_date, time(8, 30)))
@@ -618,13 +638,17 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         df_overnight = df_es_tz[overnight_mask]
         
         if df_overnight.empty:
-            return {'offset': offset, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
+            return {'offset': offset, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
         
         overnight_high = df_overnight['High'].max()
         overnight_low = df_overnight['Low'].min()
         
+        # Get current ES price (most recent)
+        current_es = float(df_es['Close'].iloc[-1]) if not df_es.empty else None
+        
         return {
             'offset': offset,
+            'current': current_es,
             'overnight_high': overnight_high,
             'overnight_low': overnight_low,
             'overnight_high_spx': overnight_high - offset,
@@ -634,7 +658,7 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         }
         
     except Exception as e:
-        return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
+        return {'offset': 0, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
 
 def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high: float, secondary_high_time: datetime, 
                              secondary_low: float, secondary_low_time: datetime, session_date: datetime) -> Dict:
