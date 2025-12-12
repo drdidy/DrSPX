@@ -1548,7 +1548,7 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     direction_class = "badge-calls" if setup.direction == "CALLS" else "badge-puts"
     
     # Trade type styling (BUY = green, SELL = red)
-    trade_type_class = "badge-go" if setup.trade_type == "BUY POINT" else "badge-nogo"
+    trade_type_class = "badge-go" if "BUY" in setup.trade_type else "badge-nogo"
     
     # GO/NO-GO (broken overnight = automatic NO-GO)
     ct_now = get_ct_now().time()
@@ -1568,95 +1568,65 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     # Theta multiplier for display
     theta_mult = THETA_MULTIPLIER.get(setup.theta_period, 1.0)
     
-    # Follow-through warning
-    follow_through_note = ""
-    if setup.follow_through_pct < 1.0:
-        follow_through_note = f'<div style="background: rgba(245, 158, 11, 0.2); border: 1px solid var(--accent-gold); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">⚠️ 8:30 already touched — Expect {setup.follow_through_pct*100:.0f}% follow-through</div>'
-    
-    # Overnight broken warning
-    broken_note = ""
+    # Build warnings HTML
+    warnings_html = ""
     if setup.overnight_broken:
-        broken_note = f'<div style="background: rgba(239, 68, 68, 0.2); border: 1px solid var(--accent-red); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-red);">❌ BROKEN OVERNIGHT — Entry invalidated</div>'
+        warnings_html += '<div style="background: rgba(239, 68, 68, 0.2); border: 1px solid var(--accent-red); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-red);">❌ BROKEN OVERNIGHT — Entry invalidated</div>'
+    if setup.follow_through_pct < 1.0:
+        pct = int(setup.follow_through_pct * 100)
+        warnings_html += f'<div style="background: rgba(245, 158, 11, 0.2); border: 1px solid var(--accent-gold); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">⚠️ 8:30 already touched — Expect {pct}% follow-through</div>'
     
-    st.markdown(f"""
-    <div class="trade-panel">
-        <div class="trade-panel-header">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                <span class="trade-panel-badge {trade_type_class}">{setup.trade_type}</span>
-                <span class="trade-panel-badge {direction_class}">{setup.direction}</span>
-                <span style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--accent-gold); font-weight: 600;">{setup.strike_label}</span>
-            </div>
-            <div style="display: flex; gap: 0.5rem;">
-                <span class="trade-panel-badge {status_class}">{status}</span>
-                <span class="trade-panel-badge {decision_class}">{decision}</span>
-            </div>
-        </div>
-        <div class="trade-panel-body">
-            {broken_note}
-            {follow_through_note}
-            <div class="entry-row">
-                <div class="entry-item">
-                    <div class="entry-label">Entry ({setup.rail_type})</div>
-                    <div class="entry-value gold">{setup.entry_price:,.2f}</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">Stop Loss</div>
-                    <div class="entry-value red">{setup.stop_loss:,.2f}</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">Target 50%</div>
-                    <div class="entry-value green">{setup.target_50:,.2f}</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">Target 100%</div>
-                    <div class="entry-value green">{setup.target_100:,.2f}</div>
-                </div>
-            </div>
-            <div class="entry-row">
-                <div class="entry-item">
-                    <div class="entry-label">Distance</div>
-                    <div class="entry-value">{distance:.1f} pts</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">Confluence</div>
-                    <div class="entry-value">{setup.confluence_strength} Rails</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">R:R (θ-adj)</div>
-                    <div class="entry-value">{setup.rr_ratio_theta_adjusted:.1f}:1</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">Delta</div>
-                    <div class="entry-value">{setup.delta_estimate:.2f}</div>
-                </div>
-            </div>
-            <div class="entry-row" style="border-bottom: none;">
-                <div class="entry-item">
-                    <div class="entry-label">Profit @ 50%</div>
-                    <div class="entry-value green">+${setup.profit_50_theta_adjusted:,.0f}</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">Profit @ 75%</div>
-                    <div class="entry-value green">+${setup.profit_75 * theta_mult:,.0f}</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">Profit @ 100%</div>
-                    <div class="entry-value green">+${setup.profit_100 * theta_mult:,.0f}</div>
-                </div>
-                <div class="entry-item">
-                    <div class="entry-label">Risk</div>
-                    <div class="entry-value red">-${setup.risk_dollars:,.0f}</div>
-                </div>
-            </div>
-            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.75rem; color: var(--text-muted);">
-                <strong>Sources:</strong> {' + '.join(setup.confluence_rails)}
-            </div>
-            <div style="margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: var(--bg-tertiary); border-radius: 4px; font-size: 0.7rem; color: var(--text-secondary);">
-                {'<strong>✅ Valid BUY:</strong> Bearish candle touches entry, closes &lt;5pts above, no drop &gt;5pts below' if setup.trade_type == 'BUY POINT' else '<strong>✅ Valid SELL:</strong> Bullish candle touches entry, closes &lt;5pts below, no rise &gt;5pts above'}
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Validation rule text
+    if "BUY" in setup.trade_type:
+        valid_rule = "<strong>✅ Valid BUY:</strong> Bearish candle touches entry, closes &lt;5pts above, no drop &gt;5pts below"
+    else:
+        valid_rule = "<strong>✅ Valid SELL:</strong> Bullish candle touches entry, closes &lt;5pts below, no rise &gt;5pts above"
+    
+    # Sources
+    sources = ' + '.join(setup.confluence_rails)
+    
+    # Profit calculations
+    profit_75_adj = int(setup.profit_75 * theta_mult)
+    profit_100_adj = int(setup.profit_100 * theta_mult)
+    
+    html = f'''<div class="trade-panel">
+<div class="trade-panel-header">
+<div style="display: flex; align-items: center; gap: 0.5rem;">
+<span class="trade-panel-badge {trade_type_class}">{setup.trade_type}</span>
+<span class="trade-panel-badge {direction_class}">{setup.direction}</span>
+<span style="font-family: JetBrains Mono, monospace; font-size: 1.1rem; color: var(--accent-gold); font-weight: 600;">{setup.strike_label}</span>
+</div>
+<div style="display: flex; gap: 0.5rem;">
+<span class="trade-panel-badge {status_class}">{status}</span>
+<span class="trade-panel-badge {decision_class}">{decision}</span>
+</div>
+</div>
+<div class="trade-panel-body">
+{warnings_html}
+<div class="entry-row">
+<div class="entry-item"><div class="entry-label">Entry ({setup.rail_type})</div><div class="entry-value gold">{setup.entry_price:,.2f}</div></div>
+<div class="entry-item"><div class="entry-label">Stop Loss</div><div class="entry-value red">{setup.stop_loss:,.2f}</div></div>
+<div class="entry-item"><div class="entry-label">Target 50%</div><div class="entry-value green">{setup.target_50:,.2f}</div></div>
+<div class="entry-item"><div class="entry-label">Target 100%</div><div class="entry-value green">{setup.target_100:,.2f}</div></div>
+</div>
+<div class="entry-row">
+<div class="entry-item"><div class="entry-label">Distance</div><div class="entry-value">{distance:.1f} pts</div></div>
+<div class="entry-item"><div class="entry-label">Confluence</div><div class="entry-value">{setup.confluence_strength} Rails</div></div>
+<div class="entry-item"><div class="entry-label">R:R (θ-adj)</div><div class="entry-value">{setup.rr_ratio_theta_adjusted:.1f}:1</div></div>
+<div class="entry-item"><div class="entry-label">Delta</div><div class="entry-value">{setup.delta_estimate:.2f}</div></div>
+</div>
+<div class="entry-row" style="border-bottom: none;">
+<div class="entry-item"><div class="entry-label">Profit @ 50%</div><div class="entry-value green">+${setup.profit_50_theta_adjusted:,.0f}</div></div>
+<div class="entry-item"><div class="entry-label">Profit @ 75%</div><div class="entry-value green">+${profit_75_adj}</div></div>
+<div class="entry-item"><div class="entry-label">Profit @ 100%</div><div class="entry-value green">+${profit_100_adj}</div></div>
+<div class="entry-item"><div class="entry-label">Risk</div><div class="entry-value red">-${setup.risk_dollars:,.0f}</div></div>
+</div>
+<div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.75rem; color: var(--text-muted);"><strong>Sources:</strong> {sources}</div>
+<div style="margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: var(--bg-tertiary); border-radius: 4px; font-size: 0.7rem; color: var(--text-secondary);">{valid_rule}</div>
+</div>
+</div>'''
+    
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # ============================================================================
