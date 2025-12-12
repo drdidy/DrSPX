@@ -10,10 +10,8 @@ import numpy as np
 import yfinance as yf
 from datetime import datetime, timedelta, time
 import pytz
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Optional, Tuple, List, Dict
-import json
-import os
 
 # ============================================================================
 # CONFIGURATION & CONSTANTS
@@ -209,236 +207,6 @@ class ActionCard:
 
 def get_ct_now() -> datetime:
     return datetime.now(CT_TZ)
-
-# ============================================================================
-# BACKTEST & PERFORMANCE TRACKING MODULE
-# ============================================================================
-
-BACKTEST_FILE = "spx_prophet_backtest.json"
-
-def load_backtest_results() -> Dict:
-    """Load existing backtest results from file."""
-    if os.path.exists(BACKTEST_FILE):
-        try:
-            with open(BACKTEST_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {'trades': [], 'last_updated': None, 'days_tracked': 0}
-    return {'trades': [], 'last_updated': None, 'days_tracked': 0}
-
-def save_backtest_results(results: Dict):
-    """Save backtest results to file."""
-    with open(BACKTEST_FILE, 'w') as f:
-        json.dump(results, f, indent=2)
-
-def calculate_performance_stats(trades: List[Dict]) -> Dict:
-    """Calculate performance statistics from trade history."""
-    if not trades:
-        return {
-            'total_trades': 0, 'wins': 0, 'losses': 0, 'win_rate': 0,
-            'avg_winner': 0, 'avg_loser': 0, 'profit_factor': 0,
-            'total_pnl': 0, 'max_drawdown': 0, 'sharpe_ratio': 0,
-            'best_trade': 0, 'worst_trade': 0, 'avg_trade': 0
-        }
-    
-    wins = [t for t in trades if t.get('win', False)]
-    losses = [t for t in trades if not t.get('win', False)]
-    
-    total_trades = len(trades)
-    num_wins = len(wins)
-    num_losses = len(losses)
-    win_rate = (num_wins / total_trades * 100) if total_trades > 0 else 0
-    
-    winners_pnl = [t.get('pnl_dollars', 0) for t in wins]
-    losers_pnl = [abs(t.get('pnl_dollars', 0)) for t in losses]
-    
-    avg_winner = sum(winners_pnl) / len(winners_pnl) if winners_pnl else 0
-    avg_loser = sum(losers_pnl) / len(losers_pnl) if losers_pnl else 0
-    
-    gross_profit = sum(winners_pnl)
-    gross_loss = sum(losers_pnl)
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
-    
-    all_pnl = [t.get('pnl_dollars', 0) for t in trades]
-    total_pnl = sum(all_pnl)
-    
-    # Max drawdown
-    cumulative = []
-    running = 0
-    for pnl in all_pnl:
-        running += pnl
-        cumulative.append(running)
-    
-    peak = 0
-    max_dd = 0
-    for val in cumulative:
-        if val > peak:
-            peak = val
-        dd = peak - val
-        if dd > max_dd:
-            max_dd = dd
-    
-    # Sharpe ratio (simplified)
-    if len(all_pnl) > 1:
-        avg_return = np.mean(all_pnl)
-        std_return = np.std(all_pnl)
-        sharpe = (avg_return / std_return * np.sqrt(252)) if std_return > 0 else 0
-    else:
-        sharpe = 0
-    
-    return {
-        'total_trades': total_trades, 'wins': num_wins, 'losses': num_losses,
-        'win_rate': win_rate, 'avg_winner': avg_winner, 'avg_loser': avg_loser,
-        'profit_factor': profit_factor, 'total_pnl': total_pnl,
-        'max_drawdown': max_dd, 'sharpe_ratio': sharpe,
-        'best_trade': max(all_pnl) if all_pnl else 0,
-        'worst_trade': min(all_pnl) if all_pnl else 0,
-        'avg_trade': total_pnl / total_trades if total_trades > 0 else 0
-    }
-
-def run_historical_backtest(days: int = 60) -> Dict:
-    """Run backtest on historical data (up to 60 days from Yahoo free tier)."""
-    results = load_backtest_results()
-    existing_dates = set(t.get('date') for t in results.get('trades', []))
-    
-    ticker = yf.Ticker("^GSPC")
-    end_date = datetime.now(CT_TZ)
-    start_date = end_date - timedelta(days=days + 5)
-    
-    df_daily = ticker.history(start=start_date.strftime('%Y-%m-%d'), 
-                               end=end_date.strftime('%Y-%m-%d'), interval='1d')
-    
-    if df_daily.empty:
-        return results
-    
-    new_trades = []
-    
-    for i in range(1, len(df_daily)):
-        current_date = df_daily.index[i]
-        if current_date.weekday() >= 5:
-            continue
-        
-        date_str = current_date.strftime('%Y-%m-%d')
-        if date_str in existing_dates:
-            continue
-        
-        prior = df_daily.iloc[i-1]
-        
-        # Create pivots
-        prior_date = (current_date - timedelta(days=1))
-        while prior_date.weekday() >= 5:
-            prior_date -= timedelta(days=1)
-        close_time = CT_TZ.localize(datetime.combine(prior_date.date(), time(15, 0)))
-        
-        high_price = float(prior['High'])
-        low_price = float(prior['Low'])
-        close_price = float(prior['Close'])
-        
-        # Build cones at 10am
-        eval_time = CT_TZ.localize(datetime.combine(current_date.date(), time(10, 0)))
-        blocks = int((eval_time - close_time).total_seconds() / 1800)  # Simplified
-        
-        close_asc = close_price + (SLOPE_ASCENDING * blocks)
-        close_desc = close_price - (SLOPE_DESCENDING * blocks)
-        cone_width = close_asc - close_desc
-        
-        if cone_width < MIN_CONE_WIDTH:
-            continue
-        
-        # Get intraday data
-        try:
-            df_intra = ticker.history(start=date_str, 
-                                       end=(current_date + timedelta(days=1)).strftime('%Y-%m-%d'),
-                                       interval='5m')
-            if df_intra.empty:
-                continue
-            df_intra.index = df_intra.index.tz_convert(CT_TZ)
-            
-            # Filter to trading window
-            df_trading = df_intra[(df_intra.index.time >= time(10, 0)) & 
-                                   (df_intra.index.time <= time(14, 30))]
-            if df_trading.empty:
-                continue
-            
-            # Check CALLS (buy at support)
-            call_entry = close_desc
-            call_stop = call_entry - STOP_LOSS_PTS
-            call_target = call_entry + (cone_width * 0.5)
-            
-            call_triggered = False
-            call_result = None
-            
-            for idx, row in df_trading.iterrows():
-                if not call_triggered:
-                    if row['Low'] <= call_entry + 2:
-                        call_triggered = True
-                else:
-                    if row['Low'] <= call_stop:
-                        call_result = {'exit': call_stop, 'reason': 'stop'}
-                        break
-                    elif row['High'] >= call_target:
-                        call_result = {'exit': call_target, 'reason': 'target'}
-                        break
-            
-            if call_triggered:
-                if not call_result:
-                    call_result = {'exit': df_trading['Close'].iloc[-1], 'reason': 'eod'}
-                
-                pnl_pts = call_result['exit'] - call_entry
-                pnl_dollars = pnl_pts * CONTRACT_FACTOR * 100
-                
-                new_trades.append({
-                    'date': date_str, 'direction': 'CALLS',
-                    'entry_price': call_entry, 'exit_price': call_result['exit'],
-                    'exit_reason': call_result['reason'],
-                    'pnl_points': pnl_pts, 'pnl_dollars': pnl_dollars,
-                    'win': pnl_pts > 0
-                })
-            
-            # Check PUTS (sell at resistance)
-            put_entry = close_asc
-            put_stop = put_entry + STOP_LOSS_PTS
-            put_target = put_entry - (cone_width * 0.5)
-            
-            put_triggered = False
-            put_result = None
-            
-            for idx, row in df_trading.iterrows():
-                if not put_triggered:
-                    if row['High'] >= put_entry - 2:
-                        put_triggered = True
-                else:
-                    if row['High'] >= put_stop:
-                        put_result = {'exit': put_stop, 'reason': 'stop'}
-                        break
-                    elif row['Low'] <= put_target:
-                        put_result = {'exit': put_target, 'reason': 'target'}
-                        break
-            
-            if put_triggered:
-                if not put_result:
-                    put_result = {'exit': df_trading['Close'].iloc[-1], 'reason': 'eod'}
-                
-                pnl_pts = put_entry - put_result['exit']
-                pnl_dollars = pnl_pts * CONTRACT_FACTOR * 100
-                
-                new_trades.append({
-                    'date': date_str, 'direction': 'PUTS',
-                    'entry_price': put_entry, 'exit_price': put_result['exit'],
-                    'exit_reason': put_result['reason'],
-                    'pnl_points': pnl_pts, 'pnl_dollars': pnl_dollars,
-                    'win': pnl_pts > 0
-                })
-                
-        except Exception as e:
-            continue
-    
-    results['trades'].extend(new_trades)
-    results['last_updated'] = datetime.now(CT_TZ).strftime('%Y-%m-%d %H:%M')
-    results['days_tracked'] = len(set(t.get('date') for t in results['trades']))
-    
-    save_backtest_results(results)
-    return results
 
 def to_ct(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -1704,6 +1472,138 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
         # Filter single rails too
         single_calls = [s for s in single_calls if active_cone in s['rail']]
         single_puts = [s for s in single_puts if active_cone in s['rail']]
+        
+        # =====================================================================
+        # CREATE SINGLE-RAIL SETUPS when active cone has no confluence
+        # =====================================================================
+        # If High or Low cone is active but has no confluence setups,
+        # create setups from the single rails of that cone
+        
+        if active_cone in ['High', 'Low'] and not calls_setups and single_calls:
+            # Create setup from the single call rail
+            for single in single_calls:
+                entry_price = single['price']
+                rail_name = single['rail']
+                
+                # Find the corresponding cone for target calculation
+                active_cone_obj = next((c for c in cones if c.name == active_cone), None)
+                if active_cone_obj:
+                    cone_width = active_cone_obj.width
+                    target_100 = active_cone_obj.ascending_rail
+                else:
+                    cone_width = avg_cone_width
+                    target_100 = entry_price + cone_width
+                
+                stop_loss = entry_price - STOP_LOSS_PTS
+                target_50 = entry_price + (cone_width * 0.5)
+                target_75 = entry_price + (cone_width * 0.75)
+                
+                # Strike calculation
+                strike = int(entry_price + STRIKE_OFFSET)
+                strike = ((strike + 4) // 5) * 5
+                
+                # Profit/risk calculations
+                delta_estimate = get_delta_estimate(STRIKE_OFFSET)
+                profit_50 = (target_50 - entry_price) * delta_estimate * 100
+                profit_75 = (target_75 - entry_price) * delta_estimate * 100
+                profit_100 = (target_100 - entry_price) * delta_estimate * 100
+                risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
+                
+                theta_mult, theta_period = get_theta_multiplier()
+                profit_50_theta = profit_50 * theta_mult
+                rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
+                rr_ratio_theta = profit_50_theta / risk_dollars if risk_dollars > 0 else 0
+                
+                setup = TradeSetup(
+                    direction='CALLS',
+                    trade_type='BUY POINT',
+                    entry_price=entry_price,
+                    confluence_rails=[rail_name],
+                    confluence_strength=1,
+                    strike=strike,
+                    strike_label=f"SPX {strike}C",
+                    stop_loss=stop_loss,
+                    target_50=target_50,
+                    target_75=target_75,
+                    target_100=target_100,
+                    profit_50=profit_50,
+                    profit_75=profit_75,
+                    profit_100=profit_100,
+                    profit_50_theta_adjusted=profit_50_theta,
+                    risk_dollars=risk_dollars,
+                    rr_ratio=rr_ratio,
+                    rr_ratio_theta_adjusted=rr_ratio_theta,
+                    cone_width=cone_width,
+                    delta_estimate=delta_estimate,
+                    theta_period=theta_period,
+                    rail_type='DESCENDING',
+                    overnight_broken=False,
+                    follow_through_pct=1.0
+                )
+                calls_setups.append(setup)
+        
+        if active_cone in ['High', 'Low'] and not puts_setups and single_puts:
+            # Create setup from the single put rail
+            for single in single_puts:
+                entry_price = single['price']
+                rail_name = single['rail']
+                
+                # Find the corresponding cone for target calculation
+                active_cone_obj = next((c for c in cones if c.name == active_cone), None)
+                if active_cone_obj:
+                    cone_width = active_cone_obj.width
+                    target_100 = active_cone_obj.descending_rail
+                else:
+                    cone_width = avg_cone_width
+                    target_100 = entry_price - cone_width
+                
+                stop_loss = entry_price + STOP_LOSS_PTS
+                target_50 = entry_price - (cone_width * 0.5)
+                target_75 = entry_price - (cone_width * 0.75)
+                
+                # Strike calculation
+                strike = int(entry_price - STRIKE_OFFSET)
+                strike = (strike // 5) * 5
+                
+                # Profit/risk calculations
+                delta_estimate = get_delta_estimate(STRIKE_OFFSET)
+                profit_50 = (entry_price - target_50) * delta_estimate * 100
+                profit_75 = (entry_price - target_75) * delta_estimate * 100
+                profit_100 = (entry_price - target_100) * delta_estimate * 100
+                risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
+                
+                theta_mult, theta_period = get_theta_multiplier()
+                profit_50_theta = profit_50 * theta_mult
+                rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
+                rr_ratio_theta = profit_50_theta / risk_dollars if risk_dollars > 0 else 0
+                
+                setup = TradeSetup(
+                    direction='PUTS',
+                    trade_type='SELL POINT',
+                    entry_price=entry_price,
+                    confluence_rails=[rail_name],
+                    confluence_strength=1,
+                    strike=strike,
+                    strike_label=f"SPX {strike}P",
+                    stop_loss=stop_loss,
+                    target_50=target_50,
+                    target_75=target_75,
+                    target_100=target_100,
+                    profit_50=profit_50,
+                    profit_75=profit_75,
+                    profit_100=profit_100,
+                    profit_50_theta_adjusted=profit_50_theta,
+                    risk_dollars=risk_dollars,
+                    rr_ratio=rr_ratio,
+                    rr_ratio_theta_adjusted=rr_ratio_theta,
+                    cone_width=cone_width,
+                    delta_estimate=delta_estimate,
+                    theta_period=theta_period,
+                    rail_type='ASCENDING',
+                    overnight_broken=False,
+                    follow_through_pct=1.0
+                )
+                puts_setups.append(setup)
     
     # =========================================================================
     # RAIL REVERSAL LOGIC
@@ -3427,67 +3327,6 @@ def main():
             st.markdown("---")
             st.markdown("### 🔄 ES-SPX Offset")
             st.metric("Offset", f"{es_data['offset']:.2f} pts")
-        
-        # ===== PERFORMANCE DASHBOARD =====
-        st.markdown("---")
-        st.markdown("### 📊 Strategy Performance")
-        
-        results = load_backtest_results()
-        trades = results.get('trades', [])
-        
-        if trades:
-            stats = calculate_performance_stats(trades)
-            
-            perf_col1, perf_col2 = st.columns(2)
-            with perf_col1:
-                st.metric("Win Rate", f"{stats['win_rate']:.1f}%")
-                st.metric("Total P&L", f"${stats['total_pnl']:,.0f}")
-            with perf_col2:
-                st.metric("Trades", f"{stats['total_trades']}")
-                pf = f"{stats['profit_factor']:.2f}" if stats['profit_factor'] < 100 else "∞"
-                st.metric("Profit Factor", pf)
-            
-            st.caption(f"Days tracked: {results.get('days_tracked', 0)} | Last: {results.get('last_updated', 'Never')}")
-        else:
-            st.caption("No backtest data yet")
-        
-        if st.button("🔄 Run Backtest (60 days)"):
-            with st.spinner("Running backtest..."):
-                results = run_historical_backtest(60)
-                st.success(f"Done! {len(results.get('trades', []))} trades analyzed")
-                st.rerun()
-        
-        # Show detailed performance in expander
-        with st.expander("📈 Detailed Performance"):
-            if trades:
-                stats = calculate_performance_stats(trades)
-                st.markdown(f"""
-                **Summary:**
-                - Wins: {stats['wins']} | Losses: {stats['losses']}
-                - Avg Winner: ${stats['avg_winner']:,.0f}
-                - Avg Loser: -${stats['avg_loser']:,.0f}
-                - Best Trade: ${stats['best_trade']:,.0f}
-                - Worst Trade: ${stats['worst_trade']:,.0f}
-                - Max Drawdown: -${stats['max_drawdown']:,.0f}
-                - Sharpe Ratio: {stats['sharpe_ratio']:.2f}
-                """)
-                
-                # Equity curve
-                if len(trades) > 1:
-                    equity = [0]
-                    running = 0
-                    for t in trades:
-                        running += t.get('pnl_dollars', 0)
-                        equity.append(running)
-                    st.line_chart(equity)
-                
-                # Recent trades
-                st.markdown("**Recent Trades:**")
-                for t in trades[-5:][::-1]:
-                    win_icon = "✅" if t.get('win') else "❌"
-                    st.caption(f"{win_icon} {t.get('date')} | {t.get('direction')} | ${t.get('pnl_dollars', 0):,.0f}")
-            else:
-                st.info("Click 'Run Backtest' to analyze historical performance")
     
     # Build PRIMARY pivots
     pivots = [
