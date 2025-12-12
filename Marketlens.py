@@ -630,8 +630,7 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         
         overnight_start = CT_TZ.localize(datetime.combine(prior_date, time(17, 0)))
         
-        # Extend overnight window to 10:00 AM CT (when we make entry decisions)
-        # This captures any breaks during early RTH (8:30-10:00 AM)
+        # For ACTIVE CONE detection: extend to 10:00 AM CT to capture early RTH breaks
         ct_now = get_ct_now()
         if ct_now.time() < time(10, 0):
             overnight_end = ct_now
@@ -650,6 +649,19 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         overnight_high = df_overnight['High'].max()
         overnight_low = df_overnight['Low'].min()
         
+        # For ENTRY INVALIDATION: only use true overnight (before 8:30am RTH open)
+        # Breaks during RTH are part of normal trading, not invalidation
+        pre_rth_end = CT_TZ.localize(datetime.combine(session_date, time(8, 30)))
+        pre_rth_mask = (df_es_tz.index >= overnight_start) & (df_es_tz.index < pre_rth_end)
+        df_pre_rth = df_es_tz[pre_rth_mask]
+        
+        if not df_pre_rth.empty:
+            pre_rth_high = df_pre_rth['High'].max()
+            pre_rth_low = df_pre_rth['Low'].min()
+        else:
+            pre_rth_high = overnight_high
+            pre_rth_low = overnight_low
+        
         # Get current ES price (most recent)
         current_es = float(df_es['Close'].iloc[-1]) if not df_es.empty else None
         
@@ -661,11 +673,16 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
             'overnight_high_spx': overnight_high - offset,
             'overnight_low_spx': overnight_low - offset,
             'overnight_range': overnight_high - overnight_low,
-            'df_overnight': df_overnight
+            'df_overnight': df_overnight,
+            # Pre-RTH values for entry invalidation (only before 8:30am)
+            'pre_rth_high': pre_rth_high,
+            'pre_rth_low': pre_rth_low,
+            'pre_rth_high_spx': pre_rth_high - offset,
+            'pre_rth_low_spx': pre_rth_low - offset
         }
         
     except Exception as e:
-        return {'offset': 0, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
+        return {'offset': 0, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None, 'pre_rth_high': None, 'pre_rth_low': None, 'pre_rth_high_spx': None, 'pre_rth_low_spx': None}
 
 def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high: float, secondary_high_time: datetime, 
                              secondary_low: float, secondary_low_time: datetime, session_date: datetime) -> Dict:
@@ -1217,12 +1234,18 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
         rail_reversal = active_cone_info.get('rail_reversal')
         active_cone_reason = active_cone_info.get('reason', '')
     
-    # Get overnight levels for validation
+    # Get overnight levels for validation (includes up to 10am for active cone detection)
     overnight_high_spx = None
     overnight_low_spx = None
+    # Get PRE-RTH levels for entry invalidation (only before 8:30am)
+    # Breaks during RTH are part of normal trading, not invalidation
+    pre_rth_high_spx = None
+    pre_rth_low_spx = None
     if es_data:
         overnight_high_spx = es_data.get('overnight_high_spx')
         overnight_low_spx = es_data.get('overnight_low_spx')
+        pre_rth_high_spx = es_data.get('pre_rth_high_spx')
+        pre_rth_low_spx = es_data.get('pre_rth_low_spx')
     
     # Check if 8:30 already touched an edge (for 70-75% follow-through rule)
     touched_830_high = session_830_touched.get('high_touched', False) if session_830_touched else False
@@ -1239,9 +1262,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
         rails = zone['rails']
         strength = zone.get('strength', len(rails))
         
-        # Check if this entry was BROKEN overnight (ES went below it)
+        # Check if this entry was BROKEN overnight (pre-RTH, before 8:30am)
+        # RTH breaks are part of trading, not invalidation
         overnight_broken = False
-        if overnight_low_spx is not None and overnight_low_spx < entry_price - 2:
+        if pre_rth_low_spx is not None and pre_rth_low_spx < entry_price - 2:
             overnight_broken = True
         
         # Check for reduced follow-through (8:30 already touched this zone)
@@ -1339,9 +1363,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
         rails = zone['rails']
         strength = zone.get('strength', len(rails))
         
-        # Check if this entry was BROKEN overnight (ES went above it)
+        # Check if this entry was BROKEN overnight (pre-RTH, before 8:30am)
+        # RTH breaks are part of trading, not invalidation
         overnight_broken = False
-        if overnight_high_spx is not None and overnight_high_spx > entry_price + 2:
+        if pre_rth_high_spx is not None and pre_rth_high_spx > entry_price + 2:
             overnight_broken = True
         
         # Check for reduced follow-through (8:30 already touched this zone)
@@ -1515,12 +1540,12 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
             risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
             
             # Determine which cones to use based on active direction
-            # Low active -> use Low and Low2 (if exists)
-            # High active -> use High and High2 (if exists)
+            # Low active -> use Low and Low² (if exists)
+            # High active -> use High and High² (if exists)
             if active_cone == 'Low':
-                active_cones_to_use = [c for c in cones if c.name in ['Low', 'Low2']]
+                active_cones_to_use = [c for c in cones if c.name in ['Low', 'Low²']]
             else:  # High
-                active_cones_to_use = [c for c in cones if c.name in ['High', 'High2']]
+                active_cones_to_use = [c for c in cones if c.name in ['High', 'High²']]
             
             for cone_obj in active_cones_to_use:
                 cone_width = cone_obj.width
@@ -1547,9 +1572,9 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
                 buy_rr = buy_profit_50 / risk_dollars if risk_dollars > 0 else 0
                 buy_rr_theta = buy_profit_50_theta / risk_dollars if risk_dollars > 0 else 0
                 
-                # Check if broken overnight
+                # Check if broken overnight (pre-RTH only, before 8:30am)
                 buy_overnight_broken = False
-                if overnight_low_spx is not None and overnight_low_spx < buy_entry - 2:
+                if pre_rth_low_spx is not None and pre_rth_low_spx < buy_entry - 2:
                     buy_overnight_broken = True
                 
                 calls_setup = TradeSetup(
@@ -1601,9 +1626,9 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
                 sell_rr = sell_profit_50 / risk_dollars if risk_dollars > 0 else 0
                 sell_rr_theta = sell_profit_50_theta / risk_dollars if risk_dollars > 0 else 0
                 
-                # Check if broken overnight
+                # Check if broken overnight (pre-RTH only, before 8:30am)
                 sell_overnight_broken = False
-                if overnight_high_spx is not None and overnight_high_spx > sell_entry + 2:
+                if pre_rth_high_spx is not None and pre_rth_high_spx > sell_entry + 2:
                     sell_overnight_broken = True
                 
                 puts_setup = TradeSetup(
@@ -3455,6 +3480,13 @@ def main():
                 st.caption(f"**Overnight High (SPX):** {es_data['overnight_high_spx']:.2f}")
                 st.caption(f"**Overnight Low (SPX):** {es_data['overnight_low_spx']:.2f}")
                 
+                # Show PRE-RTH values (for entry invalidation)
+                pre_rth_high = es_data.get('pre_rth_high_spx')
+                pre_rth_low = es_data.get('pre_rth_low_spx')
+                if pre_rth_high and pre_rth_low:
+                    st.caption(f"**Pre-RTH High (for invalidation):** {pre_rth_high:.2f}")
+                    st.caption(f"**Pre-RTH Low (for invalidation):** {pre_rth_low:.2f}")
+                
                 broke_above = es_data['overnight_high_spx'] > close_cone_1000.ascending_rail + 2
                 broke_below = es_data['overnight_low_spx'] < close_cone_1000.descending_rail - 2
                 
@@ -3489,6 +3521,16 @@ def main():
                                 broke_bottom = session_low_val < active_cone_obj.descending_rail - 2
                                 st.caption(f"**Touched High ▲?** {touched_top}")
                                 st.caption(f"**Broke through High ▼?** {broke_bottom}")
+                        
+                        # Show Low²/High² if exists
+                        secondary_name = f"{active_cone_name}²"
+                        secondary_cone = next((c for c in cones_1000 if c.name == secondary_name), None)
+                        if secondary_cone:
+                            st.markdown("---")
+                            st.caption(f"**{secondary_name} Cone ▲:** {secondary_cone.ascending_rail:.2f}")
+                            st.caption(f"**{secondary_name} Cone ▼:** {secondary_cone.descending_rail:.2f}")
+                        else:
+                            st.caption(f"**{secondary_name}:** Not detected")
     
     # Generate complete trade setups for all confluence zones
     trade_setups_830 = generate_trade_setups(cones_830, current_price, es_data=es_data, session_830_touched=None, active_cone_info=None)
