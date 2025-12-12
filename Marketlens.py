@@ -1501,30 +1501,39 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
         #   - High ▼ (descending/bottom) = BUY point (support)  
         #   - High ▲ (ascending/top) = SELL point (resistance)
         #
-        # This replaces any filtering - we directly create setups from the active cone
+        # ALSO include secondary cones (Low2, High2) if they exist!
+        #
+        # This replaces any filtering - we directly create setups from the active cone(s)
         
         if active_cone in ['High', 'Low']:
-            # Find the active cone object
-            active_cone_obj = next((c for c in cones if c.name == active_cone), None)
+            # Clear any filtered setups - we'll create fresh ones
+            calls_setups = []
+            puts_setups = []
             
-            if active_cone_obj:
-                cone_width = active_cone_obj.width
-                delta_estimate = get_delta_estimate(STRIKE_OFFSET)
-                theta_mult, theta_period = get_theta_multiplier()
-                risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
-                
-                # Clear any filtered setups - we'll create fresh ones
-                calls_setups = []
-                puts_setups = []
+            delta_estimate = get_delta_estimate(STRIKE_OFFSET)
+            theta_mult, theta_period = get_theta_multiplier()
+            risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
+            
+            # Determine which cones to use based on active direction
+            # Low active -> use Low and Low2 (if exists)
+            # High active -> use High and High2 (if exists)
+            if active_cone == 'Low':
+                active_cones_to_use = [c for c in cones if c.name in ['Low', 'Low2']]
+            else:  # High
+                active_cones_to_use = [c for c in cones if c.name in ['High', 'High2']]
+            
+            for cone_obj in active_cones_to_use:
+                cone_width = cone_obj.width
+                cone_name = cone_obj.name
                 
                 # -----------------------------------------------------------------
-                # BUY POINT: Bottom of active cone (descending rail)
+                # BUY POINT: Bottom of cone (descending rail)
                 # -----------------------------------------------------------------
-                buy_entry = active_cone_obj.descending_rail
+                buy_entry = cone_obj.descending_rail
                 buy_stop = buy_entry - STOP_LOSS_PTS
                 buy_target_50 = buy_entry + (cone_width * 0.5)
                 buy_target_75 = buy_entry + (cone_width * 0.75)
-                buy_target_100 = active_cone_obj.ascending_rail  # Top of cone
+                buy_target_100 = cone_obj.ascending_rail  # Top of cone
                 
                 # Strike for CALLS (above entry)
                 buy_strike = int(buy_entry + STRIKE_OFFSET)
@@ -1547,7 +1556,7 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
                     direction='CALLS',
                     trade_type='BUY POINT',
                     entry_price=buy_entry,
-                    confluence_rails=[f"{active_cone} ▼"],
+                    confluence_rails=[f"{cone_name} ▼"],
                     confluence_strength=1,
                     strike=buy_strike,
                     strike_label=f"SPX {buy_strike}C",
@@ -1572,13 +1581,13 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
                 calls_setups.append(calls_setup)
                 
                 # -----------------------------------------------------------------
-                # SELL POINT: Top of active cone (ascending rail)
+                # SELL POINT: Top of cone (ascending rail)
                 # -----------------------------------------------------------------
-                sell_entry = active_cone_obj.ascending_rail
+                sell_entry = cone_obj.ascending_rail
                 sell_stop = sell_entry + STOP_LOSS_PTS
                 sell_target_50 = sell_entry - (cone_width * 0.5)
                 sell_target_75 = sell_entry - (cone_width * 0.75)
-                sell_target_100 = active_cone_obj.descending_rail  # Bottom of cone
+                sell_target_100 = cone_obj.descending_rail  # Bottom of cone
                 
                 # Strike for PUTS (below entry)
                 sell_strike = int(sell_entry - STRIKE_OFFSET)
@@ -1601,7 +1610,7 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
                     direction='PUTS',
                     trade_type='SELL POINT',
                     entry_price=sell_entry,
-                    confluence_rails=[f"{active_cone} ▲"],
+                    confluence_rails=[f"{cone_name} ▲"],
                     confluence_strength=1,
                     strike=sell_strike,
                     strike_label=f"SPX {sell_strike}P",
