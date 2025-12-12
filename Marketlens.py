@@ -1474,136 +1474,141 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
         single_puts = [s for s in single_puts if active_cone in s['rail']]
         
         # =====================================================================
-        # CREATE SINGLE-RAIL SETUPS when active cone has no confluence
+        # CREATE SETUPS FOR ACTIVE CONE (High or Low)
         # =====================================================================
-        # If High or Low cone is active but has no confluence setups,
-        # create setups from the single rails of that cone
+        # When High or Low cone is active, we need BOTH rails of that cone:
+        # 
+        # LOW CONE ACTIVE (broke below Close overnight):
+        #   - Low ▼ (descending/bottom) = BUY point (support)
+        #   - Low ▲ (ascending/top) = SELL point (resistance)
+        #
+        # HIGH CONE ACTIVE (broke above Close overnight):
+        #   - High ▼ (descending/bottom) = BUY point (support)  
+        #   - High ▲ (ascending/top) = SELL point (resistance)
+        #
+        # This replaces any filtering - we directly create setups from the active cone
         
-        if active_cone in ['High', 'Low'] and not calls_setups and single_calls:
-            # Create setup from the single call rail
-            for single in single_calls:
-                entry_price = single['price']
-                rail_name = single['rail']
-                
-                # Find the corresponding cone for target calculation
-                active_cone_obj = next((c for c in cones if c.name == active_cone), None)
-                if active_cone_obj:
-                    cone_width = active_cone_obj.width
-                    target_100 = active_cone_obj.ascending_rail
-                else:
-                    cone_width = avg_cone_width
-                    target_100 = entry_price + cone_width
-                
-                stop_loss = entry_price - STOP_LOSS_PTS
-                target_50 = entry_price + (cone_width * 0.5)
-                target_75 = entry_price + (cone_width * 0.75)
-                
-                # Strike calculation
-                strike = int(entry_price + STRIKE_OFFSET)
-                strike = ((strike + 4) // 5) * 5
-                
-                # Profit/risk calculations
+        if active_cone in ['High', 'Low']:
+            # Find the active cone object
+            active_cone_obj = next((c for c in cones if c.name == active_cone), None)
+            
+            if active_cone_obj:
+                cone_width = active_cone_obj.width
                 delta_estimate = get_delta_estimate(STRIKE_OFFSET)
-                profit_50 = (target_50 - entry_price) * delta_estimate * 100
-                profit_75 = (target_75 - entry_price) * delta_estimate * 100
-                profit_100 = (target_100 - entry_price) * delta_estimate * 100
+                theta_mult, theta_period = get_theta_multiplier()
                 risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
                 
-                theta_mult, theta_period = get_theta_multiplier()
-                profit_50_theta = profit_50 * theta_mult
-                rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
-                rr_ratio_theta = profit_50_theta / risk_dollars if risk_dollars > 0 else 0
+                # Clear any filtered setups - we'll create fresh ones
+                calls_setups = []
+                puts_setups = []
                 
-                setup = TradeSetup(
+                # -----------------------------------------------------------------
+                # BUY POINT: Bottom of active cone (descending rail)
+                # -----------------------------------------------------------------
+                buy_entry = active_cone_obj.descending_rail
+                buy_stop = buy_entry - STOP_LOSS_PTS
+                buy_target_50 = buy_entry + (cone_width * 0.5)
+                buy_target_75 = buy_entry + (cone_width * 0.75)
+                buy_target_100 = active_cone_obj.ascending_rail  # Top of cone
+                
+                # Strike for CALLS (above entry)
+                buy_strike = int(buy_entry + STRIKE_OFFSET)
+                buy_strike = ((buy_strike + 4) // 5) * 5
+                
+                # Profit calculations
+                buy_profit_50 = (buy_target_50 - buy_entry) * delta_estimate * 100
+                buy_profit_75 = (buy_target_75 - buy_entry) * delta_estimate * 100
+                buy_profit_100 = (buy_target_100 - buy_entry) * delta_estimate * 100
+                buy_profit_50_theta = buy_profit_50 * theta_mult
+                buy_rr = buy_profit_50 / risk_dollars if risk_dollars > 0 else 0
+                buy_rr_theta = buy_profit_50_theta / risk_dollars if risk_dollars > 0 else 0
+                
+                # Check if broken overnight
+                buy_overnight_broken = False
+                if overnight_low_spx is not None and overnight_low_spx < buy_entry - 2:
+                    buy_overnight_broken = True
+                
+                calls_setup = TradeSetup(
                     direction='CALLS',
                     trade_type='BUY POINT',
-                    entry_price=entry_price,
-                    confluence_rails=[rail_name],
+                    entry_price=buy_entry,
+                    confluence_rails=[f"{active_cone} ▼"],
                     confluence_strength=1,
-                    strike=strike,
-                    strike_label=f"SPX {strike}C",
-                    stop_loss=stop_loss,
-                    target_50=target_50,
-                    target_75=target_75,
-                    target_100=target_100,
-                    profit_50=profit_50,
-                    profit_75=profit_75,
-                    profit_100=profit_100,
-                    profit_50_theta_adjusted=profit_50_theta,
+                    strike=buy_strike,
+                    strike_label=f"SPX {buy_strike}C",
+                    stop_loss=buy_stop,
+                    target_50=buy_target_50,
+                    target_75=buy_target_75,
+                    target_100=buy_target_100,
+                    profit_50=buy_profit_50,
+                    profit_75=buy_profit_75,
+                    profit_100=buy_profit_100,
+                    profit_50_theta_adjusted=buy_profit_50_theta,
                     risk_dollars=risk_dollars,
-                    rr_ratio=rr_ratio,
-                    rr_ratio_theta_adjusted=rr_ratio_theta,
+                    rr_ratio=buy_rr,
+                    rr_ratio_theta_adjusted=buy_rr_theta,
                     cone_width=cone_width,
                     delta_estimate=delta_estimate,
                     theta_period=theta_period,
                     rail_type='DESCENDING',
-                    overnight_broken=False,
+                    overnight_broken=buy_overnight_broken,
                     follow_through_pct=1.0
                 )
-                calls_setups.append(setup)
-        
-        if active_cone in ['High', 'Low'] and not puts_setups and single_puts:
-            # Create setup from the single put rail
-            for single in single_puts:
-                entry_price = single['price']
-                rail_name = single['rail']
+                calls_setups.append(calls_setup)
                 
-                # Find the corresponding cone for target calculation
-                active_cone_obj = next((c for c in cones if c.name == active_cone), None)
-                if active_cone_obj:
-                    cone_width = active_cone_obj.width
-                    target_100 = active_cone_obj.descending_rail
-                else:
-                    cone_width = avg_cone_width
-                    target_100 = entry_price - cone_width
+                # -----------------------------------------------------------------
+                # SELL POINT: Top of active cone (ascending rail)
+                # -----------------------------------------------------------------
+                sell_entry = active_cone_obj.ascending_rail
+                sell_stop = sell_entry + STOP_LOSS_PTS
+                sell_target_50 = sell_entry - (cone_width * 0.5)
+                sell_target_75 = sell_entry - (cone_width * 0.75)
+                sell_target_100 = active_cone_obj.descending_rail  # Bottom of cone
                 
-                stop_loss = entry_price + STOP_LOSS_PTS
-                target_50 = entry_price - (cone_width * 0.5)
-                target_75 = entry_price - (cone_width * 0.75)
+                # Strike for PUTS (below entry)
+                sell_strike = int(sell_entry - STRIKE_OFFSET)
+                sell_strike = (sell_strike // 5) * 5
                 
-                # Strike calculation
-                strike = int(entry_price - STRIKE_OFFSET)
-                strike = (strike // 5) * 5
+                # Profit calculations
+                sell_profit_50 = (sell_entry - sell_target_50) * delta_estimate * 100
+                sell_profit_75 = (sell_entry - sell_target_75) * delta_estimate * 100
+                sell_profit_100 = (sell_entry - sell_target_100) * delta_estimate * 100
+                sell_profit_50_theta = sell_profit_50 * theta_mult
+                sell_rr = sell_profit_50 / risk_dollars if risk_dollars > 0 else 0
+                sell_rr_theta = sell_profit_50_theta / risk_dollars if risk_dollars > 0 else 0
                 
-                # Profit/risk calculations
-                delta_estimate = get_delta_estimate(STRIKE_OFFSET)
-                profit_50 = (entry_price - target_50) * delta_estimate * 100
-                profit_75 = (entry_price - target_75) * delta_estimate * 100
-                profit_100 = (entry_price - target_100) * delta_estimate * 100
-                risk_dollars = STOP_LOSS_PTS * delta_estimate * 100
+                # Check if broken overnight
+                sell_overnight_broken = False
+                if overnight_high_spx is not None and overnight_high_spx > sell_entry + 2:
+                    sell_overnight_broken = True
                 
-                theta_mult, theta_period = get_theta_multiplier()
-                profit_50_theta = profit_50 * theta_mult
-                rr_ratio = profit_50 / risk_dollars if risk_dollars > 0 else 0
-                rr_ratio_theta = profit_50_theta / risk_dollars if risk_dollars > 0 else 0
-                
-                setup = TradeSetup(
+                puts_setup = TradeSetup(
                     direction='PUTS',
                     trade_type='SELL POINT',
-                    entry_price=entry_price,
-                    confluence_rails=[rail_name],
+                    entry_price=sell_entry,
+                    confluence_rails=[f"{active_cone} ▲"],
                     confluence_strength=1,
-                    strike=strike,
-                    strike_label=f"SPX {strike}P",
-                    stop_loss=stop_loss,
-                    target_50=target_50,
-                    target_75=target_75,
-                    target_100=target_100,
-                    profit_50=profit_50,
-                    profit_75=profit_75,
-                    profit_100=profit_100,
-                    profit_50_theta_adjusted=profit_50_theta,
+                    strike=sell_strike,
+                    strike_label=f"SPX {sell_strike}P",
+                    stop_loss=sell_stop,
+                    target_50=sell_target_50,
+                    target_75=sell_target_75,
+                    target_100=sell_target_100,
+                    profit_50=sell_profit_50,
+                    profit_75=sell_profit_75,
+                    profit_100=sell_profit_100,
+                    profit_50_theta_adjusted=sell_profit_50_theta,
                     risk_dollars=risk_dollars,
-                    rr_ratio=rr_ratio,
-                    rr_ratio_theta_adjusted=rr_ratio_theta,
+                    rr_ratio=sell_rr,
+                    rr_ratio_theta_adjusted=sell_rr_theta,
                     cone_width=cone_width,
                     delta_estimate=delta_estimate,
                     theta_period=theta_period,
                     rail_type='ASCENDING',
-                    overnight_broken=False,
+                    overnight_broken=sell_overnight_broken,
                     follow_through_pct=1.0
                 )
-                puts_setups.append(setup)
+                puts_setups.append(puts_setup)
     
     # =========================================================================
     # RAIL REVERSAL LOGIC
