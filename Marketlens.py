@@ -595,18 +595,33 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         df_spx = spx.history(start=start_date, end=end_date, interval='30m')
         
         if df_es.empty:
-            return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
+            return {'offset': 0, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
         
         offset = 0
-        if not df_spx.empty:
+        if not df_spx.empty and not df_es.empty:
             try:
-                spx_close = df_spx['Close'].iloc[-1]
-                es_at_time = df_es[df_es.index.tz_convert(CT_TZ).time <= time(14, 30)]
-                if not es_at_time.empty:
-                    es_price = es_at_time['Close'].iloc[-1]
-                    offset = es_price - spx_close
+                # Compare ES and SPX at the same time (2:50 PM CT)
+                # Close to market close but both actively trading = reliable comparison
+                
+                df_es_ct = df_es.copy()
+                df_es_ct.index = df_es_ct.index.tz_convert(CT_TZ)
+                
+                df_spx_ct = df_spx.copy()
+                df_spx_ct.index = df_spx_ct.index.tz_convert(CT_TZ)
+                
+                # Get ES at 2:50 PM CT
+                es_at_250 = df_es_ct[df_es_ct.index.time <= time(14, 50)]
+                # Get SPX at 2:50 PM CT  
+                spx_at_250 = df_spx_ct[df_spx_ct.index.time <= time(14, 50)]
+                
+                if not es_at_250.empty and not spx_at_250.empty:
+                    es_price = es_at_250['Close'].iloc[-1]
+                    spx_price = spx_at_250['Close'].iloc[-1]
+                    offset = es_price - spx_price
+                else:
+                    offset = 8  # Default ES-SPX spread
             except:
-                offset = 0
+                offset = 8  # Default spread
         
         overnight_start = CT_TZ.localize(datetime.combine(prior_date, time(17, 0)))
         overnight_end = CT_TZ.localize(datetime.combine(session_date, time(8, 30)))
@@ -618,13 +633,17 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         df_overnight = df_es_tz[overnight_mask]
         
         if df_overnight.empty:
-            return {'offset': offset, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
+            return {'offset': offset, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
         
         overnight_high = df_overnight['High'].max()
         overnight_low = df_overnight['Low'].min()
         
+        # Get current ES price (most recent)
+        current_es = float(df_es['Close'].iloc[-1]) if not df_es.empty else None
+        
         return {
             'offset': offset,
+            'current': current_es,
             'overnight_high': overnight_high,
             'overnight_low': overnight_low,
             'overnight_high_spx': overnight_high - offset,
@@ -634,7 +653,7 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         }
         
     except Exception as e:
-        return {'offset': 0, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
+        return {'offset': 0, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
 
 def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high: float, secondary_high_time: datetime, 
                              secondary_low: float, secondary_low_time: datetime, session_date: datetime) -> Dict:
@@ -930,6 +949,87 @@ def check_overnight_rail_touches(cones: List[Cone], es_data: Dict) -> List[str]:
     
     return touched
 
+def determine_active_cone(cones: List[Cone], es_data: Dict, session_high: float = None, session_low: float = None) -> Dict:
+    """
+    Determine which cone is ACTIVE based on overnight ES behavior and RTH price action.
+    
+    RULES:
+    - If ES stayed within Close cone overnight → Close cone is active
+    - If ES broke ABOVE Close cone ▲ → High cone is active  
+    - If ES broke BELOW Close cone ▼ → Low cone is active
+    
+    RAIL REVERSAL RULES (for 10am entries):
+    - Low cone active + RTH rises through Low ▲ → Low ▲ becomes BUY point (not sell)
+    - High cone active + RTH drops through High ▼ → High ▼ becomes SELL point (not buy)
+    
+    Returns dict with:
+        - 'active_cone': 'Close', 'High', or 'Low'
+        - 'rail_reversal': None, 'low_top_is_buy', or 'high_bottom_is_sell'
+        - 'reason': Explanation string
+    """
+    result = {
+        'active_cone': 'Close',
+        'rail_reversal': None,
+        'reason': 'Default to Close cone'
+    }
+    
+    if not es_data or es_data.get('overnight_high_spx') is None:
+        result['reason'] = 'No overnight data - using Close cone'
+        return result
+    
+    overnight_high_spx = es_data.get('overnight_high_spx')
+    overnight_low_spx = es_data.get('overnight_low_spx')
+    
+    # Find cones
+    close_cone = next((c for c in cones if c.name == 'Close'), None)
+    high_cone = next((c for c in cones if c.name == 'High'), None)
+    low_cone = next((c for c in cones if c.name == 'Low'), None)
+    
+    if not close_cone:
+        return result
+    
+    # Check if ES broke above Close cone (use 2pt buffer)
+    broke_above = overnight_high_spx > close_cone.ascending_rail + 2
+    
+    # Check if ES broke below Close cone (use 2pt buffer)
+    broke_below = overnight_low_spx < close_cone.descending_rail - 2
+    
+    if broke_above and not broke_below:
+        result['active_cone'] = 'High'
+        result['reason'] = 'ES broke ABOVE Close cone overnight → High cone entries'
+        
+        # Check for RTH rail reversal: if price dropped through High ▼, it becomes SELL point
+        if high_cone and session_low is not None:
+            if session_low < high_cone.descending_rail - 2:
+                result['rail_reversal'] = 'high_bottom_is_sell'
+                result['reason'] = 'ES broke above Close overnight, RTH dropped through High ▼ → High ▼ is SELL point'
+                
+    elif broke_below and not broke_above:
+        result['active_cone'] = 'Low'
+        result['reason'] = 'ES broke BELOW Close cone overnight → Low cone entries'
+        
+        # Check for RTH rail reversal: if price rose through Low ▲, it becomes BUY point
+        if low_cone and session_high is not None:
+            if session_high > low_cone.ascending_rail + 2:
+                result['rail_reversal'] = 'low_top_is_buy'
+                result['reason'] = 'ES broke below Close overnight, RTH rose through Low ▲ → Low ▲ is BUY point'
+                
+    elif broke_above and broke_below:
+        # Both broken - use which one broke more significantly
+        above_break = overnight_high_spx - close_cone.ascending_rail
+        below_break = close_cone.descending_rail - overnight_low_spx
+        if above_break > below_break:
+            result['active_cone'] = 'High'
+            result['reason'] = 'ES broke both directions, more above → High cone entries'
+        else:
+            result['active_cone'] = 'Low'
+            result['reason'] = 'ES broke both directions, more below → Low cone entries'
+    else:
+        result['active_cone'] = 'Close'
+        result['reason'] = 'ES stayed within Close cone overnight → Close cone entries'
+    
+    return result
+
 def find_confluence_zones(cones: List[Cone], threshold: float = 5.0) -> Dict[str, List[Dict]]:
     """
     Find where multiple cone rails converge.
@@ -1028,10 +1128,10 @@ def find_confluence_zones(cones: List[Cone], threshold: float = 5.0) -> Dict[str
 # ============================================================================
 
 @dataclass
-@dataclass
 class TradeSetup:
     """Complete trade setup for a confluence zone."""
     direction: str  # CALLS or PUTS
+    trade_type: str  # BUY POINT or SELL POINT
     entry_price: float  # The confluence zone price
     confluence_rails: List[str]  # Which rails form this confluence
     confluence_strength: int  # Number of rails converging
@@ -1051,9 +1151,15 @@ class TradeSetup:
     cone_width: float  # Width of the trading range
     delta_estimate: float  # Estimated delta for this strike
     theta_period: str  # Time period for theta (morning, mid_day, etc.)
+    rail_type: str = ""  # ASCENDING or DESCENDING
+    overnight_broken: bool = False  # True if ES broke this level overnight
+    follow_through_pct: float = 1.0  # Expected follow-through (0.70-0.75 if 8:30 already touched)
     distance: float = 0.0  # Distance from current price (set dynamically)
+    triggered: bool = False  # True if entry was triggered today (set dynamically)
 
-def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dict:
+def generate_trade_setups(cones: List[Cone], current_price: float = None, 
+                          es_data: Dict = None, session_830_touched: Dict = None,
+                          active_cone_info: Dict = None) -> Dict:
     """
     Generate complete trade setups for all confluence zones.
     
@@ -1062,6 +1168,17 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
     - Calculates exact entry, stop, targets
     - Recommends specific contract strike
     - Calculates expected profit/risk
+    - Marks entries broken overnight
+    - Applies 70-75% follow-through if 8:30 already touched
+    - Filters to show only ACTIVE CONE entries based on overnight behavior
+    - Applies RAIL REVERSAL when RTH breaks through active cone edge
+    
+    Args:
+        cones: List of Cone objects at the evaluation time
+        current_price: Current SPX price
+        es_data: Overnight ES data with overnight_high_spx and overnight_low_spx
+        session_830_touched: Dict with 'high_touched' and 'low_touched' booleans for 8:30am touch
+        active_cone_info: Dict from determine_active_cone with 'active_cone', 'rail_reversal', 'reason'
     
     Returns dict with 'calls_setups' and 'puts_setups' lists.
     """
@@ -1069,6 +1186,27 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
     confluence_data = find_confluence_zones(cones)
     calls_setups = []
     puts_setups = []
+    
+    # Extract active cone info
+    active_cone = None
+    rail_reversal = None
+    active_cone_reason = "Close cone (default)"
+    
+    if active_cone_info:
+        active_cone = active_cone_info.get('active_cone', 'Close')
+        rail_reversal = active_cone_info.get('rail_reversal')
+        active_cone_reason = active_cone_info.get('reason', '')
+    
+    # Get overnight levels for validation
+    overnight_high_spx = None
+    overnight_low_spx = None
+    if es_data:
+        overnight_high_spx = es_data.get('overnight_high_spx')
+        overnight_low_spx = es_data.get('overnight_low_spx')
+    
+    # Check if 8:30 already touched an edge (for 70-75% follow-through rule)
+    touched_830_high = session_830_touched.get('high_touched', False) if session_830_touched else False
+    touched_830_low = session_830_touched.get('low_touched', False) if session_830_touched else False
     
     # Get average cone width for target calculation
     avg_cone_width = sum(c.ascending_rail - c.descending_rail for c in cones) / len(cones) if cones else 30
@@ -1080,6 +1218,17 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         entry_price = zone['price']
         rails = zone['rails']
         strength = zone.get('strength', len(rails))
+        
+        # Check if this entry was BROKEN overnight (ES went below it)
+        overnight_broken = False
+        if overnight_low_spx is not None and overnight_low_spx < entry_price - 2:
+            overnight_broken = True
+        
+        # Check for reduced follow-through (8:30 already touched this zone)
+        # If 8:30 bounced from descending rail, 10am touch has 70-75% follow-through
+        follow_through_pct = 1.0
+        if touched_830_low:
+            follow_through_pct = 0.725  # Average of 70-75%
         
         # Find the corresponding ascending rail for target (opposite side)
         # Use the average of ascending rails from the cones that form this confluence
@@ -1101,9 +1250,11 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         if cone_width < MIN_CONE_WIDTH:
             continue
         
-        # Calculate targets
-        target_50 = entry_price + (cone_width * 0.50)
-        target_75 = entry_price + (cone_width * 0.75)
+        # Calculate targets (apply follow-through adjustment)
+        effective_width = cone_width * follow_through_pct
+        target_50 = entry_price + (effective_width * 0.50)
+        target_75 = entry_price + (effective_width * 0.75)
+        target_100 = entry_price + effective_width
         stop_loss = entry_price - STOP_LOSS_PTS
         
         # Calculate strike (OTM CALLS = strike ABOVE entry price)
@@ -1115,10 +1266,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         otm_distance = strike - entry_price
         delta_estimate = get_delta_estimate(otm_distance)
         
-        # Calculate profits using accurate delta
-        move_50 = cone_width * 0.50
-        move_75 = cone_width * 0.75
-        move_100 = cone_width
+        # Calculate profits using accurate delta (with follow-through adjustment)
+        move_50 = effective_width * 0.50
+        move_75 = effective_width * 0.75
+        move_100 = effective_width
         
         profit_50 = move_50 * delta_estimate * 100
         profit_75 = move_75 * delta_estimate * 100
@@ -1134,6 +1285,7 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         
         setup = TradeSetup(
             direction='CALLS',
+            trade_type='BUY POINT',  # Descending rails are buy points
             entry_price=entry_price,
             confluence_rails=rails,
             confluence_strength=strength,
@@ -1152,7 +1304,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
             rr_ratio_theta_adjusted=rr_ratio_theta,
             cone_width=cone_width,
             delta_estimate=delta_estimate,
-            theta_period=theta_period
+            theta_period=theta_period,
+            rail_type='DESCENDING',
+            overnight_broken=overnight_broken,
+            follow_through_pct=follow_through_pct
         )
         calls_setups.append(setup)
     
@@ -1163,6 +1318,17 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         entry_price = zone['price']
         rails = zone['rails']
         strength = zone.get('strength', len(rails))
+        
+        # Check if this entry was BROKEN overnight (ES went above it)
+        overnight_broken = False
+        if overnight_high_spx is not None and overnight_high_spx > entry_price + 2:
+            overnight_broken = True
+        
+        # Check for reduced follow-through (8:30 already touched this zone)
+        # If 8:30 rejected from ascending rail, 10am touch has 70-75% follow-through
+        follow_through_pct = 1.0
+        if touched_830_high:
+            follow_through_pct = 0.725  # Average of 70-75%
         
         # Find the corresponding descending rail for target (opposite side)
         target_prices = []
@@ -1184,8 +1350,11 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
             continue
         
         # Calculate targets
-        target_50 = entry_price - (cone_width * 0.50)
-        target_75 = entry_price - (cone_width * 0.75)
+        # Calculate targets (apply follow-through adjustment)
+        effective_width = cone_width * follow_through_pct
+        target_50 = entry_price - (effective_width * 0.50)
+        target_75 = entry_price - (effective_width * 0.75)
+        target_100 = entry_price - effective_width
         stop_loss = entry_price + STOP_LOSS_PTS
         
         # Calculate strike (OTM PUTS = strike BELOW entry price)
@@ -1197,10 +1366,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         otm_distance = entry_price - strike
         delta_estimate = get_delta_estimate(otm_distance)
         
-        # Calculate profits using accurate delta
-        move_50 = cone_width * 0.50
-        move_75 = cone_width * 0.75
-        move_100 = cone_width
+        # Calculate profits using accurate delta (with follow-through adjustment)
+        move_50 = effective_width * 0.50
+        move_75 = effective_width * 0.75
+        move_100 = effective_width
         
         profit_50 = move_50 * delta_estimate * 100
         profit_75 = move_75 * delta_estimate * 100
@@ -1216,6 +1385,7 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
         
         setup = TradeSetup(
             direction='PUTS',
+            trade_type='SELL POINT',  # Ascending rails are sell points
             entry_price=entry_price,
             confluence_rails=rails,
             confluence_strength=strength,
@@ -1234,7 +1404,10 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
             rr_ratio_theta_adjusted=rr_ratio_theta,
             cone_width=cone_width,
             delta_estimate=delta_estimate,
-            theta_period=theta_period
+            theta_period=theta_period,
+            rail_type='ASCENDING',
+            overnight_broken=overnight_broken,
+            follow_through_pct=follow_through_pct
         )
         puts_setups.append(setup)
     
@@ -1272,132 +1445,84 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None) -> Dic
                 'type': 'single'
             })
     
+    # =========================================================================
+    # FILTER BY ACTIVE CONE
+    # =========================================================================
+    # Only show entries from the active cone based on overnight behavior
+    # Close = stayed in range, High = broke above, Low = broke below
+    
+    if active_cone:
+        # Filter CALLS setups - keep only those from active cone
+        calls_setups = [
+            s for s in calls_setups 
+            if any(active_cone in rail for rail in s.confluence_rails)
+        ]
+        
+        # Filter PUTS setups - keep only those from active cone
+        puts_setups = [
+            s for s in puts_setups 
+            if any(active_cone in rail for rail in s.confluence_rails)
+        ]
+        
+        # Filter single rails too
+        single_calls = [s for s in single_calls if active_cone in s['rail']]
+        single_puts = [s for s in single_puts if active_cone in s['rail']]
+    
+    # =========================================================================
+    # RAIL REVERSAL LOGIC
+    # =========================================================================
+    # When certain conditions are met, ascending rails become BUY points
+    # and descending rails become SELL points (opposite of normal)
+    
+    if rail_reversal == 'low_top_is_buy':
+        # Low cone ▲ (normally SELL) becomes BUY point
+        # Move any Low ▲ setups from puts to calls and flip direction
+        reversed_setups = []
+        remaining_puts = []
+        for s in puts_setups:
+            if 'Low' in ''.join(s.confluence_rails) and s.rail_type == 'ASCENDING':
+                # This ascending rail is now a BUY point
+                s.direction = 'CALLS'
+                s.trade_type = 'BUY POINT (REVERSAL)'
+                # Recalculate strike for CALLS (above entry)
+                s.strike = int(s.entry_price + STRIKE_OFFSET)
+                s.strike = ((s.strike + 4) // 5) * 5
+                s.strike_label = f"SPX {s.strike}C"
+                reversed_setups.append(s)
+            else:
+                remaining_puts.append(s)
+        calls_setups.extend(reversed_setups)
+        puts_setups = remaining_puts
+        
+    elif rail_reversal == 'high_bottom_is_sell':
+        # High cone ▼ (normally BUY) becomes SELL point
+        # Move any High ▼ setups from calls to puts and flip direction
+        reversed_setups = []
+        remaining_calls = []
+        for s in calls_setups:
+            if 'High' in ''.join(s.confluence_rails) and s.rail_type == 'DESCENDING':
+                # This descending rail is now a SELL point
+                s.direction = 'PUTS'
+                s.trade_type = 'SELL POINT (REVERSAL)'
+                # Recalculate strike for PUTS (below entry)
+                s.strike = int(s.entry_price - STRIKE_OFFSET)
+                s.strike = (s.strike // 5) * 5
+                s.strike_label = f"SPX {s.strike}P"
+                reversed_setups.append(s)
+            else:
+                remaining_calls.append(s)
+        puts_setups.extend(reversed_setups)
+        calls_setups = remaining_calls
+    
     return {
         'calls_setups': calls_setups,
         'puts_setups': puts_setups,
         'single_calls': single_calls,
-        'single_puts': single_puts
+        'single_puts': single_puts,
+        'active_cone': active_cone,
+        'rail_reversal': rail_reversal,
+        'active_cone_reason': active_cone_reason
     }
-
-def render_trade_setup_card(setup: TradeSetup, current_price: float = None):
-    """Render a complete trade setup card with GO/NO-GO decision."""
-    
-    # Determine colors and proximity
-    if setup.direction == 'CALLS':
-        color = "#22c55e"
-        emoji = "🟢"
-    else:
-        color = "#ef4444"
-        emoji = "🔴"
-    
-    # Calculate distance from current price if provided
-    distance_text = ""
-    at_entry = False
-    if current_price:
-        distance = abs(current_price - setup.entry_price)
-        if distance <= AT_RAIL_THRESHOLD:
-            distance_text = f"🎯 {distance:.1f} pts away - AT ENTRY"
-            at_entry = True
-        elif distance <= 15:
-            distance_text = f"⏳ {distance:.1f} pts away - WATCH"
-        else:
-            distance_text = f"📍 {distance:.1f} pts away"
-    
-    # GO/NO-GO Decision based on calculable factors:
-    # 1. R:R (theta-adjusted) must be >= 3:1
-    # 2. Cone width must be >= 25 pts
-    # 3. Must have confluence (2+ rails)
-    # 4. Time must be before LAST_ENTRY_TIME
-    
-    ct_now = get_ct_now().time()
-    time_ok = ct_now < LAST_ENTRY_TIME
-    rr_ok = setup.rr_ratio_theta_adjusted >= MIN_RR_RATIO
-    width_ok = setup.cone_width >= MIN_CONE_WIDTH
-    confluence_ok = setup.confluence_strength >= 2
-    
-    if rr_ok and width_ok and confluence_ok and time_ok:
-        decision = "✅ GO"
-        decision_color = "#22c55e"
-        decision_reason = f"R:R {setup.rr_ratio_theta_adjusted:.1f}:1 (θ-adj), {setup.confluence_strength} rails, Δ≈{setup.delta_estimate:.2f}"
-    elif not time_ok:
-        decision = "⛔ TOO LATE"
-        decision_color = "#ef4444"
-        decision_reason = f"After {LAST_ENTRY_TIME.strftime('%H:%M')} - theta decay too aggressive"
-    elif not rr_ok:
-        decision = "❌ NO-GO"
-        decision_color = "#ef4444"
-        decision_reason = f"R:R only {setup.rr_ratio_theta_adjusted:.1f}:1 after θ (need {MIN_RR_RATIO}:1)"
-    elif not width_ok:
-        decision = "❌ NO-GO"
-        decision_color = "#ef4444"
-        decision_reason = f"Cone only {setup.cone_width:.0f} pts (need {MIN_CONE_WIDTH})"
-    else:
-        decision = "⚠️ WEAK"
-        decision_color = "#f59e0b"
-        decision_reason = f"Single rail only - reduced probability"
-    
-    # Theta period warning
-    theta_warning = ""
-    if setup.theta_period == 'afternoon':
-        theta_warning = "⚠️ Afternoon - profits reduced ~35% by theta"
-    elif setup.theta_period == 'late':
-        theta_warning = "🛑 Late session - avoid new entries"
-    
-    # Card header with strike and decision
-    if setup.direction == 'CALLS':
-        st.success(f"**{emoji} {setup.strike_label}** — {decision}")
-    else:
-        st.error(f"**{emoji} {setup.strike_label}** — {decision}")
-    
-    # Confluence info
-    st.caption(f"Confluence: {' + '.join(setup.confluence_rails)}")
-    
-    # Decision reason
-    if "GO" in decision:
-        st.markdown(f"✅ {decision_reason}")
-    elif "NO-GO" in decision or "LATE" in decision:
-        st.markdown(f"❌ {decision_reason}")
-    else:
-        st.markdown(f"⚠️ {decision_reason}")
-    
-    # Theta warning if applicable
-    if theta_warning:
-        st.warning(theta_warning)
-    
-    # Distance from current price
-    if distance_text:
-        st.info(distance_text)
-    
-    # Entry and Stop
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Entry", f"{setup.entry_price:.2f}")
-    with col2:
-        st.metric("Stop", f"{setup.stop_loss:.2f}")
-    
-    # Targets and Profits - show both theoretical and theta-adjusted
-    st.markdown("**Exit Strategy:**")
-    theta_mult = THETA_MULTIPLIER.get(setup.theta_period, 1.0)
-    target_data = {
-        "Exit": ["60% @ 50%", "20% @ 75%", "20% @ 100%"],
-        "Level": [f"{setup.target_50:.2f}", f"{setup.target_75:.2f}", f"{setup.target_100:.2f}"],
-        "Profit (θ-adj)": [f"+${setup.profit_50_theta_adjusted:.0f}", f"+${setup.profit_75 * theta_mult:.0f}", f"+${setup.profit_100 * theta_mult:.0f}"]
-    }
-    st.dataframe(target_data, use_container_width=True, hide_index=True)
-    
-    # Stats - show delta and theta-adjusted R:R
-    col_a, col_b, col_c, col_d = st.columns(4)
-    with col_a:
-        st.metric("Width", f"{setup.cone_width:.0f} pts")
-    with col_b:
-        st.metric("Delta", f"{setup.delta_estimate:.2f}")
-    with col_c:
-        st.metric("R:R (θ-adj)", f"{setup.rr_ratio_theta_adjusted:.1f}:1")
-    with col_d:
-        st.metric("Risk", f"${setup.risk_dollars:.0f}")
-    
-    st.markdown("---")
-
 
 def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     """Render a professional institutional-style trade card."""
@@ -1406,7 +1531,10 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     distance = abs(current_price - setup.entry_price)
     
     # Determine status
-    if distance <= AT_RAIL_THRESHOLD:
+    if setup.overnight_broken:
+        status = "INVALID"
+        status_class = "badge-nogo"
+    elif distance <= AT_RAIL_THRESHOLD:
         status = "ACTIVE"
         status_class = "badge-go"
     elif distance <= 15:
@@ -1419,14 +1547,18 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     # Direction styling
     direction_class = "badge-calls" if setup.direction == "CALLS" else "badge-puts"
     
-    # GO/NO-GO
+    # Trade type styling (BUY = green, SELL = red)
+    trade_type_class = "badge-go" if setup.trade_type == "BUY POINT" else "badge-nogo"
+    
+    # GO/NO-GO (broken overnight = automatic NO-GO)
     ct_now = get_ct_now().time()
     time_ok = ct_now < LAST_ENTRY_TIME
     rr_ok = setup.rr_ratio_theta_adjusted >= MIN_RR_RATIO
     width_ok = setup.cone_width >= MIN_CONE_WIDTH
     confluence_ok = setup.confluence_strength >= 2
+    not_broken = not setup.overnight_broken
     
-    if rr_ok and width_ok and confluence_ok and time_ok:
+    if rr_ok and width_ok and confluence_ok and time_ok and not_broken:
         decision = "GO"
         decision_class = "badge-go"
     else:
@@ -1436,10 +1568,21 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     # Theta multiplier for display
     theta_mult = THETA_MULTIPLIER.get(setup.theta_period, 1.0)
     
+    # Follow-through warning
+    follow_through_note = ""
+    if setup.follow_through_pct < 1.0:
+        follow_through_note = f'<div style="background: rgba(245, 158, 11, 0.2); border: 1px solid var(--accent-gold); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">⚠️ 8:30 already touched — Expect {setup.follow_through_pct*100:.0f}% follow-through</div>'
+    
+    # Overnight broken warning
+    broken_note = ""
+    if setup.overnight_broken:
+        broken_note = f'<div style="background: rgba(239, 68, 68, 0.2); border: 1px solid var(--accent-red); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-red);">❌ BROKEN OVERNIGHT — Entry invalidated</div>'
+    
     st.markdown(f"""
     <div class="trade-panel">
         <div class="trade-panel-header">
-            <div style="display: flex; align-items: center; gap: 1rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span class="trade-panel-badge {trade_type_class}">{setup.trade_type}</span>
                 <span class="trade-panel-badge {direction_class}">{setup.direction}</span>
                 <span style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: var(--accent-gold); font-weight: 600;">{setup.strike_label}</span>
             </div>
@@ -1449,9 +1592,11 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
             </div>
         </div>
         <div class="trade-panel-body">
+            {broken_note}
+            {follow_through_note}
             <div class="entry-row">
                 <div class="entry-item">
-                    <div class="entry-label">Entry</div>
+                    <div class="entry-label">Entry ({setup.rail_type})</div>
                     <div class="entry-value gold">{setup.entry_price:,.2f}</div>
                 </div>
                 <div class="entry-item">
@@ -1506,6 +1651,9 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
             <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.75rem; color: var(--text-muted);">
                 <strong>Sources:</strong> {' + '.join(setup.confluence_rails)}
             </div>
+            <div style="margin-top: 0.5rem; padding: 0.5rem 0.75rem; background: var(--bg-tertiary); border-radius: 4px; font-size: 0.7rem; color: var(--text-secondary);">
+                {'<strong>✅ Valid BUY:</strong> Bearish candle touches entry, closes &lt;5pts above, no drop &gt;5pts below' if setup.trade_type == 'BUY POINT' else '<strong>✅ Valid SELL:</strong> Bullish candle touches entry, closes &lt;5pts below, no rise &gt;5pts above'}
+            </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1514,57 +1662,6 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
 # ============================================================================
 # CONTRACT EXPECTATION ENGINE
 # ============================================================================
-
-def calculate_contract_expectation(
-    direction: str,
-    entry_rail: float,
-    opposite_rail: float,
-    cone_name: str,
-    rail_type: str
-) -> ContractExpectation:
-    
-    cone_height = abs(opposite_rail - entry_rail)
-    
-    if direction == 'CALLS':
-        target_50 = entry_rail + (cone_height * 0.50)
-        target_75 = entry_rail + (cone_height * 0.75)
-        target_100 = opposite_rail
-        stop = entry_rail - 2
-    else:
-        target_50 = entry_rail - (cone_height * 0.50)
-        target_75 = entry_rail - (cone_height * 0.75)
-        target_100 = opposite_rail
-        stop = entry_rail + 2
-    
-    move_50 = abs(target_50 - entry_rail)
-    move_100 = abs(target_100 - entry_rail)
-    
-    contract_move_50 = move_50 * CONTRACT_FACTOR
-    contract_move_75 = abs(target_75 - entry_rail) * CONTRACT_FACTOR
-    contract_move_100 = move_100 * CONTRACT_FACTOR
-    
-    profit_50 = contract_move_50 * 100
-    profit_75 = contract_move_75 * 100
-    profit_100 = contract_move_100 * 100
-    
-    risk = 2 * CONTRACT_FACTOR * 100
-    rr_50 = profit_50 / risk if risk > 0 else 0
-    
-    return ContractExpectation(
-        direction=direction,
-        entry_price=entry_rail,
-        entry_rail=f"{cone_name} {'▼' if rail_type == 'descending' else '▲'}",
-        target_50_underlying=target_50,
-        target_75_underlying=target_75,
-        target_100_underlying=target_100,
-        stop_underlying=stop,
-        expected_underlying_move_50=move_50,
-        expected_underlying_move_100=move_100,
-        contract_profit_50=profit_50,
-        contract_profit_75=profit_75,
-        contract_profit_100=profit_100,
-        risk_reward_50=rr_50
-    )
 
 # ============================================================================
 # REGIME & SCORING
@@ -2490,150 +2587,6 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
-def render_score_ring(score: int):
-    if score >= 75:
-        score_class = "score-high"
-    elif score >= 50:
-        score_class = "score-medium"
-    else:
-        score_class = "score-low"
-    
-    st.markdown(f"""
-    <div class="score-container">
-        <div class="score-ring {score_class}">
-            <span class="score-value">{score}</span>
-        </div>
-        <div class="score-label">Confluence Score</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-def render_action_card(action: ActionCard):
-    emoji = '🟢' if action.direction == 'CALLS' else ('🔴' if action.direction == 'PUTS' else ('🟡' if action.direction == 'WAIT' else '⛔'))
-    card_class = f"action-{action.color}"
-    dir_class = f"direction-{action.color}"
-    
-    st.markdown(f"""
-    <div class="action-card {card_class}">
-        <div class="direction-label {dir_class}">{emoji} {action.direction}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-def render_contract_recommendation(action: ActionCard):
-    """Display detailed contract recommendation based on the action."""
-    
-    if not action.contract_expectation:
-        st.warning("No contract data available")
-        return
-    
-    ce = action.contract_expectation
-    cone_height = abs(action.target_100 - action.entry_level)
-    
-    # Calculate recommended strike (15-20 pts OTM)
-    if ce.direction == 'CALLS':
-        # OTM CALLS = strike ABOVE entry price
-        strike = int(action.entry_level + 17.5)
-        strike = ((strike + 4) // 5) * 5  # Round UP to nearest 5
-        strike_label = f"SPX {strike}C (0DTE)"
-        border_color = "#22c55e"
-    else:
-        # OTM PUTS = strike BELOW entry price
-        strike = int(action.entry_level - 17.5)
-        strike = (strike // 5) * 5  # Round DOWN to nearest 5
-        strike_label = f"SPX {strike}P (0DTE)"
-        border_color = "#ef4444"
-    
-    # Main contract card using native Streamlit
-    st.markdown(f"""
-    <div style="border: 3px solid {border_color}; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; background: linear-gradient(135deg, {border_color}11, {border_color}22);">
-        <h2 style="text-align: center; margin: 0; color: {border_color};">📋 {strike_label}</h2>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Entry and Stop in columns
-    col_entry, col_stop = st.columns(2)
-    with col_entry:
-        st.metric("🎯 Entry Level", f"{action.entry_level:.2f}")
-    with col_stop:
-        st.metric("🛑 Stop Loss", f"{action.stop_level:.2f}", delta="-3 pts", delta_color="inverse")
-    
-    # Exit Strategy
-    st.markdown("**📊 Exit Strategy (60/20/20):**")
-    
-    exit_data = {
-        "Exit": ["60% @ 50%", "20% @ 75%", "20% @ 100%"],
-        "SPX Level": [f"{action.target_50:.2f}", f"{action.target_75:.2f}", f"{action.target_100:.2f}"],
-        "Contract Profit": [f"+${ce.contract_profit_50:.0f}", f"+${ce.contract_profit_75:.0f}", f"+${ce.contract_profit_100:.0f}"]
-    }
-    st.dataframe(exit_data, use_container_width=True, hide_index=True)
-    
-    # Stats row
-    col_width, col_rr = st.columns(2)
-    with col_width:
-        st.metric("📏 Cone Width", f"{cone_height:.0f} pts")
-    with col_rr:
-        st.metric("⚖️ R:R @ 50%", f"{ce.risk_reward_50:.1f}:1")
-    
-    st.caption("💡 Contract moves ~0.33x underlying (strike 15-20 pts OTM)")
-
-def render_decision_card(title: str, cones: List[Cone]):
-    st.markdown(f"""
-    <div class="decision-card">
-        <div class="decision-time">{title}</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    for cone in cones:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"**{cone.name} Cone**")
-        with col2:
-            st.write("")
-        
-        col_puts, col_calls = st.columns(2)
-        with col_puts:
-            st.metric(
-                label="🔴 Puts Entry ▲",
-                value=f"{cone.ascending_rail:.2f}"
-            )
-        with col_calls:
-            st.metric(
-                label="🟢 Calls Entry ▼", 
-                value=f"{cone.descending_rail:.2f}"
-            )
-
-def render_proximity_meters(cones: List[Cone], current_price: float):
-    st.markdown("#### 📍 Distance to Entry Rails")
-    
-    for cone in cones:
-        dist_asc = abs(current_price - cone.ascending_rail)
-        dist_desc = abs(current_price - cone.descending_rail)
-        
-        # Ascending (Puts)
-        pct_asc = min(100, (dist_asc / 50) * 100)
-        prox_class_asc = "proximity-close" if dist_asc <= 10 else ("proximity-medium" if dist_asc <= 25 else "proximity-far")
-        
-        # Descending (Calls)
-        pct_desc = min(100, (dist_desc / 50) * 100)
-        prox_class_desc = "proximity-close" if dist_desc <= 10 else ("proximity-medium" if dist_desc <= 25 else "proximity-far")
-        
-        st.markdown(f"""
-        <div class="premium-card" style="padding: 1rem;">
-            <div style="font-weight: 600; margin-bottom: 0.75rem;">{cone.name} Cone</div>
-            <div style="display: flex; gap: 1rem;">
-                <div style="flex: 1;">
-                    <div style="font-size: 0.75rem; color: #64748b;">To ▲ {cone.ascending_rail:.2f}</div>
-                    <div style="font-weight: 600; color: #ef4444;">{dist_asc:.1f} pts</div>
-                    <div class="proximity-bar"><div class="proximity-fill {prox_class_asc}" style="width: {100-pct_asc}%;"></div></div>
-                </div>
-                <div style="flex: 1;">
-                    <div style="font-size: 0.75rem; color: #64748b;">To ▼ {cone.descending_rail:.2f}</div>
-                    <div style="font-weight: 600; color: #22c55e;">{dist_desc:.1f} pts</div>
-                    <div class="proximity-bar"><div class="proximity-fill {prox_class_desc}" style="width: {100-pct_desc}%;"></div></div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
 def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Cone], current_price: float, overnight_validation: dict = None):
     """
     Principled Trade Checklist based on Structural Cone Methodology.
@@ -2985,6 +2938,32 @@ def main():
                     st.session_state.manual_override = False
                     st.rerun()
         
+        # Show ES → SPX implied price (useful for overnight planning)
+        if es_data and es_data.get('offset'):
+            st.markdown("---")
+            st.markdown("### 🌙 ES → SPX Estimate")
+            es_offset = es_data.get('offset', 0)
+            
+            # Get current ES if available
+            try:
+                es_ticker = yf.Ticker("ES=F")
+                es_current_data = es_ticker.history(period='1d', interval='1m')
+                if not es_current_data.empty:
+                    es_current = es_current_data['Close'].iloc[-1]
+                    spx_implied = es_current - es_offset
+                    
+                    es_col1, es_col2 = st.columns(2)
+                    with es_col1:
+                        st.metric("ES Futures", f"{es_current:,.2f}")
+                    with es_col2:
+                        st.metric("SPX Implied", f"{spx_implied:,.2f}")
+                    st.caption(f"Offset: {es_offset:+.2f} pts")
+                    
+                    if not is_market_hours:
+                        st.info("💡 Use SPX Implied to check overnight levels")
+            except:
+                pass
+        
         st.markdown("---")
         st.markdown("### ⚙️ Parameters")
         col_slope1, col_slope2 = st.columns(2)
@@ -3299,9 +3278,30 @@ def main():
     action = generate_action_card(cones, regime, current_price, is_10am, overnight_validation)
     confluence_zones = find_confluence_zones(cones_1000)
     
+    # Detect if 8:30 already touched cone edges (for 70-75% follow-through rule)
+    # If 8:30 bounced from support, 10am support touch has reduced expectation
+    session_830_touched = {'high_touched': False, 'low_touched': False}
+    if cones_830:
+        # Get 8:30 cone edges (using Close cone as the primary reference)
+        close_cone_830 = next((c for c in cones_830 if c.name == 'Close'), None)
+        if close_cone_830 and st.session_state.get('session_low') and st.session_state.get('session_high'):
+            sess_low = st.session_state.session_low
+            sess_high = st.session_state.session_high
+            # Check if session came within 5 pts of descending rail (support)
+            if sess_low <= close_cone_830.descending_rail + 5:
+                session_830_touched['low_touched'] = True
+            # Check if session came within 5 pts of ascending rail (resistance)
+            if sess_high >= close_cone_830.ascending_rail - 5:
+                session_830_touched['high_touched'] = True
+    
+    # Determine ACTIVE CONE based on overnight + RTH behavior
+    session_high_val = st.session_state.get('session_high')
+    session_low_val = st.session_state.get('session_low')
+    active_cone_info = determine_active_cone(cones_1000, es_data, session_high_val, session_low_val)
+    
     # Generate complete trade setups for all confluence zones
-    trade_setups_830 = generate_trade_setups(cones_830, current_price)
-    trade_setups_1000 = generate_trade_setups(cones_1000, current_price)
+    trade_setups_830 = generate_trade_setups(cones_830, current_price, es_data=es_data, session_830_touched=None, active_cone_info=None)
+    trade_setups_1000 = generate_trade_setups(cones_1000, current_price, es_data=es_data, session_830_touched=session_830_touched, active_cone_info=active_cone_info)
     
     # ===== INSTITUTIONAL TERMINAL LAYOUT =====
     
@@ -3309,6 +3309,28 @@ def main():
     num_calls = len(trade_setups_1000.get('calls_setups', []))
     num_puts = len(trade_setups_1000.get('puts_setups', []))
     ct_time = get_ct_now()
+    
+    # Determine market status
+    market_open_time = time(8, 30)
+    market_close_time = time(15, 0)
+    is_weekend = ct_time.weekday() >= 5
+    is_market_open = not is_weekend and market_open_time <= ct_time.time() <= market_close_time
+    
+    # Determine display price (use ES-derived when market closed)
+    if is_market_open:
+        display_price = current_price
+        price_label = "SPX Index"
+        market_status = "LIVE"
+    else:
+        # Use ES-derived SPX if available
+        if es_data and es_data.get('current') and es_data.get('offset'):
+            display_price = es_data['current'] - es_data['offset']
+            price_label = "SPX (from ES)"
+            market_status = "FUTURES"
+        else:
+            display_price = current_price
+            price_label = "SPX (Last)"
+            market_status = "CLOSED"
     
     # TERMINAL HEADER
     st.markdown(f"""
@@ -3322,8 +3344,9 @@ def main():
         </div>
         <div class="terminal-status">
             <div class="status-item">
-                <div class="status-label">SPX Index</div>
-                <div class="status-value">{current_price:,.2f}</div>
+                <div class="status-label">{price_label}</div>
+                <div class="status-value">{display_price:,.2f}</div>
+                <div style="font-size: 0.55rem; color: {'#10b981' if market_status == 'LIVE' else '#f59e0b'}; text-transform: uppercase;">{market_status}</div>
             </div>
             <div class="status-item">
                 <div class="status-label">Session</div>
@@ -3337,7 +3360,7 @@ def main():
     """, unsafe_allow_html=True)
     
     # QUICK STATS BAR
-    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME else "CLOSED"
+    trading_window = "OPEN" if ct_time.time() < LAST_ENTRY_TIME and is_market_open else "CLOSED"
     window_color = "green" if trading_window == "OPEN" else "red"
     
     st.markdown(f"""
@@ -3379,14 +3402,29 @@ def main():
             st.metric("SPX Implied", f"{spx_implied:,.2f}")
     
     # ==========================================================================
-    # ACTIVE TRADE SETUPS
+    # ACTIVE TRADE SETUPS (10:00 AM - PRIMARY)
     # ==========================================================================
+    
+    # Get active cone info from trade setups
+    active_cone_name = trade_setups_1000.get('active_cone', 'Close')
+    rail_reversal = trade_setups_1000.get('rail_reversal')
+    cone_reason = trade_setups_1000.get('active_cone_reason', 'Close cone (default)')
+    
+    # Add reversal indicator if applicable
+    reversal_badge = ""
+    if rail_reversal == 'low_top_is_buy':
+        reversal_badge = " ⚡ REVERSAL: Low ▲ is BUY"
+    elif rail_reversal == 'high_bottom_is_sell':
+        reversal_badge = " ⚡ REVERSAL: High ▼ is SELL"
+    
+    st.markdown(f"### 🎯 10:00 AM Setups — {active_cone_name} Cone Active{reversal_badge}")
+    st.caption(cone_reason)
     
     # CALLS SECTION
     st.markdown("""
     <div class="section-header">
         <div class="section-icon">📈</div>
-        <div class="section-title">Calls Entry Levels — Long Positions</div>
+        <div class="section-title">BUY Points — Descending Rails (CALLS)</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3397,7 +3435,7 @@ def main():
         st.markdown("""
         <div class="trade-panel">
             <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
-                No high-probability CALLS entries detected for this session
+                No high-probability BUY entries detected for this session
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -3406,7 +3444,7 @@ def main():
     st.markdown("""
     <div class="section-header">
         <div class="section-icon">📉</div>
-        <div class="section-title">Puts Entry Levels — Short Positions</div>
+        <div class="section-title">SELL Points — Ascending Rails (PUTS)</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3417,7 +3455,7 @@ def main():
         st.markdown("""
         <div class="trade-panel">
             <div class="trade-panel-body" style="text-align: center; color: var(--text-muted);">
-                No high-probability PUTS entries detected for this session
+                No high-probability SELL entries detected for this session
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -3541,6 +3579,41 @@ def main():
             """, unsafe_allow_html=True)
     
     st.markdown("---")
+    
+    # ==========================================================================
+    # CANDLE VALIDATION CHECKLIST
+    # ==========================================================================
+    
+    with st.expander("📋 Entry Validation Checklist"):
+        st.markdown("""
+        ### ✅ Valid BUY Entry (CALLS at Descending Rail)
+        
+        The candle that touches the BUY POINT must be:
+        1. **Bearish candle** (red/down candle)
+        2. **Closes less than 5 points ABOVE** the entry level
+        3. **Does NOT drop more than 5 points BELOW** the entry level
+        
+        ---
+        
+        ### ✅ Valid SELL Entry (PUTS at Ascending Rail)
+        
+        The candle that touches the SELL POINT must be:
+        1. **Bullish candle** (green/up candle)
+        2. **Closes less than 5 points BELOW** the entry level
+        3. **Does NOT rise more than 5 points ABOVE** the entry level
+        
+        ---
+        
+        ### ⚠️ Important Notes
+        
+        - **Descending Rails** = BUY points (except on strong DOWN days)
+        - **Ascending Rails** = SELL points (except on strong UP days)
+        - On **strong UP days**: Ascending rail can become temporary BUY point
+        - On **strong DOWN days**: Descending rail can become temporary SELL point
+        - **Close Cone** is best for range/chop days (most common)
+        - **High Cone** is best for strong UP trend days
+        - **Low Cone** is best for strong DOWN trend days
+        """)
     
     # ==========================================================================
     # SECONDARY: Decision Windows Comparison
