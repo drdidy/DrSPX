@@ -597,11 +597,11 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
         if df_es.empty:
             return {'offset': 0, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None}
         
-        offset = 0
+        offset = 8  # Default: ES typically ~8 pts higher than SPX
         if not df_spx.empty and not df_es.empty:
             try:
-                # Compare ES and SPX at the same time (2:50 PM CT)
-                # Close to market close but both actively trading = reliable comparison
+                # Compare ES and SPX at the same time (2:30 PM CT)
+                # Both actively trading at this time = reliable comparison
                 
                 df_es_ct = df_es.copy()
                 df_es_ct.index = df_es_ct.index.tz_convert(CT_TZ)
@@ -609,17 +609,22 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
                 df_spx_ct = df_spx.copy()
                 df_spx_ct.index = df_spx_ct.index.tz_convert(CT_TZ)
                 
-                # Get ES at 2:50 PM CT
-                es_at_250 = df_es_ct[df_es_ct.index.time <= time(14, 50)]
-                # Get SPX at 2:50 PM CT  
-                spx_at_250 = df_spx_ct[df_spx_ct.index.time <= time(14, 50)]
+                # Get ES at 2:30 PM CT
+                es_at_230 = df_es_ct[df_es_ct.index.time <= time(14, 30)]
+                # Get SPX at 2:30 PM CT  
+                spx_at_230 = df_spx_ct[df_spx_ct.index.time <= time(14, 30)]
                 
-                if not es_at_250.empty and not spx_at_250.empty:
-                    es_price = es_at_250['Close'].iloc[-1]
-                    spx_price = spx_at_250['Close'].iloc[-1]
-                    offset = es_price - spx_price
-                else:
-                    offset = 8  # Default ES-SPX spread
+                if not es_at_230.empty and not spx_at_230.empty:
+                    es_price = float(es_at_230['Close'].iloc[-1])
+                    spx_price = float(spx_at_230['Close'].iloc[-1])
+                    calculated_offset = es_price - spx_price
+                    
+                    # ES should always be higher than SPX (positive offset)
+                    # If calculation gives negative or zero, use default
+                    if calculated_offset > 0:
+                        offset = calculated_offset
+                    else:
+                        offset = 8  # Default if calculation seems wrong
             except:
                 offset = 8  # Default spread
         
