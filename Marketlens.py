@@ -578,7 +578,7 @@ def fetch_premarket_pivots(session_date: datetime) -> Optional[Dict]:
     except Exception as e:
         return None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)  # Cache for 60 seconds for more real-time updates
 def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
     try:
         prior_date = session_date - timedelta(days=1)
@@ -629,7 +629,14 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
                 offset = 8  # Default spread
         
         overnight_start = CT_TZ.localize(datetime.combine(prior_date, time(17, 0)))
-        overnight_end = CT_TZ.localize(datetime.combine(session_date, time(8, 30)))
+        
+        # Extend overnight window to 10:00 AM CT (when we make entry decisions)
+        # This captures any breaks during early RTH (8:30-10:00 AM)
+        ct_now = get_ct_now()
+        if ct_now.time() < time(10, 0):
+            overnight_end = ct_now
+        else:
+            overnight_end = CT_TZ.localize(datetime.combine(session_date, time(10, 0)))
         
         df_es_tz = df_es.copy()
         df_es_tz.index = df_es_tz.index.tz_convert(CT_TZ)
@@ -3332,6 +3339,16 @@ def main():
             st.markdown("---")
             st.markdown("### 🔄 ES-SPX Offset")
             st.metric("Offset", f"{es_data['offset']:.2f} pts")
+            
+            # DEBUG: Show overnight values for cone detection
+            with st.expander("🔍 Overnight ES Data"):
+                if es_data.get('overnight_high_spx'):
+                    st.caption(f"**Overnight High (SPX):** {es_data['overnight_high_spx']:.2f}")
+                    st.caption(f"**Overnight Low (SPX):** {es_data['overnight_low_spx']:.2f}")
+                    st.caption(f"**Overnight Range:** {es_data.get('overnight_range', 0):.2f} pts")
+                    st.caption(f"**ES Current:** {es_data.get('current', 'N/A')}")
+                else:
+                    st.caption("No overnight data available")
     
     # Build PRIMARY pivots
     pivots = [
@@ -3410,6 +3427,24 @@ def main():
     session_high_val = st.session_state.get('session_high')
     session_low_val = st.session_state.get('session_low')
     active_cone_info = determine_active_cone(cones_1000, es_data, session_high_val, session_low_val)
+    
+    # DEBUG: Show cone detection comparison
+    close_cone_1000 = next((c for c in cones_1000 if c.name == 'Close'), None)
+    if close_cone_1000 and es_data and es_data.get('overnight_high_spx'):
+        with st.sidebar:
+            with st.expander("🎯 Cone Detection Debug", expanded=True):
+                st.caption(f"**Close Cone ▲:** {close_cone_1000.ascending_rail:.2f}")
+                st.caption(f"**Close Cone ▼:** {close_cone_1000.descending_rail:.2f}")
+                st.caption(f"**Overnight High (SPX):** {es_data['overnight_high_spx']:.2f}")
+                st.caption(f"**Overnight Low (SPX):** {es_data['overnight_low_spx']:.2f}")
+                
+                broke_above = es_data['overnight_high_spx'] > close_cone_1000.ascending_rail + 2
+                broke_below = es_data['overnight_low_spx'] < close_cone_1000.descending_rail - 2
+                
+                st.caption(f"**Broke Above?** {broke_above} (>{close_cone_1000.ascending_rail + 2:.2f})")
+                st.caption(f"**Broke Below?** {broke_below} (<{close_cone_1000.descending_rail - 2:.2f})")
+                st.caption(f"**Active Cone:** {active_cone_info.get('active_cone')}")
+                st.caption(f"**Reason:** {active_cone_info.get('reason')}")
     
     # Generate complete trade setups for all confluence zones
     trade_setups_830 = generate_trade_setups(cones_830, current_price, es_data=es_data, session_830_touched=None, active_cone_info=None)
