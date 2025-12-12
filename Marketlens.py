@@ -1010,21 +1010,29 @@ def determine_active_cone(cones: List[Cone], es_data: Dict, session_high: float 
         result['active_cone'] = 'High'
         result['reason'] = 'ES broke ABOVE Close cone overnight → High cone entries'
         
-        # Check for RTH rail reversal: if price dropped through High ▼, it becomes SELL point
-        if high_cone and session_low is not None:
-            if session_low < high_cone.descending_rail - 2:
+        # Check for RTH rail reversal: High ▼ becomes SELL point ONLY IF:
+        # 1. Session HIGH first touched High ▲ (top) - we went up first
+        # 2. THEN session LOW broke below High ▼ (bottom) - we reversed down through
+        if high_cone and session_low is not None and session_high is not None:
+            touched_top_first = session_high >= high_cone.ascending_rail - 2
+            broke_through_bottom = session_low < high_cone.descending_rail - 2
+            if touched_top_first and broke_through_bottom:
                 result['rail_reversal'] = 'high_bottom_is_sell'
-                result['reason'] = 'ES broke above Close overnight, RTH dropped through High ▼ → High ▼ is SELL point'
+                result['reason'] = 'ES broke above Close overnight, RTH touched High ▲ then broke through High ▼ → High ▼ is SELL point'
                 
     elif broke_below and not broke_above:
         result['active_cone'] = 'Low'
         result['reason'] = 'ES broke BELOW Close cone overnight → Low cone entries'
         
-        # Check for RTH rail reversal: if price rose through Low ▲, it becomes BUY point
-        if low_cone and session_high is not None:
-            if session_high > low_cone.ascending_rail + 2:
+        # Check for RTH rail reversal: Low ▲ becomes BUY point ONLY IF:
+        # 1. Session LOW first touched Low ▼ (bottom) - we went down first
+        # 2. THEN session HIGH broke above Low ▲ (top) - we reversed up through
+        if low_cone and session_high is not None and session_low is not None:
+            touched_bottom_first = session_low <= low_cone.descending_rail + 2
+            broke_through_top = session_high > low_cone.ascending_rail + 2
+            if touched_bottom_first and broke_through_top:
                 result['rail_reversal'] = 'low_top_is_buy'
-                result['reason'] = 'ES broke below Close overnight, RTH rose through Low ▲ → Low ▲ is BUY point'
+                result['reason'] = 'ES broke below Close overnight, RTH touched Low ▼ then broke through Low ▲ → Low ▲ is BUY point'
                 
     elif broke_above and broke_below:
         # Both broken - use which one broke more significantly
@@ -3444,7 +3452,34 @@ def main():
                 st.caption(f"**Broke Above?** {broke_above} (>{close_cone_1000.ascending_rail + 2:.2f})")
                 st.caption(f"**Broke Below?** {broke_below} (<{close_cone_1000.descending_rail - 2:.2f})")
                 st.caption(f"**Active Cone:** {active_cone_info.get('active_cone')}")
+                st.caption(f"**Rail Reversal:** {active_cone_info.get('rail_reversal', 'None')}")
                 st.caption(f"**Reason:** {active_cone_info.get('reason')}")
+                
+                # Show active cone rails if not Close
+                active_cone_name = active_cone_info.get('active_cone')
+                if active_cone_name in ['High', 'Low']:
+                    active_cone_obj = next((c for c in cones_1000 if c.name == active_cone_name), None)
+                    if active_cone_obj:
+                        st.markdown("---")
+                        st.caption(f"**{active_cone_name} Cone ▲ (SELL):** {active_cone_obj.ascending_rail:.2f}")
+                        st.caption(f"**{active_cone_name} Cone ▼ (BUY):** {active_cone_obj.descending_rail:.2f}")
+                        
+                        # Show reversal conditions
+                        session_high_val = st.session_state.get('session_high')
+                        session_low_val = st.session_state.get('session_low')
+                        if session_high_val and session_low_val:
+                            st.caption(f"**Session High:** {session_high_val:.2f}")
+                            st.caption(f"**Session Low:** {session_low_val:.2f}")
+                            if active_cone_name == 'Low':
+                                touched_bottom = session_low_val <= active_cone_obj.descending_rail + 2
+                                broke_top = session_high_val > active_cone_obj.ascending_rail + 2
+                                st.caption(f"**Touched Low ▼?** {touched_bottom}")
+                                st.caption(f"**Broke through Low ▲?** {broke_top}")
+                            else:
+                                touched_top = session_high_val >= active_cone_obj.ascending_rail - 2
+                                broke_bottom = session_low_val < active_cone_obj.descending_rail - 2
+                                st.caption(f"**Touched High ▲?** {touched_top}")
+                                st.caption(f"**Broke through High ▼?** {broke_bottom}")
     
     # Generate complete trade setups for all confluence zones
     trade_setups_830 = generate_trade_setups(cones_830, current_price, es_data=es_data, session_830_touched=None, active_cone_info=None)
