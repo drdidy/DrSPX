@@ -4017,9 +4017,15 @@ def main():
     # ACTIVE TRADE SETUPS (10:00 AM - PRIMARY)
     # ==========================================================================
     
-    # Fetch 1-min data for EMA confirmation
-    df_1min = fetch_1min_data_for_ema()
-    ema_8, ema_21, bullish_cross, bearish_cross = calculate_emas(df_1min)
+    # Check if viewing today's date (for EMA display)
+    is_viewing_today = session_date.date() == get_ct_now().date()
+    
+    # Fetch 1-min data for EMA confirmation (only for today)
+    ema_8, ema_21, bullish_cross, bearish_cross = 0, 0, False, False
+    if is_viewing_today:
+        df_1min = fetch_1min_data_for_ema()
+        ema_8, ema_21, bullish_cross, bearish_cross = calculate_emas(df_1min)
+    
     ema_data = {
         'ema_8': ema_8,
         'ema_21': ema_21,
@@ -4042,31 +4048,44 @@ def main():
     st.markdown(f"### 🎯 10:00 AM Setups — {active_cone_name} Cone Active{reversal_badge}")
     st.caption(cone_reason)
     
-    # EMA Status Display
-    ema_status_color = "#10b981" if ema_8 > ema_21 else "#ef4444"
-    ema_direction = "BULLISH" if ema_8 > ema_21 else "BEARISH"
-    cross_alert = ""
-    if bullish_cross:
-        cross_alert = "🔔 BULLISH CROSS DETECTED!"
-    elif bearish_cross:
-        cross_alert = "🔔 BEARISH CROSS DETECTED!"
+    # EMA Status Display - Only show for today's live trading session
+    # BULLISH = 8 EMA above 21 EMA (good for CALLS entries)
+    # BEARISH = 8 EMA below 21 EMA (good for PUTS entries)
     
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                <span style="color: #94a3b8; font-size: 0.75rem;">1-MIN EMA STATUS</span>
-                <div style="color: {ema_status_color}; font-weight: 600; font-size: 1rem;">{ema_direction}</div>
+    if is_viewing_today and ema_8 > 0 and ema_21 > 0:
+        ema_status_color = "#10b981" if ema_8 > ema_21 else "#ef4444"
+        ema_direction = "BULLISH (8 > 21)" if ema_8 > ema_21 else "BEARISH (8 < 21)"
+        ema_hint = "Favors CALLS entries" if ema_8 > ema_21 else "Favors PUTS entries"
+        cross_alert = ""
+        if bullish_cross:
+            cross_alert = "🔔 BULLISH CROSS! 8 EMA crossed ABOVE 21 EMA - BUY signal!"
+        elif bearish_cross:
+            cross_alert = "🔔 BEARISH CROSS! 8 EMA crossed BELOW 21 EMA - SELL signal!"
+        
+        st.markdown(f"""
+        <div style="background: #ffffff; border: 2px solid {ema_status_color}; border-radius: 8px; padding: 12px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div>
+                    <span style="color: #64748b; font-size: 0.7rem; font-weight: 600;">ENTRY CONFIRMATION (1-MIN EMAs)</span>
+                    <div style="color: {ema_status_color}; font-weight: 700; font-size: 1.1rem;">{ema_direction}</div>
+                    <div style="color: #64748b; font-size: 0.7rem;">{ema_hint}</div>
+                </div>
+                <div style="text-align: right; background: #f1f5f9; padding: 8px 12px; border-radius: 6px;">
+                    <div style="color: #334155; font-size: 0.75rem; font-weight: 500;">8 EMA: <span style="font-family: monospace; color: #0f172a;">{ema_8:.2f}</span></div>
+                    <div style="color: #334155; font-size: 0.75rem; font-weight: 500;">21 EMA: <span style="font-family: monospace; color: #0f172a;">{ema_21:.2f}</span></div>
+                </div>
             </div>
-            <div style="text-align: right;">
-                <span style="color: #94a3b8; font-size: 0.7rem;">8 EMA: </span><span style="color: #f8fafc;">{ema_8:.2f}</span>
-                <span style="color: #475569; margin: 0 8px;">|</span>
-                <span style="color: #94a3b8; font-size: 0.7rem;">21 EMA: </span><span style="color: #f8fafc;">{ema_21:.2f}</span>
-            </div>
+            {f'<div style="background: #fef3c7; color: #92400e; font-weight: 600; margin-top: 10px; padding: 8px; border-radius: 4px; text-align: center;">{cross_alert}</div>' if cross_alert else ''}
         </div>
-        {f'<div style="color: #fbbf24; font-weight: 600; margin-top: 8px; text-align: center;">{cross_alert}</div>' if cross_alert else ''}
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    elif is_viewing_today:
+        # Today but EMA data unavailable (market closed or data fetch failed)
+        st.markdown("""
+        <div style="background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+            <span style="color: #64748b; font-size: 0.8rem;">📊 EMA data unavailable (market may be closed)</span>
+        </div>
+        """, unsafe_allow_html=True)
+    # For historical dates, don't show EMA panel at all
     
     # CALLS SECTION
     st.markdown("""
@@ -4078,15 +4097,19 @@ def main():
     
     if num_calls > 0:
         for setup in trade_setups_1000['calls_setups']:
-            # Get entry status for this setup
-            entry_status = get_entry_status(setup, current_price, ema_data, st.session_state)
+            # Get entry status for this setup (only for today's live trading)
+            if is_viewing_today:
+                entry_status = get_entry_status(setup, current_price, ema_data, st.session_state)
+            else:
+                entry_status = None  # No entry tracking for historical dates
             render_institutional_trade_card(setup, current_price, entry_status)
             
-            # Trigger alerts if needed
-            setup_id = f"{setup.direction}_{setup.entry_price:.0f}"
-            alert_html = render_alert_trigger(entry_status['alert_level'], setup_id, entry_status['message'])
-            if alert_html:
-                st.markdown(alert_html, unsafe_allow_html=True)
+            # Trigger alerts if needed (only for today)
+            if is_viewing_today and entry_status:
+                setup_id = f"{setup.direction}_{setup.entry_price:.0f}"
+                alert_html = render_alert_trigger(entry_status['alert_level'], setup_id, entry_status['message'])
+                if alert_html:
+                    st.markdown(alert_html, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class="trade-panel">
@@ -4106,15 +4129,19 @@ def main():
     
     if num_puts > 0:
         for setup in trade_setups_1000['puts_setups']:
-            # Get entry status for this setup
-            entry_status = get_entry_status(setup, current_price, ema_data, st.session_state)
+            # Get entry status for this setup (only for today's live trading)
+            if is_viewing_today:
+                entry_status = get_entry_status(setup, current_price, ema_data, st.session_state)
+            else:
+                entry_status = None  # No entry tracking for historical dates
             render_institutional_trade_card(setup, current_price, entry_status)
             
-            # Trigger alerts if needed
-            setup_id = f"{setup.direction}_{setup.entry_price:.0f}"
-            alert_html = render_alert_trigger(entry_status['alert_level'], setup_id, entry_status['message'])
-            if alert_html:
-                st.markdown(alert_html, unsafe_allow_html=True)
+            # Trigger alerts if needed (only for today)
+            if is_viewing_today and entry_status:
+                setup_id = f"{setup.direction}_{setup.entry_price:.0f}"
+                alert_html = render_alert_trigger(entry_status['alert_level'], setup_id, entry_status['message'])
+                if alert_html:
+                    st.markdown(alert_html, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class="trade-panel">
