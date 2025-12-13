@@ -94,6 +94,16 @@ THETA_MULTIPLIER = {
 LAST_ENTRY_TIME = time(13, 30)  # After 1:30pm, theta too aggressive
 
 # ============================================================================
+# EMA CONFIRMATION SETTINGS
+# ============================================================================
+# Entry is confirmed when 8 EMA crosses 21 EMA in trade direction on 1-min chart
+EMA_FAST = 8
+EMA_SLOW = 21
+ENTRY_TOUCH_THRESHOLD = 3.0  # Must close within 3 pts of entry level
+ENTRY_TIME_LIMIT_MINUTES = 90  # 1.5 hours to get EMA confirmation after touch
+ALERT_APPROACH_DISTANCE = 10.0  # Alert when within 10 pts of entry
+
+# ============================================================================
 # DELTA APPROXIMATION BY DISTANCE OTM
 # ============================================================================
 # More accurate than fixed 0.33 - delta decreases as you go further OTM
@@ -207,6 +217,297 @@ class ActionCard:
 
 def get_ct_now() -> datetime:
     return datetime.now(CT_TZ)
+
+# ============================================================================
+# EMA & ENTRY CONFIRMATION FUNCTIONS
+# ============================================================================
+
+@st.cache_data(ttl=30)  # Cache for 30 seconds
+def fetch_1min_data_for_ema() -> Optional[pd.DataFrame]:
+    """Fetch 1-minute SPX data for EMA calculation."""
+    try:
+        spx = yf.Ticker("^GSPC")
+        df = spx.history(period='1d', interval='1m')
+        if df.empty:
+            return None
+        df.index = df.index.tz_convert(CT_TZ)
+        return df
+    except:
+        return None
+
+def calculate_emas(df: pd.DataFrame) -> Tuple[float, float, bool, bool]:
+    """
+    Calculate 8 EMA and 21 EMA from 1-min data.
+    Returns: (ema_8, ema_21, bullish_cross, bearish_cross)
+    - bullish_cross: True if 8 EMA just crossed ABOVE 21 EMA
+    - bearish_cross: True if 8 EMA just crossed BELOW 21 EMA
+    """
+    if df is None or len(df) < EMA_SLOW + 2:
+        return 0, 0, False, False
+    
+    # Calculate EMAs
+    ema_8 = df['Close'].ewm(span=EMA_FAST, adjust=False).mean()
+    ema_21 = df['Close'].ewm(span=EMA_SLOW, adjust=False).mean()
+    
+    current_8 = ema_8.iloc[-1]
+    current_21 = ema_21.iloc[-1]
+    prev_8 = ema_8.iloc[-2]
+    prev_21 = ema_21.iloc[-2]
+    
+    # Detect crosses
+    bullish_cross = (prev_8 <= prev_21) and (current_8 > current_21)
+    bearish_cross = (prev_8 >= prev_21) and (current_8 < current_21)
+    
+    return float(current_8), float(current_21), bullish_cross, bearish_cross
+
+def get_entry_status(setup, current_price: float, ema_data: dict, session_state: dict) -> dict:
+    """
+    Determine entry status for a setup.
+    
+    Status flow:
+    1. WAITING - Price not yet at entry zone
+    2. APPROACHING - Price within ALERT_APPROACH_DISTANCE of entry
+    3. TOUCHED - Price touched entry level (within ENTRY_TOUCH_THRESHOLD)
+    4. CONFIRMING - Touched, waiting for EMA cross (within time limit)
+    5. CONFIRMED - EMA cross happened after touch = ENTER NOW
+    6. EXPIRED - Time limit passed without EMA confirmation
+    7. INVALIDATED - Price moved too far from entry without confirmation
+    
+    Returns dict with:
+    - status: one of the above
+    - message: human readable status
+    - alert_level: 'none', 'approaching', 'touched', 'confirmed'
+    - time_remaining: minutes left for confirmation (if applicable)
+    """
+    entry_price = setup.entry_price
+    direction = setup.direction  # 'CALLS' or 'PUTS'
+    setup_id = f"{setup.direction}_{entry_price:.0f}"
+    
+    # Get or initialize touch tracking for this setup
+    touch_key = f"touch_time_{setup_id}"
+    touched_key = f"touched_{setup_id}"
+    
+    result = {
+        'status': 'WAITING',
+        'message': 'Waiting for price to approach entry',
+        'alert_level': 'none',
+        'time_remaining': None,
+        'ema_8': ema_data.get('ema_8', 0),
+        'ema_21': ema_data.get('ema_21', 0),
+        'distance_to_entry': 0
+    }
+    
+    # Calculate distance to entry
+    if direction == 'CALLS':
+        # For CALLS (buy at support), price needs to come DOWN to entry
+        distance = current_price - entry_price
+        at_entry = distance <= ENTRY_TOUCH_THRESHOLD and distance >= -ENTRY_TOUCH_THRESHOLD
+        approaching = distance <= ALERT_APPROACH_DISTANCE and distance > ENTRY_TOUCH_THRESHOLD
+        past_entry = distance < -ENTRY_TOUCH_THRESHOLD  # Broke through support
+    else:
+        # For PUTS (sell at resistance), price needs to come UP to entry
+        distance = entry_price - current_price
+        at_entry = distance <= ENTRY_TOUCH_THRESHOLD and distance >= -ENTRY_TOUCH_THRESHOLD
+        approaching = distance <= ALERT_APPROACH_DISTANCE and distance > ENTRY_TOUCH_THRESHOLD
+        past_entry = distance < -ENTRY_TOUCH_THRESHOLD  # Broke through resistance
+    
+    result['distance_to_entry'] = abs(current_price - entry_price)
+    
+    # Check if already touched
+    was_touched = session_state.get(touched_key, False)
+    touch_time = session_state.get(touch_key)
+    
+    # State machine
+    if past_entry and not was_touched:
+        result['status'] = 'INVALIDATED'
+        result['message'] = 'Price broke through entry without touch'
+        result['alert_level'] = 'none'
+        return result
+    
+    if at_entry and not was_touched:
+        # First touch! Record it
+        session_state[touched_key] = True
+        session_state[touch_key] = get_ct_now()
+        was_touched = True
+        touch_time = session_state[touch_key]
+        result['status'] = 'TOUCHED'
+        result['message'] = '🎯 ENTRY TOUCHED! Waiting for EMA confirmation...'
+        result['alert_level'] = 'touched'
+    
+    if was_touched and touch_time:
+        # Calculate time remaining
+        elapsed = (get_ct_now() - touch_time).total_seconds() / 60
+        time_remaining = ENTRY_TIME_LIMIT_MINUTES - elapsed
+        result['time_remaining'] = max(0, time_remaining)
+        
+        if time_remaining <= 0:
+            result['status'] = 'EXPIRED'
+            result['message'] = '⏰ Time limit expired without EMA confirmation'
+            result['alert_level'] = 'none'
+            return result
+        
+        # Check for EMA confirmation
+        if direction == 'CALLS':
+            # Need bullish cross (8 EMA crosses ABOVE 21 EMA)
+            if ema_data.get('bullish_cross', False):
+                result['status'] = 'CONFIRMED'
+                result['message'] = '✅ ENTRY CONFIRMED! 8 EMA crossed above 21 EMA - BUY NOW!'
+                result['alert_level'] = 'confirmed'
+                return result
+            elif ema_data.get('ema_8', 0) > ema_data.get('ema_21', 0):
+                result['status'] = 'CONFIRMING'
+                result['message'] = f'⏳ EMA aligned bullish, watching for fresh cross ({time_remaining:.0f}m left)'
+                result['alert_level'] = 'touched'
+        else:
+            # Need bearish cross (8 EMA crosses BELOW 21 EMA)
+            if ema_data.get('bearish_cross', False):
+                result['status'] = 'CONFIRMED'
+                result['message'] = '✅ ENTRY CONFIRMED! 8 EMA crossed below 21 EMA - SELL NOW!'
+                result['alert_level'] = 'confirmed'
+                return result
+            elif ema_data.get('ema_8', 0) < ema_data.get('ema_21', 0):
+                result['status'] = 'CONFIRMING'
+                result['message'] = f'⏳ EMA aligned bearish, watching for fresh cross ({time_remaining:.0f}m left)'
+                result['alert_level'] = 'touched'
+        
+        if result['status'] == 'TOUCHED':
+            result['status'] = 'CONFIRMING'
+            result['message'] = f'⏳ Waiting for EMA cross confirmation ({time_remaining:.0f}m left)'
+            result['alert_level'] = 'touched'
+        
+        return result
+    
+    if approaching:
+        result['status'] = 'APPROACHING'
+        result['message'] = f'📍 Price approaching entry ({result["distance_to_entry"]:.1f} pts away)'
+        result['alert_level'] = 'approaching'
+        return result
+    
+    return result
+
+def render_alert_javascript():
+    """Render JavaScript for audio alerts and browser notifications."""
+    return """
+    <script>
+    // Audio context for alerts
+    let audioContext = null;
+    
+    function initAudio() {
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        return audioContext;
+    }
+    
+    function playTone(frequency, duration, type='sine') {
+        try {
+            const ctx = initAudio();
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            
+            oscillator.frequency.value = frequency;
+            oscillator.type = type;
+            
+            gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+            
+            oscillator.start(ctx.currentTime);
+            oscillator.stop(ctx.currentTime + duration);
+        } catch(e) {
+            console.log('Audio not available:', e);
+        }
+    }
+    
+    function playApproachingAlert() {
+        // Two short beeps
+        playTone(800, 0.15);
+        setTimeout(() => playTone(800, 0.15), 200);
+    }
+    
+    function playTouchedAlert() {
+        // Three ascending tones
+        playTone(600, 0.2);
+        setTimeout(() => playTone(800, 0.2), 250);
+        setTimeout(() => playTone(1000, 0.2), 500);
+    }
+    
+    function playConfirmedAlert() {
+        // Triumphant fanfare
+        playTone(523, 0.15);  // C
+        setTimeout(() => playTone(659, 0.15), 150);  // E
+        setTimeout(() => playTone(784, 0.15), 300);  // G
+        setTimeout(() => playTone(1047, 0.4), 450);  // High C
+    }
+    
+    // Browser notification
+    function requestNotificationPermission() {
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }
+    
+    function showNotification(title, body, tag) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(title, { body: body, tag: tag, requireInteraction: true });
+        }
+    }
+    
+    // Request permission on load
+    requestNotificationPermission();
+    
+    // Expose functions to Streamlit
+    window.spxAlerts = {
+        approaching: playApproachingAlert,
+        touched: playTouchedAlert,
+        confirmed: playConfirmedAlert,
+        notify: showNotification
+    };
+    </script>
+    """
+
+def render_alert_trigger(alert_level: str, setup_id: str, message: str):
+    """Render JavaScript to trigger an alert based on level."""
+    if alert_level == 'none':
+        return ""
+    
+    # Use session state to track which alerts have been played
+    alert_key = f"alert_played_{setup_id}_{alert_level}"
+    if st.session_state.get(alert_key, False):
+        return ""  # Already played this alert
+    
+    st.session_state[alert_key] = True
+    
+    if alert_level == 'approaching':
+        return f"""
+        <script>
+        if (window.spxAlerts) {{
+            window.spxAlerts.approaching();
+            window.spxAlerts.notify('SPX Prophet', '{message}', 'approaching_{setup_id}');
+        }}
+        </script>
+        """
+    elif alert_level == 'touched':
+        return f"""
+        <script>
+        if (window.spxAlerts) {{
+            window.spxAlerts.touched();
+            window.spxAlerts.notify('🎯 ENTRY TOUCHED!', '{message}', 'touched_{setup_id}');
+        }}
+        </script>
+        """
+    elif alert_level == 'confirmed':
+        return f"""
+        <script>
+        if (window.spxAlerts) {{
+            window.spxAlerts.confirmed();
+            window.spxAlerts.notify('✅ ENTRY CONFIRMED!', '{message}', 'confirmed_{setup_id}');
+        }}
+        </script>
+        """
+    return ""
 
 def to_ct(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -1715,25 +2016,50 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
         'active_cone_reason': active_cone_reason
     }
 
-def render_institutional_trade_card(setup: TradeSetup, current_price: float):
-    """Render a professional institutional-style trade card."""
+def render_institutional_trade_card(setup: TradeSetup, current_price: float, entry_status: dict = None):
+    """Render a professional institutional-style trade card with entry confirmation status."""
     
     # Calculate distance
     distance = abs(current_price - setup.entry_price)
     
-    # Determine status
-    if setup.overnight_broken:
-        status = "INVALID"
-        status_class = "badge-nogo"
-    elif distance <= AT_RAIL_THRESHOLD:
-        status = "ACTIVE"
-        status_class = "badge-go"
-    elif distance <= 15:
-        status = "WATCH"
-        status_class = "badge-wait"
+    # Determine status based on entry confirmation system
+    if entry_status:
+        es = entry_status.get('status', 'WAITING')
+        if es == 'CONFIRMED':
+            status = "ENTER NOW"
+            status_class = "badge-go"
+        elif es == 'TOUCHED' or es == 'CONFIRMING':
+            status = "CONFIRMING"
+            status_class = "badge-wait"
+        elif es == 'APPROACHING':
+            status = "APPROACHING"
+            status_class = "badge-wait"
+        elif es == 'EXPIRED':
+            status = "EXPIRED"
+            status_class = "badge-nogo"
+        elif es == 'INVALIDATED':
+            status = "INVALID"
+            status_class = "badge-nogo"
+        elif setup.overnight_broken:
+            status = "BROKEN"
+            status_class = "badge-nogo"
+        else:
+            status = "WAITING"
+            status_class = "badge-nogo"
     else:
-        status = "STANDBY"
-        status_class = "badge-nogo"
+        # Fallback to distance-based status
+        if setup.overnight_broken:
+            status = "INVALID"
+            status_class = "badge-nogo"
+        elif distance <= AT_RAIL_THRESHOLD:
+            status = "ACTIVE"
+            status_class = "badge-go"
+        elif distance <= 15:
+            status = "WATCH"
+            status_class = "badge-wait"
+        else:
+            status = "STANDBY"
+            status_class = "badge-nogo"
     
     # Direction styling
     direction_class = "badge-calls" if setup.direction == "CALLS" else "badge-puts"
@@ -1746,7 +2072,7 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
     time_ok = ct_now < LAST_ENTRY_TIME
     rr_ok = setup.rr_ratio_theta_adjusted >= MIN_RR_RATIO
     width_ok = setup.cone_width >= MIN_CONE_WIDTH
-    confluence_ok = setup.confluence_strength >= 2
+    confluence_ok = setup.confluence_strength >= 1  # Allow single-rail setups for active cones
     not_broken = not setup.overnight_broken
     
     if rr_ok and width_ok and confluence_ok and time_ok and not_broken:
@@ -1767,11 +2093,27 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
         pct = int(setup.follow_through_pct * 100)
         warnings_html += f'<div style="background: rgba(245, 158, 11, 0.2); border: 1px solid var(--accent-gold); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">⚠️ 8:30 already touched — Expect {pct}% follow-through</div>'
     
+    # Entry confirmation status HTML
+    entry_status_html = ""
+    if entry_status:
+        es = entry_status.get('status', 'WAITING')
+        msg = entry_status.get('message', '')
+        time_rem = entry_status.get('time_remaining')
+        
+        if es == 'CONFIRMED':
+            entry_status_html = f'<div style="background: rgba(16, 185, 129, 0.3); border: 2px solid #10b981; border-radius: 4px; padding: 0.75rem; margin-bottom: 0.5rem; font-size: 0.85rem; color: #10b981; font-weight: 600; text-align: center; animation: pulse 1s infinite;">✅ {msg}</div>'
+        elif es == 'TOUCHED' or es == 'CONFIRMING':
+            entry_status_html = f'<div style="background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #f59e0b;">🎯 {msg}</div>'
+        elif es == 'APPROACHING':
+            entry_status_html = f'<div style="background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #3b82f6;">📍 {msg}</div>'
+        elif es == 'EXPIRED':
+            entry_status_html = f'<div style="background: rgba(107, 114, 128, 0.2); border: 1px solid #6b7280; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #6b7280;">⏰ {msg}</div>'
+    
     # Validation rule text
     if "BUY" in setup.trade_type:
-        valid_rule = "<strong>✅ Valid BUY:</strong> Bearish candle touches entry, closes &lt;5pts above, no drop &gt;5pts below"
+        valid_rule = "<strong>✅ Valid BUY:</strong> Bearish candle touches entry, closes &lt;3pts above, 8 EMA crosses above 21 EMA"
     else:
-        valid_rule = "<strong>✅ Valid SELL:</strong> Bullish candle touches entry, closes &lt;5pts below, no rise &gt;5pts above"
+        valid_rule = "<strong>✅ Valid SELL:</strong> Bullish candle touches entry, closes &lt;3pts below, 8 EMA crosses below 21 EMA"
     
     # Sources
     sources = ' + '.join(setup.confluence_rails)
@@ -1793,6 +2135,7 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float):
 </div>
 </div>
 <div class="trade-panel-body">
+{entry_status_html}
 {warnings_html}
 <div class="entry-row">
 <div class="entry-item"><div class="entry-label">Entry ({setup.rail_type})</div><div class="entry-value gold">{setup.entry_price:,.2f}</div></div>
@@ -2737,6 +3080,13 @@ def inject_premium_css():
         color: var(--text-primary) !important;
     }
     
+    /* PULSE ANIMATION for confirmed entries */
+    @keyframes pulse {
+        0% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+        70% { opacity: 1; box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+        100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    
     </style>
     """, unsafe_allow_html=True)
 
@@ -3006,6 +3356,9 @@ def main():
     inject_premium_css()
     render_header()
     
+    # Inject alert JavaScript
+    st.markdown(render_alert_javascript(), unsafe_allow_html=True)
+    
     # ===== INTRADAY SESSION TRACKING =====
     # Track session high/low to detect triggered entries
     ct_now = get_ct_now()
@@ -3132,6 +3485,32 @@ def main():
             st.metric("Ascending", f"+{SLOPE_ASCENDING}")
         with col_slope2:
             st.metric("Descending", f"-{SLOPE_DESCENDING}")
+        
+        # ========== ALERT SETTINGS ==========
+        st.markdown("---")
+        st.markdown("### 🔔 Alert Settings")
+        
+        # Initialize alert settings in session state
+        if 'alerts_enabled' not in st.session_state:
+            st.session_state.alerts_enabled = True
+        if 'sound_enabled' not in st.session_state:
+            st.session_state.sound_enabled = True
+        
+        st.session_state.alerts_enabled = st.checkbox("Enable Alerts", value=st.session_state.alerts_enabled)
+        st.session_state.sound_enabled = st.checkbox("Sound Alerts", value=st.session_state.sound_enabled, disabled=not st.session_state.alerts_enabled)
+        
+        st.caption(f"Approach alert: {ALERT_APPROACH_DISTANCE:.0f} pts from entry")
+        st.caption(f"Touch threshold: {ENTRY_TOUCH_THRESHOLD:.0f} pts")
+        st.caption(f"Confirmation window: {ENTRY_TIME_LIMIT_MINUTES:.0f} min")
+        
+        # Reset touched entries button
+        if st.button("🔄 Reset Entry Tracking"):
+            # Clear all touch tracking from session state
+            keys_to_clear = [k for k in st.session_state.keys() if k.startswith('touch_') or k.startswith('touched_') or k.startswith('alert_played_')]
+            for key in keys_to_clear:
+                del st.session_state[key]
+            st.success("Entry tracking reset!")
+            st.rerun()
         
         # ========== PRICE CORRECTION OFFSET ==========
         st.markdown("---")
@@ -3638,6 +4017,16 @@ def main():
     # ACTIVE TRADE SETUPS (10:00 AM - PRIMARY)
     # ==========================================================================
     
+    # Fetch 1-min data for EMA confirmation
+    df_1min = fetch_1min_data_for_ema()
+    ema_8, ema_21, bullish_cross, bearish_cross = calculate_emas(df_1min)
+    ema_data = {
+        'ema_8': ema_8,
+        'ema_21': ema_21,
+        'bullish_cross': bullish_cross,
+        'bearish_cross': bearish_cross
+    }
+    
     # Get active cone info from trade setups
     active_cone_name = trade_setups_1000.get('active_cone', 'Close')
     rail_reversal = trade_setups_1000.get('rail_reversal')
@@ -3653,6 +4042,32 @@ def main():
     st.markdown(f"### 🎯 10:00 AM Setups — {active_cone_name} Cone Active{reversal_badge}")
     st.caption(cone_reason)
     
+    # EMA Status Display
+    ema_status_color = "#10b981" if ema_8 > ema_21 else "#ef4444"
+    ema_direction = "BULLISH" if ema_8 > ema_21 else "BEARISH"
+    cross_alert = ""
+    if bullish_cross:
+        cross_alert = "🔔 BULLISH CROSS DETECTED!"
+    elif bearish_cross:
+        cross_alert = "🔔 BEARISH CROSS DETECTED!"
+    
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <span style="color: #94a3b8; font-size: 0.75rem;">1-MIN EMA STATUS</span>
+                <div style="color: {ema_status_color}; font-weight: 600; font-size: 1rem;">{ema_direction}</div>
+            </div>
+            <div style="text-align: right;">
+                <span style="color: #94a3b8; font-size: 0.7rem;">8 EMA: </span><span style="color: #f8fafc;">{ema_8:.2f}</span>
+                <span style="color: #475569; margin: 0 8px;">|</span>
+                <span style="color: #94a3b8; font-size: 0.7rem;">21 EMA: </span><span style="color: #f8fafc;">{ema_21:.2f}</span>
+            </div>
+        </div>
+        {f'<div style="color: #fbbf24; font-weight: 600; margin-top: 8px; text-align: center;">{cross_alert}</div>' if cross_alert else ''}
+    </div>
+    """, unsafe_allow_html=True)
+    
     # CALLS SECTION
     st.markdown("""
     <div class="section-header">
@@ -3663,7 +4078,15 @@ def main():
     
     if num_calls > 0:
         for setup in trade_setups_1000['calls_setups']:
-            render_institutional_trade_card(setup, current_price)
+            # Get entry status for this setup
+            entry_status = get_entry_status(setup, current_price, ema_data, st.session_state)
+            render_institutional_trade_card(setup, current_price, entry_status)
+            
+            # Trigger alerts if needed
+            setup_id = f"{setup.direction}_{setup.entry_price:.0f}"
+            alert_html = render_alert_trigger(entry_status['alert_level'], setup_id, entry_status['message'])
+            if alert_html:
+                st.markdown(alert_html, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class="trade-panel">
@@ -3683,7 +4106,15 @@ def main():
     
     if num_puts > 0:
         for setup in trade_setups_1000['puts_setups']:
-            render_institutional_trade_card(setup, current_price)
+            # Get entry status for this setup
+            entry_status = get_entry_status(setup, current_price, ema_data, st.session_state)
+            render_institutional_trade_card(setup, current_price, entry_status)
+            
+            # Trigger alerts if needed
+            setup_id = f"{setup.direction}_{setup.entry_price:.0f}"
+            alert_html = render_alert_trigger(entry_status['alert_level'], setup_id, entry_status['message'])
+            if alert_html:
+                st.markdown(alert_html, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div class="trade-panel">
