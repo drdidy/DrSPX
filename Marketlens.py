@@ -3828,10 +3828,14 @@ def main():
     action = generate_action_card(cones, regime, current_price, is_10am, overnight_validation)
     confluence_zones = find_confluence_zones(cones_1000)
     
+    # Check if viewing a future date (no session data available yet)
+    is_future_date = session_date.date() > get_ct_now().date()
+    
     # Detect if 8:30 already touched cone edges (for 70-75% follow-through rule)
     # If 8:30 bounced from support, 10am support touch has reduced expectation
+    # Only applicable for today or past dates, not future dates
     session_830_touched = {'high_touched': False, 'low_touched': False}
-    if cones_830:
+    if not is_future_date and cones_830:
         # Get 8:30 cone edges (using Close cone as the primary reference)
         close_cone_830 = next((c for c in cones_830 if c.name == 'Close'), None)
         if close_cone_830 and st.session_state.get('session_low') and st.session_state.get('session_high'):
@@ -3845,13 +3849,19 @@ def main():
                 session_830_touched['high_touched'] = True
     
     # Determine ACTIVE CONE based on overnight + RTH behavior
-    session_high_val = st.session_state.get('session_high')
-    session_low_val = st.session_state.get('session_low')
-    active_cone_info = determine_active_cone(cones_1000, es_data, session_high_val, session_low_val)
+    # For future dates, there's no overnight data, so default to Close cone
+    session_high_val = st.session_state.get('session_high') if not is_future_date else None
+    session_low_val = st.session_state.get('session_low') if not is_future_date else None
     
-    # DEBUG: Show cone detection comparison
+    if is_future_date:
+        # For future dates, default to Close cone since we have no overnight data
+        active_cone_info = {'active_cone': 'Close', 'reason': 'Future date - no overnight data available', 'rail_reversal': None}
+    else:
+        active_cone_info = determine_active_cone(cones_1000, es_data, session_high_val, session_low_val)
+    
+    # DEBUG: Show cone detection comparison (only for today/past, not future dates)
     close_cone_1000 = next((c for c in cones_1000 if c.name == 'Close'), None)
-    if close_cone_1000 and es_data and es_data.get('overnight_high_spx'):
+    if close_cone_1000 and es_data and es_data.get('overnight_high_spx') and not is_future_date:
         with st.sidebar:
             with st.expander("🎯 Cone Detection Debug", expanded=True):
                 st.caption(f"**Close Cone ▲:** {close_cone_1000.ascending_rail:.2f}")
@@ -4165,9 +4175,13 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        # Get session high/low for trigger detection
-        session_high = st.session_state.get('session_high')
-        session_low = st.session_state.get('session_low')
+        # For future dates, don't use session high/low (they don't exist yet)
+        if is_future_date:
+            session_high = None
+            session_low = None
+        else:
+            session_high = st.session_state.get('session_high')
+            session_low = st.session_state.get('session_low')
         
         # Buffer for "close enough" triggers (accounts for spreads/slippage/data source differences)
         TRIGGER_BUFFER = 2.0  # 2 point buffer
