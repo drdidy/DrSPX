@@ -4466,13 +4466,20 @@ def main():
             test_2_3_low_display = f"{test_2_3_low:.2f}" if test_2_3_low else "—"
             test_2_3_high_display = f"{test_2_3_high:.2f}" if test_2_3_high else "—"
             
-            st.markdown(f"""
+            # Build retest HTML if needed
+            retest_html = ""
+            if vix_signal.get('retest_level'):
+                retest_html = f"""<div style="margin-top: 12px; padding: 10px; background: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: #92400e;">🔄 RETEST SETUP ACTIVE</div>
+                    <div style="font-size: 0.75rem; color: #78350f;">Watch for VIX to retest {vix_signal.get('retest_level', 0):.2f} at 10am. If rejected, expect continuation move.</div>
+                </div>"""
+            
+            vix_html = f"""
             <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">VIX Futures (VX=F)</div>
                     <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #1e293b;">{vix_signal.get('current_vix', 0):.2f}</div>
                 </div>
-                
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
                         <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor Low (5pm-12am)</div>
@@ -4485,8 +4492,6 @@ def main():
                         <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_high_time_str} CT</div>
                     </div>
                 </div>
-                
-                <!-- 2-3am Test Results -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
                     <div style="background: #fefce8; border-radius: 6px; padding: 8px; border-left: 3px solid #eab308;">
                         <div style="font-size: 0.65rem; color: #854d0e; text-transform: uppercase;">2-3am Test (Low)</div>
@@ -4497,30 +4502,26 @@ def main():
                         <div style="font-family: monospace; font-size: 0.85rem; color: {test_2_3_high_color}; font-weight: 600;">{test_2_3_high_display} — {test_2_3_high_status}</div>
                     </div>
                 </div>
-            
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <!-- SELL Signal (Uses VIX Low) -->
-                <div style="background: {sell_bg}; border: 2px solid {sell_color}; border-radius: 8px; padding: 12px;">
-                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
-                        <span style="font-size: 1.1rem;">{sell_icon}</span>
-                        <span style="font-weight: 700; color: {sell_color}; font-size: 0.85rem;">SELL @ CCA: {sell_sig}</span>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div style="background: {sell_bg}; border: 2px solid {sell_color}; border-radius: 8px; padding: 12px;">
+                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                            <span style="font-size: 1.1rem;">{sell_icon}</span>
+                            <span style="font-weight: 700; color: {sell_color}; font-size: 0.85rem;">SELL @ CCA: {sell_sig}</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: #475569; line-height: 1.4;">{vix_signal.get('sell_message', '')}</div>
                     </div>
-                    <div style="font-size: 0.75rem; color: #475569; line-height: 1.4;">{vix_signal.get('sell_message', '')}</div>
-                </div>
-                
-                <!-- BUY Signal (Uses VIX High) -->
-                <div style="background: {buy_bg}; border: 2px solid {buy_color}; border-radius: 8px; padding: 12px;">
-                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
-                        <span style="font-size: 1.1rem;">{buy_icon}</span>
-                        <span style="font-weight: 700; color: {buy_color}; font-size: 0.85rem;">BUY @ CCD: {buy_sig}</span>
+                    <div style="background: {buy_bg}; border: 2px solid {buy_color}; border-radius: 8px; padding: 12px;">
+                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                            <span style="font-size: 1.1rem;">{buy_icon}</span>
+                            <span style="font-weight: 700; color: {buy_color}; font-size: 0.85rem;">BUY @ CCD: {buy_sig}</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: #475569; line-height: 1.4;">{vix_signal.get('buy_message', '')}</div>
                     </div>
-                    <div style="font-size: 0.75rem; color: #475569; line-height: 1.4;">{vix_signal.get('buy_message', '')}</div>
                 </div>
+                {retest_html}
             </div>
-            
-            {"<div style='margin-top: 12px; padding: 10px; background: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;'><div style='font-size: 0.8rem; font-weight: 600; color: #92400e;'>🔄 RETEST SETUP ACTIVE</div><div style='font-size: 0.75rem; color: #78350f;'>Watch for VIX to retest " + str(round(vix_signal.get('retest_level', 0), 2)) + " at 10am. If rejected, expect continuation move.</div></div>" if vix_signal.get('retest_level') else ""}
-        </div>
-        """, unsafe_allow_html=True)
+            """
+            st.markdown(vix_html, unsafe_allow_html=True)
     
     st.markdown(f"### 🎯 10:00 AM Setups — {active_cone_name} Cone Active{reversal_badge}")
     st.caption(cone_reason)
