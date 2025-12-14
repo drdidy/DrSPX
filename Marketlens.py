@@ -4514,7 +4514,22 @@ def main():
     # ==========================================================================
     # VIX OVERNIGHT SIGNAL PANEL
     # ==========================================================================
-    if not is_future_date:
+    # Show VIX panel for:
+    # - Today and past dates
+    # - Next trading day IF we're in the overnight session (after 5pm CT)
+    ct_now = get_ct_now()
+    is_overnight_session = ct_now.time() >= time(17, 0)  # After 5pm CT
+    is_next_trading_day = session_date.date() == (ct_now + timedelta(days=1)).date()
+    
+    # Also handle Sunday evening -> Monday case
+    if ct_now.weekday() == 6:  # Sunday
+        # Monday is the next trading day
+        next_trading = ct_now + timedelta(days=1)
+        is_next_trading_day = session_date.date() == next_trading.date()
+    
+    show_vix_panel = not is_future_date or (is_future_date and is_overnight_session and is_next_trading_day)
+    
+    if show_vix_panel:
         st.markdown("""
         <div class="section-header">
             <div class="section-icon">📊</div>
