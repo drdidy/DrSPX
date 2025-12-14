@@ -1010,9 +1010,9 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
     Fetch VIX futures overnight data and generate trading signal.
     
     Returns dict with:
-    - anchor_low: Lowest 30-min CLOSE between 5pm-12am
+    - anchor_low: Lowest CLOSE between 5pm-12am
     - anchor_low_time: When the anchor low occurred
-    - anchor_high: Highest 30-min CLOSE between 5pm-12am
+    - anchor_high: Highest CLOSE between 5pm-12am
     - anchor_high_time: When the anchor high occurred
     - test_2_3am_low: Lowest close during 2-3am window
     - test_2_3am_high: Highest close during 2-3am window
@@ -1034,14 +1034,39 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
         start_date = prior_date.strftime('%Y-%m-%d')
         end_date = (session_date + timedelta(days=1)).strftime('%Y-%m-%d')
         
-        # Fetch 30-minute data for VIX futures
+        # Try 30-minute data first, fallback to 1-hour if empty
         df_vx = vx.history(start=start_date, end=end_date, interval='30m')
         
         if df_vx.empty:
-            return None
+            # Fallback to 1-hour data
+            df_vx = vx.history(start=start_date, end=end_date, interval='1h')
+        
+        if df_vx.empty:
+            # Try fetching more days of data
+            extended_start = (prior_date - timedelta(days=5)).strftime('%Y-%m-%d')
+            df_vx = vx.history(start=extended_start, end=end_date, interval='1h')
+        
+        if df_vx.empty:
+            return {
+                'error': 'No VIX data available',
+                'anchor_low': 0, 'anchor_low_time': None,
+                'anchor_high': 0, 'anchor_high_time': None,
+                'test_2_3am_low': None, 'test_2_3am_high': None,
+                'anchor_low_broken_2_3am': False, 'anchor_high_broken_2_3am': False,
+                'post_630_low': None, 'post_630_high': None,
+                'post_630_low_time': None, 'post_630_high_time': None,
+                'anchor_low_broken_post_630': False, 'anchor_high_broken_post_630': False,
+                'current_vix': 0,
+                'sell_signal': 'NO DATA', 'buy_signal': 'NO DATA',
+                'sell_message': 'VIX futures data not available',
+                'buy_message': 'VIX futures data not available',
+                'retest_level': None, 'retest_type': None
+            }
         
         # Convert to CT timezone
         df_vx_ct = df_vx.copy()
+        if df_vx_ct.index.tz is None:
+            df_vx_ct.index = df_vx_ct.index.tz_localize('UTC')
         df_vx_ct.index = df_vx_ct.index.tz_convert(CT_TZ)
         
         # =================================================================
@@ -4387,7 +4412,7 @@ def main():
     # ==========================================================================
     # VIX OVERNIGHT SIGNAL PANEL
     # ==========================================================================
-    if vix_signal is not None and not is_future_date:
+    if not is_future_date:
         st.markdown("""
         <div class="section-header">
             <div class="section-icon">📊</div>
@@ -4395,54 +4420,64 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         
-        # Determine overall signal status and colors
-        sell_sig = vix_signal.get('sell_signal', 'WATCHING')
-        buy_sig = vix_signal.get('buy_signal', 'WATCHING')
-        
-        # Color coding for signals
-        signal_colors = {
-            'CONFIRMED': ('#10b981', '#d1fae5', '✅'),  # Green
-            'INVALIDATED': ('#ef4444', '#fee2e2', '⚠️'),  # Red
-            'RETEST': ('#f59e0b', '#fef3c7', '🔄'),  # Amber
-            'WATCHING': ('#6b7280', '#f3f4f6', '👀'),  # Gray
-            'ERROR': ('#dc2626', '#fef2f2', '❌')  # Error red
-        }
-        
-        sell_color, sell_bg, sell_icon = signal_colors.get(sell_sig, signal_colors['WATCHING'])
-        buy_color, buy_bg, buy_icon = signal_colors.get(buy_sig, signal_colors['WATCHING'])
-        
-        # Format times
-        anchor_low_time_str = vix_signal['anchor_low_time'].strftime('%I:%M %p') if vix_signal.get('anchor_low_time') else '—'
-        anchor_high_time_str = vix_signal['anchor_high_time'].strftime('%I:%M %p') if vix_signal.get('anchor_high_time') else '—'
-        
-        # 2-3am test info
-        test_2_3_low = vix_signal.get('test_2_3am_low')
-        test_2_3_high = vix_signal.get('test_2_3am_high')
-        anchor_low_broken_2_3 = vix_signal.get('anchor_low_broken_2_3am', False)
-        anchor_high_broken_2_3 = vix_signal.get('anchor_high_broken_2_3am', False)
-        
-        # Build 2-3am status text
-        test_2_3_low_status = "BROKE ↓" if anchor_low_broken_2_3 else "Held ✓" if test_2_3_low else "—"
-        test_2_3_high_status = "BROKE ↑" if anchor_high_broken_2_3 else "Held ✓" if test_2_3_high else "—"
-        test_2_3_low_color = "#ef4444" if anchor_low_broken_2_3 else "#10b981"
-        test_2_3_high_color = "#ef4444" if anchor_high_broken_2_3 else "#10b981"
-        
-        st.markdown(f"""
-        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">VIX Futures (VX=F)</div>
-                <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #1e293b;">{vix_signal.get('current_vix', 0):.2f}</div>
+        if vix_signal is None:
+            # VIX data completely unavailable
+            st.markdown("""
+            <div style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+                <div style="font-weight: 600; color: #92400e; font-size: 0.9rem;">⚠️ VIX Data Unavailable</div>
+                <div style="color: #78350f; font-size: 0.8rem; margin-top: 8px;">VIX futures data could not be fetched. Trade without VIX confirmation or try refreshing.</div>
             </div>
+            """, unsafe_allow_html=True)
+        else:
+            # Determine overall signal status and colors
+            sell_sig = vix_signal.get('sell_signal', 'WATCHING')
+            buy_sig = vix_signal.get('buy_signal', 'WATCHING')
             
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
-                    <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor Low (5pm-12am)</div>
-                    <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_low', 0):.2f}</div>
-                    <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_low_time_str} CT</div>
+            # Color coding for signals
+            signal_colors = {
+                'CONFIRMED': ('#10b981', '#d1fae5', '✅'),  # Green
+                'INVALIDATED': ('#ef4444', '#fee2e2', '⚠️'),  # Red
+                'RETEST': ('#f59e0b', '#fef3c7', '🔄'),  # Amber
+                'WATCHING': ('#6b7280', '#f3f4f6', '👀'),  # Gray
+                'ERROR': ('#dc2626', '#fef2f2', '❌'),  # Error red
+                'NO DATA': ('#9ca3af', '#f9fafb', '❓')  # No data gray
+            }
+            
+            sell_color, sell_bg, sell_icon = signal_colors.get(sell_sig, signal_colors['WATCHING'])
+            buy_color, buy_bg, buy_icon = signal_colors.get(buy_sig, signal_colors['WATCHING'])
+            
+            # Format times
+            anchor_low_time_str = vix_signal['anchor_low_time'].strftime('%I:%M %p') if vix_signal.get('anchor_low_time') else '—'
+            anchor_high_time_str = vix_signal['anchor_high_time'].strftime('%I:%M %p') if vix_signal.get('anchor_high_time') else '—'
+            
+            # 2-3am test info
+            test_2_3_low = vix_signal.get('test_2_3am_low')
+            test_2_3_high = vix_signal.get('test_2_3am_high')
+            anchor_low_broken_2_3 = vix_signal.get('anchor_low_broken_2_3am', False)
+            anchor_high_broken_2_3 = vix_signal.get('anchor_high_broken_2_3am', False)
+            
+            # Build 2-3am status text
+            test_2_3_low_status = "BROKE ↓" if anchor_low_broken_2_3 else "Held ✓" if test_2_3_low else "—"
+            test_2_3_high_status = "BROKE ↑" if anchor_high_broken_2_3 else "Held ✓" if test_2_3_high else "—"
+            test_2_3_low_color = "#ef4444" if anchor_low_broken_2_3 else "#10b981"
+            test_2_3_high_color = "#ef4444" if anchor_high_broken_2_3 else "#10b981"
+            
+            st.markdown(f"""
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">VIX Futures (VX=F)</div>
+                    <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #1e293b;">{vix_signal.get('current_vix', 0):.2f}</div>
                 </div>
-                <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
-                    <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor High (5pm-12am)</div>
-                    <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_high', 0):.2f}</div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
+                        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor Low (5pm-12am)</div>
+                        <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_low', 0):.2f}</div>
+                        <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_low_time_str} CT</div>
+                    </div>
+                    <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
+                        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor High (5pm-12am)</div>
+                        <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_high', 0):.2f}</div>
                     <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_high_time_str} CT</div>
                 </div>
             </div>
