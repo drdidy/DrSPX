@@ -1115,8 +1115,71 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
         anchor_mask = (df_vx_ct.index >= anchor_start) & (df_vx_ct.index < anchor_end)
         df_anchor = df_vx_ct[anchor_mask]
         
+        # Check if anchor window is still in progress (current time is between 5pm and 12am)
+        ct_now = get_ct_now()
+        anchor_in_progress = (ct_now >= anchor_start and ct_now < anchor_end)
+        
         if df_anchor.empty:
-            return None
+            if anchor_in_progress:
+                # Anchor window is currently building - use whatever data we have so far
+                # Look for any data from 5pm onwards today
+                partial_mask = df_vx_ct.index >= anchor_start
+                df_partial = df_vx_ct[partial_mask]
+                
+                if not df_partial.empty:
+                    # Show partial anchor data
+                    anchor_low = float(df_partial['Close'].min())
+                    anchor_high = float(df_partial['Close'].max())
+                    anchor_low_time = df_partial['Close'].idxmin()
+                    anchor_high_time = df_partial['Close'].idxmax()
+                else:
+                    anchor_low = 0
+                    anchor_high = 0
+                    anchor_low_time = None
+                    anchor_high_time = None
+                
+                return {
+                    'anchor_low': anchor_low,
+                    'anchor_low_time': anchor_low_time,
+                    'anchor_high': anchor_high,
+                    'anchor_high_time': anchor_high_time,
+                    'test_2_3am_low': None,
+                    'test_2_3am_high': None,
+                    'anchor_low_broken_2_3am': False,
+                    'anchor_high_broken_2_3am': False,
+                    'post_630_low': None,
+                    'post_630_high': None,
+                    'post_630_low_time': None,
+                    'post_630_high_time': None,
+                    'anchor_low_broken_post_630': False,
+                    'anchor_high_broken_post_630': False,
+                    'current_vix': float(df_partial['Close'].iloc[-1]) if not df_partial.empty else 0,
+                    'sell_signal': 'BUILDING',
+                    'buy_signal': 'BUILDING',
+                    'sell_message': f'Anchor window in progress (5pm-12am). Current low: {anchor_low:.2f}' if anchor_low > 0 else 'Anchor window in progress (5pm-12am). Waiting for data...',
+                    'buy_message': f'Anchor window in progress (5pm-12am). Current high: {anchor_high:.2f}' if anchor_high > 0 else 'Anchor window in progress (5pm-12am). Waiting for data...',
+                    'retest_level': None,
+                    'retest_type': None,
+                    'data_source': data_source
+                }
+            else:
+                # No data available for the anchor window
+                return {
+                    'error': 'No anchor data for this date',
+                    'anchor_low': 0, 'anchor_low_time': None,
+                    'anchor_high': 0, 'anchor_high_time': None,
+                    'test_2_3am_low': None, 'test_2_3am_high': None,
+                    'anchor_low_broken_2_3am': False, 'anchor_high_broken_2_3am': False,
+                    'post_630_low': None, 'post_630_high': None,
+                    'post_630_low_time': None, 'post_630_high_time': None,
+                    'anchor_low_broken_post_630': False, 'anchor_high_broken_post_630': False,
+                    'current_vix': 0,
+                    'sell_signal': 'NO DATA', 'buy_signal': 'NO DATA',
+                    'sell_message': 'No VIX anchor data available for this date',
+                    'buy_message': 'No VIX anchor data available for this date',
+                    'retest_level': None, 'retest_type': None,
+                    'data_source': data_source
+                }
         
         # Find lowest and highest CLOSE in anchor window
         anchor_low_idx = df_anchor['Close'].idxmin()
@@ -4478,6 +4541,7 @@ def main():
                 'INVALIDATED': ('#ef4444', '#fee2e2', '⚠️'),  # Red
                 'RETEST': ('#f59e0b', '#fef3c7', '🔄'),  # Amber
                 'WATCHING': ('#6b7280', '#f3f4f6', '👀'),  # Gray
+                'BUILDING': ('#3b82f6', '#dbeafe', '🔵'),  # Blue - anchor window in progress
                 'ERROR': ('#dc2626', '#fef2f2', '❌'),  # Error red
                 'NO DATA': ('#9ca3af', '#f9fafb', '❓')  # No data gray
             }
