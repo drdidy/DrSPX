@@ -985,6 +985,223 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
     except Exception as e:
         return {'offset': 0, 'current': None, 'overnight_high': None, 'overnight_low': None, 'overnight_range': 0, 'df_overnight': None, 'pre_rth_high': None, 'pre_rth_low': None, 'pre_rth_high_spx': None, 'pre_rth_low_spx': None}
 
+# ============================================================================
+# VIX OVERNIGHT SIGNAL SYSTEM
+# ============================================================================
+# 
+# This system uses VIX futures (VX=F) overnight behavior to confirm/invalidate
+# SPX trade setups at cone rails.
+#
+# LOGIC:
+# 1. Find "Anchor" low/high close between 5pm-12am CT
+# 2. Check if 2-3am tests and respects OR breaks the anchor
+# 3. After 6:30am, check if anchor still holds
+# 4. Generate signal: CONFIRMED, INVALIDATED, or RETEST
+#
+# SIGNALS:
+# - Anchor Low holds + no new low after 6:30am = SELL at Close Cone ▲ CONFIRMED
+# - Anchor Low breaks after 6:30am = SELL INVALIDATED (breakout day)
+# - Anchor Low breaks drastically at 2-3am = RETEST setup at 10am
+# - Vice versa for BUY signals using Anchor High
+
+@st.cache_data(ttl=60)
+def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
+    """
+    Fetch VIX futures overnight data and generate trading signal.
+    
+    Returns dict with:
+    - anchor_low: Lowest 30-min CLOSE between 5pm-12am
+    - anchor_low_time: When the anchor low occurred
+    - anchor_high: Highest 30-min CLOSE between 5pm-12am
+    - anchor_high_time: When the anchor high occurred
+    - test_2_3am_low: Lowest close during 2-3am window
+    - test_2_3am_high: Highest close during 2-3am window
+    - post_630_low: Lowest close after 6:30am
+    - post_630_high: Highest close after 6:30am
+    - current_vix: Current VIX futures price
+    - sell_signal: 'CONFIRMED', 'INVALIDATED', 'RETEST', or None
+    - buy_signal: 'CONFIRMED', 'INVALIDATED', 'RETEST', or None
+    - signal_message: Human readable explanation
+    """
+    try:
+        prior_date = session_date - timedelta(days=1)
+        # Skip weekends
+        while prior_date.weekday() >= 5:
+            prior_date = prior_date - timedelta(days=1)
+        
+        vx = yf.Ticker("VX=F")
+        
+        start_date = prior_date.strftime('%Y-%m-%d')
+        end_date = (session_date + timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        # Fetch 30-minute data for VIX futures
+        df_vx = vx.history(start=start_date, end=end_date, interval='30m')
+        
+        if df_vx.empty:
+            return None
+        
+        # Convert to CT timezone
+        df_vx_ct = df_vx.copy()
+        df_vx_ct.index = df_vx_ct.index.tz_convert(CT_TZ)
+        
+        # =================================================================
+        # STEP 1: Find Anchor Low/High (5pm - 12am CT)
+        # =================================================================
+        anchor_start = CT_TZ.localize(datetime.combine(prior_date, time(17, 0)))
+        anchor_end = CT_TZ.localize(datetime.combine(session_date, time(0, 0)))
+        
+        anchor_mask = (df_vx_ct.index >= anchor_start) & (df_vx_ct.index < anchor_end)
+        df_anchor = df_vx_ct[anchor_mask]
+        
+        if df_anchor.empty:
+            return None
+        
+        # Find lowest and highest CLOSE in anchor window
+        anchor_low_idx = df_anchor['Close'].idxmin()
+        anchor_high_idx = df_anchor['Close'].idxmax()
+        anchor_low = float(df_anchor.loc[anchor_low_idx, 'Close'])
+        anchor_high = float(df_anchor.loc[anchor_high_idx, 'Close'])
+        anchor_low_time = anchor_low_idx
+        anchor_high_time = anchor_high_idx
+        
+        # =================================================================
+        # STEP 2: Check 2am-3am Test Window
+        # =================================================================
+        test_start = CT_TZ.localize(datetime.combine(session_date, time(2, 0)))
+        test_end = CT_TZ.localize(datetime.combine(session_date, time(3, 0)))
+        
+        test_mask = (df_vx_ct.index >= test_start) & (df_vx_ct.index <= test_end)
+        df_test = df_vx_ct[test_mask]
+        
+        test_2_3am_low = None
+        test_2_3am_high = None
+        anchor_low_broken_2_3am = False
+        anchor_high_broken_2_3am = False
+        
+        if not df_test.empty:
+            test_2_3am_low = float(df_test['Close'].min())
+            test_2_3am_high = float(df_test['Close'].max())
+            
+            # Check if anchor was broken during 2-3am
+            # "Broken" = closed below anchor low (or above anchor high) AND stayed there
+            closes_below_anchor_low = (df_test['Close'] < anchor_low).sum()
+            closes_above_anchor_high = (df_test['Close'] > anchor_high).sum()
+            
+            # If majority of 2-3am closes are below anchor = drastically broken
+            if closes_below_anchor_low >= 2:  # At least 2 closes below = drastic break
+                anchor_low_broken_2_3am = True
+            if closes_above_anchor_high >= 2:
+                anchor_high_broken_2_3am = True
+        
+        # =================================================================
+        # STEP 3: Check Post-6:30am Behavior
+        # =================================================================
+        post_630_start = CT_TZ.localize(datetime.combine(session_date, time(6, 30)))
+        ct_now = get_ct_now()
+        
+        # Only check if we're past 6:30am
+        if ct_now >= post_630_start:
+            post_630_mask = (df_vx_ct.index >= post_630_start) & (df_vx_ct.index <= ct_now)
+            df_post_630 = df_vx_ct[post_630_mask]
+        else:
+            df_post_630 = pd.DataFrame()
+        
+        post_630_low = None
+        post_630_high = None
+        anchor_low_broken_post_630 = False
+        anchor_high_broken_post_630 = False
+        
+        if not df_post_630.empty:
+            post_630_low = float(df_post_630['Close'].min())
+            post_630_high = float(df_post_630['Close'].max())
+            
+            # Check if new low/high made after 6:30am
+            if post_630_low < anchor_low:
+                anchor_low_broken_post_630 = True
+            if post_630_high > anchor_high:
+                anchor_high_broken_post_630 = True
+        
+        # =================================================================
+        # STEP 4: Get Current VIX
+        # =================================================================
+        current_vix = float(df_vx_ct['Close'].iloc[-1]) if not df_vx_ct.empty else None
+        
+        # =================================================================
+        # STEP 5: Generate Signals
+        # =================================================================
+        sell_signal = None
+        buy_signal = None
+        sell_message = ""
+        buy_message = ""
+        retest_level = None
+        retest_type = None
+        
+        # ----- SELL SIGNAL (VIX Low holds = SPX rejection at resistance) -----
+        if anchor_low_broken_2_3am:
+            # Anchor broke drastically at 2-3am = RETEST setup
+            sell_signal = 'RETEST'
+            sell_message = f"VIX broke anchor low ({anchor_low:.2f}) at 2-3am. Watch for retest at 10am - if rejected, SPX drops further."
+            retest_level = anchor_low
+            retest_type = 'LOW'
+        elif anchor_low_broken_post_630:
+            # Anchor broke after 6:30am = INVALIDATED
+            sell_signal = 'INVALIDATED'
+            sell_message = f"VIX made new low ({post_630_low:.2f}) after 6:30am, breaking anchor ({anchor_low:.2f}). SELL at CCA invalidated - possible breakout day."
+        elif ct_now >= post_630_start:
+            # Anchor held = CONFIRMED
+            sell_signal = 'CONFIRMED'
+            sell_message = f"VIX anchor low ({anchor_low:.2f}) held overnight. SELL at Close Cone ▲ confirmed."
+        else:
+            # Before 6:30am - still watching
+            sell_signal = 'WATCHING'
+            sell_message = f"VIX anchor low: {anchor_low:.2f}. Waiting for 6:30am confirmation."
+        
+        # ----- BUY SIGNAL (VIX High holds = SPX bounce at support) -----
+        if anchor_high_broken_2_3am:
+            # Anchor broke drastically at 2-3am = RETEST setup
+            buy_signal = 'RETEST'
+            buy_message = f"VIX broke anchor high ({anchor_high:.2f}) at 2-3am. Watch for retest at 10am - if rejected, SPX rallies further."
+            if retest_level is None:
+                retest_level = anchor_high
+                retest_type = 'HIGH'
+        elif anchor_high_broken_post_630:
+            # Anchor broke after 6:30am = INVALIDATED
+            buy_signal = 'INVALIDATED'
+            buy_message = f"VIX made new high ({post_630_high:.2f}) after 6:30am, breaking anchor ({anchor_high:.2f}). BUY at CCD invalidated - possible breakdown day."
+        elif ct_now >= post_630_start:
+            # Anchor held = CONFIRMED
+            buy_signal = 'CONFIRMED'
+            buy_message = f"VIX anchor high ({anchor_high:.2f}) held overnight. BUY at Close Cone ▼ confirmed."
+        else:
+            # Before 6:30am - still watching
+            buy_signal = 'WATCHING'
+            buy_message = f"VIX anchor high: {anchor_high:.2f}. Waiting for 6:30am confirmation."
+        
+        return {
+            'anchor_low': anchor_low,
+            'anchor_low_time': anchor_low_time,
+            'anchor_high': anchor_high,
+            'anchor_high_time': anchor_high_time,
+            'test_2_3am_low': test_2_3am_low,
+            'test_2_3am_high': test_2_3am_high,
+            'anchor_low_broken_2_3am': anchor_low_broken_2_3am,
+            'anchor_high_broken_2_3am': anchor_high_broken_2_3am,
+            'post_630_low': post_630_low,
+            'post_630_high': post_630_high,
+            'anchor_low_broken_post_630': anchor_low_broken_post_630,
+            'anchor_high_broken_post_630': anchor_high_broken_post_630,
+            'current_vix': current_vix,
+            'sell_signal': sell_signal,
+            'buy_signal': buy_signal,
+            'sell_message': sell_message,
+            'buy_message': buy_message,
+            'retest_level': retest_level,
+            'retest_type': retest_type
+        }
+        
+    except Exception as e:
+        return None
+
 def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high: float, secondary_high_time: datetime, 
                              secondary_low: float, secondary_low_time: datetime, session_date: datetime) -> Dict:
     """
@@ -2016,11 +2233,44 @@ def generate_trade_setups(cones: List[Cone], current_price: float = None,
         'active_cone_reason': active_cone_reason
     }
 
-def render_institutional_trade_card(setup: TradeSetup, current_price: float, entry_status: dict = None):
-    """Render a professional institutional-style trade card with entry confirmation status."""
+def render_institutional_trade_card(setup: TradeSetup, current_price: float, entry_status: dict = None, vix_signal: dict = None):
+    """Render a professional institutional-style trade card with entry confirmation status and VIX confirmation."""
     
     # Calculate distance
     distance = abs(current_price - setup.entry_price)
+    
+    # Determine VIX confirmation status for this setup
+    vix_confirmed = None
+    vix_status_html = ""
+    if vix_signal:
+        # Check if this is a Close cone setup (VIX confirmation applies to Close cone)
+        is_close_cone_setup = any('Close' in rail for rail in setup.confluence_rails)
+        
+        if is_close_cone_setup:
+            if setup.direction == "PUTS":  # SELL at CCA
+                vix_sig = vix_signal.get('sell_signal')
+                if vix_sig == 'CONFIRMED':
+                    vix_confirmed = True
+                    vix_status_html = '<div style="background: #d1fae5; border: 1px solid #10b981; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #065f46;">✅ VIX CONFIRMED — Anchor low held overnight</div>'
+                elif vix_sig == 'INVALIDATED':
+                    vix_confirmed = False
+                    vix_status_html = '<div style="background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #991b1b;">⚠️ VIX INVALIDATED — New low after 6:30am, possible breakout</div>'
+                elif vix_sig == 'RETEST':
+                    vix_status_html = '<div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #92400e;">🔄 VIX RETEST — Watch 10am retest of broken level</div>'
+                elif vix_sig == 'WATCHING':
+                    vix_status_html = '<div style="background: #f3f4f6; border: 1px solid #9ca3af; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #4b5563;">👀 VIX WATCHING — Waiting for 6:30am confirmation</div>'
+            else:  # CALLS = BUY at CCD
+                vix_sig = vix_signal.get('buy_signal')
+                if vix_sig == 'CONFIRMED':
+                    vix_confirmed = True
+                    vix_status_html = '<div style="background: #d1fae5; border: 1px solid #10b981; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #065f46;">✅ VIX CONFIRMED — Anchor high held overnight</div>'
+                elif vix_sig == 'INVALIDATED':
+                    vix_confirmed = False
+                    vix_status_html = '<div style="background: #fee2e2; border: 1px solid #ef4444; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #991b1b;">⚠️ VIX INVALIDATED — New high after 6:30am, possible breakdown</div>'
+                elif vix_sig == 'RETEST':
+                    vix_status_html = '<div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #92400e;">🔄 VIX RETEST — Watch 10am retest of broken level</div>'
+                elif vix_sig == 'WATCHING':
+                    vix_status_html = '<div style="background: #f3f4f6; border: 1px solid #9ca3af; border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #4b5563;">👀 VIX WATCHING — Waiting for 6:30am confirmation</div>'
     
     # Determine status based on entry confirmation system
     if entry_status:
@@ -2067,15 +2317,16 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float, ent
     # Trade type styling (BUY = green, SELL = red)
     trade_type_class = "badge-go" if "BUY" in setup.trade_type else "badge-nogo"
     
-    # GO/NO-GO (broken overnight = automatic NO-GO)
+    # GO/NO-GO (broken overnight = automatic NO-GO, VIX invalidated = NO-GO)
     ct_now = get_ct_now().time()
     time_ok = ct_now < LAST_ENTRY_TIME
     rr_ok = setup.rr_ratio_theta_adjusted >= MIN_RR_RATIO
     width_ok = setup.cone_width >= MIN_CONE_WIDTH
     confluence_ok = setup.confluence_strength >= 1  # Allow single-rail setups for active cones
     not_broken = not setup.overnight_broken
+    vix_ok = vix_confirmed is not False  # True or None = OK, False = NOT OK
     
-    if rr_ok and width_ok and confluence_ok and time_ok and not_broken:
+    if rr_ok and width_ok and confluence_ok and time_ok and not_broken and vix_ok:
         decision = "GO"
         decision_class = "badge-go"
     else:
@@ -2092,6 +2343,9 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float, ent
     if setup.follow_through_pct < 1.0:
         pct = int(setup.follow_through_pct * 100)
         warnings_html += f'<div style="background: rgba(245, 158, 11, 0.2); border: 1px solid var(--accent-gold); border-radius: 4px; padding: 0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">⚠️ 8:30 already touched — Expect {pct}% follow-through</div>'
+    
+    # Add VIX status to warnings
+    warnings_html += vix_status_html
     
     # Entry confirmation status HTML
     entry_status_html = ""
@@ -2111,9 +2365,9 @@ def render_institutional_trade_card(setup: TradeSetup, current_price: float, ent
     
     # Validation rule text
     if "BUY" in setup.trade_type:
-        valid_rule = "<strong>✅ Valid BUY:</strong> Bearish candle touches entry, closes &lt;3pts above, 8 EMA crosses above 21 EMA"
+        valid_rule = "<strong>✅ Valid BUY:</strong> Bearish candle touches entry, closes &lt;3pts above, 8 EMA crosses above 21 EMA + VIX anchor high holds"
     else:
-        valid_rule = "<strong>✅ Valid SELL:</strong> Bullish candle touches entry, closes &lt;3pts below, 8 EMA crosses below 21 EMA"
+        valid_rule = "<strong>✅ Valid SELL:</strong> Bullish candle touches entry, closes &lt;3pts below, 8 EMA crosses below 21 EMA + VIX anchor low holds"
     
     # Sources
     sources = ' + '.join(setup.confluence_rails)
@@ -3387,6 +3641,7 @@ def main():
         # Fetch data
         prior_session = fetch_prior_session_data(session_date)
         es_data = fetch_es_overnight_data(session_date)
+        vix_signal = fetch_vix_overnight_signal(session_date)  # VIX overnight signal
         premarket_data = fetch_premarket_pivots(session_date)
         current_price = fetch_current_spx() or (prior_session['close'] if prior_session else 6000)
         first_bar = fetch_first_30min_bar(session_date)
@@ -4055,6 +4310,80 @@ def main():
     elif rail_reversal == 'high_bottom_is_sell':
         reversal_badge = " ⚡ REVERSAL: High ▼ is SELL"
     
+    # ==========================================================================
+    # VIX OVERNIGHT SIGNAL PANEL
+    # ==========================================================================
+    if vix_signal and not is_future_date:
+        st.markdown("""
+        <div class="section-header">
+            <div class="section-icon">📊</div>
+            <div class="section-title">VIX Overnight Signal — Trade Confirmation</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Determine overall signal status and colors
+        sell_sig = vix_signal.get('sell_signal', 'WATCHING')
+        buy_sig = vix_signal.get('buy_signal', 'WATCHING')
+        
+        # Color coding for signals
+        signal_colors = {
+            'CONFIRMED': ('#10b981', '#d1fae5', '✅'),  # Green
+            'INVALIDATED': ('#ef4444', '#fee2e2', '⚠️'),  # Red
+            'RETEST': ('#f59e0b', '#fef3c7', '🔄'),  # Amber
+            'WATCHING': ('#6b7280', '#f3f4f6', '👀')  # Gray
+        }
+        
+        sell_color, sell_bg, sell_icon = signal_colors.get(sell_sig, signal_colors['WATCHING'])
+        buy_color, buy_bg, buy_icon = signal_colors.get(buy_sig, signal_colors['WATCHING'])
+        
+        # Format times
+        anchor_low_time_str = vix_signal['anchor_low_time'].strftime('%I:%M %p') if vix_signal.get('anchor_low_time') else '—'
+        anchor_high_time_str = vix_signal['anchor_high_time'].strftime('%I:%M %p') if vix_signal.get('anchor_high_time') else '—'
+        
+        st.markdown(f"""
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">VIX Futures (VX=F)</div>
+                <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #1e293b;">{vix_signal.get('current_vix', 0):.2f}</div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
+                    <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor Low (5pm-12am)</div>
+                    <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_low', 0):.2f}</div>
+                    <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_low_time_str} CT</div>
+                </div>
+                <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
+                    <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor High (5pm-12am)</div>
+                    <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_high', 0):.2f}</div>
+                    <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_high_time_str} CT</div>
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <!-- SELL Signal (Uses VIX Low) -->
+                <div style="background: {sell_bg}; border: 2px solid {sell_color}; border-radius: 8px; padding: 12px;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                        <span style="font-size: 1.1rem;">{sell_icon}</span>
+                        <span style="font-weight: 700; color: {sell_color}; font-size: 0.85rem;">SELL @ CCA: {sell_sig}</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #475569; line-height: 1.4;">{vix_signal.get('sell_message', '')}</div>
+                </div>
+                
+                <!-- BUY Signal (Uses VIX High) -->
+                <div style="background: {buy_bg}; border: 2px solid {buy_color}; border-radius: 8px; padding: 12px;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                        <span style="font-size: 1.1rem;">{buy_icon}</span>
+                        <span style="font-weight: 700; color: {buy_color}; font-size: 0.85rem;">BUY @ CCD: {buy_sig}</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #475569; line-height: 1.4;">{vix_signal.get('buy_message', '')}</div>
+                </div>
+            </div>
+            
+            {"<div style='margin-top: 12px; padding: 10px; background: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;'><div style='font-size: 0.8rem; font-weight: 600; color: #92400e;'>🔄 RETEST SETUP ACTIVE</div><div style='font-size: 0.75rem; color: #78350f;'>Watch for VIX to retest " + str(vix_signal.get('retest_level', 0)) + " at 10am. If rejected, expect continuation move.</div></div>" if vix_signal.get('retest_level') else ""}
+        </div>
+        """, unsafe_allow_html=True)
+    
     st.markdown(f"### 🎯 10:00 AM Setups — {active_cone_name} Cone Active{reversal_badge}")
     st.caption(cone_reason)
     
@@ -4112,7 +4441,7 @@ def main():
                 entry_status = get_entry_status(setup, current_price, ema_data, st.session_state)
             else:
                 entry_status = None  # No entry tracking for historical dates
-            render_institutional_trade_card(setup, current_price, entry_status)
+            render_institutional_trade_card(setup, current_price, entry_status, vix_signal if not is_future_date else None)
             
             # Trigger alerts if needed (only for today)
             if is_viewing_today and entry_status:
@@ -4144,7 +4473,7 @@ def main():
                 entry_status = get_entry_status(setup, current_price, ema_data, st.session_state)
             else:
                 entry_status = None  # No entry tracking for historical dates
-            render_institutional_trade_card(setup, current_price, entry_status)
+            render_institutional_trade_card(setup, current_price, entry_status, vix_signal if not is_future_date else None)
             
             # Trigger alerts if needed (only for today)
             if is_viewing_today and entry_status:
