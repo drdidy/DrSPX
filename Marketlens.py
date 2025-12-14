@@ -1099,9 +1099,25 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
         post_630_start = CT_TZ.localize(datetime.combine(session_date, time(6, 30)))
         ct_now = get_ct_now()
         
-        # Only check if we're past 6:30am
-        if ct_now >= post_630_start:
-            post_630_mask = (df_vx_ct.index >= post_630_start) & (df_vx_ct.index <= ct_now)
+        # Determine the evaluation end time:
+        # - For today: use current time
+        # - For past dates: use end of RTH (4:00 PM CT) to see full day
+        # - For future dates: no data available
+        is_today = session_date.date() == ct_now.date()
+        is_past = session_date.date() < ct_now.date()
+        
+        if is_today:
+            eval_end_time = ct_now
+        elif is_past:
+            # For historical dates, evaluate until end of RTH
+            eval_end_time = CT_TZ.localize(datetime.combine(session_date, time(16, 0)))
+        else:
+            # Future date - no data
+            eval_end_time = post_630_start  # Won't have data anyway
+        
+        # Check post-6:30am window
+        if is_past or (is_today and ct_now >= post_630_start):
+            post_630_mask = (df_vx_ct.index >= post_630_start) & (df_vx_ct.index <= eval_end_time)
             df_post_630 = df_vx_ct[post_630_mask]
         else:
             df_post_630 = pd.DataFrame()
@@ -1110,10 +1126,14 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
         post_630_high = None
         anchor_low_broken_post_630 = False
         anchor_high_broken_post_630 = False
+        post_630_low_time = None
+        post_630_high_time = None
         
         if not df_post_630.empty:
             post_630_low = float(df_post_630['Close'].min())
             post_630_high = float(df_post_630['Close'].max())
+            post_630_low_time = df_post_630['Close'].idxmin()
+            post_630_high_time = df_post_630['Close'].idxmax()
             
             # Check if new low/high made after 6:30am
             if post_630_low < anchor_low:
@@ -1122,9 +1142,17 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
                 anchor_high_broken_post_630 = True
         
         # =================================================================
-        # STEP 4: Get Current VIX
+        # STEP 4: Get Current/Final VIX
         # =================================================================
-        current_vix = float(df_vx_ct['Close'].iloc[-1]) if not df_vx_ct.empty else None
+        # For historical dates, get the VIX at market close
+        if is_past:
+            # Get VIX at end of RTH for that day
+            rth_end = CT_TZ.localize(datetime.combine(session_date, time(15, 0)))
+            rth_mask = df_vx_ct.index <= rth_end
+            df_rth = df_vx_ct[rth_mask]
+            current_vix = float(df_rth['Close'].iloc[-1]) if not df_rth.empty else None
+        else:
+            current_vix = float(df_vx_ct['Close'].iloc[-1]) if not df_vx_ct.empty else None
         
         # =================================================================
         # STEP 5: Generate Signals
@@ -1135,6 +1163,9 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
         buy_message = ""
         retest_level = None
         retest_type = None
+        
+        # For historical/today evaluation, check if we're past 6:30am
+        past_630 = is_past or (is_today and ct_now >= post_630_start)
         
         # ----- SELL SIGNAL (VIX Low holds = SPX rejection at resistance) -----
         if anchor_low_broken_2_3am:
@@ -1147,7 +1178,7 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
             # Anchor broke after 6:30am = INVALIDATED
             sell_signal = 'INVALIDATED'
             sell_message = f"VIX made new low ({post_630_low:.2f}) after 6:30am, breaking anchor ({anchor_low:.2f}). SELL at CCA invalidated - possible breakout day."
-        elif ct_now >= post_630_start:
+        elif past_630:
             # Anchor held = CONFIRMED
             sell_signal = 'CONFIRMED'
             sell_message = f"VIX anchor low ({anchor_low:.2f}) held overnight. SELL at Close Cone ▲ confirmed."
@@ -1168,7 +1199,7 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
             # Anchor broke after 6:30am = INVALIDATED
             buy_signal = 'INVALIDATED'
             buy_message = f"VIX made new high ({post_630_high:.2f}) after 6:30am, breaking anchor ({anchor_high:.2f}). BUY at CCD invalidated - possible breakdown day."
-        elif ct_now >= post_630_start:
+        elif past_630:
             # Anchor held = CONFIRMED
             buy_signal = 'CONFIRMED'
             buy_message = f"VIX anchor high ({anchor_high:.2f}) held overnight. BUY at Close Cone ▼ confirmed."
@@ -1188,6 +1219,8 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
             'anchor_high_broken_2_3am': anchor_high_broken_2_3am,
             'post_630_low': post_630_low,
             'post_630_high': post_630_high,
+            'post_630_low_time': post_630_low_time,
+            'post_630_high_time': post_630_high_time,
             'anchor_low_broken_post_630': anchor_low_broken_post_630,
             'anchor_high_broken_post_630': anchor_high_broken_post_630,
             'current_vix': current_vix,
@@ -4340,6 +4373,18 @@ def main():
         anchor_low_time_str = vix_signal['anchor_low_time'].strftime('%I:%M %p') if vix_signal.get('anchor_low_time') else '—'
         anchor_high_time_str = vix_signal['anchor_high_time'].strftime('%I:%M %p') if vix_signal.get('anchor_high_time') else '—'
         
+        # 2-3am test info
+        test_2_3_low = vix_signal.get('test_2_3am_low')
+        test_2_3_high = vix_signal.get('test_2_3am_high')
+        anchor_low_broken_2_3 = vix_signal.get('anchor_low_broken_2_3am', False)
+        anchor_high_broken_2_3 = vix_signal.get('anchor_high_broken_2_3am', False)
+        
+        # Build 2-3am status text
+        test_2_3_low_status = "BROKE ↓" if anchor_low_broken_2_3 else "Held ✓" if test_2_3_low else "—"
+        test_2_3_high_status = "BROKE ↑" if anchor_high_broken_2_3 else "Held ✓" if test_2_3_high else "—"
+        test_2_3_low_color = "#ef4444" if anchor_low_broken_2_3 else "#10b981"
+        test_2_3_high_color = "#ef4444" if anchor_high_broken_2_3 else "#10b981"
+        
         st.markdown(f"""
         <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -4347,7 +4392,7 @@ def main():
                 <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #1e293b;">{vix_signal.get('current_vix', 0):.2f}</div>
             </div>
             
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                 <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
                     <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor Low (5pm-12am)</div>
                     <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_low', 0):.2f}</div>
@@ -4357,6 +4402,18 @@ def main():
                     <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor High (5pm-12am)</div>
                     <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_high', 0):.2f}</div>
                     <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_high_time_str} CT</div>
+                </div>
+            </div>
+            
+            <!-- 2-3am Test Results -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                <div style="background: #fefce8; border-radius: 6px; padding: 8px; border-left: 3px solid #eab308;">
+                    <div style="font-size: 0.65rem; color: #854d0e; text-transform: uppercase;">2-3am Test (Low)</div>
+                    <div style="font-family: monospace; font-size: 0.85rem; color: {test_2_3_low_color}; font-weight: 600;">{test_2_3_low:.2f if test_2_3_low else '—'} — {test_2_3_low_status}</div>
+                </div>
+                <div style="background: #fefce8; border-radius: 6px; padding: 8px; border-left: 3px solid #eab308;">
+                    <div style="font-size: 0.65rem; color: #854d0e; text-transform: uppercase;">2-3am Test (High)</div>
+                    <div style="font-family: monospace; font-size: 0.85rem; color: {test_2_3_high_color}; font-weight: 600;">{test_2_3_high:.2f if test_2_3_high else '—'} — {test_2_3_high_status}</div>
                 </div>
             </div>
             
@@ -4380,7 +4437,7 @@ def main():
                 </div>
             </div>
             
-            {"<div style='margin-top: 12px; padding: 10px; background: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;'><div style='font-size: 0.8rem; font-weight: 600; color: #92400e;'>🔄 RETEST SETUP ACTIVE</div><div style='font-size: 0.75rem; color: #78350f;'>Watch for VIX to retest " + str(vix_signal.get('retest_level', 0)) + " at 10am. If rejected, expect continuation move.</div></div>" if vix_signal.get('retest_level') else ""}
+            {"<div style='margin-top: 12px; padding: 10px; background: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;'><div style='font-size: 0.8rem; font-weight: 600; color: #92400e;'>🔄 RETEST SETUP ACTIVE</div><div style='font-size: 0.75rem; color: #78350f;'>Watch for VIX to retest " + str(round(vix_signal.get('retest_level', 0), 2)) + " at 10am. If rejected, expect continuation move.</div></div>" if vix_signal.get('retest_level') else ""}
         </div>
         """, unsafe_allow_html=True)
     
