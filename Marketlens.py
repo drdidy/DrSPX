@@ -1112,12 +1112,28 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
         anchor_start = CT_TZ.localize(datetime.combine(prior_date, time(17, 0)))
         anchor_end = CT_TZ.localize(datetime.combine(session_date, time(0, 0)))
         
+        # Debug: Get data range info
+        data_start_time = df_vx_ct.index.min() if not df_vx_ct.empty else None
+        data_end_time = df_vx_ct.index.max() if not df_vx_ct.empty else None
+        total_rows = len(df_vx_ct)
+        
         anchor_mask = (df_vx_ct.index >= anchor_start) & (df_vx_ct.index < anchor_end)
         df_anchor = df_vx_ct[anchor_mask]
         
         # Check if anchor window is still in progress (current time is between 5pm and 12am)
         ct_now = get_ct_now()
         anchor_in_progress = (ct_now >= anchor_start and ct_now < anchor_end)
+        
+        # Debug info to include in all returns
+        debug_info = {
+            'debug_data_rows': total_rows,
+            'debug_data_start': str(data_start_time) if data_start_time else 'None',
+            'debug_data_end': str(data_end_time) if data_end_time else 'None',
+            'debug_anchor_start': str(anchor_start),
+            'debug_anchor_end': str(anchor_end),
+            'debug_anchor_rows': len(df_anchor),
+            'debug_anchor_in_progress': anchor_in_progress
+        }
         
         if df_anchor.empty:
             if anchor_in_progress:
@@ -1156,16 +1172,17 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
                     'current_vix': float(df_partial['Close'].iloc[-1]) if not df_partial.empty else 0,
                     'sell_signal': 'BUILDING',
                     'buy_signal': 'BUILDING',
-                    'sell_message': f'Anchor window in progress (5pm-12am). Current low: {anchor_low:.2f}' if anchor_low > 0 else 'Anchor window in progress (5pm-12am). Waiting for data...',
-                    'buy_message': f'Anchor window in progress (5pm-12am). Current high: {anchor_high:.2f}' if anchor_high > 0 else 'Anchor window in progress (5pm-12am). Waiting for data...',
+                    'sell_message': f'Anchor window in progress (5pm-12am). Current low: {anchor_low:.2f}' if anchor_low > 0 else 'Anchor window in progress. Waiting for VIX futures data...',
+                    'buy_message': f'Anchor window in progress (5pm-12am). Current high: {anchor_high:.2f}' if anchor_high > 0 else 'Anchor window in progress. Waiting for VIX futures data...',
                     'retest_level': None,
                     'retest_type': None,
-                    'data_source': data_source
+                    'data_source': data_source,
+                    **debug_info
                 }
             else:
                 # No data available for the anchor window
                 return {
-                    'error': 'No anchor data for this date',
+                    'error': f'No anchor data. Data range: {data_start_time} to {data_end_time}. Looking for: {anchor_start} to {anchor_end}',
                     'anchor_low': 0, 'anchor_low_time': None,
                     'anchor_high': 0, 'anchor_high_time': None,
                     'test_2_3am_low': None, 'test_2_3am_high': None,
@@ -1178,7 +1195,8 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
                     'sell_message': 'No VIX anchor data available for this date',
                     'buy_message': 'No VIX anchor data available for this date',
                     'retest_level': None, 'retest_type': None,
-                    'data_source': data_source
+                    'data_source': data_source,
+                    **debug_info
                 }
         
         # Find lowest and highest CLOSE in anchor window
@@ -4371,6 +4389,16 @@ def main():
                 st.error("❌ vix_signal is None - fetch returned nothing")
             elif vix_signal.get('error'):
                 st.error(f"❌ Error: {vix_signal.get('error')}")
+                # Show debug info even on error
+                st.markdown("---")
+                st.caption(f"**Data Source:** {vix_signal.get('data_source', 'Unknown')}")
+                st.caption(f"**Data Rows:** {vix_signal.get('debug_data_rows', 'N/A')}")
+                st.caption(f"**Data Start:** {vix_signal.get('debug_data_start', 'N/A')}")
+                st.caption(f"**Data End:** {vix_signal.get('debug_data_end', 'N/A')}")
+                st.caption(f"**Anchor Start:** {vix_signal.get('debug_anchor_start', 'N/A')}")
+                st.caption(f"**Anchor End:** {vix_signal.get('debug_anchor_end', 'N/A')}")
+                st.caption(f"**Anchor Rows Found:** {vix_signal.get('debug_anchor_rows', 'N/A')}")
+                st.caption(f"**Anchor In Progress:** {vix_signal.get('debug_anchor_in_progress', 'N/A')}")
             else:
                 st.success(f"✅ Data Source: {vix_signal.get('data_source', 'Unknown')}")
                 st.caption(f"**Current VIX:** {vix_signal.get('current_vix', 0):.2f}")
@@ -4383,22 +4411,20 @@ def main():
                 st.caption(f"**Anchor High Time:** {anchor_high_time.strftime('%Y-%m-%d %I:%M %p') if anchor_high_time else 'None'}")
                 
                 st.markdown("---")
+                st.caption(f"**Data Rows:** {vix_signal.get('debug_data_rows', 'N/A')}")
+                st.caption(f"**Data Range:** {vix_signal.get('debug_data_start', 'N/A')} to {vix_signal.get('debug_data_end', 'N/A')}")
+                st.caption(f"**Anchor Window:** {vix_signal.get('debug_anchor_start', 'N/A')} to {vix_signal.get('debug_anchor_end', 'N/A')}")
+                st.caption(f"**Anchor Rows Found:** {vix_signal.get('debug_anchor_rows', 'N/A')}")
+                
+                st.markdown("---")
                 st.caption(f"**2-3am Test Low:** {vix_signal.get('test_2_3am_low')}")
                 st.caption(f"**2-3am Test High:** {vix_signal.get('test_2_3am_high')}")
                 st.caption(f"**2-3am Low Broke:** {vix_signal.get('anchor_low_broken_2_3am', False)}")
                 st.caption(f"**2-3am High Broke:** {vix_signal.get('anchor_high_broken_2_3am', False)}")
                 
                 st.markdown("---")
-                st.caption(f"**Post-6:30 Low:** {vix_signal.get('post_630_low')}")
-                st.caption(f"**Post-6:30 High:** {vix_signal.get('post_630_high')}")
-                st.caption(f"**Post-6:30 Low Broke:** {vix_signal.get('anchor_low_broken_post_630', False)}")
-                st.caption(f"**Post-6:30 High Broke:** {vix_signal.get('anchor_high_broken_post_630', False)}")
-                
-                st.markdown("---")
                 st.caption(f"**SELL Signal:** {vix_signal.get('sell_signal')}")
                 st.caption(f"**BUY Signal:** {vix_signal.get('buy_signal')}")
-                st.caption(f"**Sell Message:** {vix_signal.get('sell_message', '')[:50]}...")
-                st.caption(f"**Buy Message:** {vix_signal.get('buy_message', '')[:50]}...")
     
     # Generate complete trade setups for all confluence zones
     trade_setups_830 = generate_trade_setups(cones_830, current_price, es_data=es_data, session_830_touched=None, active_cone_info=None)
