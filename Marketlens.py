@@ -1007,7 +1007,10 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
 @st.cache_data(ttl=60)
 def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
     """
-    Fetch VIX futures overnight data and generate trading signal.
+    Fetch VIX overnight data and generate trading signal.
+    
+    For TODAY: Uses VX=F (VIX futures) - trades overnight
+    For HISTORICAL: Falls back to ^VIX (spot VIX) if futures unavailable
     
     Returns dict with:
     - anchor_low: Lowest CLOSE between 5pm-12am
@@ -1018,34 +1021,62 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
     - test_2_3am_high: Highest close during 2-3am window
     - post_630_low: Lowest close after 6:30am
     - post_630_high: Highest close after 6:30am
-    - current_vix: Current VIX futures price
+    - current_vix: Current VIX price
     - sell_signal: 'CONFIRMED', 'INVALIDATED', 'RETEST', or None
     - buy_signal: 'CONFIRMED', 'INVALIDATED', 'RETEST', or None
     - signal_message: Human readable explanation
+    - data_source: 'VX=F' or '^VIX'
     """
     try:
+        ct_now = get_ct_now()
+        is_today = session_date.date() == ct_now.date()
+        
         prior_date = session_date - timedelta(days=1)
         # Skip weekends
         while prior_date.weekday() >= 5:
             prior_date = prior_date - timedelta(days=1)
         
-        vx = yf.Ticker("VX=F")
-        
         start_date = prior_date.strftime('%Y-%m-%d')
         end_date = (session_date + timedelta(days=1)).strftime('%Y-%m-%d')
         
-        # Try 30-minute data first, fallback to 1-hour if empty
-        df_vx = vx.history(start=start_date, end=end_date, interval='30m')
+        df_vx = pd.DataFrame()
+        data_source = "VX=F"
         
+        # Try VIX futures first (best for overnight data)
+        try:
+            vx = yf.Ticker("VX=F")
+            df_vx = vx.history(start=start_date, end=end_date, interval='30m')
+            if df_vx.empty:
+                df_vx = vx.history(start=start_date, end=end_date, interval='1h')
+        except:
+            pass
+        
+        # If futures empty, try spot VIX (more historical data available)
         if df_vx.empty:
-            # Fallback to 1-hour data
-            df_vx = vx.history(start=start_date, end=end_date, interval='1h')
+            try:
+                vix_spot = yf.Ticker("^VIX")
+                # Spot VIX only trades during market hours, so we need daily data for overnight approximation
+                # Get intraday data if available
+                df_vx = vix_spot.history(start=start_date, end=end_date, interval='30m')
+                if df_vx.empty:
+                    df_vx = vix_spot.history(start=start_date, end=end_date, interval='1h')
+                if not df_vx.empty:
+                    data_source = "^VIX"
+            except:
+                pass
         
+        # If still empty, try with extended date range
         if df_vx.empty:
-            # Try fetching more days of data
-            extended_start = (prior_date - timedelta(days=5)).strftime('%Y-%m-%d')
-            df_vx = vx.history(start=extended_start, end=end_date, interval='1h')
+            try:
+                extended_start = (prior_date - timedelta(days=7)).strftime('%Y-%m-%d')
+                vix_spot = yf.Ticker("^VIX")
+                df_vx = vix_spot.history(start=extended_start, end=end_date, interval='1h')
+                if not df_vx.empty:
+                    data_source = "^VIX"
+            except:
+                pass
         
+        # If still empty, return no data
         if df_vx.empty:
             return {
                 'error': 'No VIX data available',
@@ -1058,9 +1089,10 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
                 'anchor_low_broken_post_630': False, 'anchor_high_broken_post_630': False,
                 'current_vix': 0,
                 'sell_signal': 'NO DATA', 'buy_signal': 'NO DATA',
-                'sell_message': 'VIX futures data not available',
-                'buy_message': 'VIX futures data not available',
-                'retest_level': None, 'retest_type': None
+                'sell_message': 'VIX data not available for this date',
+                'buy_message': 'VIX data not available for this date',
+                'retest_level': None, 'retest_type': None,
+                'data_source': None
             }
         
         # Convert to CT timezone
@@ -1254,7 +1286,8 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
             'sell_message': sell_message,
             'buy_message': buy_message,
             'retest_level': retest_level,
-            'retest_type': retest_type
+            'retest_type': retest_type,
+            'data_source': data_source
         }
         
     except Exception as e:
@@ -1281,7 +1314,8 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
             'sell_message': f'VIX data fetch failed: {str(e)}',
             'buy_message': f'VIX data fetch failed: {str(e)}',
             'retest_level': None,
-            'retest_type': None
+            'retest_type': None,
+            'data_source': None
         }
 
 def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high: float, secondary_high_time: datetime, 
@@ -4466,6 +4500,11 @@ def main():
             test_2_3_low_display = f"{test_2_3_low:.2f}" if test_2_3_low else "—"
             test_2_3_high_display = f"{test_2_3_high:.2f}" if test_2_3_high else "—"
             
+            # Get data source
+            data_source = vix_signal.get('data_source', 'VX=F')
+            source_label = "VIX Futures (VX=F)" if data_source == "VX=F" else "VIX Index (^VIX)"
+            source_note = "" if data_source == "VX=F" else " <span style='font-size: 0.6rem; color: #94a3b8;'>(spot approximation)</span>"
+            
             # Build retest HTML if needed
             retest_html = ""
             if vix_signal.get('retest_level'):
@@ -4477,7 +4516,7 @@ def main():
             vix_html = f"""
             <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">VIX Futures (VX=F)</div>
+                    <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">{source_label}{source_note}</div>
                     <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #1e293b;">{vix_signal.get('current_vix', 0):.2f}</div>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
