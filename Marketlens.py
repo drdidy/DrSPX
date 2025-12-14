@@ -4360,22 +4360,45 @@ def main():
                         else:
                             st.caption(f"**{secondary_name}:** Not detected")
     
-    # VIX Debug Panel
-    if vix_signal is not None and not is_future_date:
-        with st.sidebar:
-            with st.expander("📊 VIX Signal Debug", expanded=False):
-                if vix_signal.get('error'):
-                    st.error(f"Error: {vix_signal.get('error')}")
-                else:
-                    st.caption(f"**Current VIX:** {vix_signal.get('current_vix', 0):.2f}")
-                    st.caption(f"**Anchor Low:** {vix_signal.get('anchor_low', 0):.2f}")
-                    st.caption(f"**Anchor High:** {vix_signal.get('anchor_high', 0):.2f}")
-                    st.caption(f"**2-3am Low Broke:** {vix_signal.get('anchor_low_broken_2_3am', False)}")
-                    st.caption(f"**2-3am High Broke:** {vix_signal.get('anchor_high_broken_2_3am', False)}")
-                    st.caption(f"**Post-6:30 Low Broke:** {vix_signal.get('anchor_low_broken_post_630', False)}")
-                    st.caption(f"**Post-6:30 High Broke:** {vix_signal.get('anchor_high_broken_post_630', False)}")
-                    st.caption(f"**SELL Signal:** {vix_signal.get('sell_signal')}")
-                    st.caption(f"**BUY Signal:** {vix_signal.get('buy_signal')}")
+    # VIX Debug Panel - ALWAYS show for troubleshooting
+    with st.sidebar:
+        with st.expander("📊 VIX Signal Debug", expanded=True):
+            st.caption(f"**Session Date:** {session_date.strftime('%Y-%m-%d %A')}")
+            st.caption(f"**Prior Date (for anchor):** {(session_date - timedelta(days=1)).strftime('%Y-%m-%d %A')}")
+            st.caption(f"**Is Future Date:** {is_future_date}")
+            
+            if vix_signal is None:
+                st.error("❌ vix_signal is None - fetch returned nothing")
+            elif vix_signal.get('error'):
+                st.error(f"❌ Error: {vix_signal.get('error')}")
+            else:
+                st.success(f"✅ Data Source: {vix_signal.get('data_source', 'Unknown')}")
+                st.caption(f"**Current VIX:** {vix_signal.get('current_vix', 0):.2f}")
+                st.caption(f"**Anchor Low:** {vix_signal.get('anchor_low', 0):.2f}")
+                st.caption(f"**Anchor High:** {vix_signal.get('anchor_high', 0):.2f}")
+                
+                anchor_low_time = vix_signal.get('anchor_low_time')
+                anchor_high_time = vix_signal.get('anchor_high_time')
+                st.caption(f"**Anchor Low Time:** {anchor_low_time.strftime('%Y-%m-%d %I:%M %p') if anchor_low_time else 'None'}")
+                st.caption(f"**Anchor High Time:** {anchor_high_time.strftime('%Y-%m-%d %I:%M %p') if anchor_high_time else 'None'}")
+                
+                st.markdown("---")
+                st.caption(f"**2-3am Test Low:** {vix_signal.get('test_2_3am_low')}")
+                st.caption(f"**2-3am Test High:** {vix_signal.get('test_2_3am_high')}")
+                st.caption(f"**2-3am Low Broke:** {vix_signal.get('anchor_low_broken_2_3am', False)}")
+                st.caption(f"**2-3am High Broke:** {vix_signal.get('anchor_high_broken_2_3am', False)}")
+                
+                st.markdown("---")
+                st.caption(f"**Post-6:30 Low:** {vix_signal.get('post_630_low')}")
+                st.caption(f"**Post-6:30 High:** {vix_signal.get('post_630_high')}")
+                st.caption(f"**Post-6:30 Low Broke:** {vix_signal.get('anchor_low_broken_post_630', False)}")
+                st.caption(f"**Post-6:30 High Broke:** {vix_signal.get('anchor_high_broken_post_630', False)}")
+                
+                st.markdown("---")
+                st.caption(f"**SELL Signal:** {vix_signal.get('sell_signal')}")
+                st.caption(f"**BUY Signal:** {vix_signal.get('buy_signal')}")
+                st.caption(f"**Sell Message:** {vix_signal.get('sell_message', '')[:50]}...")
+                st.caption(f"**Buy Message:** {vix_signal.get('buy_message', '')[:50]}...")
     
     # Generate complete trade setups for all confluence zones
     trade_setups_830 = generate_trade_setups(cones_830, current_price, es_data=es_data, session_830_touched=None, active_cone_info=None)
