@@ -4462,6 +4462,10 @@ def main():
             test_2_3_low_color = "#ef4444" if anchor_low_broken_2_3 else "#10b981"
             test_2_3_high_color = "#ef4444" if anchor_high_broken_2_3 else "#10b981"
             
+            # Pre-format values for display (can't use conditionals inside f-string format specs)
+            test_2_3_low_display = f"{test_2_3_low:.2f}" if test_2_3_low else "—"
+            test_2_3_high_display = f"{test_2_3_high:.2f}" if test_2_3_high else "—"
+            
             st.markdown(f"""
             <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -4478,21 +4482,21 @@ def main():
                     <div style="background: #f8fafc; border-radius: 8px; padding: 10px;">
                         <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Anchor High (5pm-12am)</div>
                         <div style="font-family: monospace; font-size: 1rem; font-weight: 600; color: #0f172a;">{vix_signal.get('anchor_high', 0):.2f}</div>
-                    <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_high_time_str} CT</div>
+                        <div style="font-size: 0.7rem; color: #94a3b8;">@ {anchor_high_time_str} CT</div>
+                    </div>
                 </div>
-            </div>
-            
-            <!-- 2-3am Test Results -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-                <div style="background: #fefce8; border-radius: 6px; padding: 8px; border-left: 3px solid #eab308;">
-                    <div style="font-size: 0.65rem; color: #854d0e; text-transform: uppercase;">2-3am Test (Low)</div>
-                    <div style="font-family: monospace; font-size: 0.85rem; color: {test_2_3_low_color}; font-weight: 600;">{test_2_3_low:.2f if test_2_3_low else '—'} — {test_2_3_low_status}</div>
+                
+                <!-- 2-3am Test Results -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                    <div style="background: #fefce8; border-radius: 6px; padding: 8px; border-left: 3px solid #eab308;">
+                        <div style="font-size: 0.65rem; color: #854d0e; text-transform: uppercase;">2-3am Test (Low)</div>
+                        <div style="font-family: monospace; font-size: 0.85rem; color: {test_2_3_low_color}; font-weight: 600;">{test_2_3_low_display} — {test_2_3_low_status}</div>
+                    </div>
+                    <div style="background: #fefce8; border-radius: 6px; padding: 8px; border-left: 3px solid #eab308;">
+                        <div style="font-size: 0.65rem; color: #854d0e; text-transform: uppercase;">2-3am Test (High)</div>
+                        <div style="font-family: monospace; font-size: 0.85rem; color: {test_2_3_high_color}; font-weight: 600;">{test_2_3_high_display} — {test_2_3_high_status}</div>
+                    </div>
                 </div>
-                <div style="background: #fefce8; border-radius: 6px; padding: 8px; border-left: 3px solid #eab308;">
-                    <div style="font-size: 0.65rem; color: #854d0e; text-transform: uppercase;">2-3am Test (High)</div>
-                    <div style="font-family: monospace; font-size: 0.85rem; color: {test_2_3_high_color}; font-weight: 600;">{test_2_3_high:.2f if test_2_3_high else '—'} — {test_2_3_high_status}</div>
-                </div>
-            </div>
             
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                 <!-- SELL Signal (Uses VIX Low) -->
