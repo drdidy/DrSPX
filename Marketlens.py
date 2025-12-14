@@ -1031,10 +1031,15 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
         ct_now = get_ct_now()
         is_today = session_date.date() == ct_now.date()
         
+        # For VIX overnight, we need the CALENDAR day before (not trading day)
+        # Monday's anchor comes from Sunday 5pm-12am
+        # Tuesday's anchor comes from Monday 5pm-12am
+        # etc.
         prior_date = session_date - timedelta(days=1)
-        # Skip weekends
-        while prior_date.weekday() >= 5:
-            prior_date = prior_date - timedelta(days=1)
+        
+        # Note: We do NOT skip weekends here because:
+        # - Monday's VIX anchor is Sunday 5pm-12am (futures trade Sunday evening)
+        # - For Saturday/Sunday session_date (which shouldn't happen), we'd look at Fri/Sat
         
         start_date = prior_date.strftime('%Y-%m-%d')
         end_date = (session_date + timedelta(days=1)).strftime('%Y-%m-%d')
