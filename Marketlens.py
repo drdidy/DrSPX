@@ -1233,7 +1233,31 @@ def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
         }
         
     except Exception as e:
-        return None
+        # Return a minimal signal with error info for debugging
+        return {
+            'error': str(e),
+            'anchor_low': 0,
+            'anchor_low_time': None,
+            'anchor_high': 0,
+            'anchor_high_time': None,
+            'test_2_3am_low': None,
+            'test_2_3am_high': None,
+            'anchor_low_broken_2_3am': False,
+            'anchor_high_broken_2_3am': False,
+            'post_630_low': None,
+            'post_630_high': None,
+            'post_630_low_time': None,
+            'post_630_high_time': None,
+            'anchor_low_broken_post_630': False,
+            'anchor_high_broken_post_630': False,
+            'current_vix': 0,
+            'sell_signal': 'ERROR',
+            'buy_signal': 'ERROR',
+            'sell_message': f'VIX data fetch failed: {str(e)}',
+            'buy_message': f'VIX data fetch failed: {str(e)}',
+            'retest_level': None,
+            'retest_type': None
+        }
 
 def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high: float, secondary_high_time: datetime, 
                              secondary_low: float, secondary_low_time: datetime, session_date: datetime) -> Dict:
@@ -4209,6 +4233,23 @@ def main():
                         else:
                             st.caption(f"**{secondary_name}:** Not detected")
     
+    # VIX Debug Panel
+    if vix_signal is not None and not is_future_date:
+        with st.sidebar:
+            with st.expander("📊 VIX Signal Debug", expanded=False):
+                if vix_signal.get('error'):
+                    st.error(f"Error: {vix_signal.get('error')}")
+                else:
+                    st.caption(f"**Current VIX:** {vix_signal.get('current_vix', 0):.2f}")
+                    st.caption(f"**Anchor Low:** {vix_signal.get('anchor_low', 0):.2f}")
+                    st.caption(f"**Anchor High:** {vix_signal.get('anchor_high', 0):.2f}")
+                    st.caption(f"**2-3am Low Broke:** {vix_signal.get('anchor_low_broken_2_3am', False)}")
+                    st.caption(f"**2-3am High Broke:** {vix_signal.get('anchor_high_broken_2_3am', False)}")
+                    st.caption(f"**Post-6:30 Low Broke:** {vix_signal.get('anchor_low_broken_post_630', False)}")
+                    st.caption(f"**Post-6:30 High Broke:** {vix_signal.get('anchor_high_broken_post_630', False)}")
+                    st.caption(f"**SELL Signal:** {vix_signal.get('sell_signal')}")
+                    st.caption(f"**BUY Signal:** {vix_signal.get('buy_signal')}")
+    
     # Generate complete trade setups for all confluence zones
     trade_setups_830 = generate_trade_setups(cones_830, current_price, es_data=es_data, session_830_touched=None, active_cone_info=None)
     trade_setups_1000 = generate_trade_setups(cones_1000, current_price, es_data=es_data, session_830_touched=session_830_touched, active_cone_info=active_cone_info)
@@ -4346,7 +4387,7 @@ def main():
     # ==========================================================================
     # VIX OVERNIGHT SIGNAL PANEL
     # ==========================================================================
-    if vix_signal and not is_future_date:
+    if vix_signal is not None and not is_future_date:
         st.markdown("""
         <div class="section-header">
             <div class="section-icon">📊</div>
@@ -4363,7 +4404,8 @@ def main():
             'CONFIRMED': ('#10b981', '#d1fae5', '✅'),  # Green
             'INVALIDATED': ('#ef4444', '#fee2e2', '⚠️'),  # Red
             'RETEST': ('#f59e0b', '#fef3c7', '🔄'),  # Amber
-            'WATCHING': ('#6b7280', '#f3f4f6', '👀')  # Gray
+            'WATCHING': ('#6b7280', '#f3f4f6', '👀'),  # Gray
+            'ERROR': ('#dc2626', '#fef2f2', '❌')  # Error red
         }
         
         sell_color, sell_bg, sell_icon = signal_colors.get(sell_sig, signal_colors['WATCHING'])
