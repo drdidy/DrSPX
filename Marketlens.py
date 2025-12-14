@@ -4385,6 +4385,21 @@ def main():
             st.caption(f"**Prior Date (for anchor):** {(session_date - timedelta(days=1)).strftime('%Y-%m-%d %A')}")
             st.caption(f"**Is Future Date:** {is_future_date}")
             
+            # Test current VIX futures connection
+            try:
+                vx_test = yf.Ticker("VX=F")
+                vx_current = vx_test.history(period='1d', interval='1m')
+                if not vx_current.empty:
+                    latest_vx = vx_current['Close'].iloc[-1]
+                    latest_time = vx_current.index[-1]
+                    st.success(f"🟢 VX=F LIVE: {latest_vx:.2f} @ {latest_time.strftime('%I:%M %p')}")
+                else:
+                    st.warning("🟡 VX=F: No current data (market may be closed)")
+            except Exception as e:
+                st.error(f"🔴 VX=F Error: {str(e)[:50]}")
+            
+            st.markdown("---")
+            
             if vix_signal is None:
                 st.error("❌ vix_signal is None - fetch returned nothing")
             elif vix_signal.get('error'):
