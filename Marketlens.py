@@ -12,8 +12,8 @@ THE CORE CONCEPT:
 This system uses "structural cones" projected from the prior day's High, Low, and 
 Close pivots to identify high-probability reversal zones for 0DTE SPX options.
 
-The SECRET SAUCE is the VIX Leading Indicator - VIX moves BEFORE SPX, giving you
-the direction signal 30 minutes before your 10am entry.
+The SECRET SAUCE is VIX-SPX CONFLUENCE - when VIX touches its anchor level
+at the SAME TIME SPX touches a cone rail, that's your high-probability signal.
 
 HOW IT WORKS:
 -------------
@@ -23,52 +23,46 @@ HOW IT WORKS:
    - CLOSE (settlement price)
 
 2. CONES: Each pivot projects two rails:
-   - Ascending rail: +0.45 pts per 30-min block (support becomes stronger over time)
-   - Descending rail: -0.45 pts per 30-min block (resistance becomes weaker over time)
+   - Ascending rail: +0.45 pts per 30-min block
+   - Descending rail: -0.45 pts per 30-min block
 
-3. CONFLUENCE: Where multiple rails converge within 5 pts = high-probability zone
+THE VIX-SPX CONFLUENCE SYSTEM (THE KEY!):
+-----------------------------------------
+VIX and SPX move inversely. When BOTH touch key levels together = SIGNAL.
 
-THE VIX LEADING INDICATOR (THE KEY!):
--------------------------------------
-VIX moves OPPOSITE to SPX - and it moves FIRST. This gives you the edge.
-
-STEP 1 - OVERNIGHT (5pm-12am):
+STEP 1 - OVERNIGHT (5pm-2am):
    Find VIX anchor LOW and anchor HIGH from TradingView (VX1!)
 
 STEP 2 - 2-3am CHECK:
    Did VIX break through either anchor? If yes = RETEST scenario
 
-STEP 3 - 9-9:30am SIGNAL (THE MONEY MAKER):
-   Watch VIX touch the anchor level. The REJECTION direction tells you SPX direction:
+STEP 3 - 9-9:30am CONFLUENCE (THE MONEY MAKER):
+   Watch for VIX to touch anchor AND SPX to touch cone rail SIMULTANEOUSLY.
    
-   • VIX touches anchor → Rejects UP    → SPX will DROP  → PUTS  ✓
-   • VIX touches anchor → Rejects DOWN  → SPX will RISE  → CALLS ✓
+   The direction depends on WHERE VIX approaches FROM:
    
-   If 2-3am broke an anchor, watch the RETEST:
-   • VIX retests broken level → Rejects in same direction → Continuation
-   • VIX retests broken level → Breaks back through       → Reversal
+   VIX at LOW:
+   • From ABOVE → holds → VIX bounces UP   → SPX DOWN → PUTS
+   • From BELOW → holds → VIX rejected DOWN → SPX UP   → CALLS
+   
+   VIX at HIGH:
+   • From BELOW → holds → VIX rejected DOWN → SPX UP   → CALLS  
+   • From ABOVE → holds → VIX bounces UP   → SPX DOWN → PUTS
 
-THE UNIVERSAL RULE:
-   SPX ALWAYS moves OPPOSITE to VIX's bounce/rejection direction
-
-THE DECISION FLOW:
-------------------
-1. OVERNIGHT: ES futures touch/reject cone rails → determines ACTIVE cone
-
-2. 9-9:30am: VIX touches anchor → rejection direction = 10am SPX direction
-
-3. 10:00am: Enter at active cone rail in the direction VIX indicated
-
-4. ENTRY CONFIRMATION: 8/21 EMA cross on 1-min chart confirms entry timing
-
-5. TARGETS:
-   - First target: 50% of cone width (take partials)
-   - Full target: Opposite rail of the cone
+THE 7-POINT CHECKLIST:
+----------------------
+1. VIX-SPX CONFLUENCE - Did both touch key levels together? ★
+2. STRUCTURE - Is cone width adequate (25+ pts)?
+3. AT RAIL - Is SPX within 5 pts of a rail?
+4. DIRECTION MATCH - Does VIX direction match the rail type?
+5. TIMING - Are we in the 9-10am window?
+6. OVERNIGHT - Was the rail validated by ES overnight?
+7. R:R - Is expected profit worth the risk?
 
 KEY RULES:
 ----------
-- VIX rejection direction = OPPOSITE of SPX direction (this is the edge)
-- Only trade ACTIVE cone after overnight validation
+- CONFLUENCE = VIX touches anchor + SPX touches rail (SAME TIME)
+- Without confluence, the signal is incomplete - WAIT
 - No new entries after 1:30pm CT (theta decay too aggressive)
 - 3:1 minimum risk/reward ratio required
 - Skip broken overnight levels
@@ -3218,10 +3212,10 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     
     THE 7-POINT CHECKLIST:
     
-    1. VIX SIGNAL - Did VIX give us a direction? (THE KEY!)
+    1. VIX-SPX CONFLUENCE - Did VIX touch anchor while SPX touched rail? (THE KEY!)
     2. STRUCTURE - Is the cone structure valid?
     3. AT RAIL - Is price at an entry point?
-    4. CONFLUENCE - Do multiple rails converge here?
+    4. DIRECTION MATCH - Does VIX direction match the trade?
     5. TIMING - Are we in the right window?
     6. OVERNIGHT - Was the rail validated overnight?
     7. R:R - Does the math work?
@@ -3236,27 +3230,6 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     # Find nearest rail info
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
     cone_width = nearest_cone.ascending_rail - nearest_cone.descending_rail if nearest_cone else 0
-    
-    # Find confluence
-    zones_data = find_confluence_zones(cones)
-    calls_zones = zones_data.get('calls_confluence', [])
-    puts_zones = zones_data.get('puts_confluence', [])
-    
-    # Check if at confluence
-    at_confluence = False
-    confluence_strength = 0
-    if nearest_rail_type == 'descending':
-        for zone in calls_zones:
-            if abs(current_price - zone['price']) <= 10:
-                at_confluence = True
-                confluence_strength = zone.get('strength', len(zone.get('rails', [])))
-                break
-    elif nearest_rail_type == 'ascending':
-        for zone in puts_zones:
-            if abs(current_price - zone['price']) <= 10:
-                at_confluence = True
-                confluence_strength = zone.get('strength', len(zone.get('rails', [])))
-                break
     
     # Check overnight validation
     rail_validated = False
@@ -3283,24 +3256,27 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     
     checks = []
     
-    # 1. VIX SIGNAL (THE KEY!) ★
+    # 1. VIX-SPX CONFLUENCE (THE KEY!) ★
     vix_direction = None
-    vix_confirmed = False
+    vix_spx_confluence = False
     if vix_signal:
         vix_direction = vix_signal.get('trade_direction')
-        vix_confirmed = vix_signal.get('direction_confirmed', False)
+        vix_spx_confluence = vix_signal.get('direction_confirmed', False)  # This requires both VIX touch AND SPX rail touch
     
-    if vix_confirmed:
-        vix_ok = True
-        vix_detail = f"✓ {vix_direction} confirmed by VIX rejection"
+    if vix_spx_confluence:
+        confluence_ok = True
+        confluence_detail = f"✓ VIX + SPX rail touched together"
+    elif vix_signal and vix_signal.get('trade_direction'):
+        confluence_ok = False
+        confluence_detail = "VIX signaled, waiting for SPX rail touch"
     elif vix_signal and vix_signal.get('anchor_low', 0) > 0:
-        vix_ok = False
-        vix_detail = "Waiting for 9-9:30am signal"
+        confluence_ok = False
+        confluence_detail = "Waiting for VIX to touch anchor"
     else:
-        vix_ok = False
-        vix_detail = "Enter VIX data in sidebar"
+        confluence_ok = False
+        confluence_detail = "Enter VIX data in sidebar"
     
-    checks.append(("1. VIX Signal ★", vix_ok, vix_detail))
+    checks.append(("1. VIX-SPX Confluence ★", confluence_ok, confluence_detail))
     
     # 2. STRUCTURE INTEGRITY
     structure_ok = cone_width >= 25 and not rail_broken
@@ -3333,18 +3309,21 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     
     checks.append(("3. At Rail", entry_quality, entry_detail))
     
-    # 4. CONFLUENCE
-    if at_confluence and confluence_strength >= 3:
-        confluence_ok = True
-        confluence_detail = f"Strong - {confluence_strength} rails converge"
-    elif at_confluence:
-        confluence_ok = True
-        confluence_detail = f"Present - {confluence_strength} rails"
+    # 4. DIRECTION MATCH - Does VIX direction match nearest rail type?
+    # Descending rail = CALLS (buy), Ascending rail = PUTS (sell)
+    if vix_direction:
+        expected_direction = "CALLS" if nearest_rail_type == 'descending' else "PUTS"
+        if vix_direction == expected_direction:
+            direction_ok = True
+            direction_detail = f"✓ VIX says {vix_direction}, at {nearest_rail_type} rail"
+        else:
+            direction_ok = False
+            direction_detail = f"✗ VIX says {vix_direction}, but at {nearest_rail_type} rail"
     else:
-        confluence_ok = False
-        confluence_detail = "None - single rail only"
+        direction_ok = False
+        direction_detail = "Waiting for VIX direction"
     
-    checks.append(("4. Confluence", confluence_ok, confluence_detail))
+    checks.append(("4. Direction Match", direction_ok, direction_detail))
     
     # 5. TIMING
     is_930_window = time(9, 0) <= ct_time <= time(9, 45)
@@ -3404,19 +3383,23 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     passed_count = sum(1 for _, passed, _ in checks if passed)
     total_checks = len(checks)
     
-    # VIX is CRITICAL - must pass for strong setup
-    vix_passed = checks[0][1]
+    # VIX-SPX Confluence is CRITICAL
+    confluence_passed = checks[0][1]
+    direction_passed = checks[3][1]
     
-    # Overall assessment - VIX is weighted heavily
-    if vix_passed and passed_count >= 6:
+    # Overall assessment - Confluence + Direction are weighted heavily
+    if confluence_passed and direction_passed and passed_count >= 6:
         overall = "🟢 STRONG SETUP - GO"
         overall_color = "#22c55e"
-    elif vix_passed and passed_count >= 5:
+    elif confluence_passed and direction_passed and passed_count >= 5:
         overall = "🟡 GOOD SETUP"
         overall_color = "#eab308"
-    elif not vix_passed and passed_count >= 5:
-        overall = "🟠 WAIT FOR VIX"
+    elif not confluence_passed:
+        overall = "🟠 WAIT FOR CONFLUENCE"
         overall_color = "#f97316"
+    elif not direction_passed:
+        overall = "🔴 DIRECTION MISMATCH"
+        overall_color = "#ef4444"
     elif passed_count >= 4:
         overall = "🟠 MARGINAL"
         overall_color = "#f97316"
@@ -3436,14 +3419,14 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
         icon = "✓" if passed else "✗"
         color = "#22c55e" if passed else "#ef4444"
         bg = "#22c55e11" if passed else "#ef444411"
-        # Highlight VIX as the key item
-        is_vix = "VIX" in label
-        star = " ⭐" if is_vix and passed else ""
+        # Highlight key items
+        is_key = "Confluence" in label or "Direction" in label
+        star = " ⭐" if is_key and passed else ""
         st.markdown(f"""
         <div style="display: flex; align-items: center; padding: 0.5rem; margin: 0.25rem 0; 
-                    background: {bg}; border-radius: 6px; {'border: 2px solid ' + color + ';' if is_vix else ''}">
+                    background: {bg}; border-radius: 6px; {'border: 2px solid ' + color + ';' if is_key else ''}">
             <span style="color: {color}; font-size: 1.1rem; font-weight: bold; width: 1.5rem;">{icon}</span>
-            <span style="flex: 1; font-weight: {'700' if is_vix else '500'};">{label}</span>
+            <span style="flex: 1; font-weight: {'700' if is_key else '500'};">{label}</span>
             <span style="color: #64748b; font-size: 0.85rem;">{detail}{star}</span>
         </div>
         """, unsafe_allow_html=True)
@@ -3452,25 +3435,22 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     st.markdown("---")
     st.markdown("**💡 Key Insight:**")
     
-    if not vix_passed and vix_signal and vix_signal.get('anchor_low', 0) > 0:
-        st.warning("⏳ **Wait for 9-9:30am VIX signal.** Watch VIX touch anchor and observe rejection direction. This tells you the 10am trade direction.")
-    elif not vix_passed:
-        st.info("📝 **Enter VIX data in sidebar** to get the 10am direction signal.")
+    if not confluence_passed and not (vix_signal and vix_signal.get('anchor_low', 0) > 0):
+        st.info("📝 **Enter VIX data in sidebar** to enable confluence detection.")
+    elif not confluence_passed:
+        st.warning("⏳ **Wait for VIX-SPX confluence.** The signal fires when VIX touches its anchor AND SPX touches a cone rail at the same time.")
+    elif not direction_passed:
+        st.error(f"⚠️ **Direction mismatch!** VIX says {vix_direction} but you're at a {nearest_rail_type} rail. Wait for the correct rail.")
     elif rail_broken:
         st.error("Rail was broken overnight - structure is compromised. Wait for new setup.")
     elif not entry_quality:
         st.warning(f"Price is {nearest_distance:.1f} pts from nearest rail. Wait for price to reach the rail.")
-    elif vix_passed and at_confluence and rail_validated:
-        direction_text = "CALLS" if vix_direction == "CALLS" else "PUTS"
-        st.success(f"🎯 **STRONG SETUP:** VIX confirmed {direction_text} + Confluence + Overnight validation. This is your highest probability trade!")
-    elif vix_passed and at_confluence:
-        direction_text = "CALLS" if vix_direction == "CALLS" else "PUTS"
-        st.success(f"✅ **GOOD SETUP:** VIX confirmed {direction_text} + Confluence. Go with standard size.")
-    elif vix_passed:
-        direction_text = "CALLS" if vix_direction == "CALLS" else "PUTS"
-        st.info(f"👍 **VIX says {direction_text}** but missing confluence/validation. Consider reduced size.")
+    elif confluence_passed and direction_passed and rail_validated:
+        st.success(f"🎯 **PERFECT SETUP:** VIX-SPX confluence + Direction match + Overnight validation. This is your A+ trade!")
+    elif confluence_passed and direction_passed:
+        st.success(f"✅ **STRONG SETUP:** VIX-SPX confluence confirmed for {vix_direction}. Execute with confidence.")
     else:
-        st.warning("Setup incomplete. Wait for more confirmation.")
+        st.info("Setup developing. Monitor for confluence.")
 
 def highlight_times(row):
     if row['Time'] in ['08:30', '10:00']:
@@ -3637,8 +3617,8 @@ def main():
         st.markdown("### 📊 VIX Leading Indicator")
         st.caption("The KEY to 10am direction (from TradingView VX1!)")
         
-        # Step 1: Anchor levels from 5pm-12am prior evening
-        st.markdown("**Step 1: Overnight Anchors (5pm-12am)**")
+        # Step 1: Anchor levels from 5pm-2am prior evening
+        st.markdown("**Step 1: Overnight Anchors (5pm-2am)**")
         vix_col1, vix_col2 = st.columns(2)
         with vix_col1:
             st.session_state.vix_anchor_low = st.number_input(
@@ -3648,7 +3628,7 @@ def main():
                 value=st.session_state.vix_anchor_low,
                 step=0.01,
                 format="%.2f",
-                help="Lowest VIX CLOSE between 5pm-12am CT"
+                help="Lowest VIX CLOSE between 5pm-2am CT"
             )
         with vix_col2:
             st.session_state.vix_anchor_high = st.number_input(
@@ -3658,7 +3638,7 @@ def main():
                 value=st.session_state.vix_anchor_high,
                 step=0.01,
                 format="%.2f",
-                help="Highest VIX CLOSE between 5pm-12am CT"
+                help="Highest VIX CLOSE between 5pm-2am CT"
             )
         
         # Step 2: 2-3am break check
@@ -3672,44 +3652,42 @@ def main():
             help="Check if VIX broke through anchor low or high during 2-3am CT"
         )
         
-        # Step 3: 9-9:30am LEADING SIGNAL (the key!)
-        st.markdown("**Step 3: 9-9:30am Signal ⭐ THE KEY**")
+        # Step 3: 9-9:30am VIX TOUCH + SPX RAIL CONFLUENCE
+        st.markdown("**Step 3: 9-9:30am VIX-SPX Confluence ⭐**")
+        st.caption("VIX touch + SPX rail touch = SIGNAL")
         
-        # Different options based on whether anchors held or broke
-        if st.session_state.vix_2_3am_status == "Anchors Held":
-            signal_options = [
-                "⏳ Waiting for signal",
-                "📈 Touched LOW → Rejected UP (SPX will DROP = PUTS)",
-                "📉 Touched HIGH → Rejected DOWN (SPX will RISE = CALLS)"
-            ]
-        elif st.session_state.vix_2_3am_status == "Broke Below Low":
-            signal_options = [
-                "⏳ Waiting for retest",
-                "📈 Retested LOW from below → Rejected DOWN (SPX will RISE = CALLS)",
-                "📉 Retested LOW from below → Broke back above (SPX will DROP = PUTS)"
-            ]
-        elif st.session_state.vix_2_3am_status == "Broke Above High":
-            signal_options = [
-                "⏳ Waiting for retest",
-                "📉 Retested HIGH from above → Rejected UP (SPX will DROP = PUTS)",
-                "📈 Retested HIGH from above → Broke back below (SPX will RISE = CALLS)"
-            ]
-        else:  # Broke Both
-            signal_options = [
-                "⏳ Waiting for retest",
-                "📈 VIX rejected UP at any level (SPX will DROP = PUTS)",
-                "📉 VIX rejected DOWN at any level (SPX will RISE = CALLS)"
-            ]
+        # VIX touch options based on support/resistance logic
+        signal_options = [
+            "⏳ Waiting for confluence",
+            "📉 VIX touched LOW from above → held (bounce UP) → SPX DOWN = PUTS",
+            "📈 VIX touched LOW from below → held (rejected DOWN) → SPX UP = CALLS",
+            "📈 VIX touched HIGH from below → held (rejected DOWN) → SPX UP = CALLS",
+            "📉 VIX touched HIGH from above → held (bounce UP) → SPX DOWN = PUTS",
+        ]
+        
+        # Add retest options if 2-3am broke
+        if st.session_state.vix_2_3am_status != "Anchors Held":
+            signal_options.extend([
+                "🔄 VIX retesting broken level → rejected → continuation",
+                "🔄 VIX retesting broken level → broke back through → reversal"
+            ])
         
         # Initialize if not exists or invalid
         if 'vix_930_signal' not in st.session_state or st.session_state.vix_930_signal not in signal_options:
             st.session_state.vix_930_signal = signal_options[0]
         
         st.session_state.vix_930_signal = st.selectbox(
-            "9-9:30am VIX Action",
+            "VIX Touch Action (when SPX at rail)",
             options=signal_options,
             index=signal_options.index(st.session_state.vix_930_signal) if st.session_state.vix_930_signal in signal_options else 0,
-            help="Watch VIX touch the anchor and observe rejection direction. SPX moves OPPOSITE."
+            help="Select when VIX touches anchor AND SPX touches a cone rail simultaneously"
+        )
+        
+        # SPX Rail Touch confirmation
+        st.session_state.spx_rail_touched = st.checkbox(
+            "✓ SPX touched cone rail at same time",
+            value=st.session_state.get('spx_rail_touched', False),
+            help="Confirm that SPX was at a cone rail when VIX touched its anchor"
         )
         
         # Current VIX (optional)
@@ -3727,32 +3705,39 @@ def main():
         if st.session_state.vix_anchor_low > 0 and st.session_state.vix_anchor_high > 0:
             # Determine the 10am trade direction based on 9-9:30am signal
             signal_930 = st.session_state.vix_930_signal
+            spx_rail_touched = st.session_state.get('spx_rail_touched', False)
             
             # Parse the signal to determine direction
-            if "PUTS" in signal_930:
+            # Only confirmed if BOTH VIX touched anchor AND SPX touched rail
+            if "PUTS" in signal_930 and spx_rail_touched:
                 trade_direction = "PUTS"
                 direction_confirmed = True
-                signal_status = "CONFIRMED"
                 sell_signal = "CONFIRMED"
                 buy_signal = "AVOID"
-                sell_message = "VIX rejected UP → SPX will DROP. PUTS confirmed."
-                buy_message = "VIX signal suggests downside. Avoid CALLS."
-            elif "CALLS" in signal_930:
+                sell_message = "VIX + SPX confluence confirmed. PUTS signal."
+                buy_message = "VIX signal favors downside. Avoid CALLS."
+            elif "CALLS" in signal_930 and spx_rail_touched:
                 trade_direction = "CALLS"
                 direction_confirmed = True
-                signal_status = "CONFIRMED"
                 sell_signal = "AVOID"
                 buy_signal = "CONFIRMED"
-                sell_message = "VIX signal suggests upside. Avoid PUTS."
-                buy_message = "VIX rejected DOWN → SPX will RISE. CALLS confirmed."
+                sell_message = "VIX signal favors upside. Avoid PUTS."
+                buy_message = "VIX + SPX confluence confirmed. CALLS signal."
+            elif "PUTS" in signal_930 or "CALLS" in signal_930:
+                # VIX signal but no SPX rail touch yet
+                trade_direction = "PUTS" if "PUTS" in signal_930 else "CALLS"
+                direction_confirmed = False
+                sell_signal = "WAITING"
+                buy_signal = "WAITING"
+                sell_message = "VIX signaled but waiting for SPX rail touch."
+                buy_message = "VIX signaled but waiting for SPX rail touch."
             else:
                 trade_direction = None
                 direction_confirmed = False
-                signal_status = "WAITING"
                 sell_signal = "WATCHING"
                 buy_signal = "WATCHING"
-                sell_message = "Waiting for 9-9:30am VIX signal."
-                buy_message = "Waiting for 9-9:30am VIX signal."
+                sell_message = "Waiting for 9-9:30am VIX-SPX confluence."
+                buy_message = "Waiting for 9-9:30am VIX-SPX confluence."
             
             # Check if this is a retest scenario
             is_retest = st.session_state.vix_2_3am_status != "Anchors Held"
@@ -3764,6 +3749,7 @@ def main():
                 'anchor_high_time': None,
                 'vix_2_3am_status': st.session_state.vix_2_3am_status,
                 'vix_930_signal': st.session_state.vix_930_signal,
+                'spx_rail_touched': spx_rail_touched,
                 'trade_direction': trade_direction,
                 'direction_confirmed': direction_confirmed,
                 'is_retest': is_retest,
@@ -3772,7 +3758,6 @@ def main():
                 'buy_signal': buy_signal,
                 'sell_message': sell_message,
                 'buy_message': buy_message,
-                'signal_status': signal_status,
                 'data_source': 'MANUAL'
             }
         
@@ -4391,7 +4376,7 @@ def main():
         st.markdown("""
         <div class="section-header">
             <div class="section-icon">📊</div>
-            <div class="section-title">VIX Leading Indicator — 10am Direction Signal</div>
+            <div class="section-title">VIX-SPX Confluence — Direction Signal</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -4400,7 +4385,7 @@ def main():
             st.markdown("""
             <div style="background: #dbeafe; border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
                 <div style="font-weight: 600; color: #1e40af; font-size: 0.9rem;">📝 Enter VIX Data in Sidebar</div>
-                <div style="color: #1e3a8a; font-size: 0.8rem; margin-top: 8px;">Enter VIX anchor levels from TradingView (VX1!) to get the 10am direction signal.</div>
+                <div style="color: #1e3a8a; font-size: 0.8rem; margin-top: 8px;">Enter VIX anchor levels from TradingView (VX1!) to enable confluence detection.</div>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -4408,29 +4393,37 @@ def main():
             trade_direction = vix_signal.get('trade_direction')
             direction_confirmed = vix_signal.get('direction_confirmed', False)
             signal_930 = vix_signal.get('vix_930_signal', '⏳ Waiting')
+            spx_rail_touched = vix_signal.get('spx_rail_touched', False)
             is_retest = vix_signal.get('is_retest', False)
             vix_2_3am = vix_signal.get('vix_2_3am_status', 'Anchors Held')
             
-            # Determine main signal display
-            if direction_confirmed:
+            # Determine main signal display based on CONFLUENCE (both VIX + SPX)
+            if direction_confirmed:  # Both VIX touched anchor AND SPX touched rail
                 if trade_direction == "PUTS":
                     main_color = "#ef4444"  # Red for puts
                     main_bg = "#fef2f2"
                     main_icon = "🔴"
-                    main_text = "SELL DIRECTION (PUTS)"
-                    sub_text = "VIX rejected UP → SPX will DROP"
+                    main_text = "CONFLUENCE: PUTS"
+                    sub_text = "VIX + SPX rail touched together → SHORT signal"
                 else:
                     main_color = "#10b981"  # Green for calls
                     main_bg = "#d1fae5"
                     main_icon = "🟢"
-                    main_text = "BUY DIRECTION (CALLS)"
-                    sub_text = "VIX rejected DOWN → SPX will RISE"
+                    main_text = "CONFLUENCE: CALLS"
+                    sub_text = "VIX + SPX rail touched together → LONG signal"
+            elif trade_direction and not spx_rail_touched:
+                # VIX signaled but SPX not at rail yet
+                main_color = "#f59e0b"
+                main_bg = "#fef3c7"
+                main_icon = "⚠️"
+                main_text = f"VIX SAYS {trade_direction} — WAIT FOR SPX RAIL"
+                sub_text = "VIX touched anchor but SPX not at cone rail yet"
             else:
                 main_color = "#6b7280"
                 main_bg = "#f3f4f6"
                 main_icon = "⏳"
-                main_text = "WAITING FOR 9-9:30am SIGNAL"
-                sub_text = "Watch VIX touch anchor and observe rejection direction"
+                main_text = "WAITING FOR CONFLUENCE"
+                sub_text = "Watch for VIX + SPX to touch levels together"
             
             # Build the HTML
             retest_badge = '<span style="background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; margin-left: 8px;">RETEST SCENARIO</span>' if is_retest else ''
