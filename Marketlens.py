@@ -4057,17 +4057,28 @@ def main():
                 low_time = CT_TZ.localize(datetime.combine(prior_date, time(13, 45)))
             close_time = CT_TZ.localize(datetime.combine(prior_date, time(15, 0)))
         
-        if es_data and es_data.get('offset'):
+        if es_data:
             st.markdown("---")
             st.markdown("### 🔄 ES-SPX Offset")
-            st.metric("Offset", f"{es_data['offset']:.2f} pts")
+            manual_offset_val = st.session_state.get('manual_es_offset', 8.0)
+            st.metric("Offset (Manual)", f"{manual_offset_val:.2f} pts")
             
             # DEBUG: Show overnight values for cone detection
             with st.expander("🔍 Overnight ES Data"):
                 if es_data.get('overnight_high_spx'):
-                    st.caption(f"**Overnight High (SPX):** {es_data['overnight_high_spx']:.2f}")
-                    st.caption(f"**Overnight Low (SPX):** {es_data['overnight_low_spx']:.2f}")
-                    st.caption(f"**Overnight Range:** {es_data.get('overnight_range', 0):.2f} pts")
+                    # Recalculate overnight SPX using manual offset
+                    es_overnight_high = es_data.get('overnight_high')
+                    es_overnight_low = es_data.get('overnight_low')
+                    if es_overnight_high and es_overnight_low:
+                        overnight_high_spx = es_overnight_high - manual_offset_val
+                        overnight_low_spx = es_overnight_low - manual_offset_val
+                        st.caption(f"**Overnight High (SPX):** {overnight_high_spx:.2f}")
+                        st.caption(f"**Overnight Low (SPX):** {overnight_low_spx:.2f}")
+                        st.caption(f"**Overnight Range:** {es_overnight_high - es_overnight_low:.2f} pts")
+                    else:
+                        st.caption(f"**Overnight High (SPX):** {es_data['overnight_high_spx']:.2f}")
+                        st.caption(f"**Overnight Low (SPX):** {es_data['overnight_low_spx']:.2f}")
+                        st.caption(f"**Overnight Range:** {es_data.get('overnight_range', 0):.2f} pts")
                     st.caption(f"**ES Current:** {es_data.get('current', 'N/A')}")
                 else:
                     st.caption("No overnight data available")
@@ -4256,14 +4267,17 @@ def main():
     is_market_open = not is_weekend and market_open_time <= ct_time.time() <= market_close_time
     
     # Determine display price (use ES-derived when market closed)
+    # Get manual offset for ES-SPX conversion
+    manual_offset = st.session_state.get('manual_es_offset', 8.0)
+    
     if is_market_open:
         display_price = current_price
         price_label = "SPX Index"
         market_status = "LIVE"
     else:
-        # Use ES-derived SPX if available
-        if es_data and es_data.get('current') and es_data.get('offset'):
-            display_price = es_data['current'] - es_data['offset']
+        # Use ES-derived SPX with manual offset
+        if es_data and es_data.get('current'):
+            display_price = es_data['current'] - manual_offset
             price_label = "SPX (from ES)"
             market_status = "FUTURES"
         else:
@@ -4326,17 +4340,19 @@ def main():
     # ==========================================================================
     # OVERNIGHT ES DATA (shows SPX implied from ES futures)
     # ==========================================================================
-    if es_data and es_data.get('current') and es_data.get('offset'):
+    # Use manual offset from session state
+    manual_offset = st.session_state.get('manual_es_offset', 8.0)
+    
+    if es_data and es_data.get('current'):
         es_current = es_data['current']
-        es_offset = es_data['offset']
-        spx_implied = es_current - es_offset
+        spx_implied = es_current - manual_offset
         
         st.markdown("#### 📊 ES Futures → SPX Implied")
         es_c1, es_c2, es_c3 = st.columns(3)
         with es_c1:
             st.metric("ES Futures", f"{es_current:,.2f}")
         with es_c2:
-            st.metric("Offset", f"{es_offset:+.2f}")
+            st.metric("Offset (Manual)", f"{manual_offset:+.2f}")
         with es_c3:
             st.metric("SPX Implied", f"{spx_implied:,.2f}")
     
