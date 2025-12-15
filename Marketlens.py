@@ -3522,6 +3522,17 @@ def main():
         current_price = fetch_current_spx() or (prior_session['close'] if prior_session else 6000)
         first_bar = fetch_first_30min_bar(session_date)
         
+        # IMPORTANT: Recalculate overnight SPX values using MANUAL offset
+        # The auto-calculated offset from Yahoo is often wrong
+        manual_offset = st.session_state.get('manual_es_offset', 8.0)
+        if es_data and es_data.get('overnight_high') is not None:
+            es_data['overnight_high_spx'] = es_data['overnight_high'] - manual_offset
+            es_data['overnight_low_spx'] = es_data['overnight_low'] - manual_offset
+            if es_data.get('pre_rth_high') is not None:
+                es_data['pre_rth_high_spx'] = es_data['pre_rth_high'] - manual_offset
+                es_data['pre_rth_low_spx'] = es_data['pre_rth_low'] - manual_offset
+            es_data['offset'] = manual_offset  # Update offset to manual value
+        
         # VIX Signal - Manual input since Yahoo is unreliable
         vix_signal = None  # Will be built from manual inputs
         
