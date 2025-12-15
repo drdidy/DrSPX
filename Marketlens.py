@@ -1,7 +1,70 @@
 """
 SPX Prophet - Where Structure Becomes Foresight
 LEGENDARY EDITION
-A professional institutional-grade SPX trading assistant
+A professional institutional-grade SPX 0DTE trading assistant
+
+================================================================================
+TRADING STRATEGY SUMMARY
+================================================================================
+
+THE CORE CONCEPT:
+-----------------
+This system uses "structural cones" projected from the prior day's High, Low, and 
+Close pivots to identify high-probability reversal zones for 0DTE SPX options.
+
+HOW IT WORKS:
+-------------
+1. PIVOTS: At 8:30am CT market open, we take the prior session's:
+   - HIGH (wick high - rejection level)
+   - LOW (close low - commitment level)  
+   - CLOSE (settlement price)
+
+2. CONES: Each pivot projects two rails:
+   - Ascending rail: +0.45 pts per 30-min block (support becomes stronger over time)
+   - Descending rail: -0.45 pts per 30-min block (resistance becomes weaker over time)
+
+3. CONFLUENCE: Where multiple rails converge within 5 pts = high-probability zone
+
+4. ENTRY SIGNALS:
+   - BUY (Calls): Price touches descending rail confluence, 8 EMA crosses above 21 EMA
+   - SELL (Puts): Price touches ascending rail confluence, 8 EMA crosses below 21 EMA
+
+THE DECISION FLOW:
+------------------
+1. OVERNIGHT (5pm-8:30am): Check which cone rails ES futures touched/rejected
+   - Touched & held = that cone is ACTIVE for the day
+   - Broke through = that cone is BROKEN, skip it
+
+2. VIX CONFIRMATION (Manual input from TradingView VX1!):
+   - Find anchor low/high between 5pm-12am
+   - Check if 2-3am broke the anchor
+   - After 6:30am, confirm anchor still holds
+   - CONFIRMED = GO | INVALIDATED = NO-GO | RETEST = Watch 10am
+
+3. 10:00am DECISION: Active cone determines primary trade direction
+   - High cone active → SELL setups prioritized (fade the high)
+   - Low cone active → BUY setups prioritized (bounce from low)
+   - Close cone → Both directions valid (mean reversion)
+
+4. ENTRY EXECUTION:
+   - Wait for price to touch the rail
+   - Wait for 8/21 EMA cross confirmation on 1-min chart
+   - Enter with 15-20pt OTM strike, stop 3pts from entry
+
+5. TARGETS:
+   - First target: 50% of cone width (take partials)
+   - Full target: Opposite rail of the cone
+   - Use 70-75% follow-through if 8:30am already touched the zone
+
+KEY RULES:
+----------
+- Only trade ACTIVE cone after overnight validation
+- VIX confirmation required for Close cone trades
+- No new entries after 1:30pm CT (theta decay too aggressive)
+- 3:1 minimum risk/reward ratio required
+- Skip broken overnight levels
+
+================================================================================
 """
 
 import streamlit as st
@@ -232,7 +295,7 @@ def fetch_1min_data_for_ema() -> Optional[pd.DataFrame]:
             return None
         df.index = df.index.tz_convert(CT_TZ)
         return df
-    except:
+    except Exception:
         return None
 
 def calculate_emas(df: pd.DataFrame) -> Tuple[float, float, bool, bool]:
@@ -508,11 +571,6 @@ def render_alert_trigger(alert_level: str, setup_id: str, message: str):
         </script>
         """
     return ""
-
-def to_ct(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        dt = ET_TZ.localize(dt)
-    return dt.astimezone(CT_TZ)
 
 def count_30min_blocks(start_time: datetime, end_time: datetime) -> int:
     """
@@ -926,7 +984,7 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
                         offset = calculated_offset
                     else:
                         offset = 8  # Default if calculation seems wrong
-            except:
+            except Exception:
                 offset = 8  # Default spread
         
         overnight_start = CT_TZ.localize(datetime.combine(prior_date, time(17, 0)))
@@ -1005,405 +1063,6 @@ def fetch_es_overnight_data(session_date: datetime) -> Optional[Dict]:
 # - Vice versa for BUY signals using Anchor High
 
 @st.cache_data(ttl=60)
-def fetch_vix_overnight_signal(session_date: datetime) -> Optional[Dict]:
-    """
-    Fetch VIX overnight data and generate trading signal.
-    
-    For TODAY: Uses VX=F (VIX futures) - trades overnight
-    For HISTORICAL: Falls back to ^VIX (spot VIX) if futures unavailable
-    
-    Returns dict with:
-    - anchor_low: Lowest CLOSE between 5pm-12am
-    - anchor_low_time: When the anchor low occurred
-    - anchor_high: Highest CLOSE between 5pm-12am
-    - anchor_high_time: When the anchor high occurred
-    - test_2_3am_low: Lowest close during 2-3am window
-    - test_2_3am_high: Highest close during 2-3am window
-    - post_630_low: Lowest close after 6:30am
-    - post_630_high: Highest close after 6:30am
-    - current_vix: Current VIX price
-    - sell_signal: 'CONFIRMED', 'INVALIDATED', 'RETEST', or None
-    - buy_signal: 'CONFIRMED', 'INVALIDATED', 'RETEST', or None
-    - signal_message: Human readable explanation
-    - data_source: 'VX=F' or '^VIX'
-    """
-    try:
-        ct_now = get_ct_now()
-        is_today = session_date.date() == ct_now.date()
-        
-        # For VIX overnight, we need the CALENDAR day before (not trading day)
-        # Monday's anchor comes from Sunday 5pm-12am
-        # Tuesday's anchor comes from Monday 5pm-12am
-        # etc.
-        prior_date = session_date - timedelta(days=1)
-        
-        # Note: We do NOT skip weekends here because:
-        # - Monday's VIX anchor is Sunday 5pm-12am (futures trade Sunday evening)
-        # - For Saturday/Sunday session_date (which shouldn't happen), we'd look at Fri/Sat
-        
-        start_date = prior_date.strftime('%Y-%m-%d')
-        end_date = (session_date + timedelta(days=1)).strftime('%Y-%m-%d')
-        
-        df_vx = pd.DataFrame()
-        data_source = "VX=F"
-        
-        # Try VIX futures first (best for overnight data)
-        try:
-            vx = yf.Ticker("VX=F")
-            df_vx = vx.history(start=start_date, end=end_date, interval='30m')
-            if df_vx.empty:
-                df_vx = vx.history(start=start_date, end=end_date, interval='1h')
-        except:
-            pass
-        
-        # If futures empty, try spot VIX (more historical data available)
-        if df_vx.empty:
-            try:
-                vix_spot = yf.Ticker("^VIX")
-                # Spot VIX only trades during market hours, so we need daily data for overnight approximation
-                # Get intraday data if available
-                df_vx = vix_spot.history(start=start_date, end=end_date, interval='30m')
-                if df_vx.empty:
-                    df_vx = vix_spot.history(start=start_date, end=end_date, interval='1h')
-                if not df_vx.empty:
-                    data_source = "^VIX"
-            except:
-                pass
-        
-        # If still empty, try with extended date range
-        if df_vx.empty:
-            try:
-                extended_start = (prior_date - timedelta(days=7)).strftime('%Y-%m-%d')
-                vix_spot = yf.Ticker("^VIX")
-                df_vx = vix_spot.history(start=extended_start, end=end_date, interval='1h')
-                if not df_vx.empty:
-                    data_source = "^VIX"
-            except:
-                pass
-        
-        # If still empty, return no data
-        if df_vx.empty:
-            return {
-                'error': 'No VIX data available',
-                'anchor_low': 0, 'anchor_low_time': None,
-                'anchor_high': 0, 'anchor_high_time': None,
-                'test_2_3am_low': None, 'test_2_3am_high': None,
-                'anchor_low_broken_2_3am': False, 'anchor_high_broken_2_3am': False,
-                'post_630_low': None, 'post_630_high': None,
-                'post_630_low_time': None, 'post_630_high_time': None,
-                'anchor_low_broken_post_630': False, 'anchor_high_broken_post_630': False,
-                'current_vix': 0,
-                'sell_signal': 'NO DATA', 'buy_signal': 'NO DATA',
-                'sell_message': 'VIX data not available for this date',
-                'buy_message': 'VIX data not available for this date',
-                'retest_level': None, 'retest_type': None,
-                'data_source': None
-            }
-        
-        # Convert to CT timezone
-        df_vx_ct = df_vx.copy()
-        if df_vx_ct.index.tz is None:
-            df_vx_ct.index = df_vx_ct.index.tz_localize('UTC')
-        df_vx_ct.index = df_vx_ct.index.tz_convert(CT_TZ)
-        
-        # =================================================================
-        # STEP 1: Find Anchor Low/High (5pm - 12am CT)
-        # =================================================================
-        anchor_start = CT_TZ.localize(datetime.combine(prior_date, time(17, 0)))
-        anchor_end = CT_TZ.localize(datetime.combine(session_date, time(0, 0)))
-        
-        # Debug: Get data range info
-        data_start_time = df_vx_ct.index.min() if not df_vx_ct.empty else None
-        data_end_time = df_vx_ct.index.max() if not df_vx_ct.empty else None
-        total_rows = len(df_vx_ct)
-        
-        anchor_mask = (df_vx_ct.index >= anchor_start) & (df_vx_ct.index < anchor_end)
-        df_anchor = df_vx_ct[anchor_mask]
-        
-        # Check if anchor window is still in progress (current time is between 5pm and 12am)
-        ct_now = get_ct_now()
-        anchor_in_progress = (ct_now >= anchor_start and ct_now < anchor_end)
-        
-        # Debug info to include in all returns
-        debug_info = {
-            'debug_data_rows': total_rows,
-            'debug_data_start': str(data_start_time) if data_start_time else 'None',
-            'debug_data_end': str(data_end_time) if data_end_time else 'None',
-            'debug_anchor_start': str(anchor_start),
-            'debug_anchor_end': str(anchor_end),
-            'debug_anchor_rows': len(df_anchor),
-            'debug_anchor_in_progress': anchor_in_progress
-        }
-        
-        if df_anchor.empty:
-            if anchor_in_progress:
-                # Anchor window is currently building - use whatever data we have so far
-                # Look for any data from 5pm onwards today
-                partial_mask = df_vx_ct.index >= anchor_start
-                df_partial = df_vx_ct[partial_mask]
-                
-                if not df_partial.empty:
-                    # Show partial anchor data
-                    anchor_low = float(df_partial['Close'].min())
-                    anchor_high = float(df_partial['Close'].max())
-                    anchor_low_time = df_partial['Close'].idxmin()
-                    anchor_high_time = df_partial['Close'].idxmax()
-                else:
-                    anchor_low = 0
-                    anchor_high = 0
-                    anchor_low_time = None
-                    anchor_high_time = None
-                
-                return {
-                    'anchor_low': anchor_low,
-                    'anchor_low_time': anchor_low_time,
-                    'anchor_high': anchor_high,
-                    'anchor_high_time': anchor_high_time,
-                    'test_2_3am_low': None,
-                    'test_2_3am_high': None,
-                    'anchor_low_broken_2_3am': False,
-                    'anchor_high_broken_2_3am': False,
-                    'post_630_low': None,
-                    'post_630_high': None,
-                    'post_630_low_time': None,
-                    'post_630_high_time': None,
-                    'anchor_low_broken_post_630': False,
-                    'anchor_high_broken_post_630': False,
-                    'current_vix': float(df_partial['Close'].iloc[-1]) if not df_partial.empty else 0,
-                    'sell_signal': 'BUILDING',
-                    'buy_signal': 'BUILDING',
-                    'sell_message': f'Anchor window in progress (5pm-12am). Current low: {anchor_low:.2f}' if anchor_low > 0 else 'Anchor window in progress. Waiting for VIX futures data...',
-                    'buy_message': f'Anchor window in progress (5pm-12am). Current high: {anchor_high:.2f}' if anchor_high > 0 else 'Anchor window in progress. Waiting for VIX futures data...',
-                    'retest_level': None,
-                    'retest_type': None,
-                    'data_source': data_source,
-                    **debug_info
-                }
-            else:
-                # No data available for the anchor window
-                return {
-                    'error': f'No anchor data. Data range: {data_start_time} to {data_end_time}. Looking for: {anchor_start} to {anchor_end}',
-                    'anchor_low': 0, 'anchor_low_time': None,
-                    'anchor_high': 0, 'anchor_high_time': None,
-                    'test_2_3am_low': None, 'test_2_3am_high': None,
-                    'anchor_low_broken_2_3am': False, 'anchor_high_broken_2_3am': False,
-                    'post_630_low': None, 'post_630_high': None,
-                    'post_630_low_time': None, 'post_630_high_time': None,
-                    'anchor_low_broken_post_630': False, 'anchor_high_broken_post_630': False,
-                    'current_vix': 0,
-                    'sell_signal': 'NO DATA', 'buy_signal': 'NO DATA',
-                    'sell_message': 'No VIX anchor data available for this date',
-                    'buy_message': 'No VIX anchor data available for this date',
-                    'retest_level': None, 'retest_type': None,
-                    'data_source': data_source,
-                    **debug_info
-                }
-        
-        # Find lowest and highest CLOSE in anchor window
-        anchor_low_idx = df_anchor['Close'].idxmin()
-        anchor_high_idx = df_anchor['Close'].idxmax()
-        anchor_low = float(df_anchor.loc[anchor_low_idx, 'Close'])
-        anchor_high = float(df_anchor.loc[anchor_high_idx, 'Close'])
-        anchor_low_time = anchor_low_idx
-        anchor_high_time = anchor_high_idx
-        
-        # =================================================================
-        # STEP 2: Check 2am-3am Test Window
-        # =================================================================
-        test_start = CT_TZ.localize(datetime.combine(session_date, time(2, 0)))
-        test_end = CT_TZ.localize(datetime.combine(session_date, time(3, 0)))
-        
-        test_mask = (df_vx_ct.index >= test_start) & (df_vx_ct.index <= test_end)
-        df_test = df_vx_ct[test_mask]
-        
-        test_2_3am_low = None
-        test_2_3am_high = None
-        anchor_low_broken_2_3am = False
-        anchor_high_broken_2_3am = False
-        
-        if not df_test.empty:
-            test_2_3am_low = float(df_test['Close'].min())
-            test_2_3am_high = float(df_test['Close'].max())
-            
-            # Check if anchor was broken during 2-3am
-            # "Broken" = closed below anchor low (or above anchor high) AND stayed there
-            closes_below_anchor_low = (df_test['Close'] < anchor_low).sum()
-            closes_above_anchor_high = (df_test['Close'] > anchor_high).sum()
-            
-            # If majority of 2-3am closes are below anchor = drastically broken
-            if closes_below_anchor_low >= 2:  # At least 2 closes below = drastic break
-                anchor_low_broken_2_3am = True
-            if closes_above_anchor_high >= 2:
-                anchor_high_broken_2_3am = True
-        
-        # =================================================================
-        # STEP 3: Check Post-6:30am Behavior
-        # =================================================================
-        post_630_start = CT_TZ.localize(datetime.combine(session_date, time(6, 30)))
-        ct_now = get_ct_now()
-        
-        # Determine the evaluation end time:
-        # - For today: use current time
-        # - For past dates: use end of RTH (4:00 PM CT) to see full day
-        # - For future dates: no data available
-        is_today = session_date.date() == ct_now.date()
-        is_past = session_date.date() < ct_now.date()
-        
-        if is_today:
-            eval_end_time = ct_now
-        elif is_past:
-            # For historical dates, evaluate until end of RTH
-            eval_end_time = CT_TZ.localize(datetime.combine(session_date, time(16, 0)))
-        else:
-            # Future date - no data
-            eval_end_time = post_630_start  # Won't have data anyway
-        
-        # Check post-6:30am window
-        if is_past or (is_today and ct_now >= post_630_start):
-            post_630_mask = (df_vx_ct.index >= post_630_start) & (df_vx_ct.index <= eval_end_time)
-            df_post_630 = df_vx_ct[post_630_mask]
-        else:
-            df_post_630 = pd.DataFrame()
-        
-        post_630_low = None
-        post_630_high = None
-        anchor_low_broken_post_630 = False
-        anchor_high_broken_post_630 = False
-        post_630_low_time = None
-        post_630_high_time = None
-        
-        if not df_post_630.empty:
-            post_630_low = float(df_post_630['Close'].min())
-            post_630_high = float(df_post_630['Close'].max())
-            post_630_low_time = df_post_630['Close'].idxmin()
-            post_630_high_time = df_post_630['Close'].idxmax()
-            
-            # Check if new low/high made after 6:30am
-            if post_630_low < anchor_low:
-                anchor_low_broken_post_630 = True
-            if post_630_high > anchor_high:
-                anchor_high_broken_post_630 = True
-        
-        # =================================================================
-        # STEP 4: Get Current/Final VIX
-        # =================================================================
-        # For historical dates, get the VIX at market close
-        if is_past:
-            # Get VIX at end of RTH for that day
-            rth_end = CT_TZ.localize(datetime.combine(session_date, time(15, 0)))
-            rth_mask = df_vx_ct.index <= rth_end
-            df_rth = df_vx_ct[rth_mask]
-            current_vix = float(df_rth['Close'].iloc[-1]) if not df_rth.empty else None
-        else:
-            current_vix = float(df_vx_ct['Close'].iloc[-1]) if not df_vx_ct.empty else None
-        
-        # =================================================================
-        # STEP 5: Generate Signals
-        # =================================================================
-        sell_signal = None
-        buy_signal = None
-        sell_message = ""
-        buy_message = ""
-        retest_level = None
-        retest_type = None
-        
-        # For historical/today evaluation, check if we're past 6:30am
-        past_630 = is_past or (is_today and ct_now >= post_630_start)
-        
-        # ----- SELL SIGNAL (VIX Low holds = SPX rejection at resistance) -----
-        if anchor_low_broken_2_3am:
-            # Anchor broke drastically at 2-3am = RETEST setup
-            sell_signal = 'RETEST'
-            sell_message = f"VIX broke anchor low ({anchor_low:.2f}) at 2-3am. Watch for retest at 10am - if rejected, SPX drops further."
-            retest_level = anchor_low
-            retest_type = 'LOW'
-        elif anchor_low_broken_post_630:
-            # Anchor broke after 6:30am = INVALIDATED
-            sell_signal = 'INVALIDATED'
-            sell_message = f"VIX made new low ({post_630_low:.2f}) after 6:30am, breaking anchor ({anchor_low:.2f}). SELL at CCA invalidated - possible breakout day."
-        elif past_630:
-            # Anchor held = CONFIRMED
-            sell_signal = 'CONFIRMED'
-            sell_message = f"VIX anchor low ({anchor_low:.2f}) held overnight. SELL at Close Cone ▲ confirmed."
-        else:
-            # Before 6:30am - still watching
-            sell_signal = 'WATCHING'
-            sell_message = f"VIX anchor low: {anchor_low:.2f}. Waiting for 6:30am confirmation."
-        
-        # ----- BUY SIGNAL (VIX High holds = SPX bounce at support) -----
-        if anchor_high_broken_2_3am:
-            # Anchor broke drastically at 2-3am = RETEST setup
-            buy_signal = 'RETEST'
-            buy_message = f"VIX broke anchor high ({anchor_high:.2f}) at 2-3am. Watch for retest at 10am - if rejected, SPX rallies further."
-            if retest_level is None:
-                retest_level = anchor_high
-                retest_type = 'HIGH'
-        elif anchor_high_broken_post_630:
-            # Anchor broke after 6:30am = INVALIDATED
-            buy_signal = 'INVALIDATED'
-            buy_message = f"VIX made new high ({post_630_high:.2f}) after 6:30am, breaking anchor ({anchor_high:.2f}). BUY at CCD invalidated - possible breakdown day."
-        elif past_630:
-            # Anchor held = CONFIRMED
-            buy_signal = 'CONFIRMED'
-            buy_message = f"VIX anchor high ({anchor_high:.2f}) held overnight. BUY at Close Cone ▼ confirmed."
-        else:
-            # Before 6:30am - still watching
-            buy_signal = 'WATCHING'
-            buy_message = f"VIX anchor high: {anchor_high:.2f}. Waiting for 6:30am confirmation."
-        
-        return {
-            'anchor_low': anchor_low,
-            'anchor_low_time': anchor_low_time,
-            'anchor_high': anchor_high,
-            'anchor_high_time': anchor_high_time,
-            'test_2_3am_low': test_2_3am_low,
-            'test_2_3am_high': test_2_3am_high,
-            'anchor_low_broken_2_3am': anchor_low_broken_2_3am,
-            'anchor_high_broken_2_3am': anchor_high_broken_2_3am,
-            'post_630_low': post_630_low,
-            'post_630_high': post_630_high,
-            'post_630_low_time': post_630_low_time,
-            'post_630_high_time': post_630_high_time,
-            'anchor_low_broken_post_630': anchor_low_broken_post_630,
-            'anchor_high_broken_post_630': anchor_high_broken_post_630,
-            'current_vix': current_vix,
-            'sell_signal': sell_signal,
-            'buy_signal': buy_signal,
-            'sell_message': sell_message,
-            'buy_message': buy_message,
-            'retest_level': retest_level,
-            'retest_type': retest_type,
-            'data_source': data_source
-        }
-        
-    except Exception as e:
-        # Return a minimal signal with error info for debugging
-        return {
-            'error': str(e),
-            'anchor_low': 0,
-            'anchor_low_time': None,
-            'anchor_high': 0,
-            'anchor_high_time': None,
-            'test_2_3am_low': None,
-            'test_2_3am_high': None,
-            'anchor_low_broken_2_3am': False,
-            'anchor_high_broken_2_3am': False,
-            'post_630_low': None,
-            'post_630_high': None,
-            'post_630_low_time': None,
-            'post_630_high_time': None,
-            'anchor_low_broken_post_630': False,
-            'anchor_high_broken_post_630': False,
-            'current_vix': 0,
-            'sell_signal': 'ERROR',
-            'buy_signal': 'ERROR',
-            'sell_message': f'VIX data fetch failed: {str(e)}',
-            'buy_message': f'VIX data fetch failed: {str(e)}',
-            'retest_level': None,
-            'retest_type': None,
-            'data_source': None
-        }
-
 def validate_overnight_rails(es_data: Dict, pivots: List[Pivot], secondary_high: float, secondary_high_time: datetime, 
                              secondary_low: float, secondary_low_time: datetime, session_date: datetime) -> Dict:
     """
@@ -1577,7 +1236,7 @@ def fetch_current_spx() -> Optional[float]:
         if not data.empty:
             return data['Close'].iloc[-1]
         return None
-    except:
+    except Exception:
         return None
 
 def fetch_todays_session_range() -> Dict:
@@ -1592,7 +1251,7 @@ def fetch_todays_session_range() -> Dict:
                 'current': float(data['Close'].iloc[-1])
             }
         return {'high': None, 'low': None, 'current': None}
-    except:
+    except Exception:
         return {'high': None, 'low': None, 'current': None}
 
 @st.cache_data(ttl=300)
@@ -1627,7 +1286,7 @@ def fetch_first_30min_bar(session_date: datetime) -> Optional[Dict]:
             'body': bar_body,
             'energy': energy
         }
-    except:
+    except Exception:
         return None
 
 # ============================================================================
@@ -3827,12 +3486,29 @@ def main():
         st.session_state.session_low = None
         st.session_state.manual_override = False
     
+    # Initialize VIX manual input session state
+    if 'vix_manual_mode' not in st.session_state:
+        st.session_state.vix_manual_mode = True  # Default to manual since Yahoo is unreliable
+        st.session_state.vix_anchor_low = 0.0
+        st.session_state.vix_anchor_high = 0.0
+        st.session_state.vix_anchor_low_time = "10:00 PM"
+        st.session_state.vix_anchor_high_time = "08:00 PM"
+        st.session_state.vix_2_3am_status = "Held"  # "Held", "Broke Low", "Broke High", "Broke Both"
+        st.session_state.vix_post_630_status = "Waiting"  # "Waiting", "Held", "New Low", "New High"
+        st.session_state.vix_current = 0.0
+    
     # Reset if new trading day
     if st.session_state.session_date != today_str:
         st.session_state.session_date = today_str
         st.session_state.session_high = None
         st.session_state.session_low = None
         st.session_state.manual_override = False
+        # Reset VIX inputs for new day
+        st.session_state.vix_anchor_low = 0.0
+        st.session_state.vix_anchor_high = 0.0
+        st.session_state.vix_2_3am_status = "Held"
+        st.session_state.vix_post_630_status = "Waiting"
+        st.session_state.vix_current = 0.0
     
     # ===== SIDEBAR =====
     with st.sidebar:
@@ -3843,10 +3519,12 @@ def main():
         # Fetch data
         prior_session = fetch_prior_session_data(session_date)
         es_data = fetch_es_overnight_data(session_date)
-        vix_signal = fetch_vix_overnight_signal(session_date)  # VIX overnight signal
         premarket_data = fetch_premarket_pivots(session_date)
         current_price = fetch_current_spx() or (prior_session['close'] if prior_session else 6000)
         first_bar = fetch_first_30min_bar(session_date)
+        
+        # VIX Signal - Manual input since Yahoo is unreliable
+        vix_signal = None  # Will be built from manual inputs
         
         # Fetch TODAY'S ACTUAL session high/low from Yahoo (not just current price)
         market_open = time(8, 30)
@@ -3932,8 +3610,123 @@ def main():
                     
                     if not is_market_hours:
                         st.info("💡 Use SPX Implied to check overnight levels")
-            except:
+            except Exception:
                 pass
+        
+        # ========== VIX OVERNIGHT SIGNAL INPUT ==========
+        st.markdown("---")
+        st.markdown("### 📊 VIX Overnight Signal")
+        st.caption("Enter from TradingView (VX1! or VIX futures)")
+        
+        # Anchor levels from 5pm-12am prior evening
+        vix_col1, vix_col2 = st.columns(2)
+        with vix_col1:
+            st.session_state.vix_anchor_low = st.number_input(
+                "Anchor Low (5pm-12am)", 
+                min_value=0.0, 
+                max_value=100.0, 
+                value=st.session_state.vix_anchor_low,
+                step=0.01,
+                format="%.2f",
+                help="Lowest VIX CLOSE between 5pm-12am CT"
+            )
+        with vix_col2:
+            st.session_state.vix_anchor_high = st.number_input(
+                "Anchor High (5pm-12am)", 
+                min_value=0.0, 
+                max_value=100.0, 
+                value=st.session_state.vix_anchor_high,
+                step=0.01,
+                format="%.2f",
+                help="Highest VIX CLOSE between 5pm-12am CT"
+            )
+        
+        # 2-3am test result
+        st.session_state.vix_2_3am_status = st.selectbox(
+            "2-3am Test Result",
+            options=["Held", "Broke Low", "Broke High", "Broke Both"],
+            index=["Held", "Broke Low", "Broke High", "Broke Both"].index(st.session_state.vix_2_3am_status),
+            help="Did VIX break the anchor low or high during 2-3am CT?"
+        )
+        
+        # Post-6:30am status
+        st.session_state.vix_post_630_status = st.selectbox(
+            "Post-6:30am Status",
+            options=["Waiting", "Held", "New Low", "New High"],
+            index=["Waiting", "Held", "New Low", "New High"].index(st.session_state.vix_post_630_status),
+            help="After 6:30am: Did VIX make new low/high or hold?"
+        )
+        
+        # Current VIX (optional)
+        st.session_state.vix_current = st.number_input(
+            "Current VIX", 
+            min_value=0.0, 
+            max_value=100.0, 
+            value=st.session_state.vix_current,
+            step=0.01,
+            format="%.2f",
+            help="Current VIX level (optional)"
+        )
+        
+        # Build vix_signal from manual inputs
+        if st.session_state.vix_anchor_low > 0 and st.session_state.vix_anchor_high > 0:
+            # Determine signals based on manual inputs
+            anchor_low_broken_2_3am = st.session_state.vix_2_3am_status in ["Broke Low", "Broke Both"]
+            anchor_high_broken_2_3am = st.session_state.vix_2_3am_status in ["Broke High", "Broke Both"]
+            anchor_low_broken_post_630 = st.session_state.vix_post_630_status == "New Low"
+            anchor_high_broken_post_630 = st.session_state.vix_post_630_status == "New High"
+            past_630 = st.session_state.vix_post_630_status != "Waiting"
+            
+            # SELL signal logic (VIX low)
+            if anchor_low_broken_2_3am:
+                sell_signal = 'RETEST'
+                sell_message = f"VIX broke anchor low ({st.session_state.vix_anchor_low:.2f}) at 2-3am. Watch 10am retest."
+            elif anchor_low_broken_post_630:
+                sell_signal = 'INVALIDATED'
+                sell_message = f"VIX made new low after 6:30am. SELL at CCA invalidated."
+            elif past_630:
+                sell_signal = 'CONFIRMED'
+                sell_message = f"VIX anchor low ({st.session_state.vix_anchor_low:.2f}) held. SELL at CCA confirmed."
+            else:
+                sell_signal = 'WATCHING'
+                sell_message = f"Waiting for 6:30am confirmation."
+            
+            # BUY signal logic (VIX high)
+            if anchor_high_broken_2_3am:
+                buy_signal = 'RETEST'
+                buy_message = f"VIX broke anchor high ({st.session_state.vix_anchor_high:.2f}) at 2-3am. Watch 10am retest."
+            elif anchor_high_broken_post_630:
+                buy_signal = 'INVALIDATED'
+                buy_message = f"VIX made new high after 6:30am. BUY at CCD invalidated."
+            elif past_630:
+                buy_signal = 'CONFIRMED'
+                buy_message = f"VIX anchor high ({st.session_state.vix_anchor_high:.2f}) held. BUY at CCD confirmed."
+            else:
+                buy_signal = 'WATCHING'
+                buy_message = f"Waiting for 6:30am confirmation."
+            
+            vix_signal = {
+                'anchor_low': st.session_state.vix_anchor_low,
+                'anchor_high': st.session_state.vix_anchor_high,
+                'anchor_low_time': None,
+                'anchor_high_time': None,
+                'test_2_3am_low': st.session_state.vix_anchor_low if anchor_low_broken_2_3am else None,
+                'test_2_3am_high': st.session_state.vix_anchor_high if anchor_high_broken_2_3am else None,
+                'anchor_low_broken_2_3am': anchor_low_broken_2_3am,
+                'anchor_high_broken_2_3am': anchor_high_broken_2_3am,
+                'anchor_low_broken_post_630': anchor_low_broken_post_630,
+                'anchor_high_broken_post_630': anchor_high_broken_post_630,
+                'post_630_low': None,
+                'post_630_high': None,
+                'current_vix': st.session_state.vix_current,
+                'sell_signal': sell_signal,
+                'buy_signal': buy_signal,
+                'sell_message': sell_message,
+                'buy_message': buy_message,
+                'retest_level': st.session_state.vix_anchor_low if anchor_low_broken_2_3am else (st.session_state.vix_anchor_high if anchor_high_broken_2_3am else None),
+                'retest_type': 'LOW' if anchor_low_broken_2_3am else ('HIGH' if anchor_high_broken_2_3am else None),
+                'data_source': 'MANUAL'
+            }
         
         st.markdown("---")
         st.markdown("### ⚙️ Parameters")
@@ -4126,7 +3919,7 @@ def main():
                         while prior_date.weekday() >= 5:
                             prior_date -= timedelta(days=1)
                         premarket_high_time = CT_TZ.localize(datetime.combine(prior_date, time(h, m)))
-                    except:
+                    except Exception:
                         premarket_high_time = None
                 
                 if use_premarket_low:
@@ -4138,7 +3931,7 @@ def main():
                         while prior_date.weekday() >= 5:
                             prior_date -= timedelta(days=1)
                         premarket_low_time = CT_TZ.localize(datetime.combine(prior_date, time(h, m)))
-                    except:
+                    except Exception:
                         premarket_low_time = None
             
             # Debug: Show timing info
@@ -4179,13 +3972,13 @@ def main():
             try:
                 h, m = map(int, high_time_str.split(':'))
                 high_time = CT_TZ.localize(datetime.combine(prior_session['date'], time(h, m)))
-            except:
+            except Exception:
                 high_time = base_high_time
             
             try:
                 h, m = map(int, low_time_str.split(':'))
                 low_time = CT_TZ.localize(datetime.combine(prior_session['date'], time(h, m)))
-            except:
+            except Exception:
                 low_time = base_low_time
             
             close_time = CT_TZ.localize(datetime.combine(prior_session['date'], time(15, 0)))
@@ -4204,12 +3997,12 @@ def main():
             try:
                 h, m = map(int, high_time_str.split(':'))
                 high_time = CT_TZ.localize(datetime.combine(prior_date, time(h, m)))
-            except:
+            except Exception:
                 high_time = CT_TZ.localize(datetime.combine(prior_date, time(10, 30)))
             try:
                 h, m = map(int, low_time_str.split(':'))
                 low_time = CT_TZ.localize(datetime.combine(prior_date, time(h, m)))
-            except:
+            except Exception:
                 low_time = CT_TZ.localize(datetime.combine(prior_date, time(13, 45)))
             close_time = CT_TZ.localize(datetime.combine(prior_date, time(15, 0)))
         
@@ -4378,65 +4171,22 @@ def main():
                         else:
                             st.caption(f"**{secondary_name}:** Not detected")
     
-    # VIX Debug Panel - ALWAYS show for troubleshooting
+    # VIX Debug Panel - Simplified for manual mode
     with st.sidebar:
-        with st.expander("📊 VIX Signal Debug", expanded=True):
-            st.caption(f"**Session Date:** {session_date.strftime('%Y-%m-%d %A')}")
-            st.caption(f"**Prior Date (for anchor):** {(session_date - timedelta(days=1)).strftime('%Y-%m-%d %A')}")
-            st.caption(f"**Is Future Date:** {is_future_date}")
-            
-            # Test current VIX futures connection
-            try:
-                vx_test = yf.Ticker("VX=F")
-                vx_current = vx_test.history(period='1d', interval='1m')
-                if not vx_current.empty:
-                    latest_vx = vx_current['Close'].iloc[-1]
-                    latest_time = vx_current.index[-1]
-                    st.success(f"🟢 VX=F LIVE: {latest_vx:.2f} @ {latest_time.strftime('%I:%M %p')}")
-                else:
-                    st.warning("🟡 VX=F: No current data (market may be closed)")
-            except Exception as e:
-                st.error(f"🔴 VX=F Error: {str(e)[:50]}")
-            
-            st.markdown("---")
-            
+        with st.expander("📊 VIX Signal Status", expanded=False):
             if vix_signal is None:
-                st.error("❌ vix_signal is None - fetch returned nothing")
-            elif vix_signal.get('error'):
-                st.error(f"❌ Error: {vix_signal.get('error')}")
-                # Show debug info even on error
-                st.markdown("---")
-                st.caption(f"**Data Source:** {vix_signal.get('data_source', 'Unknown')}")
-                st.caption(f"**Data Rows:** {vix_signal.get('debug_data_rows', 'N/A')}")
-                st.caption(f"**Data Start:** {vix_signal.get('debug_data_start', 'N/A')}")
-                st.caption(f"**Data End:** {vix_signal.get('debug_data_end', 'N/A')}")
-                st.caption(f"**Anchor Start:** {vix_signal.get('debug_anchor_start', 'N/A')}")
-                st.caption(f"**Anchor End:** {vix_signal.get('debug_anchor_end', 'N/A')}")
-                st.caption(f"**Anchor Rows Found:** {vix_signal.get('debug_anchor_rows', 'N/A')}")
-                st.caption(f"**Anchor In Progress:** {vix_signal.get('debug_anchor_in_progress', 'N/A')}")
+                st.warning("⚠️ Enter VIX data above to enable signals")
             else:
-                st.success(f"✅ Data Source: {vix_signal.get('data_source', 'Unknown')}")
-                st.caption(f"**Current VIX:** {vix_signal.get('current_vix', 0):.2f}")
+                source = vix_signal.get('data_source', 'Unknown')
+                if source == 'MANUAL':
+                    st.success("✅ Using MANUAL VIX input")
+                else:
+                    st.info(f"📡 Data Source: {source}")
+                
                 st.caption(f"**Anchor Low:** {vix_signal.get('anchor_low', 0):.2f}")
                 st.caption(f"**Anchor High:** {vix_signal.get('anchor_high', 0):.2f}")
-                
-                anchor_low_time = vix_signal.get('anchor_low_time')
-                anchor_high_time = vix_signal.get('anchor_high_time')
-                st.caption(f"**Anchor Low Time:** {anchor_low_time.strftime('%Y-%m-%d %I:%M %p') if anchor_low_time else 'None'}")
-                st.caption(f"**Anchor High Time:** {anchor_high_time.strftime('%Y-%m-%d %I:%M %p') if anchor_high_time else 'None'}")
-                
-                st.markdown("---")
-                st.caption(f"**Data Rows:** {vix_signal.get('debug_data_rows', 'N/A')}")
-                st.caption(f"**Data Range:** {vix_signal.get('debug_data_start', 'N/A')} to {vix_signal.get('debug_data_end', 'N/A')}")
-                st.caption(f"**Anchor Window:** {vix_signal.get('debug_anchor_start', 'N/A')} to {vix_signal.get('debug_anchor_end', 'N/A')}")
-                st.caption(f"**Anchor Rows Found:** {vix_signal.get('debug_anchor_rows', 'N/A')}")
-                
-                st.markdown("---")
-                st.caption(f"**2-3am Test Low:** {vix_signal.get('test_2_3am_low')}")
-                st.caption(f"**2-3am Test High:** {vix_signal.get('test_2_3am_high')}")
                 st.caption(f"**2-3am Low Broke:** {vix_signal.get('anchor_low_broken_2_3am', False)}")
                 st.caption(f"**2-3am High Broke:** {vix_signal.get('anchor_high_broken_2_3am', False)}")
-                
                 st.markdown("---")
                 st.caption(f"**SELL Signal:** {vix_signal.get('sell_signal')}")
                 st.caption(f"**BUY Signal:** {vix_signal.get('buy_signal')}")
@@ -4602,11 +4352,11 @@ def main():
         """, unsafe_allow_html=True)
         
         if vix_signal is None:
-            # VIX data completely unavailable
+            # VIX data not entered - prompt user
             st.markdown("""
-            <div style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-                <div style="font-weight: 600; color: #92400e; font-size: 0.9rem;">⚠️ VIX Data Unavailable</div>
-                <div style="color: #78350f; font-size: 0.8rem; margin-top: 8px;">VIX futures data could not be fetched. Trade without VIX confirmation or try refreshing.</div>
+            <div style="background: #dbeafe; border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+                <div style="font-weight: 600; color: #1e40af; font-size: 0.9rem;">📝 Enter VIX Data in Sidebar</div>
+                <div style="color: #1e3a8a; font-size: 0.8rem; margin-top: 8px;">Enter VIX anchor levels from TradingView (VX1!) in the sidebar to see trade confirmation signals.</div>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -4649,9 +4399,16 @@ def main():
             test_2_3_high_display = f"{test_2_3_high:.2f}" if test_2_3_high else "—"
             
             # Get data source
-            data_source = vix_signal.get('data_source', 'VX=F')
-            source_label = "VIX Futures (VX=F)" if data_source == "VX=F" else "VIX Index (^VIX)"
-            source_note = "" if data_source == "VX=F" else " <span style='font-size: 0.6rem; color: #94a3b8;'>(spot approximation)</span>"
+            data_source = vix_signal.get('data_source', 'MANUAL')
+            if data_source == "MANUAL":
+                source_label = "VIX (Manual Input)"
+                source_note = ""
+            elif data_source == "VX=F":
+                source_label = "VIX Futures (VX=F)"
+                source_note = ""
+            else:
+                source_label = "VIX Index (^VIX)"
+                source_note = " <span style='font-size: 0.6rem; color: #94a3b8;'>(spot approximation)</span>"
             
             # Build retest HTML if needed
             retest_html = ""
