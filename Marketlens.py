@@ -4430,41 +4430,31 @@ def main():
             
             vix_html = f"""
             <div style="background: #ffffff; border: 2px solid {main_color}; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                
-                <!-- Main Signal Banner -->
                 <div style="background: {main_bg}; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;">
                     <div style="font-size: 2rem; margin-bottom: 4px;">{main_icon}</div>
                     <div style="font-weight: 700; color: {main_color}; font-size: 1.2rem;">{main_text}</div>
                     <div style="color: #64748b; font-size: 0.85rem; margin-top: 4px;">{sub_text}</div>
                     {retest_badge}
                 </div>
-                
-                <!-- Anchor Levels -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <div style="background: #f8fafc; border-radius: 8px; padding: 12px; text-align: center;">
-                        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Anchor Low</div>
+                        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Anchor Low (5pm-2am)</div>
                         <div style="font-family: monospace; font-size: 1.2rem; font-weight: 700; color: #0f172a;">{vix_signal.get('anchor_low', 0):.2f}</div>
                     </div>
                     <div style="background: #f8fafc; border-radius: 8px; padding: 12px; text-align: center;">
-                        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Anchor High</div>
+                        <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Anchor High (5pm-2am)</div>
                         <div style="font-family: monospace; font-size: 1.2rem; font-weight: 700; color: #0f172a;">{vix_signal.get('anchor_high', 0):.2f}</div>
                     </div>
                 </div>
-                
-                <!-- Status Line -->
                 <div style="background: #f1f5f9; border-radius: 6px; padding: 10px; margin-bottom: 12px;">
                     <div style="font-size: 0.75rem; color: #475569;">
-                        <strong>2-3am Status:</strong> {vix_2_3am} &nbsp;|&nbsp; 
-                        <strong>Current VIX:</strong> {vix_signal.get('current_vix', 0):.2f}
+                        <strong>2-3am Status:</strong> {vix_2_3am} | <strong>Current VIX:</strong> {vix_signal.get('current_vix', 0):.2f}
                     </div>
                 </div>
-                
-                <!-- 9-9:30am Signal Display -->
                 <div style="background: {'#fef3c7' if not direction_confirmed else main_bg}; border-left: 4px solid {main_color}; border-radius: 0 6px 6px 0; padding: 12px;">
-                    <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">9-9:30am Signal</div>
+                    <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">9-9:30am VIX-SPX Confluence</div>
                     <div style="font-size: 0.9rem; color: #1e293b; font-weight: 500;">{signal_930}</div>
                 </div>
-                
             </div>
             """
             st.markdown(vix_html, unsafe_allow_html=True)
