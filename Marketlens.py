@@ -3587,30 +3587,48 @@ def main():
                     st.rerun()
         
         # Show ES → SPX implied price (useful for overnight planning)
-        if es_data and es_data.get('offset'):
-            st.markdown("---")
-            st.markdown("### 🌙 ES → SPX Estimate")
-            es_offset = es_data.get('offset', 0)
-            
-            # Get current ES if available
-            try:
-                es_ticker = yf.Ticker("ES=F")
-                es_current_data = es_ticker.history(period='1d', interval='1m')
-                if not es_current_data.empty:
-                    es_current = es_current_data['Close'].iloc[-1]
-                    spx_implied = es_current - es_offset
-                    
-                    es_col1, es_col2 = st.columns(2)
-                    with es_col1:
-                        st.metric("ES Futures", f"{es_current:,.2f}")
-                    with es_col2:
-                        st.metric("SPX Implied", f"{spx_implied:,.2f}")
-                    st.caption(f"Offset: {es_offset:+.2f} pts")
-                    
-                    if not is_market_hours:
-                        st.info("💡 Use SPX Implied to check overnight levels")
-            except Exception:
-                pass
+        st.markdown("---")
+        st.markdown("### 🌙 ES → SPX Estimate")
+        
+        # Initialize manual offset in session state
+        if 'manual_es_offset' not in st.session_state:
+            st.session_state.manual_es_offset = 8.0  # Default offset
+        if 'use_manual_offset' not in st.session_state:
+            st.session_state.use_manual_offset = True  # Default to manual since auto is unreliable
+        
+        # Manual offset input
+        st.session_state.manual_es_offset = st.number_input(
+            "ES-SPX Offset",
+            min_value=-50.0,
+            max_value=50.0,
+            value=st.session_state.manual_es_offset,
+            step=0.25,
+            format="%.2f",
+            help="ES typically trades 6-10 pts above SPX. Enter the offset you see on TradingView."
+        )
+        
+        # Use manual offset
+        es_offset = st.session_state.manual_es_offset
+        
+        # Get current ES if available
+        try:
+            es_ticker = yf.Ticker("ES=F")
+            es_current_data = es_ticker.history(period='1d', interval='1m')
+            if not es_current_data.empty:
+                es_current = es_current_data['Close'].iloc[-1]
+                spx_implied = es_current - es_offset
+                
+                es_col1, es_col2 = st.columns(2)
+                with es_col1:
+                    st.metric("ES Futures", f"{es_current:,.2f}")
+                with es_col2:
+                    st.metric("SPX Implied", f"{spx_implied:,.2f}")
+                st.caption(f"Using offset: {es_offset:+.2f} pts")
+                
+                if not is_market_hours:
+                    st.info("💡 Use SPX Implied to check overnight levels")
+        except Exception:
+            st.warning("Unable to fetch ES futures data")
         
         # ========== VIX LEADING INDICATOR SYSTEM ==========
         st.markdown("---")
