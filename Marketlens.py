@@ -3916,23 +3916,86 @@ def main():
                 if price_offset != 0:
                     st.caption(f"📉 Offset applied: -{price_offset:.2f} pts")
             
-            # Secondary Pivots Display
-            if base_sec_high is not None or base_sec_low is not None:
-                st.markdown("---")
-                st.markdown("### 📍 Secondary Pivots")
-                st.caption("High² = Wick | Low² = Close")
+            # Secondary Pivots Section with Manual Override
+            st.markdown("---")
+            st.markdown("### 📍 Secondary Pivots")
+            st.caption("High² = Wick | Low² = Close")
             
-            if base_sec_high is not None:
-                st.success("🔄 Secondary High Detected!")
-                secondary_high_price = base_sec_high - price_offset
-                secondary_high_time = base_sec_high_time
-                st.metric("2nd High² (Wick)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
+            # Initialize session state for manual secondary pivots
+            if 'use_manual_secondary' not in st.session_state:
+                st.session_state.use_manual_secondary = False
             
-            if base_sec_low is not None:
-                st.success("🔄 Secondary Low Detected!")
-                secondary_low_price = base_sec_low - price_offset
-                secondary_low_time = base_sec_low_time
-                st.metric("2nd Low² (Close)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
+            use_manual_secondary = st.checkbox("✏️ Manual Secondary Override", value=st.session_state.use_manual_secondary, help="Enable to manually enter secondary pivots")
+            st.session_state.use_manual_secondary = use_manual_secondary
+            
+            if use_manual_secondary:
+                st.info("Enter secondary pivot values from TradingView")
+                
+                # Secondary High² (Wick)
+                use_sec_high = st.checkbox("Enable High²", value=base_sec_high is not None)
+                if use_sec_high:
+                    default_sec_high = float(base_sec_high - price_offset) if base_sec_high else float(high_price - 5)
+                    secondary_high_price = st.number_input(
+                        "High² (Wick)", 
+                        value=default_sec_high, 
+                        format="%.2f", 
+                        help="Secondary high pivot - use wick value"
+                    )
+                    sec_high_time_str = st.text_input(
+                        "High² Time (CT)", 
+                        value=base_sec_high_time.strftime('%H:%M') if base_sec_high_time else "14:00"
+                    )
+                    try:
+                        h, m = map(int, sec_high_time_str.split(':'))
+                        prior_date = prior_session['date'].date() if prior_session else session_date.date() - timedelta(days=1)
+                        secondary_high_time = CT_TZ.localize(datetime.combine(prior_date, time(h, m)))
+                    except:
+                        secondary_high_time = CT_TZ.localize(datetime.combine(prior_date, time(14, 0)))
+                else:
+                    secondary_high_price = None
+                    secondary_high_time = None
+                
+                # Secondary Low² (Close)
+                use_sec_low = st.checkbox("Enable Low²", value=base_sec_low is not None)
+                if use_sec_low:
+                    default_sec_low = float(base_sec_low - price_offset) if base_sec_low else float(low_price + 5)
+                    secondary_low_price = st.number_input(
+                        "Low² (Close)", 
+                        value=default_sec_low, 
+                        format="%.2f", 
+                        help="Secondary low pivot - use close value"
+                    )
+                    sec_low_time_str = st.text_input(
+                        "Low² Time (CT)", 
+                        value=base_sec_low_time.strftime('%H:%M') if base_sec_low_time else "10:00"
+                    )
+                    try:
+                        h, m = map(int, sec_low_time_str.split(':'))
+                        prior_date = prior_session['date'].date() if prior_session else session_date.date() - timedelta(days=1)
+                        secondary_low_time = CT_TZ.localize(datetime.combine(prior_date, time(h, m)))
+                    except:
+                        secondary_low_time = CT_TZ.localize(datetime.combine(prior_date, time(10, 0)))
+                else:
+                    secondary_low_price = None
+                    secondary_low_time = None
+                    
+            else:
+                # Auto-detected secondary pivots (display only)
+                if base_sec_high is not None:
+                    st.success("🔄 Secondary High Detected!")
+                    secondary_high_price = base_sec_high - price_offset
+                    secondary_high_time = base_sec_high_time
+                    st.metric("2nd High² (Wick)", f"{secondary_high_price:.2f}", f"@ {secondary_high_time.strftime('%H:%M')} CT")
+                else:
+                    st.caption("High²: Not detected")
+                
+                if base_sec_low is not None:
+                    st.success("🔄 Secondary Low Detected!")
+                    secondary_low_price = base_sec_low - price_offset
+                    secondary_low_time = base_sec_low_time
+                    st.metric("2nd Low² (Close)", f"{secondary_low_price:.2f}", f"@ {secondary_low_time.strftime('%H:%M')} CT")
+                else:
+                    st.caption("Low²: Not detected")
             
             # ========== PRE-MARKET PIVOTS ==========
             st.markdown("---")
