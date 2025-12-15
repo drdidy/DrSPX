@@ -3551,51 +3551,57 @@ def main():
                 st.session_state.session_low = todays_range['low']
         
         # Show session tracking info with MANUAL OVERRIDE
+        # Only relevant during RTH (Regular Trading Hours) for rail reversal logic
         st.markdown("---")
-        st.markdown("### 📊 Session Tracker")
+        st.markdown("### 📊 RTH Session Tracker")
         
-        # Display current values
-        sess_col1, sess_col2 = st.columns(2)
-        with sess_col1:
-            display_high = st.session_state.session_high
-            st.metric("Session High", f"{display_high:,.2f}" if display_high else "—")
-        with sess_col2:
-            display_low = st.session_state.session_low
-            st.metric("Session Low", f"{display_low:,.2f}" if display_low else "—")
-        
-        if st.session_state.get('manual_override'):
-            st.caption("⚠️ Manual override active")
+        if is_today and is_market_hours:
+            # Active session - show real values
+            sess_col1, sess_col2 = st.columns(2)
+            with sess_col1:
+                display_high = st.session_state.session_high
+                st.metric("Session High", f"{display_high:,.2f}" if display_high else "—")
+            with sess_col2:
+                display_low = st.session_state.session_low
+                st.metric("Session Low", f"{display_low:,.2f}" if display_low else "—")
+            
+            if st.session_state.get('manual_override'):
+                st.caption("⚠️ Manual override active")
+            else:
+                st.caption("📡 Auto-updating from Yahoo Finance")
+            
+            # Manual override inputs
+            with st.expander("✏️ Manual Override"):
+                st.caption("Use if Yahoo data differs from TradingView")
+                manual_high = st.number_input(
+                    "Session High", 
+                    value=float(st.session_state.session_high) if st.session_state.session_high else float(current_price),
+                    step=0.5,
+                    format="%.2f",
+                    key="manual_high_input"
+                )
+                manual_low = st.number_input(
+                    "Session Low", 
+                    value=float(st.session_state.session_low) if st.session_state.session_low else float(current_price),
+                    step=0.5,
+                    format="%.2f",
+                    key="manual_low_input"
+                )
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("✅ Set Manual"):
+                        st.session_state.session_high = manual_high
+                        st.session_state.session_low = manual_low
+                        st.session_state.manual_override = True
+                        st.rerun()
+                with col_btn2:
+                    if st.button("🔄 Reset Auto"):
+                        st.session_state.manual_override = False
+                        st.rerun()
         else:
-            st.caption("📡 Auto-updating from Yahoo Finance")
-        
-        # Manual override inputs
-        with st.expander("✏️ Manual Override"):
-            st.caption("Use if Yahoo data differs from TradingView")
-            manual_high = st.number_input(
-                "Session High", 
-                value=float(st.session_state.session_high) if st.session_state.session_high else float(current_price),
-                step=0.5,
-                format="%.2f",
-                key="manual_high_input"
-            )
-            manual_low = st.number_input(
-                "Session Low", 
-                value=float(st.session_state.session_low) if st.session_state.session_low else float(current_price),
-                step=0.5,
-                format="%.2f",
-                key="manual_low_input"
-            )
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("✅ Set Manual"):
-                    st.session_state.session_high = manual_high
-                    st.session_state.session_low = manual_low
-                    st.session_state.manual_override = True
-                    st.rerun()
-            with col_btn2:
-                if st.button("🔄 Reset Auto"):
-                    st.session_state.manual_override = False
-                    st.rerun()
+            # Market closed - show message
+            st.caption("🌙 Market closed - RTH session tracking inactive")
+            st.caption("Session High/Low will update when market opens (8:30am CT)")
         
         # Show ES → SPX implied price (useful for overnight planning)
         st.markdown("---")
