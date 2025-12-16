@@ -4221,7 +4221,30 @@ def main():
     confluence_zones = find_confluence_zones(cones_1000)
     
     # Check if viewing a future date (no session data available yet)
-    is_future_date = session_date.date() > get_ct_now().date()
+    # EXCEPTION: On Monday evening after market close (5pm+), Tuesday is the "next trading day"
+    # and we CAN project cones using Monday's completed session data
+    ct_now = get_ct_now()
+    is_after_market_close = ct_now.time() >= time(17, 0)  # After 5pm CT
+    is_tomorrow = session_date.date() == (ct_now + timedelta(days=1)).date()
+    
+    # Handle weekend: Sunday evening looking at Monday
+    if ct_now.weekday() == 6:  # Sunday
+        next_trading_day = ct_now + timedelta(days=1)  # Monday
+        is_next_trading_day = session_date.date() == next_trading_day.date()
+    # Handle Friday evening looking at Monday
+    elif ct_now.weekday() == 4 and is_after_market_close:  # Friday evening
+        next_trading_day = ct_now + timedelta(days=3)  # Monday
+        is_next_trading_day = session_date.date() == next_trading_day.date()
+    else:
+        is_next_trading_day = is_tomorrow
+    
+    # Future date logic:
+    # - If after 5pm and looking at NEXT trading day -> NOT a future date (we have today's data)
+    # - Otherwise, if date > today -> IS a future date
+    if is_after_market_close and is_next_trading_day:
+        is_future_date = False  # We can use today's completed session for tomorrow's projections
+    else:
+        is_future_date = session_date.date() > ct_now.date()
     
     # Detect if 8:30 already touched cone edges (for 70-75% follow-through rule)
     # If 8:30 bounced from support, 10am support touch has reduced expectation
