@@ -3206,19 +3206,16 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
-def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Cone], current_price: float, overnight_validation: dict = None, vix_signal: dict = None):
+def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Cone], current_price: float, overnight_validation: dict = None, vix_signal: dict = None, active_cone_info: dict = None, ema_data: dict = None):
     """
-    Principled Trade Checklist based on Structural Cone Methodology.
+    PRACTICAL TRADE CHECKLIST - What Actually Matters for Profitability
     
-    THE 7-POINT CHECKLIST:
-    
-    1. VIX-SPX CONFLUENCE - Did VIX touch anchor while SPX touched rail? (THE KEY!)
-    2. STRUCTURE - Is the cone structure valid?
-    3. AT RAIL - Is price at an entry point?
-    4. DIRECTION MATCH - Does VIX direction match the trade?
-    5. TIMING - Are we in the right window?
-    6. OVERNIGHT - Was the rail validated overnight?
-    7. R:R - Does the math work?
+    5 ESSENTIAL CHECKS:
+    1. AT RAIL - Is price at the entry point?
+    2. STRUCTURE - Is cone wide enough & not broken?
+    3. ACTIVE CONE - Are we trading the right cone?
+    4. EMA CONFIRMATION - Does momentum support the trade?
+    5. TIME OK - Is there enough time for the move?
     """
     
     st.markdown("#### 📋 Trade Checklist")
@@ -3231,150 +3228,123 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
     cone_width = nearest_cone.ascending_rail - nearest_cone.descending_rail if nearest_cone else 0
     
-    # Check overnight validation
-    rail_validated = False
+    # Check if rail was broken overnight
     rail_broken = False
     if overnight_validation:
-        validated = overnight_validation.get('validated', [])
         broken = overnight_validation.get('broken', [])
-        
-        for v in validated:
-            if nearest_rail_type == 'descending' and '▼' in v:
-                rail_validated = True
-            elif nearest_rail_type == 'ascending' and '▲' in v:
-                rail_validated = True
-        
         for b in broken:
             if nearest_rail_type == 'descending' and '▼' in b:
                 rail_broken = True
             elif nearest_rail_type == 'ascending' and '▲' in b:
                 rail_broken = True
     
+    # Get active cone info
+    active_cone = active_cone_info.get('active_cone', 'Close') if active_cone_info else 'Close'
+    
+    # Get EMA data
+    ema_8 = ema_data.get('ema_8', 0) if ema_data else 0
+    ema_21 = ema_data.get('ema_21', 0) if ema_data else 0
+    
     # =========================================================================
-    # CHECKLIST ITEMS
+    # THE 5 ESSENTIAL CHECKS
     # =========================================================================
     
     checks = []
     
-    # 1. VIX-SPX CONFLUENCE (THE KEY!) ★
-    vix_direction = None
-    vix_spx_confluence = False
-    if vix_signal:
-        vix_direction = vix_signal.get('trade_direction')
-        vix_spx_confluence = vix_signal.get('direction_confirmed', False)  # This requires both VIX touch AND SPX rail touch
-    
-    if vix_spx_confluence:
-        confluence_ok = True
-        confluence_detail = f"✓ VIX + SPX rail touched together"
-    elif vix_signal and vix_signal.get('trade_direction'):
-        confluence_ok = False
-        confluence_detail = "VIX signaled, waiting for SPX rail touch"
-    elif vix_signal and vix_signal.get('anchor_low', 0) > 0:
-        confluence_ok = False
-        confluence_detail = "Waiting for VIX to touch anchor"
-    else:
-        confluence_ok = False
-        confluence_detail = "Enter VIX data in sidebar"
-    
-    checks.append(("1. VIX-SPX Confluence ★", confluence_ok, confluence_detail))
-    
-    # 2. STRUCTURE INTEGRITY
-    structure_ok = cone_width >= 25 and not rail_broken
-    if cone_width >= 35:
-        structure_detail = f"Excellent ({cone_width:.0f} pts)"
-    elif cone_width >= 25:
-        structure_detail = f"Adequate ({cone_width:.0f} pts)"
-    else:
-        structure_detail = f"Too narrow ({cone_width:.0f} pts) - SKIP"
-    
-    if rail_broken:
-        structure_detail = "Rail BROKEN overnight - SKIP"
-        structure_ok = False
-    
-    checks.append(("2. Structure Intact", structure_ok, structure_detail))
-    
-    # 3. AT RAIL
+    # 1. AT RAIL - The most important check
     if nearest_distance <= 3:
-        entry_quality = True
-        entry_detail = f"Excellent - {nearest_distance:.1f} pts from rail"
+        at_rail_ok = True
+        at_rail_detail = f"✓ Excellent entry - {nearest_distance:.1f} pts away"
     elif nearest_distance <= 5:
-        entry_quality = True
-        entry_detail = f"Good - {nearest_distance:.1f} pts from rail"
-    elif nearest_distance <= 10:
-        entry_quality = True
-        entry_detail = f"Acceptable - {nearest_distance:.1f} pts from rail"
+        at_rail_ok = True
+        at_rail_detail = f"✓ Good entry - {nearest_distance:.1f} pts away"
+    elif nearest_distance <= 8:
+        at_rail_ok = True
+        at_rail_detail = f"Acceptable - {nearest_distance:.1f} pts away"
     else:
-        entry_quality = False
-        entry_detail = f"Too far - {nearest_distance:.1f} pts (wait for rail)"
+        at_rail_ok = False
+        at_rail_detail = f"✗ Too far - {nearest_distance:.1f} pts (WAIT)"
     
-    checks.append(("3. At Rail", entry_quality, entry_detail))
+    checks.append(("1. At Rail", at_rail_ok, at_rail_detail))
     
-    # 4. DIRECTION MATCH - Does VIX direction match nearest rail type?
-    # Descending rail = CALLS (buy), Ascending rail = PUTS (sell)
-    if vix_direction:
-        expected_direction = "CALLS" if nearest_rail_type == 'descending' else "PUTS"
-        if vix_direction == expected_direction:
-            direction_ok = True
-            direction_detail = f"✓ VIX says {vix_direction}, at {nearest_rail_type} rail"
+    # 2. STRUCTURE - Cone width and not broken
+    if rail_broken:
+        structure_ok = False
+        structure_detail = "✗ Rail BROKEN overnight - SKIP"
+    elif cone_width >= 35:
+        structure_ok = True
+        structure_detail = f"✓ Excellent room ({cone_width:.0f} pts)"
+    elif cone_width >= 25:
+        structure_ok = True
+        structure_detail = f"✓ Adequate room ({cone_width:.0f} pts)"
+    elif cone_width >= 18:
+        structure_ok = True
+        structure_detail = f"Tight but tradeable ({cone_width:.0f} pts)"
+    else:
+        structure_ok = False
+        structure_detail = f"✗ Too narrow ({cone_width:.0f} pts) - SKIP"
+    
+    checks.append(("2. Structure OK", structure_ok, structure_detail))
+    
+    # 3. ACTIVE CONE - Are we at the right cone?
+    if nearest_cone:
+        cone_name = nearest_cone.name.replace('²', '')  # Remove secondary marker for comparison
+        if active_cone in nearest_cone.name or active_cone == 'Close':
+            active_ok = True
+            active_detail = f"✓ At {nearest_cone.name} rail ({active_cone} cone active)"
         else:
-            direction_ok = False
-            direction_detail = f"✗ VIX says {vix_direction}, but at {nearest_rail_type} rail"
+            active_ok = False
+            active_detail = f"✗ At {nearest_cone.name} but {active_cone} cone is active"
     else:
-        direction_ok = False
-        direction_detail = "Waiting for VIX direction"
+        active_ok = False
+        active_detail = "✗ No cone found"
     
-    checks.append(("4. Direction Match", direction_ok, direction_detail))
+    checks.append(("3. Active Cone", active_ok, active_detail))
     
-    # 5. TIMING
-    is_930_window = time(9, 0) <= ct_time <= time(9, 45)
-    is_1000_window = time(9, 45) <= ct_time <= time(10, 30)
-    is_late = ct_time >= time(12, 30)
-    
-    if is_1000_window:
-        timing_ok = True
-        timing_detail = "10:00 Decision Window ★"
-    elif is_930_window:
-        timing_ok = True
-        timing_detail = "9-9:30 VIX Signal Window ★"
-    elif is_late:
-        timing_ok = False
-        timing_detail = "Late (less time for move)"
+    # 4. EMA CONFIRMATION - Does momentum support the direction?
+    # Descending rail = looking to BUY (CALLS) = want bullish EMA (8 > 21)
+    # Ascending rail = looking to SELL (PUTS) = want bearish EMA (8 < 21)
+    if ema_8 > 0 and ema_21 > 0:
+        ema_bullish = ema_8 > ema_21
+        
+        if nearest_rail_type == 'descending':  # CALLS entry
+            if ema_bullish:
+                ema_ok = True
+                ema_detail = "✓ Bullish (8 > 21) - supports CALLS"
+            else:
+                ema_ok = False
+                ema_detail = "✗ Bearish EMAs - wait for cross"
+        else:  # PUTS entry (ascending rail)
+            if not ema_bullish:
+                ema_ok = True
+                ema_detail = "✓ Bearish (8 < 21) - supports PUTS"
+            else:
+                ema_ok = False
+                ema_detail = "✗ Bullish EMAs - wait for cross"
     else:
-        timing_ok = True
-        timing_detail = "Mid-session"
+        ema_ok = True  # Don't penalize if EMAs not available (after hours)
+        ema_detail = "N/A (market closed)"
     
-    checks.append(("5. Timing", timing_ok, timing_detail))
+    checks.append(("4. EMA Confirm", ema_ok, ema_detail))
     
-    # 6. OVERNIGHT VALIDATION
-    if rail_validated:
-        validation_ok = True
-        validation_detail = "Rail validated overnight ★"
-    elif overnight_validation and len(overnight_validation.get('validated', [])) > 0:
-        validation_ok = True
-        validation_detail = "Other rails validated"
+    # 5. TIME OK - Not too late for 0DTE
+    if ct_time < time(8, 30):
+        time_ok = True
+        time_detail = "Pre-market - ready for open"
+    elif ct_time < time(10, 30):
+        time_ok = True
+        time_detail = "✓ Prime window (8:30-10:30)"
+    elif ct_time < time(12, 0):
+        time_ok = True
+        time_detail = "✓ Good - mid-morning"
+    elif ct_time < time(13, 30):
+        time_ok = True
+        time_detail = "OK - reduce size"
     else:
-        validation_ok = False
-        validation_detail = "Not tested overnight"
+        time_ok = False
+        time_detail = "✗ Too late for 0DTE (after 1:30pm)"
     
-    checks.append(("6. Overnight OK", validation_ok, validation_detail))
-    
-    # 7. R:R CHECK
-    if action.contract_expectation:
-        expected_profit = action.contract_expectation.contract_profit_50
-        if expected_profit >= 15:
-            rr_ok = True
-            rr_detail = f"Good - ${expected_profit:.0f} @ 50%"
-        elif expected_profit >= 8:
-            rr_ok = True
-            rr_detail = f"Acceptable - ${expected_profit:.0f} @ 50%"
-        else:
-            rr_ok = False
-            rr_detail = f"Weak - ${expected_profit:.0f} @ 50%"
-    else:
-        rr_ok = False
-        rr_detail = "N/A"
-    
-    checks.append(("7. R:R Worth It", rr_ok, rr_detail))
+    checks.append(("5. Time OK", time_ok, time_detail))
     
     # =========================================================================
     # RENDER CHECKLIST
@@ -3383,35 +3353,35 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     passed_count = sum(1 for _, passed, _ in checks if passed)
     total_checks = len(checks)
     
-    # VIX-SPX Confluence is CRITICAL
-    confluence_passed = checks[0][1]
-    direction_passed = checks[3][1]
+    # Critical checks that MUST pass
+    at_rail_passed = checks[0][1]
+    structure_passed = checks[1][1]
     
-    # Overall assessment - Confluence + Direction are weighted heavily
-    if confluence_passed and direction_passed and passed_count >= 6:
-        overall = "🟢 STRONG SETUP - GO"
-        overall_color = "#22c55e"
-    elif confluence_passed and direction_passed and passed_count >= 5:
-        overall = "🟡 GOOD SETUP"
-        overall_color = "#eab308"
-    elif not confluence_passed:
-        overall = "🟠 WAIT FOR CONFLUENCE"
-        overall_color = "#f97316"
-    elif not direction_passed:
-        overall = "🔴 DIRECTION MISMATCH"
+    # Overall assessment
+    if not structure_passed:
+        overall = "🔴 NO TRADE - Structure broken/too narrow"
         overall_color = "#ef4444"
+    elif not at_rail_passed:
+        overall = "🟡 WAIT - Price not at rail yet"
+        overall_color = "#eab308"
+    elif passed_count == 5:
+        overall = "🟢 GO - All systems green"
+        overall_color = "#22c55e"
     elif passed_count >= 4:
-        overall = "🟠 MARGINAL"
-        overall_color = "#f97316"
+        overall = "🟢 GO - Strong setup"
+        overall_color = "#22c55e"
+    elif passed_count >= 3:
+        overall = "🟡 CAUTION - Reduce size"
+        overall_color = "#eab308"
     else:
-        overall = "🔴 SKIP"
+        overall = "🔴 SKIP - Too many issues"
         overall_color = "#ef4444"
     
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, {overall_color}22, {overall_color}11); 
                 border-left: 4px solid {overall_color}; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem;">
         <span style="font-weight: 700; font-size: 1.1rem;">{overall}</span>
-        <span style="color: #64748b; margin-left: 0.5rem;">({passed_count}/{total_checks} passed)</span>
+        <span style="color: #64748b; margin-left: 0.5rem;">({passed_count}/{total_checks} checks passed)</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3419,38 +3389,31 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
         icon = "✓" if passed else "✗"
         color = "#22c55e" if passed else "#ef4444"
         bg = "#22c55e11" if passed else "#ef444411"
-        # Highlight key items
-        is_key = "Confluence" in label or "Direction" in label
-        star = " ⭐" if is_key and passed else ""
         st.markdown(f"""
         <div style="display: flex; align-items: center; padding: 0.5rem; margin: 0.25rem 0; 
-                    background: {bg}; border-radius: 6px; {'border: 2px solid ' + color + ';' if is_key else ''}">
+                    background: {bg}; border-radius: 6px;">
             <span style="color: {color}; font-size: 1.1rem; font-weight: bold; width: 1.5rem;">{icon}</span>
-            <span style="flex: 1; font-weight: {'700' if is_key else '500'};">{label}</span>
-            <span style="color: #64748b; font-size: 0.85rem;">{detail}{star}</span>
+            <span style="flex: 1; font-weight: 500;">{label}</span>
+            <span style="color: #64748b; font-size: 0.85rem;">{detail}</span>
         </div>
         """, unsafe_allow_html=True)
     
-    # KEY INSIGHT
+    # Trade direction summary
     st.markdown("---")
-    st.markdown("**💡 Key Insight:**")
-    
-    if not confluence_passed and not (vix_signal and vix_signal.get('anchor_low', 0) > 0):
-        st.info("📝 **Enter VIX data in sidebar** to enable confluence detection.")
-    elif not confluence_passed:
-        st.warning("⏳ **Wait for VIX-SPX confluence.** The signal fires when VIX touches its anchor AND SPX touches a cone rail at the same time.")
-    elif not direction_passed:
-        st.error(f"⚠️ **Direction mismatch!** VIX says {vix_direction} but you're at a {nearest_rail_type} rail. Wait for the correct rail.")
-    elif rail_broken:
-        st.error("Rail was broken overnight - structure is compromised. Wait for new setup.")
-    elif not entry_quality:
-        st.warning(f"Price is {nearest_distance:.1f} pts from nearest rail. Wait for price to reach the rail.")
-    elif confluence_passed and direction_passed and rail_validated:
-        st.success(f"🎯 **PERFECT SETUP:** VIX-SPX confluence + Direction match + Overnight validation. This is your A+ trade!")
-    elif confluence_passed and direction_passed:
-        st.success(f"✅ **STRONG SETUP:** VIX-SPX confluence confirmed for {vix_direction}. Execute with confidence.")
+    if nearest_rail_type == 'descending':
+        direction = "CALLS"
+        direction_color = "#22c55e"
     else:
-        st.info("Setup developing. Monitor for confluence.")
+        direction = "PUTS"
+        direction_color = "#ef4444"
+    
+    st.markdown(f"""
+    <div style="text-align: center; padding: 0.75rem; background: {direction_color}22; border-radius: 8px; border: 2px solid {direction_color};">
+        <span style="font-size: 0.8rem; color: #64748b;">Trade Direction:</span>
+        <span style="font-size: 1.2rem; font-weight: 700; color: {direction_color}; margin-left: 0.5rem;">{direction}</span>
+        <span style="font-size: 0.8rem; color: #64748b; margin-left: 0.5rem;">@ {nearest_cone.name if nearest_cone else 'N/A'} {nearest_rail_type} rail</span>
+    </div>
+    """, unsafe_allow_html=True)
 
 def highlight_times(row):
     if row['Time'] in ['08:30', '10:00']:
@@ -4880,7 +4843,7 @@ def main():
     col_check, col_val = st.columns(2)
     
     with col_check:
-        render_checklist(regime, action, cones, current_price, overnight_validation, vix_signal)
+        render_checklist(regime, action, cones, current_price, overnight_validation, vix_signal, active_cone_info, ema_data)
     
     with col_val:
         # Overnight Validation Display
