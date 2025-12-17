@@ -3210,19 +3210,14 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     """
     PRACTICAL TRADE CHECKLIST - What Actually Matters for Profitability
     
-    5 ESSENTIAL CHECKS:
+    4 ESSENTIAL CHECKS:
     1. AT RAIL - Is price at the entry point?
     2. STRUCTURE - Is cone wide enough & not broken?
     3. ACTIVE CONE - Are we trading the right cone?
-    4. EMA CONFIRMATION - Does momentum support the trade?
-    5. TIME OK - Is there enough time for the move?
+    4. VIX ALIGNED - Does VIX position support this trade direction?
     """
     
     st.markdown("#### 📋 Trade Checklist")
-    
-    # Get current time
-    ct_now = get_ct_now()
-    ct_time = ct_now.time()
     
     # Find nearest rail info
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
@@ -3241,12 +3236,12 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     # Get active cone info
     active_cone = active_cone_info.get('active_cone', 'Close') if active_cone_info else 'Close'
     
-    # Get EMA data
-    ema_8 = ema_data.get('ema_8', 0) if ema_data else 0
-    ema_21 = ema_data.get('ema_21', 0) if ema_data else 0
+    # Get VIX trade zone
+    vix_trade_zone = vix_signal.get('trade_zone', 'UNKNOWN') if vix_signal else 'UNKNOWN'
+    vix_position_pct = vix_signal.get('position_pct', 50) if vix_signal else 50
     
     # =========================================================================
-    # THE 5 ESSENTIAL CHECKS
+    # THE 4 ESSENTIAL CHECKS
     # =========================================================================
     
     checks = []
@@ -3254,13 +3249,13 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     # 1. AT RAIL - The most important check
     if nearest_distance <= 3:
         at_rail_ok = True
-        at_rail_detail = f"✓ Excellent entry - {nearest_distance:.1f} pts away"
+        at_rail_detail = f"✓ Excellent - {nearest_distance:.1f} pts away"
     elif nearest_distance <= 5:
         at_rail_ok = True
-        at_rail_detail = f"✓ Good entry - {nearest_distance:.1f} pts away"
+        at_rail_detail = f"✓ Good - {nearest_distance:.1f} pts away"
     elif nearest_distance <= 8:
         at_rail_ok = True
-        at_rail_detail = f"Acceptable - {nearest_distance:.1f} pts away"
+        at_rail_detail = f"OK - {nearest_distance:.1f} pts away"
     else:
         at_rail_ok = False
         at_rail_detail = f"✗ Too far - {nearest_distance:.1f} pts (WAIT)"
@@ -3273,78 +3268,62 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
         structure_detail = "✗ Rail BROKEN overnight - SKIP"
     elif cone_width >= 35:
         structure_ok = True
-        structure_detail = f"✓ Excellent room ({cone_width:.0f} pts)"
+        structure_detail = f"✓ Excellent ({cone_width:.0f} pts room)"
     elif cone_width >= 25:
         structure_ok = True
-        structure_detail = f"✓ Adequate room ({cone_width:.0f} pts)"
+        structure_detail = f"✓ Good ({cone_width:.0f} pts room)"
     elif cone_width >= 18:
         structure_ok = True
-        structure_detail = f"Tight but tradeable ({cone_width:.0f} pts)"
+        structure_detail = f"OK - tight ({cone_width:.0f} pts)"
     else:
         structure_ok = False
-        structure_detail = f"✗ Too narrow ({cone_width:.0f} pts) - SKIP"
+        structure_detail = f"✗ Too narrow ({cone_width:.0f} pts)"
     
     checks.append(("2. Structure OK", structure_ok, structure_detail))
     
     # 3. ACTIVE CONE - Are we at the right cone?
     if nearest_cone:
-        cone_name = nearest_cone.name.replace('²', '')  # Remove secondary marker for comparison
         if active_cone in nearest_cone.name or active_cone == 'Close':
             active_ok = True
-            active_detail = f"✓ At {nearest_cone.name} rail ({active_cone} cone active)"
+            active_detail = f"✓ {nearest_cone.name} ({active_cone} active)"
         else:
             active_ok = False
-            active_detail = f"✗ At {nearest_cone.name} but {active_cone} cone is active"
+            active_detail = f"✗ At {nearest_cone.name}, but {active_cone} active"
     else:
         active_ok = False
         active_detail = "✗ No cone found"
     
     checks.append(("3. Active Cone", active_ok, active_detail))
     
-    # 4. EMA CONFIRMATION - Does momentum support the direction?
-    # Descending rail = looking to BUY (CALLS) = want bullish EMA (8 > 21)
-    # Ascending rail = looking to SELL (PUTS) = want bearish EMA (8 < 21)
-    if ema_8 > 0 and ema_21 > 0:
-        ema_bullish = ema_8 > ema_21
-        
-        if nearest_rail_type == 'descending':  # CALLS entry
-            if ema_bullish:
-                ema_ok = True
-                ema_detail = "✓ Bullish (8 > 21) - supports CALLS"
+    # 4. VIX ALIGNED - Does VIX support this trade?
+    # Descending rail (▼) = CALLS → VIX should be near resistance
+    # Ascending rail (▲) = PUTS → VIX should be near support
+    if vix_signal and vix_signal.get('current', 0) > 0:
+        if nearest_rail_type == 'descending':  # CALLS trade
+            if vix_trade_zone == "CALLS":
+                vix_ok = True
+                vix_detail = f"✓ VIX at {vix_position_pct:.0f}% (near resistance)"
+            elif vix_trade_zone == "NEUTRAL":
+                vix_ok = False
+                vix_detail = f"⚠ VIX mid-range ({vix_position_pct:.0f}%) - wait"
             else:
-                ema_ok = False
-                ema_detail = "✗ Bearish EMAs - wait for cross"
-        else:  # PUTS entry (ascending rail)
-            if not ema_bullish:
-                ema_ok = True
-                ema_detail = "✓ Bearish (8 < 21) - supports PUTS"
+                vix_ok = False
+                vix_detail = f"✗ VIX at {vix_position_pct:.0f}% (favors PUTS)"
+        else:  # PUTS trade (ascending rail)
+            if vix_trade_zone == "PUTS":
+                vix_ok = True
+                vix_detail = f"✓ VIX at {vix_position_pct:.0f}% (near support)"
+            elif vix_trade_zone == "NEUTRAL":
+                vix_ok = False
+                vix_detail = f"⚠ VIX mid-range ({vix_position_pct:.0f}%) - wait"
             else:
-                ema_ok = False
-                ema_detail = "✗ Bullish EMAs - wait for cross"
+                vix_ok = False
+                vix_detail = f"✗ VIX at {vix_position_pct:.0f}% (favors CALLS)"
     else:
-        ema_ok = True  # Don't penalize if EMAs not available (after hours)
-        ema_detail = "N/A (market closed)"
+        vix_ok = True  # Don't penalize if VIX not entered
+        vix_detail = "Enter VIX in sidebar"
     
-    checks.append(("4. EMA Confirm", ema_ok, ema_detail))
-    
-    # 5. TIME OK - Not too late for 0DTE
-    if ct_time < time(8, 30):
-        time_ok = True
-        time_detail = "Pre-market - ready for open"
-    elif ct_time < time(10, 30):
-        time_ok = True
-        time_detail = "✓ Prime window (8:30-10:30)"
-    elif ct_time < time(12, 0):
-        time_ok = True
-        time_detail = "✓ Good - mid-morning"
-    elif ct_time < time(13, 30):
-        time_ok = True
-        time_detail = "OK - reduce size"
-    else:
-        time_ok = False
-        time_detail = "✗ Too late for 0DTE (after 1:30pm)"
-    
-    checks.append(("5. Time OK", time_ok, time_detail))
+    checks.append(("4. VIX Aligned", vix_ok, vix_detail))
     
     # =========================================================================
     # RENDER CHECKLIST
@@ -3353,35 +3332,35 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
     passed_count = sum(1 for _, passed, _ in checks if passed)
     total_checks = len(checks)
     
-    # Critical checks that MUST pass
+    # Critical checks
     at_rail_passed = checks[0][1]
     structure_passed = checks[1][1]
     
     # Overall assessment
     if not structure_passed:
-        overall = "🔴 NO TRADE - Structure broken/too narrow"
+        overall = "🔴 NO TRADE - Structure broken/narrow"
         overall_color = "#ef4444"
     elif not at_rail_passed:
-        overall = "🟡 WAIT - Price not at rail yet"
+        overall = "🟡 WAIT - Not at rail yet"
         overall_color = "#eab308"
-    elif passed_count == 5:
-        overall = "🟢 GO - All systems green"
-        overall_color = "#22c55e"
-    elif passed_count >= 4:
-        overall = "🟢 GO - Strong setup"
+    elif passed_count == 4:
+        overall = "🟢 GO - Perfect setup"
         overall_color = "#22c55e"
     elif passed_count >= 3:
+        overall = "🟢 GO - Good setup"
+        overall_color = "#22c55e"
+    elif passed_count >= 2:
         overall = "🟡 CAUTION - Reduce size"
         overall_color = "#eab308"
     else:
-        overall = "🔴 SKIP - Too many issues"
+        overall = "🔴 SKIP"
         overall_color = "#ef4444"
     
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, {overall_color}22, {overall_color}11); 
                 border-left: 4px solid {overall_color}; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem;">
         <span style="font-weight: 700; font-size: 1.1rem;">{overall}</span>
-        <span style="color: #64748b; margin-left: 0.5rem;">({passed_count}/{total_checks} checks passed)</span>
+        <span style="color: #64748b; margin-left: 0.5rem;">({passed_count}/{total_checks})</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -3398,20 +3377,23 @@ def render_checklist(regime: RegimeAnalysis, action: ActionCard, cones: List[Con
         </div>
         """, unsafe_allow_html=True)
     
-    # Trade direction summary
+    # Trade direction and target
     st.markdown("---")
     if nearest_rail_type == 'descending':
         direction = "CALLS"
         direction_color = "#22c55e"
+        target = "ascending rail (▲)"
     else:
         direction = "PUTS"
         direction_color = "#ef4444"
+        target = "descending rail (▼)"
     
     st.markdown(f"""
     <div style="text-align: center; padding: 0.75rem; background: {direction_color}22; border-radius: 8px; border: 2px solid {direction_color};">
-        <span style="font-size: 0.8rem; color: #64748b;">Trade Direction:</span>
-        <span style="font-size: 1.2rem; font-weight: 700; color: {direction_color}; margin-left: 0.5rem;">{direction}</span>
-        <span style="font-size: 0.8rem; color: #64748b; margin-left: 0.5rem;">@ {nearest_cone.name if nearest_cone else 'N/A'} {nearest_rail_type} rail</span>
+        <div style="font-size: 0.75rem; color: #64748b;">Trade Direction</div>
+        <div style="font-size: 1.3rem; font-weight: 700; color: {direction_color};">{direction}</div>
+        <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">Entry: {nearest_cone.name if nearest_cone else 'N/A'} {nearest_rail_type} (▼ or ▲)</div>
+        <div style="font-size: 0.75rem; color: #64748b;">Target: {target}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -3611,85 +3593,36 @@ def main():
         except Exception:
             st.warning("Unable to fetch ES futures data")
         
-        # ========== VIX LEADING INDICATOR SYSTEM ==========
+        # ========== VIX TRADE COMPASS ==========
         st.markdown("---")
-        st.markdown("### 📊 VIX Leading Indicator")
-        st.caption("The KEY to 10am direction (from TradingView VX1!)")
+        st.markdown("### 🧭 VIX Trade Compass")
+        st.caption("VIX Support/Resistance → SPX Rail Mapping")
         
-        # Step 1: Anchor levels from 5pm-2am prior evening
-        st.markdown("**Step 1: Overnight Anchors (5pm-2am)**")
+        # VIX Support and Resistance from overnight (5pm-2am)
+        st.markdown("**Overnight Range (5pm-2am)**")
         vix_col1, vix_col2 = st.columns(2)
         with vix_col1:
             st.session_state.vix_anchor_low = st.number_input(
-                "Anchor Low", 
+                "VIX Support", 
                 min_value=0.0, 
                 max_value=100.0, 
                 value=st.session_state.vix_anchor_low,
                 step=0.01,
                 format="%.2f",
-                help="Lowest VIX CLOSE between 5pm-2am CT"
+                help="Overnight LOW = Support → Maps to SPX ASCENDING rails (▲)"
             )
         with vix_col2:
             st.session_state.vix_anchor_high = st.number_input(
-                "Anchor High", 
+                "VIX Resistance", 
                 min_value=0.0, 
                 max_value=100.0, 
                 value=st.session_state.vix_anchor_high,
                 step=0.01,
                 format="%.2f",
-                help="Highest VIX CLOSE between 5pm-2am CT"
+                help="Overnight HIGH = Resistance → Maps to SPX DESCENDING rails (▼)"
             )
         
-        # Step 2: 2-3am break check
-        st.markdown("**Step 2: 2-3am Break Check**")
-        st.session_state.vix_2_3am_status = st.selectbox(
-            "Did VIX break an anchor at 2-3am?",
-            options=["Anchors Held", "Broke Below Low", "Broke Above High", "Broke Both"],
-            index=["Anchors Held", "Broke Below Low", "Broke Above High", "Broke Both"].index(
-                st.session_state.vix_2_3am_status if st.session_state.vix_2_3am_status in ["Anchors Held", "Broke Below Low", "Broke Above High", "Broke Both"] else "Anchors Held"
-            ),
-            help="Check if VIX broke through anchor low or high during 2-3am CT"
-        )
-        
-        # Step 3: 9-9:30am VIX TOUCH + SPX RAIL CONFLUENCE
-        st.markdown("**Step 3: 9-9:30am VIX-SPX Confluence ⭐**")
-        st.caption("VIX touch + SPX rail touch = SIGNAL")
-        
-        # VIX touch options based on support/resistance logic
-        signal_options = [
-            "⏳ Waiting for confluence",
-            "📉 VIX touched LOW from above → held (bounce UP) → SPX DOWN = PUTS",
-            "📈 VIX touched LOW from below → held (rejected DOWN) → SPX UP = CALLS",
-            "📈 VIX touched HIGH from below → held (rejected DOWN) → SPX UP = CALLS",
-            "📉 VIX touched HIGH from above → held (bounce UP) → SPX DOWN = PUTS",
-        ]
-        
-        # Add retest options if 2-3am broke
-        if st.session_state.vix_2_3am_status != "Anchors Held":
-            signal_options.extend([
-                "🔄 VIX retesting broken level → rejected → continuation",
-                "🔄 VIX retesting broken level → broke back through → reversal"
-            ])
-        
-        # Initialize if not exists or invalid
-        if 'vix_930_signal' not in st.session_state or st.session_state.vix_930_signal not in signal_options:
-            st.session_state.vix_930_signal = signal_options[0]
-        
-        st.session_state.vix_930_signal = st.selectbox(
-            "VIX Touch Action (when SPX at rail)",
-            options=signal_options,
-            index=signal_options.index(st.session_state.vix_930_signal) if st.session_state.vix_930_signal in signal_options else 0,
-            help="Select when VIX touches anchor AND SPX touches a cone rail simultaneously"
-        )
-        
-        # SPX Rail Touch confirmation
-        st.session_state.spx_rail_touched = st.checkbox(
-            "✓ SPX touched cone rail at same time",
-            value=st.session_state.get('spx_rail_touched', False),
-            help="Confirm that SPX was at a cone rail when VIX touched its anchor"
-        )
-        
-        # Current VIX (optional)
+        # Current VIX - Critical for knowing where we are in the range
         st.session_state.vix_current = st.number_input(
             "Current VIX", 
             min_value=0.0, 
@@ -3697,68 +3630,77 @@ def main():
             value=st.session_state.vix_current,
             step=0.01,
             format="%.2f",
-            help="Current VIX level (optional)"
+            help="Enter current VIX value from TradingView"
         )
         
-        # Build vix_signal from manual inputs
+        # Build vix_signal with the new trade compass logic
+        vix_signal = None
         if st.session_state.vix_anchor_low > 0 and st.session_state.vix_anchor_high > 0:
-            # Determine the 10am trade direction based on 9-9:30am signal
-            signal_930 = st.session_state.vix_930_signal
-            spx_rail_touched = st.session_state.get('spx_rail_touched', False)
+            vix_support = st.session_state.vix_anchor_low
+            vix_resistance = st.session_state.vix_anchor_high
+            vix_current = st.session_state.vix_current
+            vix_range = vix_resistance - vix_support
             
-            # Parse the signal to determine direction
-            # Only confirmed if BOTH VIX touched anchor AND SPX touched rail
-            if "PUTS" in signal_930 and spx_rail_touched:
-                trade_direction = "PUTS"
-                direction_confirmed = True
-                sell_signal = "CONFIRMED"
-                buy_signal = "AVOID"
-                sell_message = "VIX + SPX confluence confirmed. PUTS signal."
-                buy_message = "VIX signal favors downside. Avoid CALLS."
-            elif "CALLS" in signal_930 and spx_rail_touched:
-                trade_direction = "CALLS"
-                direction_confirmed = True
-                sell_signal = "AVOID"
-                buy_signal = "CONFIRMED"
-                sell_message = "VIX signal favors upside. Avoid PUTS."
-                buy_message = "VIX + SPX confluence confirmed. CALLS signal."
-            elif "PUTS" in signal_930 or "CALLS" in signal_930:
-                # VIX signal but no SPX rail touch yet
-                trade_direction = "PUTS" if "PUTS" in signal_930 else "CALLS"
-                direction_confirmed = False
-                sell_signal = "WAITING"
-                buy_signal = "WAITING"
-                sell_message = "VIX signaled but waiting for SPX rail touch."
-                buy_message = "VIX signaled but waiting for SPX rail touch."
+            # Calculate where current VIX is in the range (0% = at support, 100% = at resistance)
+            if vix_range > 0 and vix_current > 0:
+                vix_position_pct = ((vix_current - vix_support) / vix_range) * 100
+                vix_position_pct = max(0, min(100, vix_position_pct))  # Clamp 0-100
             else:
-                trade_direction = None
-                direction_confirmed = False
-                sell_signal = "WATCHING"
-                buy_signal = "WATCHING"
-                sell_message = "Waiting for 9-9:30am VIX-SPX confluence."
-                buy_message = "Waiting for 9-9:30am VIX-SPX confluence."
+                vix_position_pct = 50  # Default to middle if no current
             
-            # Check if this is a retest scenario
-            is_retest = st.session_state.vix_2_3am_status != "Anchors Held"
+            # Determine trade bias based on VIX position
+            # VIX near resistance = CALLS entry zone (SPX at descending rail)
+            # VIX near support = PUTS entry zone (SPX at ascending rail)
+            if vix_current > 0:
+                if vix_position_pct >= 75:
+                    trade_zone = "CALLS"
+                    zone_description = "VIX near RESISTANCE → Look for CALLS"
+                    entry_rail = "descending (▼)"
+                    target_rail = "ascending (▲)"
+                elif vix_position_pct <= 25:
+                    trade_zone = "PUTS"
+                    zone_description = "VIX near SUPPORT → Look for PUTS"
+                    entry_rail = "ascending (▲)"
+                    target_rail = "descending (▼)"
+                else:
+                    trade_zone = "NEUTRAL"
+                    zone_description = "VIX mid-range → Wait for extremes"
+                    entry_rail = "wait"
+                    target_rail = "wait"
+            else:
+                trade_zone = "UNKNOWN"
+                zone_description = "Enter current VIX"
+                entry_rail = "N/A"
+                target_rail = "N/A"
+                vix_position_pct = 50
             
             vix_signal = {
-                'anchor_low': st.session_state.vix_anchor_low,
-                'anchor_high': st.session_state.vix_anchor_high,
-                'anchor_low_time': None,
-                'anchor_high_time': None,
-                'vix_2_3am_status': st.session_state.vix_2_3am_status,
-                'vix_930_signal': st.session_state.vix_930_signal,
-                'spx_rail_touched': spx_rail_touched,
-                'trade_direction': trade_direction,
-                'direction_confirmed': direction_confirmed,
-                'is_retest': is_retest,
-                'current_vix': st.session_state.vix_current,
-                'sell_signal': sell_signal,
-                'buy_signal': buy_signal,
-                'sell_message': sell_message,
-                'buy_message': buy_message,
+                'support': vix_support,
+                'resistance': vix_resistance,
+                'current': vix_current,
+                'range': vix_range,
+                'position_pct': vix_position_pct,
+                'trade_zone': trade_zone,
+                'zone_description': zone_description,
+                'entry_rail': entry_rail,
+                'target_rail': target_rail,
                 'data_source': 'MANUAL'
             }
+            
+            # Visual display in sidebar
+            st.markdown("---")
+            if trade_zone == "CALLS":
+                st.success(f"🟢 **{zone_description}**")
+                st.caption(f"Entry: SPX {entry_rail} | Target: SPX {target_rail}")
+            elif trade_zone == "PUTS":
+                st.error(f"🔴 **{zone_description}**")
+                st.caption(f"Entry: SPX {entry_rail} | Target: SPX {target_rail}")
+            else:
+                st.warning(f"🟡 **{zone_description}**")
+            
+            # Show VIX position bar
+            st.caption(f"VIX Position: {vix_position_pct:.0f}% (0%=Support, 100%=Resistance)")
+            st.progress(vix_position_pct / 100)
         
         st.markdown("---")
         st.markdown("### ⚙️ Parameters")
@@ -4456,7 +4398,7 @@ def main():
         reversal_badge = " ⚡ REVERSAL: High ▼ is SELL"
     
     # ==========================================================================
-    # VIX OVERNIGHT SIGNAL PANEL
+    # VIX TRADE COMPASS PANEL
     # ==========================================================================
     # Show VIX panel for:
     # - Today and past dates
@@ -4476,8 +4418,8 @@ def main():
     if show_vix_panel:
         st.markdown("""
         <div class="section-header">
-            <div class="section-icon">📊</div>
-            <div class="section-title">VIX-SPX Confluence — Direction Signal</div>
+            <div class="section-icon">🧭</div>
+            <div class="section-title">VIX Trade Compass</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -4486,66 +4428,79 @@ def main():
             st.markdown("""
             <div style="background: #dbeafe; border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
                 <div style="font-weight: 600; color: #1e40af; font-size: 0.9rem;">📝 Enter VIX Data in Sidebar</div>
-                <div style="color: #1e3a8a; font-size: 0.8rem; margin-top: 8px;">Enter VIX anchor levels from TradingView (VX1!) to enable confluence detection.</div>
+                <div style="color: #1e3a8a; font-size: 0.8rem; margin-top: 8px;">Enter VIX Support/Resistance from overnight (5pm-2am) to see trade direction.</div>
             </div>
             """, unsafe_allow_html=True)
         else:
-            # Get the key values
-            trade_direction = vix_signal.get('trade_direction')
-            direction_confirmed = vix_signal.get('direction_confirmed', False)
-            signal_930 = vix_signal.get('vix_930_signal', '⏳ Waiting')
-            spx_rail_touched = vix_signal.get('spx_rail_touched', False)
-            is_retest = vix_signal.get('is_retest', False)
-            vix_2_3am = vix_signal.get('vix_2_3am_status', 'Anchors Held')
+            # Get the key values from new vix_signal structure
+            vix_support = vix_signal.get('support', 0)
+            vix_resistance = vix_signal.get('resistance', 0)
+            vix_current = vix_signal.get('current', 0)
+            vix_position_pct = vix_signal.get('position_pct', 50)
+            trade_zone = vix_signal.get('trade_zone', 'UNKNOWN')
+            zone_description = vix_signal.get('zone_description', '')
+            entry_rail = vix_signal.get('entry_rail', 'N/A')
+            target_rail = vix_signal.get('target_rail', 'N/A')
             
-            # Determine main signal display based on CONFLUENCE (both VIX + SPX)
-            if direction_confirmed:  # Both VIX touched anchor AND SPX touched rail
-                if trade_direction == "PUTS":
-                    main_color = "#ef4444"  # Red for puts
-                    main_bg = "#fef2f2"
-                    main_icon = "🔴"
-                    main_text = "CONFLUENCE: PUTS"
-                    sub_text = "VIX + SPX rail touched together → SHORT signal"
-                else:
-                    main_color = "#10b981"  # Green for calls
-                    main_bg = "#d1fae5"
-                    main_icon = "🟢"
-                    main_text = "CONFLUENCE: CALLS"
-                    sub_text = "VIX + SPX rail touched together → LONG signal"
-            elif trade_direction and not spx_rail_touched:
-                # VIX signaled but SPX not at rail yet
+            # Determine colors based on trade zone
+            if trade_zone == "CALLS":
+                main_color = "#10b981"
+                main_bg = "#d1fae5"
+                main_icon = "🟢"
+            elif trade_zone == "PUTS":
+                main_color = "#ef4444"
+                main_bg = "#fef2f2"
+                main_icon = "🔴"
+            else:
                 main_color = "#f59e0b"
                 main_bg = "#fef3c7"
-                main_icon = "⚠️"
-                main_text = f"VIX SAYS {trade_direction} — WAIT FOR SPX RAIL"
-                sub_text = "VIX touched anchor but SPX not at cone rail yet"
-            else:
-                main_color = "#6b7280"
-                main_bg = "#f3f4f6"
-                main_icon = "⏳"
-                main_text = "WAITING FOR CONFLUENCE"
-                sub_text = "Watch for VIX + SPX to touch levels together"
+                main_icon = "🟡"
             
-            # Build the HTML - pre-compute all values to avoid f-string issues
-            retest_badge = '<span style="background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; margin-left: 8px;">RETEST SCENARIO</span>' if is_retest else ''
-            signal_bg = '#fef3c7' if not direction_confirmed else main_bg
-            anchor_low_val = vix_signal.get('anchor_low', 0)
-            anchor_high_val = vix_signal.get('anchor_high', 0)
-            current_vix_val = vix_signal.get('current_vix', 0)
-            
-            vix_html = f"""<div style="background: #ffffff; border: 2px solid {main_color}; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"><div style="background: {main_bg}; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;"><div style="font-size: 2rem; margin-bottom: 4px;">{main_icon}</div><div style="font-weight: 700; color: {main_color}; font-size: 1.2rem;">{main_text}</div><div style="color: #64748b; font-size: 0.85rem; margin-top: 4px;">{sub_text}</div>{retest_badge}</div><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;"><div style="background: #f8fafc; border-radius: 8px; padding: 12px; text-align: center;"><div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Anchor Low (5pm-2am)</div><div style="font-family: monospace; font-size: 1.2rem; font-weight: 700; color: #0f172a;">{anchor_low_val:.2f}</div></div><div style="background: #f8fafc; border-radius: 8px; padding: 12px; text-align: center;"><div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Anchor High (5pm-2am)</div><div style="font-family: monospace; font-size: 1.2rem; font-weight: 700; color: #0f172a;">{anchor_high_val:.2f}</div></div></div><div style="background: #f1f5f9; border-radius: 6px; padding: 10px; margin-bottom: 12px;"><div style="font-size: 0.75rem; color: #475569;"><strong>2-3am Status:</strong> {vix_2_3am} | <strong>Current VIX:</strong> {current_vix_val:.2f}</div></div><div style="background: {signal_bg}; border-left: 4px solid {main_color}; border-radius: 0 6px 6px 0; padding: 12px;"><div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">9-9:30am VIX-SPX Confluence</div><div style="font-size: 0.9rem; color: #1e293b; font-weight: 500;">{signal_930}</div></div></div>"""
+            # Build VIX Trade Compass HTML
+            vix_html = f"""
+            <div style="background: #ffffff; border: 2px solid {main_color}; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                <div style="background: {main_bg}; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;">
+                    <div style="font-size: 2rem; margin-bottom: 4px;">{main_icon}</div>
+                    <div style="font-weight: 700; color: {main_color}; font-size: 1.2rem;">{trade_zone if trade_zone != 'UNKNOWN' else 'ENTER VIX DATA'}</div>
+                    <div style="color: #64748b; font-size: 0.85rem; margin-top: 4px;">{zone_description}</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px;">
+                    <div style="background: #fef2f2; border-radius: 8px; padding: 10px; text-align: center;">
+                        <div style="font-size: 0.65rem; color: #ef4444; text-transform: uppercase; font-weight: 600;">Resistance</div>
+                        <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #dc2626;">{vix_resistance:.2f}</div>
+                        <div style="font-size: 0.6rem; color: #64748b;">CALLS Zone</div>
+                    </div>
+                    <div style="background: #f0f9ff; border-radius: 8px; padding: 10px; text-align: center; border: 2px solid #0ea5e9;">
+                        <div style="font-size: 0.65rem; color: #0ea5e9; text-transform: uppercase; font-weight: 600;">Current</div>
+                        <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #0369a1;">{vix_current:.2f if vix_current > 0 else '—'}</div>
+                        <div style="font-size: 0.6rem; color: #64748b;">{vix_position_pct:.0f}%</div>
+                    </div>
+                    <div style="background: #d1fae5; border-radius: 8px; padding: 10px; text-align: center;">
+                        <div style="font-size: 0.65rem; color: #10b981; text-transform: uppercase; font-weight: 600;">Support</div>
+                        <div style="font-family: monospace; font-size: 1.1rem; font-weight: 700; color: #059669;">{vix_support:.2f}</div>
+                        <div style="font-size: 0.6rem; color: #64748b;">PUTS Zone</div>
+                    </div>
+                </div>
+                <div style="background: #f8fafc; border-radius: 8px; padding: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 0.7rem; color: #64748b;">PUTS ← VIX Position → CALLS</span>
+                    </div>
+                    <div style="background: linear-gradient(to right, #d1fae5 0%, #d1fae5 25%, #fef3c7 25%, #fef3c7 75%, #fef2f2 75%, #fef2f2 100%); height: 20px; border-radius: 10px; position: relative;">
+                        <div style="position: absolute; left: {vix_position_pct}%; top: -2px; transform: translateX(-50%); width: 24px; height: 24px; background: #0f172a; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                        <span style="font-size: 0.65rem; color: #10b981;">Support ({vix_support:.2f})</span>
+                        <span style="font-size: 0.65rem; color: #ef4444;">Resistance ({vix_resistance:.2f})</span>
+                    </div>
+                </div>
+                <div style="margin-top: 12px; padding: 10px; background: #f1f5f9; border-radius: 6px;">
+                    <div style="font-size: 0.75rem; color: #475569;">
+                        <strong>Entry Rail:</strong> SPX {entry_rail} | <strong>Target Rail:</strong> SPX {target_rail}
+                    </div>
+                </div>
+            </div>
+            """
             st.markdown(vix_html, unsafe_allow_html=True)
-            
-            # Add signal color to sell/buy
-            sell_sig = vix_signal.get('sell_signal', 'WATCHING')
-            buy_sig = vix_signal.get('buy_signal', 'WATCHING')
-            
-            # Update signal colors to include AVOID
-            signal_colors = {
-                'CONFIRMED': ('#10b981', '#d1fae5', '✅'),
-                'AVOID': ('#ef4444', '#fee2e2', '⛔'),
-                'WATCHING': ('#6b7280', '#f3f4f6', '👀'),
-            }
     
     st.markdown(f"### 🎯 10:00 AM Setups — {active_cone_name} Cone Active{reversal_badge}")
     st.caption(cone_reason)
