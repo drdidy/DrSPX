@@ -3568,27 +3568,29 @@ def main():
         
         # Show ES → SPX implied price (useful for overnight planning)
         st.markdown("---")
-        st.markdown("### 🌙 ES → SPX Estimate")
+        st.markdown("### 🌙 ES → SPX Conversion")
         
         # Initialize manual offset in session state
         if 'manual_es_offset' not in st.session_state:
             st.session_state.manual_es_offset = 8.0  # Default offset
-        if 'use_manual_offset' not in st.session_state:
-            st.session_state.use_manual_offset = True  # Default to manual since auto is unreliable
         
-        # Manual offset input
+        # Manual offset input - expanded range for unusual market conditions
         st.session_state.manual_es_offset = st.number_input(
-            "ES-SPX Offset",
-            min_value=-50.0,
-            max_value=50.0,
+            "ES - SPX Offset",
+            min_value=-100.0,
+            max_value=100.0,
             value=st.session_state.manual_es_offset,
             step=0.25,
             format="%.2f",
-            help="ES typically trades 6-10 pts above SPX. Enter the offset you see on TradingView."
+            help="Enter (ES price - SPX price). Positive if ES > SPX, Negative if ES < SPX. Example: If ES=6000 and SPX=6058, enter -58"
         )
         
-        # Use manual offset
+        # Clarify the math
         es_offset = st.session_state.manual_es_offset
+        if es_offset >= 0:
+            st.caption(f"📐 SPX = ES - {es_offset:.2f} (ES is {es_offset:.2f} pts ABOVE SPX)")
+        else:
+            st.caption(f"📐 SPX = ES + {abs(es_offset):.2f} (ES is {abs(es_offset):.2f} pts BELOW SPX)")
         
         # Get current ES if available
         try:
@@ -3596,14 +3598,13 @@ def main():
             es_current_data = es_ticker.history(period='1d', interval='1m')
             if not es_current_data.empty:
                 es_current = es_current_data['Close'].iloc[-1]
-                spx_implied = es_current - es_offset
+                spx_implied = es_current - es_offset  # This works for both positive and negative offsets
                 
                 es_col1, es_col2 = st.columns(2)
                 with es_col1:
                     st.metric("ES Futures", f"{es_current:,.2f}")
                 with es_col2:
                     st.metric("SPX Implied", f"{spx_implied:,.2f}")
-                st.caption(f"Using offset: {es_offset:+.2f} pts")
                 
                 if not is_market_hours:
                     st.info("💡 Use SPX Implied to check overnight levels")
