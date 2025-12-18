@@ -4433,31 +4433,39 @@ def main():
             price_label = "SPX (Last)"
             market_status = "CLOSED"
     
-    # TERMINAL HEADER
+    # TERMINAL HEADER - Sleek Professional Design
     st.markdown(f"""
-    <div class="terminal-header">
-        <div class="terminal-logo">
-            <div class="terminal-logo-icon">SP</div>
-            <div>
-                <div class="terminal-title">SPX PROPHET</div>
-                <div class="terminal-subtitle">Institutional Options Intelligence</div>
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border-radius: 12px; padding: 20px 28px; margin-bottom: 16px; border: 1px solid #334155; box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(245,158,11,0.3);">
+                    <span style="font-size: 20px; font-weight: 800; color: #0f172a;">📈</span>
+                </div>
+                <div>
+                    <div style="font-size: 24px; font-weight: 700; color: #f8fafc; letter-spacing: -0.5px;">SPX PROPHET</div>
+                    <div style="font-size: 11px; color: #94a3b8; letter-spacing: 2px; text-transform: uppercase; margin-top: 2px;">0DTE Options • Structural Analysis</div>
+                </div>
             </div>
-        </div>
-        <div class="terminal-status">
-            <div class="status-item">
-                <div class="status-label">{price_label}</div>
-                <div class="status-value">{display_price:,.2f}</div>
-                <div style="font-size: 0.55rem; color: {'#10b981' if market_status == 'LIVE' else '#f59e0b'}; text-transform: uppercase;">{market_status}</div>
-            </div>
-            <div class="status-item">
-                <div class="status-label">Session</div>
-                <div class="status-value status-live">
-                    <span class="live-dot"></span>
-                    {ct_time.strftime('%H:%M:%S')} CT
+            <div style="display: flex; gap: 32px; align-items: center;">
+                <div style="text-align: right;">
+                    <div style="font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">{price_label}</div>
+                    <div style="font-size: 22px; font-weight: 700; color: #f8fafc; font-family: 'JetBrains Mono', monospace;">{display_price:,.2f}</div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Status</div>
+                    <div style="display: flex; align-items: center; gap: 6px; justify-content: flex-end;">
+                        <span style="width: 8px; height: 8px; background: {'#10b981' if market_status == 'LIVE' else '#f59e0b'}; border-radius: 50%; animation: pulse 2s infinite;"></span>
+                        <span style="font-size: 13px; font-weight: 600; color: {'#10b981' if market_status == 'LIVE' else '#f59e0b'};">{market_status}</span>
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Time (CT)</div>
+                    <div style="font-size: 15px; font-weight: 600; color: #f8fafc; font-family: 'JetBrains Mono', monospace;">{ct_time.strftime('%H:%M:%S')}</div>
                 </div>
             </div>
         </div>
     </div>
+    <style>@keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.4; }} }}</style>
     """, unsafe_allow_html=True)
     
     # QUICK STATS BAR
