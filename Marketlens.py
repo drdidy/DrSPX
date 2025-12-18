@@ -4684,7 +4684,7 @@ def main():
                         <!-- Current VIX -->
                         <div style="background: #0f172a; border-radius: 8px; padding: 10px; text-align: center; margin-bottom: 8px;">
                             <div style="font-size: 0.65rem; color: #cbd5e1; text-transform: uppercase;">Current VIX</div>
-                            <div style="font-family: monospace; font-size: 1.5rem; font-weight: 700; color: #f8fafc;">{vix_current:.2f if vix_current > 0 else '—'}</div>
+                            <div style="font-family: monospace; font-size: 1.5rem; font-weight: 700; color: #f8fafc;">{f'{vix_current:.2f}' if vix_current > 0 else '—'}</div>
                             <div style="font-size: 0.65rem; color: #94a3b8;">{f'{position_in_zone:.0f}% in zone' if zone_status == 'CONTAINED' and position_in_zone else zone_status_text}</div>
                         </div>
                         
