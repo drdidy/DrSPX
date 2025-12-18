@@ -2000,7 +2000,7 @@ def main():
                 format="%.2f"
             )
         
-       st.markdown("---")
+           st.markdown("---")
         
         # --------------------------------------------------------------------
         # MANUAL SPX OVERRIDE
