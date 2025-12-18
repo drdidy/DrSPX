@@ -676,7 +676,7 @@ def inject_premium_css():
         }
         
         .metric-value {
-            font-size: 2.2rem;
+            font-size: 1.5rem;
             font-weight: 800;
             font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
             margin-bottom: 6px;
@@ -852,7 +852,7 @@ def inject_premium_css():
         .zone-price {
             font-weight: 700;
             color: #1e293b;
-            font-size: 1.05rem;
+            font-size: 0.9rem;
         }
         
         .zone-action {
@@ -976,7 +976,7 @@ def inject_premium_css():
         }
         
         .trade-stat-value {
-            font-size: 1.4rem;
+            font-size: 1.1rem;
             font-weight: 800;
             font-family: 'SF Mono', monospace;
             margin-bottom: 6px;
@@ -1030,7 +1030,7 @@ def inject_premium_css():
         }
         
         .pnl-value {
-            font-size: 1.6rem;
+            font-size: 1.2rem;
             font-weight: 800;
             font-family: 'SF Mono', monospace;
         }
