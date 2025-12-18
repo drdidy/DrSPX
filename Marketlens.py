@@ -730,17 +730,17 @@ def render_dashboard_html(
                             <div class="vix-zone">
                                 <div class="zone-box top">
                                     <div class="zone-label green">Zone Top (Resistance)</div>
-                                    <div class="zone-value green">{vix_top:.2f if vix_top > 0 else '—'}</div>
+                                    <div class="zone-value green">{f'{vix_top:.2f}' if vix_top > 0 else '—'}</div>
                                     <div class="zone-hint">VIX closes here → CALLS</div>
                                 </div>
                                 <div class="zone-box current">
                                     <div class="zone-label white">Current VIX</div>
-                                    <div class="zone-value white">{vix_now:.2f if vix_now > 0 else '—'}</div>
+                                    <div class="zone-value white">{f'{vix_now:.2f}' if vix_now > 0 else '—'}</div>
                                     <div class="zone-hint" style="color:#94a3b8;">{vix_pct:.0f}% in zone</div>
                                 </div>
                                 <div class="zone-box bottom">
                                     <div class="zone-label red">Zone Bottom (Support)</div>
-                                    <div class="zone-value red">{vix_bot:.2f if vix_bot > 0 else '—'}</div>
+                                    <div class="zone-value red">{f'{vix_bot:.2f}' if vix_bot > 0 else '—'}</div>
                                     <div class="zone-hint">VIX closes here → PUTS</div>
                                 </div>
                             </div>
@@ -752,7 +752,7 @@ def render_dashboard_html(
                                 </div>
                                 <div class="info-box">
                                     <div class="info-label">Exit When</div>
-                                    <div class="info-value" style="color:#dc2626;">VIX hits {vix_bot:.2f if vix_bias == 'CALLS' else vix_top:.2f if vix_bias == 'PUTS' else '—'}</div>
+                                    <div class="info-value" style="color:#dc2626;">VIX hits {f'{vix_bot:.2f}' if vix_bias == 'CALLS' else f'{vix_top:.2f}' if vix_bias == 'PUTS' else '—'}</div>
                                 </div>
                             </div>
                         </div>
