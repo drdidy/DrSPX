@@ -433,8 +433,206 @@ def assess_day(vix: VIXZone, cones: List[Cone], current_price: float) -> DayAsse
     )
 
 # ============================================================================
-# DATA FETCHING
+# HISTORICAL TRACKING - What Actually Happened
 # ============================================================================
+
+@st.cache_data(ttl=300)
+def fetch_session_candles(session_date: datetime) -> Optional[pd.DataFrame]:
+    """Fetch intraday candles for a session to analyze what happened."""
+    try:
+        spx = yf.Ticker("^GSPC")
+        
+        # Need to fetch a range that includes the session date
+        start = session_date
+        end = session_date + timedelta(days=1)
+        
+        df = spx.history(start=start, end=end, interval='5m')
+        
+        if df.empty:
+            return None
+        
+        df.index = df.index.tz_convert(CT_TZ)
+        
+        # Filter to RTH only (8:30 AM - 3:00 PM CT)
+        rth_start = time(8, 30)
+        rth_end = time(15, 0)
+        df = df[(df.index.time >= rth_start) & (df.index.time <= rth_end)]
+        
+        return df
+    except:
+        return None
+
+@dataclass
+class TradeResult:
+    setup: TradeSetup
+    triggered: bool
+    trigger_time: Optional[str]
+    trigger_price: Optional[float]
+    outcome: str  # 'WIN_50', 'WIN_75', 'WIN_100', 'STOPPED', 'OPEN', 'NO_TRIGGER'
+    exit_time: Optional[str]
+    exit_price: Optional[float]
+    profit: float
+    max_favorable: float  # Best price reached in our direction
+    max_adverse: float    # Worst price reached against us
+
+def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, vix_bias: str) -> List[TradeResult]:
+    """Analyze what actually happened to each setup on a historical date."""
+    results = []
+    
+    if candles is None or candles.empty:
+        return results
+    
+    session_high = candles['High'].max()
+    session_low = candles['Low'].min()
+    
+    for setup in setups:
+        # Only analyze setups that match VIX bias (or analyze all if UNKNOWN)
+        # if vix_bias not in ['UNKNOWN', 'WAIT'] and setup.direction != vix_bias:
+        #     continue
+        
+        triggered = False
+        trigger_time = None
+        trigger_price = None
+        outcome = 'NO_TRIGGER'
+        exit_time = None
+        exit_price = None
+        profit = 0.0
+        max_favorable = 0.0
+        max_adverse = 0.0
+        
+        # Check if entry was triggered
+        if setup.direction == 'CALLS':
+            # CALLS: Entry at descending rail (buy when price drops to entry)
+            if session_low <= setup.entry:
+                triggered = True
+                # Find when it triggered
+                for idx, row in candles.iterrows():
+                    if row['Low'] <= setup.entry:
+                        trigger_time = idx.strftime('%H:%M')
+                        trigger_price = setup.entry
+                        break
+                
+                if triggered:
+                    # Track price action after trigger
+                    trigger_found = False
+                    highest_after = setup.entry
+                    lowest_after = setup.entry
+                    
+                    for idx, row in candles.iterrows():
+                        if not trigger_found:
+                            if row['Low'] <= setup.entry:
+                                trigger_found = True
+                            continue
+                        
+                        highest_after = max(highest_after, row['High'])
+                        lowest_after = min(lowest_after, row['Low'])
+                        
+                        # Check stop first
+                        if row['Low'] <= setup.stop:
+                            outcome = 'STOPPED'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.stop
+                            profit = -setup.risk_per_contract
+                            break
+                        
+                        # Check targets
+                        if row['High'] >= setup.target_100:
+                            outcome = 'WIN_100'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_100
+                            profit = setup.profit_100
+                            break
+                        elif row['High'] >= setup.target_75:
+                            outcome = 'WIN_75'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_75
+                            profit = setup.profit_75
+                            # Don't break - might hit 100%
+                        elif row['High'] >= setup.target_50:
+                            if outcome != 'WIN_75':
+                                outcome = 'WIN_50'
+                                exit_time = idx.strftime('%H:%M')
+                                exit_price = setup.target_50
+                                profit = setup.profit_50
+                    
+                    max_favorable = highest_after - setup.entry
+                    max_adverse = setup.entry - lowest_after
+                    
+                    if outcome == 'NO_TRIGGER':
+                        outcome = 'OPEN'  # Triggered but no target/stop hit
+        
+        else:  # PUTS
+            # PUTS: Entry at ascending rail (buy when price rises to entry)
+            if session_high >= setup.entry:
+                triggered = True
+                # Find when it triggered
+                for idx, row in candles.iterrows():
+                    if row['High'] >= setup.entry:
+                        trigger_time = idx.strftime('%H:%M')
+                        trigger_price = setup.entry
+                        break
+                
+                if triggered:
+                    trigger_found = False
+                    lowest_after = setup.entry
+                    highest_after = setup.entry
+                    
+                    for idx, row in candles.iterrows():
+                        if not trigger_found:
+                            if row['High'] >= setup.entry:
+                                trigger_found = True
+                            continue
+                        
+                        lowest_after = min(lowest_after, row['Low'])
+                        highest_after = max(highest_after, row['High'])
+                        
+                        # Check stop first
+                        if row['High'] >= setup.stop:
+                            outcome = 'STOPPED'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.stop
+                            profit = -setup.risk_per_contract
+                            break
+                        
+                        # Check targets
+                        if row['Low'] <= setup.target_100:
+                            outcome = 'WIN_100'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_100
+                            profit = setup.profit_100
+                            break
+                        elif row['Low'] <= setup.target_75:
+                            outcome = 'WIN_75'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_75
+                            profit = setup.profit_75
+                        elif row['Low'] <= setup.target_50:
+                            if outcome != 'WIN_75':
+                                outcome = 'WIN_50'
+                                exit_time = idx.strftime('%H:%M')
+                                exit_price = setup.target_50
+                                profit = setup.profit_50
+                    
+                    max_favorable = setup.entry - lowest_after
+                    max_adverse = highest_after - setup.entry
+                    
+                    if outcome == 'NO_TRIGGER':
+                        outcome = 'OPEN'
+        
+        results.append(TradeResult(
+            setup=setup,
+            triggered=triggered,
+            trigger_time=trigger_time,
+            trigger_price=trigger_price,
+            outcome=outcome,
+            exit_time=exit_time,
+            exit_price=exit_price,
+            profit=profit,
+            max_favorable=max_favorable,
+            max_adverse=max_adverse
+        ))
+    
+    return results
 
 @st.cache_data(ttl=300)
 def fetch_prior_session(session_date: datetime) -> Optional[Dict]:
@@ -496,7 +694,10 @@ def render_dashboard(
     cones: List[Cone],
     setups: List[TradeSetup],
     assessment: DayAssessment,
-    prior: Dict
+    prior: Dict,
+    historical_results: List = None,
+    session_data: Dict = None,
+    is_historical: bool = False
 ) -> str:
     """Render the complete dashboard HTML."""
     
@@ -936,12 +1137,121 @@ def render_dashboard(
                     </div>
                 </div>
             </div>
+            
+            {'<!-- Historical Results -->' + render_historical_section(historical_results, session_data) if is_historical and historical_results else ''}
         </div>
     </body>
     </html>
     '''
     
     return html
+
+def render_historical_section(results: List, session_data: Dict) -> str:
+    """Render the historical results section."""
+    if not results or not session_data:
+        return ''
+    
+    # Calculate summary
+    wins = [r for r in results if r.outcome.startswith('WIN')]
+    losses = [r for r in results if r.outcome == 'STOPPED']
+    no_triggers = [r for r in results if r.outcome == 'NO_TRIGGER']
+    
+    total_profit = sum(r.profit for r in results)
+    
+    # Build results HTML
+    results_html = ''
+    for r in results:
+        if r.outcome == 'NO_TRIGGER':
+            icon = '⚪'
+            color = '#6b7280'
+            bg = '#f9fafb'
+            status = 'NOT TRIGGERED'
+            detail = f"Entry {r.setup.entry:.2f} never reached"
+        elif r.outcome == 'STOPPED':
+            icon = '🔴'
+            color = '#dc2626'
+            bg = '#fef2f2'
+            status = 'STOPPED OUT'
+            detail = f"Entry {r.trigger_time} → Stop hit {r.exit_time}"
+        elif r.outcome.startswith('WIN'):
+            icon = '🟢'
+            color = '#059669'
+            bg = '#ecfdf5'
+            pct = r.outcome.split('_')[1]
+            status = f'WIN ({pct}% Target)'
+            detail = f"Entry {r.trigger_time} → Target hit {r.exit_time}"
+        else:
+            icon = '🟡'
+            color = '#d97706'
+            bg = '#fffbeb'
+            status = 'OPEN (No Exit)'
+            detail = f"Entry {r.trigger_time} → Still open at close"
+        
+        dir_label = f"{r.setup.cone_name} {'▼' if r.setup.direction == 'CALLS' else '▲'} {r.setup.direction}"
+        profit_color = '#059669' if r.profit >= 0 else '#dc2626'
+        profit_text = f"+${r.profit:,.0f}" if r.profit >= 0 else f"-${abs(r.profit):,.0f}"
+        
+        results_html += f'''
+        <div style="background:{bg};border-radius:10px;padding:14px 16px;margin-bottom:10px;border-left:4px solid {color};">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div style="font-weight:600;font-size:14px;color:#1f2937;">{icon} {dir_label}</div>
+                    <div style="font-size:12px;color:#6b7280;margin-top:2px;">{status}</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:2px;">{detail}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:{profit_color};">{profit_text}</div>
+                    <div style="font-size:10px;color:#6b7280;">/contract</div>
+                </div>
+            </div>
+        </div>
+        '''
+    
+    summary_color = '#059669' if total_profit >= 0 else '#dc2626'
+    summary_text = f"+${total_profit:,.0f}" if total_profit >= 0 else f"-${abs(total_profit):,.0f}"
+    
+    return f'''
+    <div class="card" style="margin-top:20px;">
+        <div class="card-header" style="background:#1e293b;color:#f8fafc;">📊 HISTORICAL RESULTS - What Actually Happened</div>
+        <div class="card-body">
+            <!-- Session Stats -->
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;padding:16px;background:#f8fafc;border-radius:10px;">
+                <div style="text-align:center;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Session High</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:600;color:#059669;">{session_data.get('high', 0):,.2f}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Session Low</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:600;color:#dc2626;">{session_data.get('low', 0):,.2f}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Range</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:600;color:#1f2937;">{session_data.get('high', 0) - session_data.get('low', 0):,.1f} pts</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Net P/L</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:{summary_color};">{summary_text}</div>
+                </div>
+            </div>
+            
+            <!-- Summary -->
+            <div style="display:flex;gap:16px;margin-bottom:16px;">
+                <div style="background:#ecfdf5;padding:8px 16px;border-radius:8px;font-size:13px;color:#059669;font-weight:600;">
+                    🟢 {len(wins)} Wins
+                </div>
+                <div style="background:#fef2f2;padding:8px 16px;border-radius:8px;font-size:13px;color:#dc2626;font-weight:600;">
+                    🔴 {len(losses)} Stopped
+                </div>
+                <div style="background:#f3f4f6;padding:8px 16px;border-radius:8px;font-size:13px;color:#6b7280;font-weight:600;">
+                    ⚪ {len(no_triggers)} No Trigger
+                </div>
+            </div>
+            
+            <!-- Individual Results -->
+            {results_html}
+        </div>
+    </div>
+    '''
 
 # ============================================================================
 # MAIN APPLICATION
@@ -1059,9 +1369,37 @@ def main():
     # Assess day
     assessment = assess_day(vix, cones, spx)
     
+    # Check if this is a historical date (not today)
+    ct_now = get_ct_now()
+    is_historical = session_date < ct_now.date()
+    
+    historical_results = None
+    session_data = None
+    
+    if is_historical and setups:
+        # Fetch intraday candles for the selected date
+        candles = fetch_session_candles(session_dt)
+        
+        if candles is not None and not candles.empty:
+            # Analyze what happened
+            historical_results = analyze_historical_trades(setups, candles, vix.bias)
+            session_data = {
+                'high': candles['High'].max(),
+                'low': candles['Low'].min(),
+                'close': candles['Close'].iloc[-1] if not candles.empty else 0
+            }
+    
     # Render
-    html = render_dashboard(spx, vix, cones, setups, assessment, prior)
-    components.html(html, height=1400, scrolling=True)
+    html = render_dashboard(
+        spx, vix, cones, setups, assessment, prior,
+        historical_results=historical_results,
+        session_data=session_data,
+        is_historical=is_historical
+    )
+    
+    # Adjust height based on historical content
+    height = 1800 if is_historical and historical_results else 1400
+    components.html(html, height=height, scrolling=True)
 
 if __name__ == "__main__":
     main()
