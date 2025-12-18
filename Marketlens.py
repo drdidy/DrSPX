@@ -2805,59 +2805,54 @@ def inject_premium_css():
     #MainMenu, footer, header { visibility: hidden; }
     
     /* ============================================
-       SIDEBAR - Compact & Readable
+       SIDEBAR - Readable & Compact
        ============================================ */
     [data-testid="stSidebar"] {
         background: #f9fafb;
         border-right: 1px solid #e5e7eb;
     }
     [data-testid="stSidebar"] * {
-        font-size: 11px !important;
+        font-size: 13px !important;
         color: #374151 !important;
     }
     [data-testid="stSidebar"] h1, 
     [data-testid="stSidebar"] h2, 
     [data-testid="stSidebar"] h3 {
-        font-size: 12px !important;
+        font-size: 14px !important;
         font-weight: 600 !important;
         color: #111827 !important;
         margin-bottom: 8px !important;
     }
     [data-testid="stSidebar"] label {
-        font-size: 10px !important;
-        color: #4b5563 !important;
+        font-size: 12px !important;
+        color: #374151 !important;
         font-weight: 500 !important;
     }
     [data-testid="stSidebar"] .stNumberInput input,
     [data-testid="stSidebar"] .stSelectbox > div > div {
-        font-size: 12px !important;
+        font-size: 13px !important;
         font-family: 'JetBrains Mono', monospace !important;
-        padding: 4px 8px !important;
     }
     [data-testid="stSidebar"] .stMetric label {
-        font-size: 9px !important;
+        font-size: 11px !important;
         color: #6b7280 !important;
     }
     [data-testid="stSidebar"] .stMetric [data-testid="stMetricValue"] {
-        font-size: 13px !important;
+        font-size: 15px !important;
         color: #111827 !important;
     }
     [data-testid="stSidebar"] .stCaption {
-        font-size: 9px !important;
+        font-size: 11px !important;
         color: #6b7280 !important;
     }
     [data-testid="stSidebar"] .stCheckbox label span {
-        font-size: 10px !important;
+        font-size: 12px !important;
     }
     [data-testid="stSidebar"] button {
-        font-size: 10px !important;
-        padding: 4px 12px !important;
-    }
-    [data-testid="stSidebar"] .stExpander {
-        font-size: 10px !important;
+        font-size: 12px !important;
     }
     [data-testid="stSidebar"] hr {
-        margin: 8px 0 !important;
+        margin: 10px 0 !important;
         border-color: #e5e7eb !important;
     }
     
@@ -3655,26 +3650,26 @@ def main():
             elif zone_size > 0:
                 st.info(f"Zone = {num_zones} level(s) ({zone_size:.2f})")
             
-            # Trade bias indicator - ultra compact
+            # Trade bias indicator - readable
             if trade_bias == "CALLS":
                 st.markdown(f"""
-                <div style="background:#d1fae5;border:1px solid #10b981;border-radius:4px;padding:4px;text-align:center;">
-                    <div style="font-weight:700;color:#047857;font-size:12px;">🟢 CALLS</div>
-                    <div style="font-size:9px;color:#065f46;">{trade_action}</div>
+                <div style="background:#d1fae5;border:2px solid #10b981;border-radius:6px;padding:8px;text-align:center;">
+                    <div style="font-weight:700;color:#047857;font-size:16px;">🟢 CALLS</div>
+                    <div style="font-size:11px;color:#065f46;margin-top:4px;">{trade_action}</div>
                 </div>
                 """, unsafe_allow_html=True)
             elif trade_bias == "PUTS":
                 st.markdown(f"""
-                <div style="background:#fee2e2;border:1px solid #ef4444;border-radius:4px;padding:4px;text-align:center;">
-                    <div style="font-weight:700;color:#b91c1c;font-size:12px;">🔴 PUTS</div>
-                    <div style="font-size:9px;color:#7f1d1d;">{trade_action}</div>
+                <div style="background:#fee2e2;border:2px solid #ef4444;border-radius:6px;padding:8px;text-align:center;">
+                    <div style="font-weight:700;color:#b91c1c;font-size:16px;">🔴 PUTS</div>
+                    <div style="font-size:11px;color:#7f1d1d;margin-top:4px;">{trade_action}</div>
                 </div>
                 """, unsafe_allow_html=True)
             elif trade_bias == "WAIT":
                 st.markdown(f"""
-                <div style="background:#fef3c7;border:1px solid #d97706;border-radius:4px;padding:4px;text-align:center;">
-                    <div style="font-weight:700;color:#92400e;font-size:12px;">🟡 WAIT</div>
-                    <div style="font-size:9px;color:#78350f;">{trade_action}</div>
+                <div style="background:#fef3c7;border:2px solid #d97706;border-radius:6px;padding:8px;text-align:center;">
+                    <div style="font-weight:700;color:#92400e;font-size:16px;">🟡 WAIT</div>
+                    <div style="font-size:11px;color:#78350f;margin-top:4px;">{trade_action}</div>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -3683,28 +3678,28 @@ def main():
                 st.caption(f"🎯 {exit_target}")
             
             # ===== VIX ZONE LADDER =====
-            st.markdown("**Ladder**")
+            st.markdown("**Zone Ladder**")
             
-            # Build ladder HTML - ultra compact
-            ladder_html = '<div style="font-family:monospace;font-size:9px;line-height:1.2;">'
+            # Build ladder HTML - readable
+            ladder_html = '<div style="font-family:monospace;font-size:11px;line-height:1.4;">'
             
-            # Zones above (only show 2)
+            # Zones above (show 2)
             for i in range(1, -1, -1):
                 level = zones_above[i]
                 ladder_html += f'<div style="color:#6b7280;">+{i+1}: {level:.2f}</div>'
             
             # Zone top
-            ladder_html += f'<div style="background:#d1fae5;padding:1px 3px;border-radius:2px;margin:1px 0;color:#047857;font-weight:600;">TOP:{zone_top:.2f}</div>'
+            ladder_html += f'<div style="background:#d1fae5;padding:3px 6px;border-radius:3px;margin:2px 0;color:#047857;font-weight:600;">TOP: {zone_top:.2f}</div>'
             
             # Current VIX
             if zone_status == "CONTAINED" and vix_current > 0:
                 pos_pct = vix_signal.get('position_in_zone', 50)
-                ladder_html += f'<div style="background:#dbeafe;padding:1px 3px;border-radius:2px;margin:1px 0;color:#1e3a8a;font-weight:600;">NOW:{vix_current:.2f} ({pos_pct:.0f}%)</div>'
+                ladder_html += f'<div style="background:#dbeafe;padding:3px 6px;border-radius:3px;margin:2px 0;color:#1e3a8a;font-weight:600;">NOW: {vix_current:.2f} ({pos_pct:.0f}%)</div>'
             
             # Zone bottom
-            ladder_html += f'<div style="background:#fee2e2;padding:1px 3px;border-radius:2px;margin:1px 0;color:#991b1b;font-weight:600;">BOT:{zone_bottom:.2f}</div>'
+            ladder_html += f'<div style="background:#fee2e2;padding:3px 6px;border-radius:3px;margin:2px 0;color:#991b1b;font-weight:600;">BOT: {zone_bottom:.2f}</div>'
             
-            # Zones below (only show 2)
+            # Zones below (show 2)
             for i in range(2):
                 level = zones_below[i]
                 ladder_html += f'<div style="color:#6b7280;">-{i+1}: {level:.2f}</div>'
