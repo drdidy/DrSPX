@@ -476,7 +476,14 @@ class TradeResult:
     max_adverse: float    # Worst price reached against us
 
 def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, vix_bias: str) -> List[TradeResult]:
-    """Analyze what actually happened to each setup on a historical date."""
+    """
+    Analyze what actually happened to each setup on a historical date.
+    
+    IMPORTANT LOGIC:
+    - If price hits 50% target FIRST → WIN (we take profit)
+    - If price hits STOP FIRST (before 50%) → LOSS
+    - We track the BEST target reached (50%, 75%, or 100%)
+    """
     results = []
     
     if candles is None or candles.empty:
@@ -486,10 +493,6 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
     session_low = candles['Low'].min()
     
     for setup in setups:
-        # Only analyze setups that match VIX bias (or analyze all if UNKNOWN)
-        # if vix_bias not in ['UNKNOWN', 'WAIT'] and setup.direction != vix_bias:
-        #     continue
-        
         triggered = False
         trigger_time = None
         trigger_price = None
@@ -500,11 +503,11 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
         max_favorable = 0.0
         max_adverse = 0.0
         
-        # Check if entry was triggered
         if setup.direction == 'CALLS':
             # CALLS: Entry at descending rail (buy when price drops to entry)
             if session_low <= setup.entry:
                 triggered = True
+                
                 # Find when it triggered
                 for idx, row in candles.iterrows():
                     if row['Low'] <= setup.entry:
@@ -513,10 +516,10 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
                         break
                 
                 if triggered:
-                    # Track price action after trigger
                     trigger_found = False
                     highest_after = setup.entry
                     lowest_after = setup.entry
+                    best_target_hit = None  # Track best target reached
                     
                     for idx, row in candles.iterrows():
                         if not trigger_found:
@@ -527,44 +530,50 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
                         highest_after = max(highest_after, row['High'])
                         lowest_after = min(lowest_after, row['Low'])
                         
-                        # Check stop first
-                        if row['Low'] <= setup.stop:
+                        # Check targets FIRST (50% is a win!)
+                        if row['High'] >= setup.target_100:
+                            best_target_hit = '100'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_100
+                            # Don't break yet - want to track full price action
+                        elif row['High'] >= setup.target_75 and best_target_hit != '100':
+                            best_target_hit = '75'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_75
+                        elif row['High'] >= setup.target_50 and best_target_hit not in ['75', '100']:
+                            best_target_hit = '50'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_50
+                        
+                        # Check stop ONLY if no target hit yet
+                        if best_target_hit is None and row['Low'] <= setup.stop:
                             outcome = 'STOPPED'
                             exit_time = idx.strftime('%H:%M')
                             exit_price = setup.stop
                             profit = -setup.risk_per_contract
                             break
-                        
-                        # Check targets
-                        if row['High'] >= setup.target_100:
-                            outcome = 'WIN_100'
-                            exit_time = idx.strftime('%H:%M')
-                            exit_price = setup.target_100
-                            profit = setup.profit_100
-                            break
-                        elif row['High'] >= setup.target_75:
-                            outcome = 'WIN_75'
-                            exit_time = idx.strftime('%H:%M')
-                            exit_price = setup.target_75
-                            profit = setup.profit_75
-                            # Don't break - might hit 100%
-                        elif row['High'] >= setup.target_50:
-                            if outcome != 'WIN_75':
-                                outcome = 'WIN_50'
-                                exit_time = idx.strftime('%H:%M')
-                                exit_price = setup.target_50
-                                profit = setup.profit_50
+                    
+                    # Set outcome based on best target hit
+                    if best_target_hit == '100':
+                        outcome = 'WIN_100'
+                        profit = setup.profit_100
+                    elif best_target_hit == '75':
+                        outcome = 'WIN_75'
+                        profit = setup.profit_75
+                    elif best_target_hit == '50':
+                        outcome = 'WIN_50'
+                        profit = setup.profit_50
+                    elif outcome != 'STOPPED':
+                        outcome = 'OPEN'  # Triggered but no target or stop hit
                     
                     max_favorable = highest_after - setup.entry
                     max_adverse = setup.entry - lowest_after
-                    
-                    if outcome == 'NO_TRIGGER':
-                        outcome = 'OPEN'  # Triggered but no target/stop hit
         
         else:  # PUTS
             # PUTS: Entry at ascending rail (buy when price rises to entry)
             if session_high >= setup.entry:
                 triggered = True
+                
                 # Find when it triggered
                 for idx, row in candles.iterrows():
                     if row['High'] >= setup.entry:
@@ -576,6 +585,7 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
                     trigger_found = False
                     lowest_after = setup.entry
                     highest_after = setup.entry
+                    best_target_hit = None
                     
                     for idx, row in candles.iterrows():
                         if not trigger_found:
@@ -586,38 +596,43 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
                         lowest_after = min(lowest_after, row['Low'])
                         highest_after = max(highest_after, row['High'])
                         
-                        # Check stop first
-                        if row['High'] >= setup.stop:
+                        # Check targets FIRST (50% is a win!)
+                        if row['Low'] <= setup.target_100:
+                            best_target_hit = '100'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_100
+                        elif row['Low'] <= setup.target_75 and best_target_hit != '100':
+                            best_target_hit = '75'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_75
+                        elif row['Low'] <= setup.target_50 and best_target_hit not in ['75', '100']:
+                            best_target_hit = '50'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_50
+                        
+                        # Check stop ONLY if no target hit yet
+                        if best_target_hit is None and row['High'] >= setup.stop:
                             outcome = 'STOPPED'
                             exit_time = idx.strftime('%H:%M')
                             exit_price = setup.stop
                             profit = -setup.risk_per_contract
                             break
-                        
-                        # Check targets
-                        if row['Low'] <= setup.target_100:
-                            outcome = 'WIN_100'
-                            exit_time = idx.strftime('%H:%M')
-                            exit_price = setup.target_100
-                            profit = setup.profit_100
-                            break
-                        elif row['Low'] <= setup.target_75:
-                            outcome = 'WIN_75'
-                            exit_time = idx.strftime('%H:%M')
-                            exit_price = setup.target_75
-                            profit = setup.profit_75
-                        elif row['Low'] <= setup.target_50:
-                            if outcome != 'WIN_75':
-                                outcome = 'WIN_50'
-                                exit_time = idx.strftime('%H:%M')
-                                exit_price = setup.target_50
-                                profit = setup.profit_50
+                    
+                    # Set outcome based on best target hit
+                    if best_target_hit == '100':
+                        outcome = 'WIN_100'
+                        profit = setup.profit_100
+                    elif best_target_hit == '75':
+                        outcome = 'WIN_75'
+                        profit = setup.profit_75
+                    elif best_target_hit == '50':
+                        outcome = 'WIN_50'
+                        profit = setup.profit_50
+                    elif outcome != 'STOPPED':
+                        outcome = 'OPEN'
                     
                     max_favorable = setup.entry - lowest_after
                     max_adverse = highest_after - setup.entry
-                    
-                    if outcome == 'NO_TRIGGER':
-                        outcome = 'OPEN'
         
         results.append(TradeResult(
             setup=setup,
