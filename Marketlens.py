@@ -327,16 +327,63 @@ def fetch_prior_session_data(session_date: datetime) -> Optional[Dict]:
     except Exception as e:
         return None
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def fetch_current_spx() -> Optional[float]:
+    """Fetch current SPX price with multiple fallback methods."""
+    
+    # Method 1: Try 1-minute data (most current)
     try:
         spx = yf.Ticker("^GSPC")
         data = spx.history(period='1d', interval='1m')
         if not data.empty:
-            return data['Close'].iloc[-1]
-        return None
+            price = data['Close'].iloc[-1]
+            if price > 0:
+                return float(price)
     except:
-        return None
+        pass
+    
+    # Method 2: Try 5-minute data
+    try:
+        spx = yf.Ticker("^GSPC")
+        data = spx.history(period='1d', interval='5m')
+        if not data.empty:
+            price = data['Close'].iloc[-1]
+            if price > 0:
+                return float(price)
+    except:
+        pass
+    
+    # Method 3: Try daily data (last close)
+    try:
+        spx = yf.Ticker("^GSPC")
+        data = spx.history(period='5d', interval='1d')
+        if not data.empty:
+            price = data['Close'].iloc[-1]
+            if price > 0:
+                return float(price)
+    except:
+        pass
+    
+    # Method 4: Try fast_info
+    try:
+        spx = yf.Ticker("^GSPC")
+        price = spx.fast_info.get('lastPrice', None)
+        if price and price > 0:
+            return float(price)
+    except:
+        pass
+    
+    # Method 5: Try info dict
+    try:
+        spx = yf.Ticker("^GSPC")
+        info = spx.info
+        price = info.get('regularMarketPrice', None) or info.get('previousClose', None)
+        if price and price > 0:
+            return float(price)
+    except:
+        pass
+    
+    return None
 
 # ============================================================================
 # TRADE SETUP GENERATION
@@ -1953,6 +2000,29 @@ def main():
                 format="%.2f"
             )
         
+       st.markdown("---")
+        
+        # --------------------------------------------------------------------
+        # MANUAL SPX OVERRIDE
+        # --------------------------------------------------------------------
+        st.markdown("### 💹 Manual SPX")
+        
+        if 'manual_spx' not in st.session_state:
+            st.session_state.manual_spx = 0.0
+        
+        use_manual_spx = st.checkbox("Override SPX Price", value=False)
+        
+        if use_manual_spx:
+            st.session_state.manual_spx = st.number_input(
+                "Current SPX",
+                min_value=0.0,
+                max_value=10000.0,
+                value=st.session_state.manual_spx,
+                step=0.25,
+                format="%.2f",
+                help="Enter current SPX price manually"
+            )
+        
         st.markdown("---")
         
         # --------------------------------------------------------------------
@@ -1986,11 +2056,18 @@ def main():
     # ========================================================================
     
     prior_session = fetch_prior_session_data(session_date_dt)
-    current_price = fetch_current_spx()
-    
-    if current_price is None:
-        current_price = 6000.0
-        st.warning("⚠️ Could not fetch SPX. Using placeholder.")
+   # Get SPX price (manual override or fetch)
+    if use_manual_spx and st.session_state.manual_spx > 0:
+        current_price = st.session_state.manual_spx
+        st.info(f"📌 Using manual SPX: **{current_price:.2f}**")
+    else:
+        current_price = fetch_current_spx()
+        
+        if current_price is None:
+            current_price = 6000.0
+            st.warning("⚠️ Could not fetch SPX. Use Manual SPX Override in sidebar.")
+        else:
+            st.success(f"✅ Live SPX: **{current_price:.2f}**")
     
     # Determine pivots
     if use_manual and st.session_state.manual_high > 0:
