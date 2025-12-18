@@ -3644,8 +3644,8 @@ def main():
         st.markdown("### 🎯 SPX-VIX Confluence")
         st.caption("BOTH must align: VIX zone + SPX rail")
         st.markdown("""
-        <div style="background: #fef3c7; border-left: 3px solid #f59e0b; padding: 8px 12px; margin-bottom: 12px; border-radius: 0 6px 6px 0; font-size: 0.75rem;">
-            ⚠️ <strong>30-MIN CLOSE matters!</strong> Wicks can pierce levels but wait for candle CLOSE to confirm.
+        <div style="background: #fef3c7; border-left: 3px solid #d97706; padding: 8px 12px; margin-bottom: 12px; border-radius: 0 6px 6px 0; font-size: 0.75rem; color: #78350f;">
+            ⚠️ <strong style="color: #92400e;">30-MIN CLOSE matters!</strong> Wicks can pierce levels — wait for candle CLOSE to confirm.
         </div>
         """, unsafe_allow_html=True)
         
@@ -4604,11 +4604,11 @@ def main():
         
         # 30-min close reminder
         st.markdown("""
-        <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px;">
+        <div style="background: #fef3c7; border: 1px solid #d97706; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 1.2rem;">⏱️</span>
             <div>
-                <div style="font-weight: 600; color: #92400e; font-size: 0.85rem;">30-Minute Candle CLOSE Matters</div>
-                <div style="color: #a16207; font-size: 0.75rem;">VIX wicks can pierce levels — wait for candle CLOSE to confirm rejection/bounce</div>
+                <div style="font-weight: 600; color: #78350f; font-size: 0.85rem;">30-Minute Candle CLOSE Matters</div>
+                <div style="color: #92400e; font-size: 0.75rem;">VIX wicks can pierce levels — wait for candle CLOSE to confirm rejection/bounce</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
