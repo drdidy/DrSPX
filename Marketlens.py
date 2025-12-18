@@ -3234,6 +3234,7 @@ def render_header():
     <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 20px 24px; border-radius: 10px; margin-bottom: 16px; text-align: center; border: 1px solid #334155;">
         <h1 style="font-size: 28px; font-weight: 700; color: #f8fafc; margin: 0; letter-spacing: -0.5px;">SPX PROPHET</h1>
         <p style="font-size: 11px; color: #fbbf24; text-transform: uppercase; letter-spacing: 3px; margin: 8px 0 0 0;">Where Structure Becomes Foresight</p>
+        <p style="font-size: 9px; color: #64748b; margin: 4px 0 0 0;">v2.1 - Dec 18, 2025</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -4641,30 +4642,30 @@ def main():
             # Breakout badge
             breakout_badge = ""
             if zone_status == "BREAKOUT_UP":
-                breakout_badge = '<div style="background: #fee2e2; color: #dc2626; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; margin-top: 8px;">⚠️ VIX BROKE UP — PUTS targets extend</div>'
+                breakout_badge = '<div style="background: #fee2e2; color: #dc2626; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-top: 12px;">⚠️ VIX BROKE UP — PUTS targets extend</div>'
             elif zone_status == "BREAKOUT_DOWN":
-                breakout_badge = '<div style="background: #d1fae5; color: #059669; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; margin-top: 8px;">⚡ VIX BROKE DOWN — CALLS targets extend</div>'
+                breakout_badge = '<div style="background: #d1fae5; color: #059669; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-top: 12px;">⚡ VIX BROKE DOWN — CALLS targets extend</div>'
             
-            # Build main VIX Zone HTML
+            # Build main VIX Zone HTML - Readable fonts
             vix_html = f"""
-            <div style="background: #ffffff; border: 2px solid {main_color}; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            <div style="background: #ffffff; border: 2px solid {main_color}; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
                 
                 <!-- Main Trade Signal -->
-                <div style="background: {main_bg}; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;">
-                    <div style="font-size: 2.5rem; margin-bottom: 4px;">{main_icon}</div>
-                    <div style="font-weight: 700; color: {main_color}; font-size: 1.4rem;">{trade_bias}</div>
-                    <div style="color: #374151; font-size: 0.9rem; margin-top: 4px;">{trade_action}</div>
-                    <div style="color: #1f2937; font-size: 0.8rem; margin-top: 2px; font-weight: 500;">{spx_direction}</div>
+                <div style="background: {main_bg}; border-radius: 10px; padding: 20px; margin-bottom: 20px; text-align: center;">
+                    <div style="font-size: 48px; margin-bottom: 8px;">{main_icon}</div>
+                    <div style="font-weight: 700; color: {main_color}; font-size: 28px;">{trade_bias}</div>
+                    <div style="color: #374151; font-size: 14px; margin-top: 8px;">{trade_action}</div>
+                    <div style="color: #1f2937; font-size: 13px; margin-top: 4px; font-weight: 500;">{spx_direction}</div>
                     {breakout_badge}
                 </div>
                 
                 <!-- VIX Zone Ladder (Visual) -->
-                <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 12px; margin-bottom: 16px;">
+                <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 16px; margin-bottom: 20px;">
                     
                     <!-- Zones Above (PUTS extend) -->
                     <div style="text-align: center;">
-                        <div style="font-size: 0.65rem; color: #b91c1c; text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">PUTS Extend ↑</div>
-                        <div style="font-family: monospace; font-size: 0.75rem; color: #6b7280; line-height: 1.8;">
+                        <div style="font-size: 11px; color: #b91c1c; text-transform: uppercase; font-weight: 600; margin-bottom: 10px;">PUTS Extend ↑</div>
+                        <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6b7280; line-height: 2;">
                             {f'+4: {zones_above[3]:.2f}' if len(zones_above) > 3 else ''}<br>
                             {f'+3: {zones_above[2]:.2f}' if len(zones_above) > 2 else ''}<br>
                             {f'+2: {zones_above[1]:.2f}' if len(zones_above) > 1 else ''}<br>
@@ -4675,31 +4676,31 @@ def main():
                     <!-- Current Zone -->
                     <div>
                         <!-- Zone Top -->
-                        <div style="background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-radius: 8px; padding: 12px; text-align: center; margin-bottom: 8px; border: 2px solid #10b981;">
-                            <div style="font-size: 0.7rem; color: #047857; text-transform: uppercase; font-weight: 600;">Zone Top (Resistance)</div>
-                            <div style="font-family: monospace; font-size: 1.3rem; font-weight: 700; color: #047857;">{zone_top:.2f}</div>
-                            <div style="font-size: 0.65rem; color: #065f46;">VIX <strong>CLOSES</strong> here → SPX UP → <strong>CALLS</strong></div>
+                        <div style="background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-radius: 10px; padding: 14px; text-align: center; margin-bottom: 10px; border: 2px solid #10b981;">
+                            <div style="font-size: 11px; color: #047857; text-transform: uppercase; font-weight: 600;">Zone Top (Resistance)</div>
+                            <div style="font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: #047857;">{zone_top:.2f}</div>
+                            <div style="font-size: 11px; color: #065f46;">VIX CLOSES here → SPX UP → <strong>CALLS</strong></div>
                         </div>
                         
                         <!-- Current VIX -->
-                        <div style="background: #0f172a; border-radius: 8px; padding: 10px; text-align: center; margin-bottom: 8px;">
-                            <div style="font-size: 0.65rem; color: #cbd5e1; text-transform: uppercase;">Current VIX</div>
-                            <div style="font-family: monospace; font-size: 1.5rem; font-weight: 700; color: #f8fafc;">{f'{vix_current:.2f}' if vix_current > 0 else '—'}</div>
-                            <div style="font-size: 0.65rem; color: #94a3b8;">{f'{position_in_zone:.0f}% in zone' if zone_status == 'CONTAINED' and position_in_zone else zone_status_text}</div>
+                        <div style="background: #0f172a; border-radius: 10px; padding: 14px; text-align: center; margin-bottom: 10px;">
+                            <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Current VIX</div>
+                            <div style="font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: #f8fafc;">{f'{vix_current:.2f}' if vix_current > 0 else '—'}</div>
+                            <div style="font-size: 12px; color: #94a3b8;">{f'{position_in_zone:.0f}% in zone' if zone_status == 'CONTAINED' and position_in_zone else zone_status_text}</div>
                         </div>
                         
                         <!-- Zone Bottom -->
-                        <div style="background: linear-gradient(135deg, #fee2e2, #fecaca); border-radius: 8px; padding: 12px; text-align: center; border: 2px solid #ef4444;">
-                            <div style="font-size: 0.7rem; color: #b91c1c; text-transform: uppercase; font-weight: 600;">Zone Bottom (Support)</div>
-                            <div style="font-family: monospace; font-size: 1.3rem; font-weight: 700; color: #b91c1c;">{zone_bottom:.2f}</div>
-                            <div style="font-size: 0.65rem; color: #7f1d1d;">VIX <strong>CLOSES</strong> here → SPX DOWN → <strong>PUTS</strong></div>
+                        <div style="background: linear-gradient(135deg, #fee2e2, #fecaca); border-radius: 10px; padding: 14px; text-align: center; border: 2px solid #ef4444;">
+                            <div style="font-size: 11px; color: #b91c1c; text-transform: uppercase; font-weight: 600;">Zone Bottom (Support)</div>
+                            <div style="font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: #b91c1c;">{zone_bottom:.2f}</div>
+                            <div style="font-size: 11px; color: #7f1d1d;">VIX CLOSES here → SPX DOWN → <strong>PUTS</strong></div>
                         </div>
                     </div>
                     
                     <!-- Zones Below (CALLS extend) -->
                     <div style="text-align: center;">
-                        <div style="font-size: 0.65rem; color: #047857; text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">CALLS Extend ↓</div>
-                        <div style="font-family: monospace; font-size: 0.75rem; color: #6b7280; line-height: 1.8;">
+                        <div style="font-size: 11px; color: #047857; text-transform: uppercase; font-weight: 600; margin-bottom: 10px;">CALLS Extend ↓</div>
+                        <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6b7280; line-height: 2;">
                             {f'-1: {zones_below[0]:.2f}' if len(zones_below) > 0 else ''}<br>
                             {f'-2: {zones_below[1]:.2f}' if len(zones_below) > 1 else ''}<br>
                             {f'-3: {zones_below[2]:.2f}' if len(zones_below) > 2 else ''}<br>
@@ -4710,13 +4711,13 @@ def main():
                 
                 <!-- Entry and Exit Info -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div style="background: #f0fdf4; border-left: 4px solid #10b981; padding: 12px; border-radius: 0 8px 8px 0;">
-                        <div style="font-size: 0.7rem; color: #065f46; text-transform: uppercase; font-weight: 600;">Entry Rail</div>
-                        <div style="font-size: 0.95rem; color: #047857; font-weight: 600;">SPX {entry_rail}</div>
+                    <div style="background: #f0fdf4; border-left: 4px solid #10b981; padding: 14px; border-radius: 0 8px 8px 0;">
+                        <div style="font-size: 11px; color: #065f46; text-transform: uppercase; font-weight: 600;">Entry Rail</div>
+                        <div style="font-size: 15px; color: #047857; font-weight: 600; margin-top: 4px;">SPX {entry_rail}</div>
                     </div>
-                    <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 12px; border-radius: 0 8px 8px 0;">
-                        <div style="font-size: 0.7rem; color: #7f1d1d; text-transform: uppercase; font-weight: 600;">Exit Target</div>
-                        <div style="font-size: 0.95rem; color: #b91c1c; font-weight: 600;">{exit_target if exit_target else 'Enter VIX data'}</div>
+                    <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 14px; border-radius: 0 8px 8px 0;">
+                        <div style="font-size: 11px; color: #7f1d1d; text-transform: uppercase; font-weight: 600;">Exit Target</div>
+                        <div style="font-size: 15px; color: #b91c1c; font-weight: 600; margin-top: 4px;">{exit_target if exit_target else 'Enter VIX data'}</div>
                     </div>
                 </div>
             </div>
