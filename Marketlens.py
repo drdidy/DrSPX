@@ -44,10 +44,10 @@ MIN_CONE_WIDTH = 18.0   # Minimum tradeable width
 CONFLUENCE_THRESHOLD = 5.0
 
 # Trade Constants
-STOP_LOSS_PTS = 3.0
-STRIKE_OFFSET = 17.5    # OTM distance for ~0.33 delta
-CONTRACT_DELTA = 0.33
-CONTRACTS_PER_TRADE = 10
+STOP_LOSS_PTS = 6.0
+STRIKE_OTM_DISTANCE = 17.5    # OTM distance for ~0.33 delta
+DELTA = 0.33                   # Contract moves $0.33 for every $1 SPX moves
+CONTRACT_MULTIPLIER = 100      # Options multiplier
 
 # Choppy Day Thresholds
 LOW_VIX_THRESHOLD = 13.0
@@ -92,16 +92,23 @@ class VIXZone:
 class TradeSetup:
     direction: str
     cone_name: str
+    cone_width: float
     entry: float
     stop: float
     target_50: float
     target_75: float
     target_100: float
     strike: int
+    # Contract pricing
+    contract_entry_est: float    # Estimated entry price (e.g., $4.00)
+    contract_move_50: float      # Contract price move at 50%
+    contract_move_75: float      # Contract price move at 75%
+    contract_move_100: float     # Contract price move at 100%
+    # Profits per contract
     profit_50: float
     profit_75: float
     profit_100: float
-    risk: float
+    risk_per_contract: float
     rr_ratio: float
     distance: float
     is_active: bool = False
@@ -239,78 +246,129 @@ def find_nearest(price: float, cones: List[Cone]) -> Tuple[Cone, str, float]:
 # ============================================================================
 
 def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> List[TradeSetup]:
-    """Generate trade setups sorted by distance."""
+    """
+    Generate trade setups with CORRECT profit calculations.
+    
+    The Math:
+    - Delta = 0.33 (contract moves $0.33 for every $1 SPX moves)
+    - Cone width = potential SPX move (rail to rail)
+    - Contract move = Cone width × Delta
+    - Profit = Contract move × $100 (options multiplier)
+    
+    Example:
+    - Cone width: 27 pts
+    - Contract move: 27 × 0.33 = 8.91 pts (~$9)
+    - If entry at $4.00, exit at $13.00
+    - Profit: $9.00 × 100 = $900 per contract
+    """
     setups = []
     
     for cone in cones:
         if cone.width < MIN_CONE_WIDTH:
             continue
         
-        # CALLS setup (descending rail entry)
+        # ========== CALLS SETUP (Enter at Descending Rail) ==========
         entry_c = cone.descending_rail
         target_c = cone.ascending_rail
-        move_c = target_c - entry_c
+        spx_move_c = cone.width  # Full rail-to-rail move
         dist_c = abs(current_price - entry_c)
         
-        strike_c = int(entry_c + STRIKE_OFFSET)
-        strike_c = ((strike_c + 4) // 5) * 5
+        # Strike: ~17.5 pts OTM from entry for ~0.33 delta
+        strike_c = int(entry_c + STRIKE_OTM_DISTANCE)
+        strike_c = ((strike_c + 4) // 5) * 5  # Round to nearest 5
         
-        profit_50_c = round(move_c * 0.5 * CONTRACT_DELTA * 100 * CONTRACTS_PER_TRADE, 0)
-        profit_75_c = round(move_c * 0.75 * CONTRACT_DELTA * 100 * CONTRACTS_PER_TRADE, 0)
-        profit_100_c = round(move_c * CONTRACT_DELTA * 100 * CONTRACTS_PER_TRADE, 0)
-        risk_c = round(STOP_LOSS_PTS * CONTRACT_DELTA * 100 * CONTRACTS_PER_TRADE, 0)
+        # Contract price moves (based on delta)
+        contract_move_100_c = spx_move_c * DELTA           # Full move
+        contract_move_75_c = spx_move_c * 0.75 * DELTA     # 75% move
+        contract_move_50_c = spx_move_c * 0.50 * DELTA     # 50% move
+        contract_loss_c = STOP_LOSS_PTS * DELTA            # Stop loss move
+        
+        # Estimated contract entry price (rough estimate based on OTM distance)
+        # This is approximate - real price depends on IV, time, etc.
+        contract_entry_c = 4.00  # Typical entry for 15-20pt OTM 0DTE
+        
+        # Profits per contract (contract move × $100 multiplier)
+        profit_100_c = round(contract_move_100_c * CONTRACT_MULTIPLIER, 0)
+        profit_75_c = round(contract_move_75_c * CONTRACT_MULTIPLIER, 0)
+        profit_50_c = round(contract_move_50_c * CONTRACT_MULTIPLIER, 0)
+        risk_c = round(contract_loss_c * CONTRACT_MULTIPLIER, 0)
+        
+        # R:R ratio (50% profit vs risk)
+        rr_c = round(profit_50_c / risk_c, 1) if risk_c > 0 else 0
         
         setups.append(TradeSetup(
             direction='CALLS',
             cone_name=cone.name,
+            cone_width=cone.width,
             entry=entry_c,
             stop=round(entry_c - STOP_LOSS_PTS, 2),
-            target_50=round(entry_c + move_c * 0.5, 2),
-            target_75=round(entry_c + move_c * 0.75, 2),
+            target_50=round(entry_c + spx_move_c * 0.5, 2),
+            target_75=round(entry_c + spx_move_c * 0.75, 2),
             target_100=target_c,
             strike=strike_c,
+            contract_entry_est=contract_entry_c,
+            contract_move_50=round(contract_move_50_c, 2),
+            contract_move_75=round(contract_move_75_c, 2),
+            contract_move_100=round(contract_move_100_c, 2),
             profit_50=profit_50_c,
             profit_75=profit_75_c,
             profit_100=profit_100_c,
-            risk=risk_c,
-            rr_ratio=round(profit_50_c / risk_c, 1) if risk_c > 0 else 0,
+            risk_per_contract=risk_c,
+            rr_ratio=rr_c,
             distance=round(dist_c, 2),
             is_active=(dist_c <= 5 and vix_bias == 'CALLS')
         ))
         
-        # PUTS setup (ascending rail entry)
+        # ========== PUTS SETUP (Enter at Ascending Rail) ==========
         entry_p = cone.ascending_rail
         target_p = cone.descending_rail
-        move_p = entry_p - target_p
+        spx_move_p = cone.width  # Full rail-to-rail move
         dist_p = abs(current_price - entry_p)
         
-        strike_p = int(entry_p - STRIKE_OFFSET)
-        strike_p = (strike_p // 5) * 5
+        # Strike: ~17.5 pts OTM from entry for ~0.33 delta
+        strike_p = int(entry_p - STRIKE_OTM_DISTANCE)
+        strike_p = (strike_p // 5) * 5  # Round to nearest 5
         
-        profit_50_p = round(move_p * 0.5 * CONTRACT_DELTA * 100 * CONTRACTS_PER_TRADE, 0)
-        profit_75_p = round(move_p * 0.75 * CONTRACT_DELTA * 100 * CONTRACTS_PER_TRADE, 0)
-        profit_100_p = round(move_p * CONTRACT_DELTA * 100 * CONTRACTS_PER_TRADE, 0)
-        risk_p = round(STOP_LOSS_PTS * CONTRACT_DELTA * 100 * CONTRACTS_PER_TRADE, 0)
+        # Contract price moves (based on delta)
+        contract_move_100_p = spx_move_p * DELTA
+        contract_move_75_p = spx_move_p * 0.75 * DELTA
+        contract_move_50_p = spx_move_p * 0.50 * DELTA
+        contract_loss_p = STOP_LOSS_PTS * DELTA
+        
+        contract_entry_p = 4.00
+        
+        # Profits per contract
+        profit_100_p = round(contract_move_100_p * CONTRACT_MULTIPLIER, 0)
+        profit_75_p = round(contract_move_75_p * CONTRACT_MULTIPLIER, 0)
+        profit_50_p = round(contract_move_50_p * CONTRACT_MULTIPLIER, 0)
+        risk_p = round(contract_loss_p * CONTRACT_MULTIPLIER, 0)
+        
+        rr_p = round(profit_50_p / risk_p, 1) if risk_p > 0 else 0
         
         setups.append(TradeSetup(
             direction='PUTS',
             cone_name=cone.name,
+            cone_width=cone.width,
             entry=entry_p,
             stop=round(entry_p + STOP_LOSS_PTS, 2),
-            target_50=round(entry_p - move_p * 0.5, 2),
-            target_75=round(entry_p - move_p * 0.75, 2),
+            target_50=round(entry_p - spx_move_p * 0.5, 2),
+            target_75=round(entry_p - spx_move_p * 0.75, 2),
             target_100=target_p,
             strike=strike_p,
+            contract_entry_est=contract_entry_p,
+            contract_move_50=round(contract_move_50_p, 2),
+            contract_move_75=round(contract_move_75_p, 2),
+            contract_move_100=round(contract_move_100_p, 2),
             profit_50=profit_50_p,
             profit_75=profit_75_p,
             profit_100=profit_100_p,
-            risk=risk_p,
-            rr_ratio=round(profit_50_p / risk_p, 1) if risk_p > 0 else 0,
+            risk_per_contract=risk_p,
+            rr_ratio=rr_p,
             distance=round(dist_p, 2),
             is_active=(dist_p <= 5 and vix_bias == 'PUTS')
         ))
     
-    # Sort by distance
+    # Sort by distance from current price
     setups.sort(key=lambda x: x.distance)
     return setups
 
@@ -499,46 +557,66 @@ def render_dashboard(
     def setup_html(s: TradeSetup) -> str:
         active_badge = '<span style="background:#059669;color:white;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px;">ACTIVE</span>' if s.is_active else ''
         dir_color = '#059669' if s.direction == 'CALLS' else '#dc2626'
+        arrow = '▼' if s.direction == 'CALLS' else '▲'
         return f'''
         <div style="background:white;border-radius:12px;padding:16px;margin-bottom:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                <div style="font-weight:700;font-size:15px;color:#1f2937;">{s.cone_name} {'▼' if s.direction == 'CALLS' else '▲'}{active_badge}</div>
-                <div style="font-size:13px;color:#6b7280;">{s.distance:.0f} pts away</div>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;">
                 <div>
-                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Entry</div>
-                    <div style="font-family:'SF Mono',monospace;font-size:15px;font-weight:600;color:#1f2937;">{s.entry:.2f}</div>
+                    <span style="font-weight:700;font-size:15px;color:#1f2937;">{s.cone_name} {arrow}</span>
+                    {active_badge}
                 </div>
-                <div>
-                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Stop</div>
-                    <div style="font-family:'SF Mono',monospace;font-size:15px;font-weight:600;color:#dc2626;">{s.stop:.2f}</div>
-                </div>
-                <div>
-                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Target</div>
-                    <div style="font-family:'SF Mono',monospace;font-size:15px;font-weight:600;color:#059669;">{s.target_100:.2f}</div>
-                </div>
-                <div>
-                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;">Strike</div>
-                    <div style="font-family:'SF Mono',monospace;font-size:15px;font-weight:600;color:{dir_color};">{s.strike}{'C' if s.direction == 'CALLS' else 'P'}</div>
+                <div style="text-align:right;">
+                    <div style="font-size:12px;color:#6b7280;">{s.distance:.0f} pts away</div>
+                    <div style="font-size:11px;color:#9ca3af;">Width: {s.cone_width:.0f} pts</div>
                 </div>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding-top:12px;border-top:1px solid #f3f4f6;">
+            
+            <!-- Entry/Stop/Target/Strike -->
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;padding:12px;background:#f9fafb;border-radius:8px;">
                 <div>
+                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;">Entry</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#1f2937;">{s.entry:.2f}</div>
+                </div>
+                <div>
+                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;">Stop</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#dc2626;">{s.stop:.2f}</div>
+                </div>
+                <div>
+                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;">Target</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#059669;">{s.target_100:.2f}</div>
+                </div>
+                <div>
+                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;">Strike</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:{dir_color};">{s.strike}{'C' if s.direction == 'CALLS' else 'P'}</div>
+                </div>
+            </div>
+            
+            <!-- Contract Move Info -->
+            <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:0 4px;">
+                Contract moves ~${s.contract_move_100:.2f} on full rail-to-rail ({s.cone_width:.0f} × 0.33 delta)
+            </div>
+            
+            <!-- Profits Per Contract -->
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding-top:12px;border-top:1px solid #e5e7eb;">
+                <div style="text-align:center;">
                     <div style="font-size:10px;color:#6b7280;">50% Move</div>
-                    <div style="font-family:'SF Mono',monospace;font-size:14px;font-weight:700;color:#059669;">${s.profit_50:,.0f}</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#059669;">${s.profit_50:,.0f}</div>
+                    <div style="font-size:9px;color:#9ca3af;">/contract</div>
                 </div>
-                <div>
+                <div style="text-align:center;">
                     <div style="font-size:10px;color:#6b7280;">75% Move</div>
-                    <div style="font-family:'SF Mono',monospace;font-size:14px;font-weight:700;color:#059669;">${s.profit_75:,.0f}</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#059669;">${s.profit_75:,.0f}</div>
+                    <div style="font-size:9px;color:#9ca3af;">/contract</div>
                 </div>
-                <div>
+                <div style="text-align:center;">
                     <div style="font-size:10px;color:#6b7280;">100% Move</div>
-                    <div style="font-family:'SF Mono',monospace;font-size:14px;font-weight:700;color:#059669;">${s.profit_100:,.0f}</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#059669;">${s.profit_100:,.0f}</div>
+                    <div style="font-size:9px;color:#9ca3af;">/contract</div>
                 </div>
-                <div>
-                    <div style="font-size:10px;color:#6b7280;">R:R</div>
-                    <div style="font-family:'SF Mono',monospace;font-size:14px;font-weight:700;color:#1f2937;">{s.rr_ratio}:1</div>
+                <div style="text-align:center;">
+                    <div style="font-size:10px;color:#6b7280;">Risk | R:R</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#dc2626;">${s.risk_per_contract:.0f}</div>
+                    <div style="font-size:9px;color:#1f2937;font-weight:600;">{s.rr_ratio}:1</div>
                 </div>
             </div>
         </div>
