@@ -3,8 +3,8 @@
 ║                           SPX PROPHET v2.1                                    ║
 ║                    Where Structure Becomes Foresight                          ║
 ║                         LEGENDARY EDITION                                     ║
-║                                                                                ║
-║                    100% Native Streamlit - Guaranteed Rendering               ║
+║                                                                               ║
+║                         100% Native Streamlit                                 ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 THE VIX-SPX CONFLUENCE SYSTEM:
