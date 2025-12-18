@@ -673,7 +673,7 @@ def render_dashboard_html(
                     </div>
                     <div class="stat">
                         <div class="stat-label">ES</div>
-                        <div class="stat-value">{es_price:,.2f if es_price else '—'}</div>
+                        <div class="stat-value">{f'{es_price:,.2f}' if es_price else '—'}</div>
                     </div>
                     <div class="stat">
                         <div class="stat-label">Time (CT)</div>
