@@ -3836,30 +3836,30 @@ def main():
             for i in range(3, -1, -1):
                 level = zones_above[i]
                 is_target = zone_status == "BREAKOUT_UP" and vix_current > 0 and level > vix_current and (i == 0 or zones_above[i-1] < vix_current if i > 0 else True)
-                style = 'color: #ef4444; font-weight: 600;' if is_target else 'color: #9ca3af;'
+                style = 'color: #dc2626; font-weight: 600;' if is_target else 'color: #6b7280;'
                 marker = ' ◀ TARGET' if is_target else ''
-                ladder_html += f'<div style="{style}">+{i+1}: {level:.2f} <span style="color: #ef4444; font-size: 0.65rem;">(PUTS extend){marker}</span></div>'
+                ladder_html += f'<div style="{style}">+{i+1}: {level:.2f} <span style="color: #b91c1c; font-size: 0.65rem;">(PUTS extend){marker}</span></div>'
             
             # Zone top (resistance)
             top_style = 'background: #d1fae5; padding: 4px 8px; border-radius: 4px; margin: 4px 0;'
-            ladder_html += f'<div style="{top_style}"><strong style="color: #059669;">TOP: {zone_top:.2f}</strong> <span style="color: #065f46; font-size: 0.7rem;">← CALLS entry / PUTS exit</span></div>'
+            ladder_html += f'<div style="{top_style}"><strong style="color: #047857;">TOP: {zone_top:.2f}</strong> <span style="color: #065f46; font-size: 0.7rem;">← CALLS entry / PUTS exit</span></div>'
             
             # Current VIX position (if in zone)
             if zone_status == "CONTAINED" and vix_current > 0:
                 pos_pct = vix_signal.get('position_in_zone', 50)
-                ladder_html += f'<div style="background: #dbeafe; padding: 4px 8px; border-radius: 4px; margin: 4px 0;"><strong style="color: #1d4ed8;">NOW: {vix_current:.2f}</strong> <span style="color: #1e40af; font-size: 0.7rem;">({pos_pct:.0f}% in zone)</span></div>'
+                ladder_html += f'<div style="background: #dbeafe; padding: 4px 8px; border-radius: 4px; margin: 4px 0;"><strong style="color: #1e40af;">NOW: {vix_current:.2f}</strong> <span style="color: #1e3a8a; font-size: 0.7rem;">({pos_pct:.0f}% in zone)</span></div>'
             
             # Zone bottom (support)
             bot_style = 'background: #fee2e2; padding: 4px 8px; border-radius: 4px; margin: 4px 0;'
-            ladder_html += f'<div style="{bot_style}"><strong style="color: #dc2626;">BOT: {zone_bottom:.2f}</strong> <span style="color: #991b1b; font-size: 0.7rem;">← PUTS entry / CALLS exit</span></div>'
+            ladder_html += f'<div style="{bot_style}"><strong style="color: #b91c1c;">BOT: {zone_bottom:.2f}</strong> <span style="color: #7f1d1d; font-size: 0.7rem;">← PUTS entry / CALLS exit</span></div>'
             
             # Zones below
             for i in range(4):
                 level = zones_below[i]
                 is_target = zone_status == "BREAKOUT_DOWN" and vix_current > 0 and level < vix_current and (i == 0 or zones_below[i-1] > vix_current if i > 0 else True)
-                style = 'color: #10b981; font-weight: 600;' if is_target else 'color: #9ca3af;'
+                style = 'color: #059669; font-weight: 600;' if is_target else 'color: #6b7280;'
                 marker = ' ◀ TARGET' if is_target else ''
-                ladder_html += f'<div style="{style}">-{i+1}: {level:.2f} <span style="color: #10b981; font-size: 0.65rem;">(CALLS extend){marker}</span></div>'
+                ladder_html += f'<div style="{style}">-{i+1}: {level:.2f} <span style="color: #047857; font-size: 0.65rem;">(CALLS extend){marker}</span></div>'
             
             ladder_html += '</div>'
             st.markdown(ladder_html, unsafe_allow_html=True)
@@ -4674,8 +4674,8 @@ def main():
                 <div style="background: {main_bg}; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;">
                     <div style="font-size: 2.5rem; margin-bottom: 4px;">{main_icon}</div>
                     <div style="font-weight: 700; color: {main_color}; font-size: 1.4rem;">{trade_bias}</div>
-                    <div style="color: #64748b; font-size: 0.9rem; margin-top: 4px;">{trade_action}</div>
-                    <div style="color: #475569; font-size: 0.8rem; margin-top: 2px; font-weight: 500;">{spx_direction}</div>
+                    <div style="color: #374151; font-size: 0.9rem; margin-top: 4px;">{trade_action}</div>
+                    <div style="color: #1f2937; font-size: 0.8rem; margin-top: 2px; font-weight: 500;">{spx_direction}</div>
                     {breakout_badge}
                 </div>
                 
@@ -4684,8 +4684,8 @@ def main():
                     
                     <!-- Zones Above (PUTS extend) -->
                     <div style="text-align: center;">
-                        <div style="font-size: 0.65rem; color: #ef4444; text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">PUTS Extend ↑</div>
-                        <div style="font-family: monospace; font-size: 0.75rem; color: #9ca3af; line-height: 1.8;">
+                        <div style="font-size: 0.65rem; color: #b91c1c; text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">PUTS Extend ↑</div>
+                        <div style="font-family: monospace; font-size: 0.75rem; color: #6b7280; line-height: 1.8;">
                             {f'+4: {zones_above[3]:.2f}' if len(zones_above) > 3 else ''}<br>
                             {f'+3: {zones_above[2]:.2f}' if len(zones_above) > 2 else ''}<br>
                             {f'+2: {zones_above[1]:.2f}' if len(zones_above) > 1 else ''}<br>
@@ -4697,30 +4697,30 @@ def main():
                     <div>
                         <!-- Zone Top -->
                         <div style="background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-radius: 8px; padding: 12px; text-align: center; margin-bottom: 8px; border: 2px solid #10b981;">
-                            <div style="font-size: 0.7rem; color: #059669; text-transform: uppercase; font-weight: 600;">Zone Top (Resistance)</div>
+                            <div style="font-size: 0.7rem; color: #047857; text-transform: uppercase; font-weight: 600;">Zone Top (Resistance)</div>
                             <div style="font-family: monospace; font-size: 1.3rem; font-weight: 700; color: #047857;">{zone_top:.2f}</div>
                             <div style="font-size: 0.65rem; color: #065f46;">VIX <strong>CLOSES</strong> here → SPX UP → <strong>CALLS</strong></div>
                         </div>
                         
                         <!-- Current VIX -->
                         <div style="background: #0f172a; border-radius: 8px; padding: 10px; text-align: center; margin-bottom: 8px;">
-                            <div style="font-size: 0.65rem; color: #94a3b8; text-transform: uppercase;">Current VIX</div>
+                            <div style="font-size: 0.65rem; color: #cbd5e1; text-transform: uppercase;">Current VIX</div>
                             <div style="font-family: monospace; font-size: 1.5rem; font-weight: 700; color: #f8fafc;">{vix_current:.2f if vix_current > 0 else '—'}</div>
-                            <div style="font-size: 0.65rem; color: #64748b;">{f'{position_in_zone:.0f}% in zone' if zone_status == 'CONTAINED' and position_in_zone else zone_status_text}</div>
+                            <div style="font-size: 0.65rem; color: #94a3b8;">{f'{position_in_zone:.0f}% in zone' if zone_status == 'CONTAINED' and position_in_zone else zone_status_text}</div>
                         </div>
                         
                         <!-- Zone Bottom -->
                         <div style="background: linear-gradient(135deg, #fee2e2, #fecaca); border-radius: 8px; padding: 12px; text-align: center; border: 2px solid #ef4444;">
-                            <div style="font-size: 0.7rem; color: #dc2626; text-transform: uppercase; font-weight: 600;">Zone Bottom (Support)</div>
+                            <div style="font-size: 0.7rem; color: #b91c1c; text-transform: uppercase; font-weight: 600;">Zone Bottom (Support)</div>
                             <div style="font-family: monospace; font-size: 1.3rem; font-weight: 700; color: #b91c1c;">{zone_bottom:.2f}</div>
-                            <div style="font-size: 0.65rem; color: #991b1b;">VIX <strong>CLOSES</strong> here → SPX DOWN → <strong>PUTS</strong></div>
+                            <div style="font-size: 0.65rem; color: #7f1d1d;">VIX <strong>CLOSES</strong> here → SPX DOWN → <strong>PUTS</strong></div>
                         </div>
                     </div>
                     
                     <!-- Zones Below (CALLS extend) -->
                     <div style="text-align: center;">
-                        <div style="font-size: 0.65rem; color: #10b981; text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">CALLS Extend ↓</div>
-                        <div style="font-family: monospace; font-size: 0.75rem; color: #9ca3af; line-height: 1.8;">
+                        <div style="font-size: 0.65rem; color: #047857; text-transform: uppercase; font-weight: 600; margin-bottom: 8px;">CALLS Extend ↓</div>
+                        <div style="font-family: monospace; font-size: 0.75rem; color: #6b7280; line-height: 1.8;">
                             {f'-1: {zones_below[0]:.2f}' if len(zones_below) > 0 else ''}<br>
                             {f'-2: {zones_below[1]:.2f}' if len(zones_below) > 1 else ''}<br>
                             {f'-3: {zones_below[2]:.2f}' if len(zones_below) > 2 else ''}<br>
@@ -4736,7 +4736,7 @@ def main():
                         <div style="font-size: 0.95rem; color: #047857; font-weight: 600;">SPX {entry_rail}</div>
                     </div>
                     <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 12px; border-radius: 0 8px 8px 0;">
-                        <div style="font-size: 0.7rem; color: #991b1b; text-transform: uppercase; font-weight: 600;">Exit Target</div>
+                        <div style="font-size: 0.7rem; color: #7f1d1d; text-transform: uppercase; font-weight: 600;">Exit Target</div>
                         <div style="font-size: 0.95rem; color: #b91c1c; font-weight: 600;">{exit_target if exit_target else 'Enter VIX data'}</div>
                     </div>
                 </div>
