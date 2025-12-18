@@ -1166,12 +1166,34 @@ def render_historical_section(results: List, session_data: Dict) -> str:
     if not results or not session_data:
         return ''
     
+    # Check if results were filtered by VIX
+    vix_filtered = session_data.get('vix_filtered', False)
+    vix_bias = session_data.get('vix_bias', 'UNKNOWN')
+    
     # Calculate summary
     wins = [r for r in results if r.outcome.startswith('WIN')]
     losses = [r for r in results if r.outcome == 'STOPPED']
     no_triggers = [r for r in results if r.outcome == 'NO_TRIGGER']
     
     total_profit = sum(r.profit for r in results)
+    
+    # VIX warning banner
+    if vix_filtered:
+        vix_banner = f'''
+        <div style="background:#ecfdf5;border:1px solid #10b981;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+            <div style="font-size:13px;color:#065f46;">
+                <strong>✓ VIX Filtered:</strong> Only showing <strong>{vix_bias}</strong> setups (VIX bias was {vix_bias})
+            </div>
+        </div>
+        '''
+    else:
+        vix_banner = '''
+        <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+            <div style="font-size:13px;color:#92400e;">
+                <strong>⚠️ No VIX Data:</strong> Showing ALL setups. Enter the VIX zone for that day to see only valid entries.
+            </div>
+        </div>
+        '''
     
     # Build results HTML
     results_html = ''
@@ -1229,6 +1251,8 @@ def render_historical_section(results: List, session_data: Dict) -> str:
     <div class="card" style="margin-top:20px;">
         <div class="card-header" style="background:#1e293b;color:#f8fafc;">📊 HISTORICAL RESULTS - What Actually Happened</div>
         <div class="card-body">
+            {vix_banner}
+            
             <!-- Session Stats -->
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;padding:16px;background:#f8fafc;border-radius:10px;">
                 <div style="text-align:center;">
@@ -1396,12 +1420,21 @@ def main():
         candles = fetch_session_candles(session_dt)
         
         if candles is not None and not candles.empty:
+            # Filter setups by VIX bias - ONLY analyze valid entries
+            if vix.bias in ['CALLS', 'PUTS']:
+                valid_setups = [s for s in setups if s.direction == vix.bias]
+            else:
+                # No VIX data or WAIT - analyze all but mark as unfiltered
+                valid_setups = setups
+            
             # Analyze what happened
-            historical_results = analyze_historical_trades(setups, candles, vix.bias)
+            historical_results = analyze_historical_trades(valid_setups, candles, vix.bias)
             session_data = {
                 'high': candles['High'].max(),
                 'low': candles['Low'].min(),
-                'close': candles['Close'].iloc[-1] if not candles.empty else 0
+                'close': candles['Close'].iloc[-1] if not candles.empty else 0,
+                'vix_bias': vix.bias,
+                'vix_filtered': vix.bias in ['CALLS', 'PUTS']
             }
     
     # Render
