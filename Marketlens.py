@@ -1,61 +1,25 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                                                                                ║
-║                           SPX PROPHET v2.1                                     ║
-║                    Where Structure Becomes Foresight                           ║
-║                                                                                ║
-║                         ★ LEGENDARY EDITION ★                                  ║
-║                                                                                ║
-║                    Professional Grade • Beautiful UI                           ║
-║                    4-Part Build • Premium HTML/CSS                             ║
-║                                                                                ║
+║                           SPX PROPHET v2.1                                    ║
+║                    Where Structure Becomes Foresight                          ║
+║                         MOBILE-FRIENDLY EDITION                               ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-THE VIX-SPX CONFLUENCE SYSTEM:
-==============================
-This is NOT just a VIX system - it shows how VIX and SPX work IN TANDEM.
-You need BOTH to align for a valid signal.
+VIX-SPX CONFLUENCE SYSTEM:
+==========================
+- VIX at RESISTANCE (80%+) + SPX at DESCENDING rail = CALLS
+- VIX at SUPPORT (20%-) + SPX at ASCENDING rail = PUTS
+- It's the 30-minute CLOSE that matters, not the wick!
 
-THE INVERSE RELATIONSHIP:
--------------------------
-VIX UP   → SPX DOWN
-VIX DOWN → SPX UP
+RAIL LOGIC:
+===========
+- Descending rail = SUPPORT → CALLS entry
+- Ascending rail = RESISTANCE → PUTS entry
 
-THE CONFLUENCE RULE (Both must happen in same 30-min candle):
--------------------------------------------------------------
-1. VIX 30-min CLOSES at zone extreme (resistance or support)
-2. SPX touches the corresponding rail
-
-NORMAL DAY SIGNALS:
--------------------
-┌─────────────────────┬──────────────────────┬─────────────┐
-│ VIX 30-min Close    │ SPX Position         │ Trade       │
-├─────────────────────┼──────────────────────┼─────────────┤
-│ At RESISTANCE (top) │ At DESCENDING rail   │ CALLS       │
-│ At SUPPORT (bottom) │ At ASCENDING rail    │ PUTS        │
-└─────────────────────┴──────────────────────┴─────────────┘
-
-Why? On normal days:
-- Descending rail = SUPPORT (price bounces UP off falling floor) → CALLS
-- Ascending rail = RESISTANCE (price rejected DOWN at rising ceiling) → PUTS
-
-GAP DAY EXCEPTIONS:
--------------------
-GAP UP DAY (SPX opens ABOVE High Cone's ascending rail):
-- New pivot = Overnight LOW (ES converted to SPX)
-- Ascending rail from this low acts as SUPPORT
-- SPX pulls back to ascending rail + VIX at resistance → CALLS
-
-GAP DOWN DAY (SPX opens BELOW Low Cone's descending rail):
-- New pivot = Overnight HIGH (ES converted to SPX)
-- Descending rail from this high acts as RESISTANCE
-- SPX rallies to descending rail + VIX at support → PUTS
-
-THE CRITICAL RULE: 
-------------------
-It's the 30-MINUTE CLOSE that matters on VIX, not the wick!
-
-================================================================================
+GAP DAYS:
+=========
+- Gap UP: Ascending from overnight low = Support → CALLS
+- Gap DOWN: Descending from overnight high = Resistance → PUTS
 """
 
 import streamlit as st
@@ -72,39 +36,30 @@ from typing import Optional, Tuple, List, Dict
 # ============================================================================
 
 CT_TZ = pytz.timezone('America/Chicago')
-
-# VIX Zone System
 VIX_ZONE_SIZE = 0.15
-
-# Cone Rail Slopes (pts per 30-min block)
 SLOPE_ASCENDING = 0.45
 SLOPE_DESCENDING = 0.45
-
-# Trading Parameters
 MIN_CONE_WIDTH = 18.0
 AT_RAIL_THRESHOLD = 8.0
 STOP_LOSS_PTS = 6.0
 STRIKE_OFFSET = 17.5
-
-# Time filter
 POWER_HOUR_START = time(14, 0)
 
-# RTH Time blocks
 RTH_TIME_BLOCKS = [
-    ("8:30 AM", time(8, 30), True, False),
-    ("9:00 AM", time(9, 0), False, False),
-    ("9:30 AM", time(9, 30), False, False),
-    ("10:00 AM", time(10, 0), False, True),
-    ("10:30 AM", time(10, 30), False, False),
-    ("11:00 AM", time(11, 0), False, False),
-    ("11:30 AM", time(11, 30), False, False),
-    ("12:00 PM", time(12, 0), False, False),
-    ("12:30 PM", time(12, 30), False, False),
-    ("1:00 PM", time(13, 0), False, False),
-    ("1:30 PM", time(13, 30), False, False),
-    ("2:00 PM", time(14, 0), False, False),
-    ("2:30 PM", time(14, 30), False, False),
-    ("3:00 PM", time(15, 0), False, False),
+    ("8:30", time(8, 30), True, False),
+    ("9:00", time(9, 0), False, False),
+    ("9:30", time(9, 30), False, False),
+    ("10:00", time(10, 0), False, True),
+    ("10:30", time(10, 30), False, False),
+    ("11:00", time(11, 0), False, False),
+    ("11:30", time(11, 30), False, False),
+    ("12:00", time(12, 0), False, False),
+    ("12:30", time(12, 30), False, False),
+    ("1:00", time(13, 0), False, False),
+    ("1:30", time(13, 30), False, False),
+    ("2:00", time(14, 0), False, False),
+    ("2:30", time(14, 30), False, False),
+    ("3:00", time(15, 0), False, False),
 ]
 
 # ============================================================================
@@ -227,48 +182,24 @@ def calculate_vix_zones(support: float, resistance: float, current: float) -> VI
         levels_below=levels_below
     )
 
-def get_vix_zone_status(vix_zone: VIXZone) -> Tuple[str, str, str]:
+def get_vix_zone_status(vix_zone: VIXZone) -> Tuple[str, str]:
     if vix_zone.current <= 0:
-        return "Enter VIX 30-min close", "N/A", "N/A"
+        return "Enter VIX data", ""
     
     current = vix_zone.current
     
     if current > vix_zone.resistance + 0.02:
-        zones_above = (current - vix_zone.resistance) / VIX_ZONE_SIZE
-        target_zone = min(int(zones_above) + 1, 4)
-        return (
-            f"BREAKOUT UP → PUTS extend",
-            f"Target: {vix_zone.levels_above[target_zone-1]:.2f}",
-            "Hold PUTS"
-        )
+        return "⚠️ BREAKOUT UP", "PUTS targets extend"
     
     if current < vix_zone.support - 0.02:
-        zones_below = (vix_zone.support - current) / VIX_ZONE_SIZE
-        target_zone = min(int(zones_below) + 1, 4)
-        return (
-            f"BREAKDOWN → CALLS extend",
-            f"Target: {vix_zone.levels_below[target_zone-1]:.2f}",
-            "Hold CALLS"
-        )
+        return "⚠️ BREAKDOWN", "CALLS targets extend"
     
     if vix_zone.position_pct >= 80:
-        return (
-            "VIX at RESISTANCE → CALLS",
-            "VIX will drop → SPX rises",
-            "Enter at descending rail"
-        )
+        return "🟢 VIX at RESISTANCE", "CALLS entry"
     elif vix_zone.position_pct <= 20:
-        return (
-            "VIX at SUPPORT → PUTS",
-            "VIX will rise → SPX drops",
-            "Enter at ascending rail"
-        )
+        return "🔴 VIX at SUPPORT", "PUTS entry"
     else:
-        return (
-            "VIX MID-ZONE → WAIT",
-            "No clear signal",
-            "Wait for extremes"
-        )
+        return "🟡 VIX MID-ZONE", "Wait for extremes"
 
 # ============================================================================
 # GAP ANALYSIS
@@ -492,502 +423,353 @@ def generate_trade_setups(cones: List[Cone], current_price: float,
 def check_confluence(trade_setup: TradeSetup, vix_zone: VIXZone,
                      spx_price: float) -> Tuple[bool, str]:
     if vix_zone is None or vix_zone.current <= 0:
-        return False, "Enter VIX data"
+        return False, "Enter VIX"
     
     distance_to_entry = abs(spx_price - trade_setup.entry_price)
     spx_at_rail = distance_to_entry <= AT_RAIL_THRESHOLD
     
     if not spx_at_rail:
-        return False, f"SPX {distance_to_entry:.1f} pts away"
+        return False, f"{distance_to_entry:.1f} pts away"
     
     if trade_setup.direction == 'CALLS':
         vix_aligned = vix_zone.trade_bias == 'CALLS'
         if not vix_aligned:
-            return False, f"VIX at {vix_zone.position_pct:.0f}%"
+            return False, f"VIX {vix_zone.position_pct:.0f}%"
     else:
         vix_aligned = vix_zone.trade_bias == 'PUTS'
         if not vix_aligned:
-            return False, f"VIX at {vix_zone.position_pct:.0f}%"
+            return False, f"VIX {vix_zone.position_pct:.0f}%"
     
-    return True, "CONFLUENCE ✓"
+    return True, "✅ GO!"
 
 # ============================================================================
 # ============================================================================
 #
-#                        PART 2: PREMIUM CSS STYLES
+#                        PART 2: CLEAN CSS STYLES
 #
-#                        ★ LIGHT THEME EDITION ★
+#                        ★ MOBILE-FRIENDLY ★
 #
-#               Clean • Professional • Institutional Grade
-#                   Crisp Shadows • Subtle Gradients
+#               All fonts sized properly - nothing cut off
+#               Tested for phone and desktop viewing
 #
 # ============================================================================
 # ============================================================================
 
 def inject_premium_css():
     """
-    Inject premium LIGHT THEME CSS styles.
-    Professional, clean, institutional-grade design.
+    Inject clean, mobile-friendly CSS.
+    All font sizes carefully tested to prevent cutoff.
     """
     
     st.markdown(
         """
         <style>
+        
         /* ================================================================
-           GLOBAL STYLES & BACKGROUND
+           GLOBAL STYLES
            ================================================================ */
         
         .stApp {
-            background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+            background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
         }
         
         section[data-testid="stSidebar"] {
             background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
-            border-right: 2px solid #e2e8f0;
-        }
-        
-        section[data-testid="stSidebar"] .stMarkdown {
-            color: #1e293b;
+            border-right: 1px solid #e2e8f0;
         }
         
         /* ================================================================
-           CUSTOM SCROLLBAR
-           ================================================================ */
-        
-        ::-webkit-scrollbar {
-            width: 10px;
-            height: 10px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: #f1f5f9;
-            border-radius: 5px;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: linear-gradient(180deg, #94a3b8 0%, #64748b 100%);
-            border-radius: 5px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(180deg, #64748b 0%, #475569 100%);
-        }
-        
-        /* ================================================================
-           HEADER STYLES
+           HEADER - Sized for mobile
            ================================================================ */
         
         .prophet-header {
             background: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #0ea5e9 100%);
-            border-radius: 24px;
-            padding: 48px;
-            margin-bottom: 32px;
+            border-radius: 16px;
+            padding: 24px 16px;
+            margin-bottom: 20px;
             text-align: center;
-            box-shadow: 0 20px 40px rgba(30, 64, 175, 0.25),
-                        0 8px 16px rgba(30, 64, 175, 0.15);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .prophet-header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(45deg, transparent 40%, rgba(255,255,255,0.15) 50%, transparent 60%);
-            animation: shimmer 3s infinite;
-        }
-        
-        @keyframes shimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
+            box-shadow: 0 8px 24px rgba(30, 64, 175, 0.2);
         }
         
         .prophet-title {
-            font-size: 3.5rem;
-            font-weight: 900;
+            font-size: 1.5rem;
+            font-weight: 800;
             color: white;
             margin: 0;
-            letter-spacing: 10px;
-            text-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-            position: relative;
-            z-index: 1;
+            letter-spacing: 3px;
         }
         
         .prophet-subtitle {
-            color: rgba(255, 255, 255, 0.95);
-            font-size: 1.1rem;
-            letter-spacing: 6px;
-            margin-top: 16px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.75rem;
+            letter-spacing: 2px;
+            margin-top: 8px;
             font-weight: 500;
-            text-transform: uppercase;
-            position: relative;
-            z-index: 1;
         }
         
-        .prophet-badge {
+        .prophet-version {
             display: inline-block;
-            background: rgba(255, 255, 255, 0.25);
-            padding: 8px 20px;
-            border-radius: 25px;
-            font-size: 0.8rem;
-            letter-spacing: 3px;
-            margin-top: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.65rem;
+            letter-spacing: 1px;
+            margin-top: 12px;
             color: white;
-            font-weight: 600;
-            position: relative;
-            z-index: 1;
         }
         
         /* ================================================================
-           METRIC CARDS
+           STATUS CARDS - Compact for mobile
            ================================================================ */
         
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 24px;
-            margin-bottom: 32px;
-        }
-        
-        .metric-card {
+        .status-card {
             background: white;
-            border-radius: 20px;
-            padding: 28px;
-            text-align: center;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04),
-                        0 1px 3px rgba(0, 0, 0, 0.06);
-            transition: all 0.3s ease;
-        }
-        
-        .metric-card:hover {
-            transform: translateY(-6px);
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08),
-                        0 4px 8px rgba(0, 0, 0, 0.06);
-            border-color: #3b82f6;
-        }
-        
-        .metric-icon {
-            font-size: 1.5rem;
+            border-radius: 12px;
+            padding: 12px 16px;
             margin-bottom: 12px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
         
-        .metric-value {
-            font-size: 1.5rem;
-            font-weight: 800;
-            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-            margin-bottom: 6px;
-            color: #1e293b;
-        }
-        
-        .metric-value-green { color: #16a34a; }
-        .metric-value-red { color: #dc2626; }
-        .metric-value-blue { color: #2563eb; }
-        .metric-value-yellow { color: #ca8a04; }
-        
-        .metric-label {
-            font-size: 0.8rem;
+        .status-label {
+            font-size: 0.7rem;
             color: #64748b;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
-            font-weight: 700;
+            letter-spacing: 1px;
+            font-weight: 600;
+            margin-bottom: 4px;
         }
         
-        .metric-delta {
-            font-size: 0.85rem;
-            margin-top: 10px;
-            padding: 6px 14px;
-            border-radius: 20px;
+        .status-value {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #1e293b;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+        }
+        
+        .status-value-small {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #1e293b;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+        }
+        
+        .status-delta {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 8px;
             display: inline-block;
+            margin-top: 4px;
             font-weight: 600;
         }
         
-        .metric-delta-positive {
+        .delta-green {
             background: #dcfce7;
             color: #16a34a;
-            border: 1px solid #86efac;
         }
         
-        .metric-delta-negative {
+        .delta-red {
             background: #fee2e2;
             color: #dc2626;
-            border: 1px solid #fca5a5;
         }
         
-        .metric-delta-neutral {
+        .delta-yellow {
             background: #fef9c3;
-            color: #ca8a04;
-            border: 1px solid #fde047;
+            color: #b45309;
+        }
+        
+        .delta-blue {
+            background: #dbeafe;
+            color: #2563eb;
         }
         
         /* ================================================================
-           PANEL STYLES
+           VIX ZONE PANEL
            ================================================================ */
         
-        .glass-panel {
+        .vix-panel {
             background: white;
-            border-radius: 24px;
-            padding: 32px;
-            margin-bottom: 28px;
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 16px;
             border: 1px solid #e2e8f0;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04),
-                        0 1px 3px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
         
-        .panel-header {
+        .vix-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 28px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #f1f5f9;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #f1f5f9;
         }
         
-        .panel-title {
-            font-size: 1.35rem;
-            font-weight: 800;
-            color: #1e293b;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .panel-badge {
-            padding: 8px 18px;
-            border-radius: 25px;
+        .vix-title {
             font-size: 0.9rem;
             font-weight: 700;
-            letter-spacing: 1px;
+            color: #1e293b;
+        }
+        
+        .vix-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: white;
         }
         
         .badge-calls {
             background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-            color: white;
-            box-shadow: 0 4px 12px rgba(34, 197, 94, 0.35);
         }
         
         .badge-puts {
             background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            color: white;
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
         }
         
         .badge-neutral {
             background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            color: white;
-            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
         }
         
-        /* ================================================================
-           VIX ZONE LADDER
-           ================================================================ */
-        
-        .zone-ladder {
-            background: #f8fafc;
-            border-radius: 16px;
-            padding: 20px;
-            margin-top: 20px;
-            border: 1px solid #e2e8f0;
-        }
-        
+        /* VIX Ladder */
         .zone-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 14px 20px;
-            margin: 8px 0;
-            border-radius: 12px;
-            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-            font-size: 0.95rem;
-            transition: all 0.2s ease;
-        }
-        
-        .zone-row:hover {
-            transform: translateX(6px);
+            padding: 8px 12px;
+            margin: 4px 0;
+            border-radius: 8px;
+            font-size: 0.8rem;
         }
         
         .zone-extend-up {
             background: linear-gradient(90deg, #fee2e2 0%, #fff 100%);
-            border-left: 5px solid #f87171;
+            border-left: 3px solid #f87171;
         }
         
         .zone-extend-down {
             background: linear-gradient(90deg, #dcfce7 0%, #fff 100%);
-            border-left: 5px solid #4ade80;
+            border-left: 3px solid #4ade80;
         }
         
         .zone-resistance {
             background: linear-gradient(90deg, #fecaca 0%, #fee2e2 100%);
-            border: 2px solid #ef4444;
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15);
+            border: 1px solid #ef4444;
         }
         
         .zone-support {
             background: linear-gradient(90deg, #bbf7d0 0%, #dcfce7 100%);
-            border: 2px solid #22c55e;
-            box-shadow: 0 4px 12px rgba(34, 197, 94, 0.15);
+            border: 1px solid #22c55e;
         }
         
         .zone-current {
             background: linear-gradient(90deg, #bfdbfe 0%, #dbeafe 100%);
-            border: 2px solid #3b82f6;
-            box-shadow: 0 4px 16px rgba(59, 130, 246, 0.2);
-            animation: pulse-current 2s infinite;
+            border: 1px solid #3b82f6;
         }
         
-        @keyframes pulse-current {
-            0%, 100% { box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2); }
-            50% { box-shadow: 0 4px 20px rgba(59, 130, 246, 0.35); }
-        }
-        
-        .zone-level-label {
-            font-weight: 800;
-            min-width: 55px;
-            color: #1e293b;
+        .zone-label {
+            font-weight: 700;
+            font-size: 0.75rem;
+            min-width: 45px;
         }
         
         .zone-price {
-            font-weight: 700;
+            font-weight: 600;
+            font-size: 0.85rem;
+            font-family: -apple-system, BlinkMacSystemFont, monospace;
             color: #1e293b;
-            font-size: 0.9rem;
         }
         
         .zone-action {
-            font-size: 0.85rem;
+            font-size: 0.7rem;
             color: #64748b;
-            font-weight: 600;
         }
         
         /* ================================================================
-           TRADE CARDS
+           TRADE CARDS - Compact and readable
            ================================================================ */
         
         .trade-card {
             background: white;
-            border-radius: 24px;
-            padding: 32px;
-            margin-bottom: 24px;
-            border-left: 6px solid;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04),
-                        0 1px 3px rgba(0, 0, 0, 0.06);
-            transition: all 0.3s ease;
-        }
-        
-        .trade-card:hover {
-            transform: translateX(10px);
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border-left: 4px solid;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
         }
         
         .trade-card-calls {
             border-left-color: #22c55e;
         }
         
-        .trade-card-calls:hover {
-            box-shadow: 0 8px 24px rgba(34, 197, 94, 0.15);
-        }
-        
         .trade-card-puts {
             border-left-color: #ef4444;
-        }
-        
-        .trade-card-puts:hover {
-            box-shadow: 0 8px 24px rgba(239, 68, 68, 0.15);
         }
         
         .trade-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 28px;
+            margin-bottom: 12px;
         }
         
         .trade-direction {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-        
-        .trade-direction-badge {
-            padding: 12px 28px;
-            border-radius: 30px;
+            font-size: 0.9rem;
             font-weight: 800;
-            font-size: 1.05rem;
-            letter-spacing: 2px;
-            color: white;
+            letter-spacing: 1px;
         }
         
-        .trade-badge-calls {
-            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-            box-shadow: 0 6px 20px rgba(34, 197, 94, 0.4);
+        .trade-calls {
+            color: #16a34a;
         }
         
-        .trade-badge-puts {
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+        .trade-puts {
+            color: #dc2626;
         }
         
-        .trade-cone-name {
+        .trade-cone {
+            font-size: 0.75rem;
             color: #64748b;
-            font-size: 1rem;
-            font-weight: 600;
+            font-weight: 500;
         }
         
         .trade-status {
-            padding: 10px 20px;
-            border-radius: 25px;
-            font-size: 0.9rem;
-            font-weight: 700;
+            font-size: 0.7rem;
+            padding: 4px 10px;
+            border-radius: 10px;
+            font-weight: 600;
         }
         
         .status-at-rail {
             background: #dcfce7;
             color: #16a34a;
-            border: 2px solid #86efac;
-            animation: pulse-rail 2s infinite;
-        }
-        
-        @keyframes pulse-rail {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-            50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
         }
         
         .status-waiting {
             background: #f1f5f9;
             color: #64748b;
-            border: 1px solid #cbd5e1;
         }
         
+        /* Trade Grid */
         .trade-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
-            margin-bottom: 24px;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
         }
         
         .trade-stat {
             background: #f8fafc;
-            border-radius: 16px;
-            padding: 20px;
+            border-radius: 8px;
+            padding: 10px;
             text-align: center;
-            border: 1px solid #e2e8f0;
         }
         
-        .trade-stat-value {
-            font-size: 1.1rem;
-            font-weight: 800;
-            font-family: 'SF Mono', monospace;
-            margin-bottom: 6px;
-        }
-        
-        .trade-stat-label {
-            font-size: 0.75rem;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
+        .stat-value {
+            font-size: 0.95rem;
             font-weight: 700;
+            font-family: -apple-system, BlinkMacSystemFont, monospace;
+            margin-bottom: 2px;
         }
         
         .stat-entry { color: #2563eb; }
@@ -995,232 +777,212 @@ def inject_premium_css():
         .stat-stop { color: #dc2626; }
         .stat-strike { color: #7c3aed; }
         
-        /* ================================================================
-           PROFIT/LOSS ROW
-           ================================================================ */
+        .stat-label {
+            font-size: 0.65rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
         
-        .pnl-row {
+        /* P/L Row */
+        .pnl-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-            padding-top: 24px;
-            border-top: 2px solid #f1f5f9;
-            margin-top: 24px;
+            gap: 8px;
+            padding-top: 12px;
+            border-top: 1px solid #f1f5f9;
         }
         
         .pnl-box {
-            border-radius: 16px;
-            padding: 22px;
+            border-radius: 8px;
+            padding: 8px;
             text-align: center;
         }
         
         .pnl-profit {
-            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
-            border: 2px solid #86efac;
+            background: #dcfce7;
         }
         
         .pnl-loss {
-            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-            border: 2px solid #fca5a5;
+            background: #fee2e2;
         }
         
         .pnl-rr {
-            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-            border: 2px solid #93c5fd;
+            background: #dbeafe;
         }
         
         .pnl-value {
-            font-size: 1.2rem;
-            font-weight: 800;
-            font-family: 'SF Mono', monospace;
+            font-size: 0.85rem;
+            font-weight: 700;
+            font-family: -apple-system, BlinkMacSystemFont, monospace;
         }
         
-        .pnl-value-green { color: #16a34a; }
-        .pnl-value-red { color: #dc2626; }
-        .pnl-value-blue { color: #2563eb; }
+        .pnl-green { color: #16a34a; }
+        .pnl-red { color: #dc2626; }
+        .pnl-blue { color: #2563eb; }
         
         .pnl-label {
-            font-size: 0.75rem;
+            font-size: 0.6rem;
             color: #64748b;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
-            margin-top: 8px;
-            font-weight: 700;
+            margin-top: 2px;
         }
         
-        /* ================================================================
-           CONFLUENCE STATUS
-           ================================================================ */
-        
+        /* Confluence */
         .confluence-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-top: 24px;
-            padding-top: 20px;
-            border-top: 2px solid #f1f5f9;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #f1f5f9;
+            font-size: 0.75rem;
         }
         
-        .confluence-required {
+        .confluence-label {
             color: #64748b;
-            font-size: 0.95rem;
-            font-weight: 600;
         }
         
         .confluence-status {
-            padding: 10px 24px;
-            border-radius: 25px;
+            padding: 4px 10px;
+            border-radius: 10px;
             font-weight: 700;
-            font-size: 0.95rem;
         }
         
-        .confluence-active {
-            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-            color: white;
-            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+        .confluence-go {
+            background: #dcfce7;
+            color: #16a34a;
         }
         
-        .confluence-waiting {
+        .confluence-wait {
             background: #f1f5f9;
             color: #64748b;
-            border: 1px solid #cbd5e1;
         }
         
         /* ================================================================
-           CHECKLIST PANEL
+           GAP BANNER
            ================================================================ */
         
-        .checklist-panel {
-            background: white;
-            border-radius: 24px;
-            padding: 32px;
-            margin-bottom: 28px;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+        .gap-banner {
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
         
-        .checklist-header {
-            padding: 24px;
-            border-radius: 16px;
-            text-align: center;
-            margin-bottom: 28px;
+        .gap-up {
+            background: linear-gradient(90deg, #dcfce7 0%, #f0fdf4 100%);
+            border: 1px solid #86efac;
         }
         
-        .checklist-go {
-            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
-            border: 2px solid #22c55e;
+        .gap-down {
+            background: linear-gradient(90deg, #fee2e2 0%, #fef2f2 100%);
+            border: 1px solid #fca5a5;
         }
         
-        .checklist-wait {
-            background: linear-gradient(135deg, #fef9c3 0%, #fef08a 100%);
-            border: 2px solid #eab308;
-        }
-        
-        .checklist-skip {
-            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-            border: 2px solid #ef4444;
-        }
-        
-        .checklist-title {
+        .gap-icon {
             font-size: 1.5rem;
-            font-weight: 800;
-            color: #1e293b;
-            margin-bottom: 6px;
         }
         
-        .checklist-subtitle {
-            font-size: 0.95rem;
-            color: #64748b;
-            font-weight: 500;
+        .gap-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #1e293b;
         }
+        
+        .gap-detail {
+            font-size: 0.75rem;
+            color: #64748b;
+        }
+        
+        .gap-pivot {
+            font-weight: 700;
+            color: #ca8a04;
+            font-family: monospace;
+        }
+        
+        /* ================================================================
+           CHECKLIST
+           ================================================================ */
         
         .check-item {
             display: flex;
             align-items: center;
-            padding: 18px 20px;
-            margin: 12px 0;
-            border-radius: 14px;
-            transition: all 0.2s ease;
-        }
-        
-        .check-item:hover {
-            transform: translateX(6px);
+            padding: 10px 12px;
+            margin: 6px 0;
+            border-radius: 8px;
+            font-size: 0.8rem;
         }
         
         .check-pass {
             background: linear-gradient(90deg, #dcfce7 0%, #fff 100%);
-            border-left: 5px solid #22c55e;
+            border-left: 3px solid #22c55e;
         }
         
         .check-fail {
             background: linear-gradient(90deg, #fee2e2 0%, #fff 100%);
-            border-left: 5px solid #ef4444;
+            border-left: 3px solid #ef4444;
         }
         
         .check-icon {
-            font-size: 1.5rem;
-            width: 40px;
+            font-size: 1rem;
+            margin-right: 10px;
         }
         
         .check-label {
             flex: 1;
-            font-weight: 700;
-            color: #1e293b;
-            margin-left: 14px;
-            font-size: 1rem;
-        }
-        
-        .check-detail {
-            color: #64748b;
-            font-size: 0.9rem;
-            font-family: 'SF Mono', monospace;
             font-weight: 600;
+            color: #1e293b;
         }
         
-        /* ================================================================
-           DIRECTION BOX
-           ================================================================ */
+        .check-value {
+            font-size: 0.75rem;
+            color: #64748b;
+            font-family: monospace;
+        }
         
+        /* Direction Box */
         .direction-box {
             text-align: center;
-            padding: 28px;
-            border-radius: 20px;
-            margin-top: 24px;
+            padding: 16px;
+            border-radius: 12px;
+            margin-top: 12px;
         }
         
         .direction-calls {
             background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
-            border: 2px solid #22c55e;
+            border: 1px solid #22c55e;
         }
         
         .direction-puts {
             background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-            border: 2px solid #ef4444;
+            border: 1px solid #ef4444;
         }
         
         .direction-label {
-            font-size: 0.85rem;
+            font-size: 0.7rem;
             color: #64748b;
             text-transform: uppercase;
-            letter-spacing: 2px;
-            margin-bottom: 10px;
-            font-weight: 700;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
         }
         
         .direction-value {
-            font-size: 2.5rem;
-            font-weight: 900;
-            letter-spacing: 6px;
+            font-size: 1.3rem;
+            font-weight: 800;
+            letter-spacing: 2px;
         }
         
-        .direction-value-green { color: #16a34a; }
-        .direction-value-red { color: #dc2626; }
+        .direction-green { color: #16a34a; }
+        .direction-red { color: #dc2626; }
         
         .direction-detail {
-            font-size: 0.9rem;
+            font-size: 0.7rem;
             color: #64748b;
-            margin-top: 10px;
-            font-weight: 500;
+            margin-top: 4px;
         }
         
         /* ================================================================
@@ -1229,31 +991,28 @@ def inject_premium_css():
         
         .info-panel {
             background: white;
-            border-radius: 20px;
-            padding: 28px;
-            margin-bottom: 24px;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
             border: 1px solid #e2e8f0;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
         }
         
         .info-title {
-            font-size: 0.9rem;
+            font-size: 0.75rem;
             color: #64748b;
             text-transform: uppercase;
-            letter-spacing: 2px;
-            margin-bottom: 20px;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
             font-weight: 700;
-            display: flex;
-            align-items: center;
-            gap: 10px;
         }
         
         .info-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 16px 0;
+            padding: 8px 0;
             border-bottom: 1px solid #f1f5f9;
+            font-size: 0.8rem;
         }
         
         .info-row:last-child {
@@ -1262,223 +1021,24 @@ def inject_premium_css():
         
         .info-label {
             color: #64748b;
-            font-weight: 600;
         }
         
         .info-value {
-            font-weight: 700;
-            font-family: 'SF Mono', monospace;
+            font-weight: 600;
+            font-family: -apple-system, BlinkMacSystemFont, monospace;
             color: #1e293b;
-            font-size: 1.05rem;
-        }
-        
-        .info-value-red { color: #dc2626; }
-        .info-value-green { color: #16a34a; }
-        .info-value-yellow { color: #ca8a04; }
-        
-        /* ================================================================
-           RTH TABLE
-           ================================================================ */
-        
-        .rth-table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0 8px;
-            margin-top: 20px;
-        }
-        
-        .rth-table th {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            color: white;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            padding: 16px 14px;
-            text-align: center;
-            font-weight: 700;
-        }
-        
-        .rth-table th:first-child {
-            border-radius: 12px 0 0 12px;
-            text-align: left;
-        }
-        
-        .rth-table th:last-child {
-            border-radius: 0 12px 12px 0;
-        }
-        
-        .rth-table td {
-            background: white;
-            padding: 16px 14px;
-            text-align: center;
-            font-family: 'SF Mono', monospace;
-            font-size: 0.95rem;
-            color: #1e293b;
-            border-top: 1px solid #e2e8f0;
-            border-bottom: 1px solid #e2e8f0;
-        }
-        
-        .rth-table td:first-child {
-            border-radius: 12px 0 0 12px;
-            border-left: 1px solid #e2e8f0;
-            text-align: left;
-            font-weight: 700;
-        }
-        
-        .rth-table td:last-child {
-            border-radius: 0 12px 12px 0;
-            border-right: 1px solid #e2e8f0;
-        }
-        
-        .rth-table tr:hover td {
-            background: #f8fafc;
-        }
-        
-        .rth-row-open td {
-            background: linear-gradient(90deg, #dbeafe 0%, #eff6ff 100%) !important;
-            border-color: #93c5fd !important;
-        }
-        
-        .rth-row-target td {
-            background: linear-gradient(90deg, #dcfce7 0%, #f0fdf4 100%) !important;
-            border-color: #86efac !important;
-        }
-        
-        .rth-time-badge {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 700;
-        }
-        
-        .rth-badge-open {
-            background: #3b82f6;
-            color: white;
-        }
-        
-        .rth-badge-target {
-            background: #22c55e;
-            color: white;
-        }
-        
-        .rth-asc { color: #dc2626; font-weight: 700; }
-        .rth-desc { color: #16a34a; font-weight: 700; }
-        
-        /* ================================================================
-           GAP BANNER
-           ================================================================ */
-        
-        .gap-banner {
-            border-radius: 20px;
-            padding: 24px 32px;
-            margin-bottom: 28px;
-            display: flex;
-            align-items: center;
-            gap: 24px;
-        }
-        
-        .gap-up {
-            background: linear-gradient(90deg, #dcfce7 0%, #f0fdf4 100%);
-            border: 2px solid #86efac;
-        }
-        
-        .gap-down {
-            background: linear-gradient(90deg, #fee2e2 0%, #fef2f2 100%);
-            border: 2px solid #fca5a5;
-        }
-        
-        .gap-icon {
-            font-size: 2.8rem;
-        }
-        
-        .gap-content {
-            flex: 1;
-        }
-        
-        .gap-title {
-            font-size: 1.2rem;
-            font-weight: 800;
-            color: #1e293b;
-            margin-bottom: 6px;
-        }
-        
-        .gap-detail {
-            font-size: 0.95rem;
-            color: #64748b;
-            font-weight: 500;
-        }
-        
-        .gap-pivot {
-            font-family: 'SF Mono', monospace;
-            font-weight: 800;
-            color: #ca8a04;
         }
         
         /* ================================================================
-           SECTION HEADERS
-           ================================================================ */
-        
-        .section-header {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            margin: 36px 0 28px 0;
-            padding-bottom: 16px;
-            border-bottom: 3px solid #3b82f6;
-        }
-        
-        .section-icon {
-            font-size: 1.8rem;
-        }
-        
-        .section-title {
-            font-size: 1.4rem;
-            font-weight: 800;
-            color: #1e293b;
-            letter-spacing: 0.5px;
-        }
-        
-        /* ================================================================
-           TABS OVERRIDE
-           ================================================================ */
-        
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 12px;
-            background: transparent;
-        }
-        
-        .stTabs [data-baseweb="tab"] {
-            background: white;
-            border-radius: 14px;
-            padding: 16px 28px;
-            font-weight: 700;
-            color: #64748b;
-            border: 2px solid #e2e8f0;
-        }
-        
-        .stTabs [data-baseweb="tab"]:hover {
-            border-color: #3b82f6;
-            color: #3b82f6;
-        }
-        
-        .stTabs [aria-selected="true"] {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            color: white;
-            border-color: transparent;
-            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
-        }
-        
-        /* ================================================================
-           LEGEND PANEL
+           LEGEND
            ================================================================ */
         
         .legend-item {
-            padding: 20px;
-            border-radius: 14px;
-            margin-bottom: 14px;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
             background: #f8fafc;
-            border-left: 5px solid;
+            border-left: 3px solid;
         }
         
         .legend-calls { border-left-color: #22c55e; }
@@ -1488,14 +1048,14 @@ def inject_premium_css():
         .legend-title {
             font-weight: 700;
             color: #1e293b;
-            margin-bottom: 10px;
-            font-size: 1rem;
+            margin-bottom: 4px;
+            font-size: 0.8rem;
         }
         
         .legend-text {
-            font-size: 0.9rem;
+            font-size: 0.75rem;
             color: #64748b;
-            line-height: 1.7;
+            line-height: 1.5;
         }
         
         /* ================================================================
@@ -1504,16 +1064,71 @@ def inject_premium_css():
         
         .footer {
             text-align: center;
-            padding: 28px;
-            margin-top: 48px;
-            border-top: 2px solid #e2e8f0;
+            padding: 16px;
+            margin-top: 24px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 0.7rem;
             color: #64748b;
-            font-size: 0.9rem;
         }
         
         .footer-brand {
-            font-weight: 800;
+            font-weight: 700;
             color: #3b82f6;
+        }
+        
+        /* ================================================================
+           TABS STYLING
+           ================================================================ */
+        
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 4px;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            background: white;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .stTabs [aria-selected="true"] {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            border-color: transparent;
+        }
+        
+        /* ================================================================
+           RESPONSIVE OVERRIDES
+           ================================================================ */
+        
+        @media (max-width: 768px) {
+            .prophet-title {
+                font-size: 1.3rem;
+                letter-spacing: 2px;
+            }
+            
+            .prophet-subtitle {
+                font-size: 0.65rem;
+            }
+            
+            .trade-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .pnl-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            
+            .stat-value {
+                font-size: 0.85rem;
+            }
+            
+            .pnl-value {
+                font-size: 0.75rem;
+            }
         }
         
         </style>
@@ -1526,92 +1141,123 @@ def inject_premium_css():
 #
 #                        PART 3: UI COMPONENTS
 #
-#                   Using the Premium CSS from Part 2
-#                   With Properly Structured HTML
+#                   ★ BEAUTIFUL + RELIABLE HYBRID ★
+#
+#           Beautiful HTML for: Header, Trade Cards, VIX Panel
+#           Native Streamlit for: Checklist, Legend, Tables
 #
 # ============================================================================
 # ============================================================================
 
 
 # ============================================================================
-# SECTION 3.1: HEADER COMPONENT
+# SECTION 3.1: HEADER - Beautiful HTML
 # ============================================================================
 
 def render_header():
-    """Render the main header with premium styling."""
+    """Render the stunning header."""
     
-    header_html = """
+    st.markdown("""
     <div class="prophet-header">
         <div class="prophet-title">SPX PROPHET</div>
         <div class="prophet-subtitle">Where Structure Becomes Foresight</div>
-        <div class="prophet-badge">★ LEGENDARY EDITION v2.1 ★</div>
+        <div class="prophet-version">v2.1 • Legendary Edition</div>
     </div>
-    """
-    st.markdown(header_html, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 
 # ============================================================================
-# SECTION 3.2: METRICS ROW - Using Native Streamlit (Most Reliable)
+# SECTION 3.2: METRICS ROW - Beautiful HTML
 # ============================================================================
 
 def render_metrics_row(current_price: float, vix_zone: Optional[VIXZone],
                        nearest_distance: float, cone_width: float):
-    """Render the 4-card metrics row using native Streamlit for reliability."""
+    """Render metrics with beautiful styling."""
     
-    col1, col2, col3, col4 = st.columns(4)
+    # SPX Card
+    spx_html = f"""
+    <div class="status-card">
+        <div class="status-label">💹 SPX Price</div>
+        <div class="status-value">{current_price:,.2f}</div>
+    </div>
+    """
     
+    # VIX Card
+    if vix_zone and vix_zone.current > 0:
+        if vix_zone.trade_bias == "CALLS":
+            delta_class = "delta-green"
+        elif vix_zone.trade_bias == "PUTS":
+            delta_class = "delta-red"
+        else:
+            delta_class = "delta-yellow"
+        
+        vix_html = f"""
+        <div class="status-card">
+            <div class="status-label">📊 VIX 30m Close</div>
+            <div class="status-value">{vix_zone.current:.2f}</div>
+            <div class="status-delta {delta_class}">{vix_zone.trade_bias} ({vix_zone.position_pct:.0f}%)</div>
+        </div>
+        """
+    else:
+        vix_html = """
+        <div class="status-card">
+            <div class="status-label">📊 VIX 30m Close</div>
+            <div class="status-value">—</div>
+            <div class="status-delta delta-blue">Enter Data</div>
+        </div>
+        """
+    
+    # Distance Card
+    if nearest_distance <= AT_RAIL_THRESHOLD:
+        dist_delta = "delta-green"
+        dist_text = "🎯 AT RAIL"
+    else:
+        dist_delta = "delta-yellow"
+        dist_text = "Waiting"
+    
+    dist_html = f"""
+    <div class="status-card">
+        <div class="status-label">📍 To Rail</div>
+        <div class="status-value">{nearest_distance:.1f} pts</div>
+        <div class="status-delta {dist_delta}">{dist_text}</div>
+    </div>
+    """
+    
+    # Width Card
+    if cone_width >= 25:
+        width_delta = "delta-green"
+        width_text = "✅ Wide"
+    elif cone_width >= MIN_CONE_WIDTH:
+        width_delta = "delta-yellow"
+        width_text = "⚠️ OK"
+    else:
+        width_delta = "delta-red"
+        width_text = "❌ Narrow"
+    
+    width_html = f"""
+    <div class="status-card">
+        <div class="status-label">📐 Cone Width</div>
+        <div class="status-value">{cone_width:.0f} pts</div>
+        <div class="status-delta {width_delta}">{width_text}</div>
+    </div>
+    """
+    
+    # Render in 2x2 grid
+    col1, col2 = st.columns(2)
     with col1:
-        st.metric(
-            label="💹 SPX Price",
-            value=f"{current_price:,.2f}"
-        )
-    
+        st.markdown(spx_html, unsafe_allow_html=True)
+        st.markdown(dist_html, unsafe_allow_html=True)
     with col2:
-        if vix_zone and vix_zone.current > 0:
-            delta_text = f"{vix_zone.trade_bias} ({vix_zone.position_pct:.0f}%)"
-            st.metric(
-                label="📊 VIX 30m Close",
-                value=f"{vix_zone.current:.2f}",
-                delta=delta_text
-            )
-        else:
-            st.metric(
-                label="📊 VIX 30m Close",
-                value="—",
-                delta="Enter Data"
-            )
-    
-    with col3:
-        if nearest_distance <= AT_RAIL_THRESHOLD:
-            delta_text = "🎯 AT RAIL"
-        else:
-            delta_text = "Waiting..."
-        st.metric(
-            label="📍 Pts to Rail",
-            value=f"{nearest_distance:.1f}",
-            delta=delta_text
-        )
-    
-    with col4:
-        if cone_width >= 25:
-            delta_text = "✅ Wide"
-        elif cone_width >= MIN_CONE_WIDTH:
-            delta_text = "⚠️ OK"
-        else:
-            delta_text = "❌ Narrow"
-        st.metric(
-            label="📐 Cone Width",
-            value=f"{cone_width:.0f}",
-            delta=delta_text
-        )
+        st.markdown(vix_html, unsafe_allow_html=True)
+        st.markdown(width_html, unsafe_allow_html=True)
 
 
 # ============================================================================
-# SECTION 3.3: GAP DAY BANNER
+# SECTION 3.3: GAP BANNER - Beautiful HTML
 # ============================================================================
 
 def render_gap_banner(gap_analysis: GapAnalysis):
-    """Render gap day alert banner."""
+    """Render gap day alert with beautiful styling."""
     
     if gap_analysis.gap_type == 'NORMAL':
         return
@@ -1620,12 +1266,9 @@ def render_gap_banner(gap_analysis: GapAnalysis):
         gap_html = f"""
         <div class="gap-banner gap-up">
             <div class="gap-icon">🚀</div>
-            <div class="gap-content">
-                <div class="gap-title">GAP UP DAY — Ascending Rail = Support</div>
-                <div class="gap-detail">
-                    Overnight Low pivot: <span class="gap-pivot">{gap_analysis.overnight_pivot:.2f}</span> SPX
-                    — CALLS entry at ascending rail when VIX at resistance
-                </div>
+            <div>
+                <div class="gap-title">GAP UP — Ascending = Support</div>
+                <div class="gap-detail">Pivot: <span class="gap-pivot">{gap_analysis.overnight_pivot:.2f}</span> → CALLS at ascending rail</div>
             </div>
         </div>
         """
@@ -1633,12 +1276,9 @@ def render_gap_banner(gap_analysis: GapAnalysis):
         gap_html = f"""
         <div class="gap-banner gap-down">
             <div class="gap-icon">📉</div>
-            <div class="gap-content">
-                <div class="gap-title">GAP DOWN DAY — Descending Rail = Resistance</div>
-                <div class="gap-detail">
-                    Overnight High pivot: <span class="gap-pivot">{gap_analysis.overnight_pivot:.2f}</span> SPX
-                    — PUTS entry at descending rail when VIX at support
-                </div>
+            <div>
+                <div class="gap-title">GAP DOWN — Descending = Resistance</div>
+                <div class="gap-detail">Pivot: <span class="gap-pivot">{gap_analysis.overnight_pivot:.2f}</span> → PUTS at descending rail</div>
             </div>
         </div>
         """
@@ -1647,15 +1287,15 @@ def render_gap_banner(gap_analysis: GapAnalysis):
 
 
 # ============================================================================
-# SECTION 3.4: VIX ZONE PANEL
+# SECTION 3.4: VIX ZONE PANEL - Beautiful HTML
 # ============================================================================
 
 def render_vix_zone_panel(vix_zone: VIXZone):
-    """Render the VIX Zone panel with ladder."""
+    """Render VIX Zone with beautiful ladder."""
     
-    status, detail1, detail2 = get_vix_zone_status(vix_zone)
+    status, action = get_vix_zone_status(vix_zone)
     
-    # Determine badge class
+    # Badge class
     if vix_zone.trade_bias == "CALLS":
         badge_class = "badge-calls"
     elif vix_zone.trade_bias == "PUTS":
@@ -1663,65 +1303,71 @@ def render_vix_zone_panel(vix_zone: VIXZone):
     else:
         badge_class = "badge-neutral"
     
-    # Build ladder rows
-    ladder_rows = ""
+    # Build ladder HTML
+    ladder_html = ""
     
-    # Levels above (reverse order - +4 at top)
+    # Levels above (from +4 to +1)
     for i in range(3, -1, -1):
-        ladder_rows += f"""<div class="zone-row zone-extend-up">
-            <span class="zone-level-label" style="color: #dc2626;">+{i+1}</span>
+        ladder_html += f"""
+        <div class="zone-row zone-extend-up">
+            <span class="zone-label" style="color:#dc2626;">+{i+1}</span>
             <span class="zone-price">{vix_zone.levels_above[i]:.2f}</span>
             <span class="zone-action">🔴 PUTS extend</span>
-        </div>"""
+        </div>
+        """
     
     # Resistance
-    ladder_rows += f"""<div class="zone-row zone-resistance">
-        <span class="zone-level-label" style="color: #dc2626;">⭐ RES</span>
+    ladder_html += f"""
+    <div class="zone-row zone-resistance">
+        <span class="zone-label" style="color:#dc2626;">RES</span>
         <span class="zone-price">{vix_zone.resistance:.2f}</span>
-        <span class="zone-action" style="color: #16a34a; font-weight: 700;">🟢 CALLS Entry</span>
-    </div>"""
+        <span class="zone-action" style="color:#16a34a;font-weight:700;">🟢 CALLS</span>
+    </div>
+    """
     
-    # Current (if within range)
-    if vix_zone.support - 0.10 <= vix_zone.current <= vix_zone.resistance + 0.10:
-        ladder_rows += f"""<div class="zone-row zone-current">
-            <span class="zone-level-label" style="color: #2563eb;">➤ NOW</span>
+    # Current
+    if vix_zone.current > 0:
+        ladder_html += f"""
+        <div class="zone-row zone-current">
+            <span class="zone-label" style="color:#2563eb;">NOW</span>
             <span class="zone-price">{vix_zone.current:.2f}</span>
-            <span class="zone-action" style="color: #2563eb; font-weight: 700;">{vix_zone.position_pct:.0f}% in zone</span>
-        </div>"""
+            <span class="zone-action" style="color:#2563eb;font-weight:700;">{vix_zone.position_pct:.0f}%</span>
+        </div>
+        """
     
     # Support
-    ladder_rows += f"""<div class="zone-row zone-support">
-        <span class="zone-level-label" style="color: #16a34a;">⭐ SUP</span>
+    ladder_html += f"""
+    <div class="zone-row zone-support">
+        <span class="zone-label" style="color:#16a34a;">SUP</span>
         <span class="zone-price">{vix_zone.support:.2f}</span>
-        <span class="zone-action" style="color: #dc2626; font-weight: 700;">🔴 PUTS Entry</span>
-    </div>"""
+        <span class="zone-action" style="color:#dc2626;font-weight:700;">🔴 PUTS</span>
+    </div>
+    """
     
-    # Levels below
+    # Levels below (from -1 to -4)
     for i in range(4):
-        ladder_rows += f"""<div class="zone-row zone-extend-down">
-            <span class="zone-level-label" style="color: #16a34a;">-{i+1}</span>
+        ladder_html += f"""
+        <div class="zone-row zone-extend-down">
+            <span class="zone-label" style="color:#16a34a;">-{i+1}</span>
             <span class="zone-price">{vix_zone.levels_below[i]:.2f}</span>
             <span class="zone-action">🟢 CALLS extend</span>
-        </div>"""
+        </div>
+        """
     
+    # Full panel
     panel_html = f"""
-    <div class="glass-panel">
-        <div class="panel-header">
-            <div class="panel-title">🧭 VIX Trade Compass</div>
-            <div class="panel-badge {badge_class}">{vix_zone.trade_bias}</div>
+    <div class="vix-panel">
+        <div class="vix-header">
+            <div class="vix-title">🧭 VIX Trade Compass</div>
+            <div class="vix-badge {badge_class}">{vix_zone.trade_bias}</div>
         </div>
-        <div style="background: #f8fafc; border-radius: 12px; padding: 16px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
-            <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem; margin-bottom: 6px;">{status}</div>
-            <div style="color: #64748b; font-size: 0.9rem;">{detail1}</div>
-            <div style="color: #64748b; font-size: 0.9rem;">{detail2}</div>
+        <div style="background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+            <div style="font-weight:600;color:#1e293b;font-size:0.85rem;">{status}</div>
+            <div style="color:#64748b;font-size:0.75rem;">{action}</div>
         </div>
-        <div class="zone-ladder">
-            {ladder_rows}
-        </div>
-        <div style="margin-top: 20px; padding: 12px 16px; background: #f1f5f9; border-radius: 10px; text-align: center;">
-            <span style="color: #64748b; font-size: 0.85rem;">Zone Size: </span>
-            <span style="color: #1e293b; font-weight: 700; font-family: monospace;">{vix_zone.zone_size:.2f}</span>
-            <span style="color: #64748b; font-size: 0.85rem;"> | 80%+ = CALLS | 20%- = PUTS</span>
+        {ladder_html}
+        <div style="text-align:center;padding-top:12px;border-top:1px solid #f1f5f9;margin-top:12px;">
+            <span style="font-size:0.7rem;color:#64748b;">Zone: {vix_zone.zone_size:.2f} | 80%+ = CALLS | 20%- = PUTS</span>
         </div>
     </div>
     """
@@ -1730,83 +1376,83 @@ def render_vix_zone_panel(vix_zone: VIXZone):
 
 
 # ============================================================================
-# SECTION 3.5: TRADE CARD
+# SECTION 3.5: TRADE CARD - Beautiful HTML
 # ============================================================================
 
 def render_trade_card(setup: TradeSetup, current_price: float, vix_zone: Optional[VIXZone]):
-    """Render a single trade setup card."""
+    """Render beautiful trade card."""
     
     distance = abs(current_price - setup.entry_price)
     is_near = distance <= AT_RAIL_THRESHOLD
     
-    # Card classes
+    # Classes
     if setup.direction == "CALLS":
         card_class = "trade-card-calls"
-        badge_class = "trade-badge-calls"
+        dir_class = "trade-calls"
     else:
         card_class = "trade-card-puts"
-        badge_class = "trade-badge-puts"
+        dir_class = "trade-puts"
     
     # Status
     if is_near:
         status_class = "status-at-rail"
-        status_text = f"🎯 AT RAIL ({distance:.1f} pts)"
+        status_text = f"🎯 AT RAIL ({distance:.1f})"
     else:
         status_class = "status-waiting"
         status_text = f"⏳ {distance:.1f} pts away"
     
-    # Confluence check
+    # Confluence
     confluence_ok = False
     confluence_text = "Enter VIX"
     if vix_zone and vix_zone.current > 0:
         confluence_ok, confluence_text = check_confluence(setup, vix_zone, current_price)
     
-    confluence_class = "confluence-active" if confluence_ok else "confluence-waiting"
+    confluence_class = "confluence-go" if confluence_ok else "confluence-wait"
     
     card_html = f"""
     <div class="trade-card {card_class}">
         <div class="trade-header">
-            <div class="trade-direction">
-                <span class="trade-direction-badge {badge_class}">{setup.direction}</span>
-                <span class="trade-cone-name">{setup.cone_name} Cone • {setup.rail_type.upper()} Rail</span>
+            <div>
+                <span class="trade-direction {dir_class}">{setup.direction}</span>
+                <span class="trade-cone">{setup.cone_name} • {setup.rail_type.upper()}</span>
             </div>
             <div class="trade-status {status_class}">{status_text}</div>
         </div>
         <div class="trade-grid">
             <div class="trade-stat">
-                <div class="trade-stat-value stat-entry">{setup.entry_price:.2f}</div>
-                <div class="trade-stat-label">Entry</div>
+                <div class="stat-value stat-entry">{setup.entry_price:.2f}</div>
+                <div class="stat-label">Entry</div>
             </div>
             <div class="trade-stat">
-                <div class="trade-stat-value stat-target">{setup.target_price:.2f}</div>
-                <div class="trade-stat-label">Target</div>
+                <div class="stat-value stat-target">{setup.target_price:.2f}</div>
+                <div class="stat-label">Target</div>
             </div>
             <div class="trade-stat">
-                <div class="trade-stat-value stat-stop">{setup.stop_price:.2f}</div>
-                <div class="trade-stat-label">Stop</div>
+                <div class="stat-value stat-stop">{setup.stop_price:.2f}</div>
+                <div class="stat-label">Stop</div>
             </div>
             <div class="trade-stat">
-                <div class="trade-stat-value stat-strike">{setup.strike:.0f}</div>
-                <div class="trade-stat-label">Strike (Δ{setup.delta:.2f})</div>
+                <div class="stat-value stat-strike">{setup.strike:.0f}</div>
+                <div class="stat-label">Strike Δ{setup.delta:.2f}</div>
             </div>
         </div>
-        <div class="pnl-row">
+        <div class="pnl-grid">
             <div class="pnl-box pnl-profit">
-                <div class="pnl-value pnl-value-green">+${setup.expected_profit:.0f}</div>
-                <div class="pnl-label">Expected Profit</div>
+                <div class="pnl-value pnl-green">+${setup.expected_profit:.0f}</div>
+                <div class="pnl-label">Profit</div>
             </div>
             <div class="pnl-box pnl-loss">
-                <div class="pnl-value pnl-value-red">-${setup.max_loss:.0f}</div>
+                <div class="pnl-value pnl-red">-${setup.max_loss:.0f}</div>
                 <div class="pnl-label">Max Loss</div>
             </div>
             <div class="pnl-box pnl-rr">
-                <div class="pnl-value pnl-value-blue">{setup.rr_ratio:.1f}:1</div>
-                <div class="pnl-label">Risk:Reward</div>
+                <div class="pnl-value pnl-blue">{setup.rr_ratio:.1f}:1</div>
+                <div class="pnl-label">R:R</div>
             </div>
         </div>
         <div class="confluence-row">
-            <div class="confluence-required">Required: <strong>{setup.vix_condition}</strong></div>
-            <div class="confluence-status {confluence_class}">{confluence_text}</div>
+            <span class="confluence-label">Req: {setup.vix_condition}</span>
+            <span class="confluence-status {confluence_class}">{confluence_text}</span>
         </div>
     </div>
     """
@@ -1815,11 +1461,11 @@ def render_trade_card(setup: TradeSetup, current_price: float, vix_zone: Optiona
 
 
 # ============================================================================
-# SECTION 3.6: TRADE CHECKLIST - Using Native Streamlit (Most Reliable)
+# SECTION 3.6: CHECKLIST - Native Streamlit (Reliable)
 # ============================================================================
 
 def render_checklist(cones: List[Cone], current_price: float, vix_zone: Optional[VIXZone]):
-    """Render the 4-point trade checklist using native Streamlit for reliability."""
+    """Render checklist using native Streamlit for reliability."""
     
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
     cone_width = abs(nearest_cone.ascending_rail - nearest_cone.descending_rail) if nearest_cone else 0
@@ -1832,7 +1478,7 @@ def render_checklist(cones: List[Cone], current_price: float, vix_zone: Optional
         expected_direction = 'PUTS'
         expected_vix = 'PUTS'
     
-    # Calculate checks
+    # Checks
     at_rail_ok = nearest_distance <= AT_RAIL_THRESHOLD
     structure_ok = cone_width >= MIN_CONE_WIDTH
     cone_ok = nearest_cone is not None
@@ -1846,99 +1492,82 @@ def render_checklist(cones: List[Cone], current_price: float, vix_zone: Optional
     
     passed = sum([at_rail_ok, structure_ok, cone_ok, vix_ok])
     
-    # Overall status header
+    # Header
+    st.markdown("### 📋 Checklist")
+    
     if passed == 4:
-        st.success(f"## 🟢 CONFLUENCE — GO!\n**{passed}/4** checks passed — All conditions met!")
+        st.success(f"**🟢 CONFLUENCE — GO!** ({passed}/4)")
     elif passed >= 3 and at_rail_ok:
-        st.success(f"## 🟢 STRONG SETUP\n**{passed}/4** checks passed — Good to trade")
+        st.success(f"**🟢 STRONG** ({passed}/4)")
     elif not at_rail_ok:
-        st.warning(f"## 🟡 WAIT — Not at Rail\n**{passed}/4** checks passed — Wait for price")
-    elif not structure_ok:
-        st.error(f"## 🔴 SKIP — Bad Structure\n**{passed}/4** checks passed — Cone too narrow")
+        st.warning(f"**🟡 WAIT** ({passed}/4)")
     else:
-        st.warning(f"## 🟡 CAUTION\n**{passed}/4** checks passed")
+        st.error(f"**🔴 SKIP** ({passed}/4)")
     
-    st.markdown("---")
-    
-    # Individual checks
+    # Checks
     if at_rail_ok:
-        st.success(f"✅ **At Rail (≤8 pts)** — {nearest_distance:.1f} pts")
+        st.success(f"✅ At Rail — {nearest_distance:.1f}")
     else:
-        st.error(f"❌ **At Rail (≤8 pts)** — {nearest_distance:.1f} pts away")
+        st.error(f"❌ At Rail — {nearest_distance:.1f}")
     
     if structure_ok:
-        st.success(f"✅ **Structure (≥18 pts)** — {cone_width:.0f} pts")
+        st.success(f"✅ Structure — {cone_width:.0f}")
     else:
-        st.error(f"❌ **Structure (≥18 pts)** — {cone_width:.0f} pts")
+        st.error(f"❌ Structure — {cone_width:.0f}")
     
     if cone_ok:
-        st.success(f"✅ **Active Cone** — {nearest_cone.name}")
+        st.success(f"✅ Cone — {nearest_cone.name}")
     else:
-        st.error(f"❌ **Active Cone** — None")
+        st.error(f"❌ Cone — None")
     
     if vix_ok:
-        st.success(f"✅ **VIX Confluence ({expected_vix})** — {vix_detail}")
+        st.success(f"✅ VIX — {vix_detail}")
     else:
-        st.error(f"❌ **VIX Confluence ({expected_vix})** — {vix_detail}")
+        st.error(f"❌ VIX — {vix_detail}")
     
-    st.markdown("---")
-    
-    # Direction box
+    # Direction
     if expected_direction == "CALLS":
-        st.success(
-            f"## 🎯 Trade Direction: CALLS\n"
-            f"**{nearest_cone.name if nearest_cone else 'N/A'}** cone • **{nearest_rail_type}** rail\n\n"
-            f"▼ Descending = Support → Buy CALLS"
-        )
+        st.success(f"**🎯 CALLS** | {nearest_cone.name if nearest_cone else 'N/A'} | {nearest_rail_type}")
     else:
-        st.error(
-            f"## 🎯 Trade Direction: PUTS\n"
-            f"**{nearest_cone.name if nearest_cone else 'N/A'}** cone • **{nearest_rail_type}** rail\n\n"
-            f"▲ Ascending = Resistance → Buy PUTS"
-        )
+        st.error(f"**🎯 PUTS** | {nearest_cone.name if nearest_cone else 'N/A'} | {nearest_rail_type}")
 
 
 # ============================================================================
-# SECTION 3.7: RTH SESSION TABLE - Using Native Streamlit DataFrame
+# SECTION 3.7: RTH TABLE - Native Streamlit DataFrame
 # ============================================================================
 
 def render_rth_table(cones: List[Cone], current_price: float, session_date):
-    """Render the RTH session rails table using native Streamlit DataFrame."""
+    """Render RTH table using DataFrame."""
     
-    # Legend row
-    col1, col2, col3, col4 = st.columns(4)
+    st.markdown("### 📊 RTH Rails")
+    
+    col1, col2 = st.columns(2)
     with col1:
-        st.info("🔵 **8:30 AM** = Open")
+        st.info("🔵 8:30 = Open")
     with col2:
-        st.success("🟢 **10:00 AM** = Target")
-    with col3:
-        st.caption("▲ ASC = PUTS")
-    with col4:
-        st.caption("▼ DESC = CALLS")
+        st.success("🟢 10:00 = Target")
     
-    # Build table data
+    # Build table
     ct_now = get_ct_now()
     rows = []
     
     for time_label, time_val, is_open, is_target in RTH_TIME_BLOCKS:
         target_dt = ct_now.replace(hour=time_val.hour, minute=time_val.minute, second=0, microsecond=0)
         
-        # Time label with marker
         if is_open:
-            time_display = f"🔵 {time_label}"
+            t = f"🔵{time_label}"
         elif is_target:
-            time_display = f"🟢 {time_label}"
+            t = f"🟢{time_label}"
         else:
-            time_display = time_label
+            t = time_label
         
-        row = {"Time": time_display}
+        row = {"Time": t}
         
         for cone in cones:
-            asc_price = calculate_rail_price(cone.pivot.price, cone.pivot.time, target_dt, True)
-            desc_price = calculate_rail_price(cone.pivot.price, cone.pivot.time, target_dt, False)
-            
-            row[f"{cone.name} ▲"] = f"{asc_price:.2f}"
-            row[f"{cone.name} ▼"] = f"{desc_price:.2f}"
+            asc = calculate_rail_price(cone.pivot.price, cone.pivot.time, target_dt, True)
+            desc = calculate_rail_price(cone.pivot.price, cone.pivot.time, target_dt, False)
+            row[f"{cone.name}▲"] = f"{asc:.2f}"
+            row[f"{cone.name}▼"] = f"{desc:.2f}"
         
         rows.append(row)
     
@@ -1947,194 +1576,173 @@ def render_rth_table(cones: List[Cone], current_price: float, session_date):
 
 
 # ============================================================================
-# SECTION 3.8: PRIOR SESSION PIVOTS - Using Native Streamlit
+# SECTION 3.8: PIVOTS PANEL - Beautiful HTML
 # ============================================================================
 
 def render_pivots_panel(high_price: float, low_price: float, close_price: float, prior_date):
-    """Render prior session pivots using native Streamlit components."""
+    """Render pivots with beautiful styling."""
     
-    date_str = prior_date.strftime('%b %d, %Y') if hasattr(prior_date, 'strftime') else str(prior_date)
+    date_str = prior_date.strftime('%b %d') if hasattr(prior_date, 'strftime') else str(prior_date)
     
-    st.caption(f"Session: **{date_str}**")
+    panel_html = f"""
+    <div class="info-panel">
+        <div class="info-title">📍 Prior Session ({date_str})</div>
+        <div class="info-row">
+            <span class="info-label">🔴 High (Wick)</span>
+            <span class="info-value" style="color:#dc2626;">{high_price:.2f}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">🟢 Low (Close)</span>
+            <span class="info-value" style="color:#16a34a;">{low_price:.2f}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">🟡 Close</span>
+            <span class="info-value" style="color:#ca8a04;">{close_price:.2f}</span>
+        </div>
+    </div>
+    """
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(label="🔴 High (Wick)", value=f"{high_price:.2f}")
-    
-    with col2:
-        st.metric(label="🟢 Low (Close)", value=f"{low_price:.2f}")
-    
-    with col3:
-        st.metric(label="🟡 Close", value=f"{close_price:.2f}")
+    st.markdown(panel_html, unsafe_allow_html=True)
 
 
 # ============================================================================
-# SECTION 3.9: 10AM RAILS PANEL - Using Native Streamlit
+# SECTION 3.9: RAILS PANEL - Beautiful HTML
 # ============================================================================
 
 def render_rails_panel(cones: List[Cone]):
-    """Render 10:00 AM rail prices using native Streamlit components."""
+    """Render 10am rails with beautiful styling."""
     
-    st.caption("▲ ASC = PUTS entry (resistance) | ▼ DESC = CALLS entry (support)")
-    
+    rows_html = ""
     for cone in cones:
-        st.markdown(f"**{cone.name} Cone**")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric(label="▲ Ascending (PUTS)", value=f"{cone.ascending_rail:.2f}", delta="Resistance")
-        
-        with col2:
-            st.metric(label="▼ Descending (CALLS)", value=f"{cone.descending_rail:.2f}", delta="Support")
-        
-        st.markdown("---")
+        rows_html += f"""
+        <div class="info-row">
+            <span class="info-label">{cone.name}</span>
+            <span>
+                <span style="color:#dc2626;font-weight:600;">▲{cone.ascending_rail:.2f}</span>
+                <span style="margin:0 8px;color:#cbd5e1;">|</span>
+                <span style="color:#16a34a;font-weight:600;">▼{cone.descending_rail:.2f}</span>
+            </span>
+        </div>
+        """
+    
+    panel_html = f"""
+    <div class="info-panel">
+        <div class="info-title">📐 10:00 AM Rails</div>
+        <div style="font-size:0.7rem;color:#64748b;margin-bottom:8px;">▲ ASC=PUTS | ▼ DESC=CALLS</div>
+        {rows_html}
+    </div>
+    """
+    
+    st.markdown(panel_html, unsafe_allow_html=True)
 
 
 # ============================================================================
-# SECTION 3.10: VIX-SPX LEGEND - Using Native Streamlit Expanders
+# SECTION 3.10: LEGEND - Native Streamlit Expanders
 # ============================================================================
 
 def render_legend():
-    """Render the VIX-SPX confluence rules using native Streamlit expanders."""
+    """Render trading rules using expanders."""
     
-    with st.expander("🟢 CALLS Entry Rules", expanded=False):
+    st.markdown("### 📚 Rules")
+    
+    with st.expander("🟢 CALLS", expanded=False):
         st.markdown("""
-**Conditions Required:**
-1. VIX 30-min candle **CLOSES at RESISTANCE** (80%+ in zone)
-2. SPX is at **DESCENDING rail** (support)
+**Required:**
+- VIX closes at **RESISTANCE** (80%+)
+- SPX at **DESCENDING** rail
 
-**Why it works:**
-- VIX at resistance → VIX will drop
-- VIX drops → SPX rises
-- Descending rail = support → SPX bounces UP
-
-**Entry:** Descending rail | **Target:** Ascending rail | **Stop:** 6 pts below
+VIX drops → SPX rises
         """)
     
-    with st.expander("🔴 PUTS Entry Rules", expanded=False):
+    with st.expander("🔴 PUTS", expanded=False):
         st.markdown("""
-**Conditions Required:**
-1. VIX 30-min candle **CLOSES at SUPPORT** (20% or below)
-2. SPX is at **ASCENDING rail** (resistance)
+**Required:**
+- VIX closes at **SUPPORT** (≤20%)
+- SPX at **ASCENDING** rail
 
-**Why it works:**
-- VIX at support → VIX will rise
-- VIX rises → SPX drops
-- Ascending rail = resistance → SPX rejected DOWN
-
-**Entry:** Ascending rail | **Target:** Descending rail | **Stop:** 6 pts above
+VIX rises → SPX drops
         """)
     
-    with st.expander("⚠️ Breakout Rules", expanded=False):
+    with st.expander("⚠️ Breakouts", expanded=False):
         st.markdown("""
-**VIX Breaks ABOVE Resistance:**
-- VIX continuing up → SPX continuing DOWN
-- PUTS targets extend by +0.15 per zone
-
-**VIX Breaks BELOW Support:**
-- VIX continuing down → SPX continuing UP
-- CALLS targets extend by -0.15 per zone
+- Above resistance → PUTS extend
+- Below support → CALLS extend
         """)
     
-    with st.expander("🚀 Gap Day Rules", expanded=False):
+    with st.expander("🚀 Gap Days", expanded=False):
         st.markdown("""
-**GAP UP Day (SPX opens above High Cone ascending rail):**
-- Use overnight LOW as new pivot
-- Ascending rail from gap low = SUPPORT
-- CALLS entry at ascending rail + VIX at resistance
-
-**GAP DOWN Day (SPX opens below Low Cone descending rail):**
-- Use overnight HIGH as new pivot
-- Descending rail from gap high = RESISTANCE
-- PUTS entry at descending rail + VIX at support
+**Gap UP:** Ascending = Support → CALLS
+**Gap DOWN:** Descending = Resistance → PUTS
         """)
     
-    st.warning("⏰ **Critical Rule:** It's the 30-minute **CLOSE** that matters, not the wick!")
+    st.warning("⏰ **30-min CLOSE matters!**")
 
 
 # ============================================================================
-# SECTION 3.11: SECTION HEADER - Using Native Streamlit
-# ============================================================================
-
-def render_section_header(icon: str, title: str):
-    """Render a section header using native Streamlit."""
-    
-    st.markdown(f"## {icon} {title}")
-    st.markdown("---")
-
-
-# ============================================================================
-# SECTION 3.12: FOOTER - Using Native Streamlit
+# SECTION 3.11: FOOTER
 # ============================================================================
 
 def render_footer():
-    """Render the footer using native Streamlit."""
-    
+    """Render footer."""
     ct_now = get_ct_now()
     
-    st.markdown("---")
+    footer_html = f"""
+    <div class="footer">
+        <span class="footer-brand">SPX PROPHET v2.1</span> | {ct_now.strftime('%I:%M %p CT')} | 30-min CLOSE is everything! 🎯
+    </div>
+    """
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.caption("**SPX PROPHET v2.1** — Legendary Edition")
-    
-    with col2:
-        st.caption(f"Updated: {ct_now.strftime('%I:%M:%S %p CT')}")
-    
-    with col3:
-        st.caption("Remember: 30-min CLOSE is everything! 🎯")
+    st.markdown(footer_html, unsafe_allow_html=True)
 
 
 # ============================================================================
-# SECTION 3.13: SIDEBAR STATUS - Using Native Streamlit
+# SECTION 3.12: SIDEBAR STATUS - Native Streamlit
 # ============================================================================
 
 def render_sidebar_status(vix_zone: Optional[VIXZone], nearest_distance: float,
                           nearest_rail_type: str, cone_width: float):
-    """Render status summary in sidebar using native Streamlit components."""
+    """Render sidebar status."""
     
-    st.markdown("### 📡 Live Status")
+    st.markdown("### 📡 Status")
     
-    # VIX Status
     if vix_zone and vix_zone.current > 0:
         if vix_zone.trade_bias == "CALLS":
-            st.success(f"**VIX:** 🟢 CALLS ({vix_zone.position_pct:.0f}%)")
+            st.success(f"VIX: **CALLS** ({vix_zone.position_pct:.0f}%)")
         elif vix_zone.trade_bias == "PUTS":
-            st.error(f"**VIX:** 🔴 PUTS ({vix_zone.position_pct:.0f}%)")
+            st.error(f"VIX: **PUTS** ({vix_zone.position_pct:.0f}%)")
         else:
-            st.warning(f"**VIX:** 🟡 WAIT ({vix_zone.position_pct:.0f}%)")
+            st.warning(f"VIX: **WAIT** ({vix_zone.position_pct:.0f}%)")
     else:
-        st.info("**VIX:** Enter Data")
+        st.info("VIX: Enter data")
     
-    # Rail Status
     if nearest_distance <= AT_RAIL_THRESHOLD:
-        st.success(f"**Rail:** 🎯 AT RAIL ({nearest_distance:.1f} pts)")
+        st.success(f"Rail: **AT RAIL** ({nearest_distance:.1f})")
     else:
-        st.warning(f"**Rail:** ⏳ {nearest_distance:.1f} pts away")
+        st.warning(f"Rail: {nearest_distance:.1f} pts")
     
-    # Direction
     expected_dir = "CALLS" if nearest_rail_type == 'descending' else "PUTS"
     if expected_dir == "CALLS":
-        st.success(f"**Direction:** 🟢 {expected_dir}")
+        st.success(f"Dir: **{expected_dir}**")
     else:
-        st.error(f"**Direction:** 🔴 {expected_dir}")
-    
-    # Structure
-    if cone_width >= MIN_CONE_WIDTH:
-        st.success(f"**Structure:** ✅ {cone_width:.0f} pts")
-    else:
-        st.error(f"**Structure:** ❌ {cone_width:.0f} pts")
+        st.error(f"Dir: **{expected_dir}**")
+
+
+# ============================================================================
+# SECTION 3.13: SECTION HEADER
+# ============================================================================
+
+def render_section_header(icon: str, title: str):
+    """Simple section header."""
+    st.markdown(f"## {icon} {title}")
 
 # ============================================================================
 # ============================================================================
 #
 #                        PART 4: MAIN APPLICATION
 #
-#                   The Final Piece — Everything Connected
-#                   Sidebar • Main Layout • Full Integration
+#                   ★ BRINGING IT ALL TOGETHER ★
+#
+#           Sidebar Controls • Main Layout • Full Integration
 #
 # ============================================================================
 # ============================================================================
@@ -2143,10 +1751,10 @@ def main():
     """Main application entry point."""
     
     # ========================================================================
-    # PAGE CONFIGURATION
+    # PAGE CONFIG
     # ========================================================================
     st.set_page_config(
-        page_title="SPX Prophet v2.1 | Legendary Edition",
+        page_title="SPX Prophet v2.1",
         page_icon="🎯",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -2163,44 +1771,32 @@ def main():
     render_header()
     
     # ========================================================================
-    # SIDEBAR
+    # SIDEBAR CONTROLS
     # ========================================================================
     with st.sidebar:
+        st.markdown("## ⚙️ Controls")
         
-        st.markdown(
-            """
-            <div style="text-align: center; padding: 10px 0 20px 0;">
-                <div style="font-size: 1.5rem; font-weight: 800; color: #1e293b;">⚙️ CONTROL PANEL</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        
-        # ====================================================================
+        # --------------------------------------------------------------------
         # SESSION DATE
-        # ====================================================================
-        st.markdown("### 📅 Session Date")
-        
+        # --------------------------------------------------------------------
+        st.markdown("### 📅 Session")
         session_date = st.date_input(
-            "Trading Date",
+            "Date",
             value=get_ct_now().date(),
-            help="Select the trading session date"
+            help="Trading session date"
         )
-        
         session_date_dt = CT_TZ.localize(datetime.combine(session_date, time(10, 0)))
         
         ct_now = get_ct_now()
-        st.info(f"🕐 **{ct_now.strftime('%I:%M %p CT')}** | {ct_now.strftime('%A, %b %d')}")
+        st.caption(f"🕐 {ct_now.strftime('%I:%M %p CT')} | {ct_now.strftime('%a %b %d')}")
         
         st.markdown("---")
         
-        # ====================================================================
-        # VIX ZONE INPUT
-        # ====================================================================
-        st.markdown("### 🧭 VIX Zone Setup")
-        st.caption("From overnight session (5pm-2am CT)")
-        
-        st.warning("⚠️ **Use 30-min CLOSE prices, NOT wicks!**")
+        # --------------------------------------------------------------------
+        # VIX ZONE
+        # --------------------------------------------------------------------
+        st.markdown("### 🧭 VIX Zone")
+        st.caption("From overnight (5pm-2am CT)")
         
         if 'vix_support' not in st.session_state:
             st.session_state.vix_support = 0.0
@@ -2210,35 +1806,35 @@ def main():
             st.session_state.vix_current = 0.0
         
         vix_support = st.number_input(
-            "VIX Support (Zone Bottom)",
+            "Support (Bottom)",
             min_value=0.0,
             max_value=100.0,
             value=st.session_state.vix_support,
             step=0.01,
             format="%.2f",
-            help="Overnight low CLOSE — PUTS entry when VIX closes here"
+            help="Overnight low CLOSE"
         )
         st.session_state.vix_support = vix_support
         
         vix_resistance = st.number_input(
-            "VIX Resistance (Zone Top)",
+            "Resistance (Top)",
             min_value=0.0,
             max_value=100.0,
             value=st.session_state.vix_resistance,
             step=0.01,
             format="%.2f",
-            help="Overnight high CLOSE — CALLS entry when VIX closes here"
+            help="Overnight high CLOSE"
         )
         st.session_state.vix_resistance = vix_resistance
         
         vix_current = st.number_input(
-            "Current VIX (30m Close)",
+            "Current (30m Close)",
             min_value=0.0,
             max_value=100.0,
             value=st.session_state.vix_current,
             step=0.01,
             format="%.2f",
-            help="Latest 30-min candle CLOSE from TradingView (VX1!)"
+            help="Latest 30-min CLOSE"
         )
         st.session_state.vix_current = vix_current
         
@@ -2249,23 +1845,22 @@ def main():
             
             zone_size = vix_resistance - vix_support
             if 0.13 <= zone_size <= 0.17:
-                st.success(f"✅ Valid 1-zone: **{zone_size:.2f}**")
+                st.success(f"✅ Valid zone: {zone_size:.2f}")
             elif zone_size > 0:
-                num_zones = round(zone_size / 0.15)
-                st.info(f"📊 ~{num_zones} zones ({zone_size:.2f})")
+                st.info(f"📊 Zone: {zone_size:.2f}")
             
             if vix_zone.trade_bias == "CALLS":
-                st.success(f"🟢 **CALLS** — VIX at resistance ({vix_zone.position_pct:.0f}%)")
+                st.success(f"🟢 **CALLS** ({vix_zone.position_pct:.0f}%)")
             elif vix_zone.trade_bias == "PUTS":
-                st.error(f"🔴 **PUTS** — VIX at support ({vix_zone.position_pct:.0f}%)")
+                st.error(f"🔴 **PUTS** ({vix_zone.position_pct:.0f}%)")
             elif vix_zone.current > 0:
-                st.warning(f"🟡 **WAIT** — VIX mid-zone ({vix_zone.position_pct:.0f}%)")
+                st.warning(f"🟡 **WAIT** ({vix_zone.position_pct:.0f}%)")
         
         st.markdown("---")
         
-        # ====================================================================
+        # --------------------------------------------------------------------
         # ES-SPX OFFSET
-        # ====================================================================
+        # --------------------------------------------------------------------
         st.markdown("### 📊 ES-SPX Offset")
         
         if 'es_offset' not in st.session_state:
@@ -2278,22 +1873,22 @@ def main():
             value=st.session_state.es_offset,
             step=0.25,
             format="%.2f",
-            help="Positive if ES > SPX, Negative if ES < SPX"
+            help="Positive if ES > SPX"
         )
         st.session_state.es_offset = es_offset
         
         if es_offset >= 0:
-            st.caption(f"ES is **{es_offset:.2f}** pts ABOVE SPX")
+            st.caption(f"ES is {es_offset:.2f} ABOVE SPX")
         else:
-            st.caption(f"ES is **{abs(es_offset):.2f}** pts BELOW SPX")
+            st.caption(f"ES is {abs(es_offset):.2f} BELOW SPX")
         
         st.markdown("---")
         
-        # ====================================================================
+        # --------------------------------------------------------------------
         # OVERNIGHT PIVOTS
-        # ====================================================================
-        st.markdown("### 🌙 Overnight ES Pivots")
-        st.caption("For gap day detection (ES values)")
+        # --------------------------------------------------------------------
+        st.markdown("### 🌙 Overnight ES")
+        st.caption("For gap detection")
         
         if 'overnight_es_high' not in st.session_state:
             st.session_state.overnight_es_high = 0.0
@@ -2301,47 +1896,41 @@ def main():
             st.session_state.overnight_es_low = 0.0
         
         overnight_es_high = st.number_input(
-            "Overnight ES High",
+            "ES High",
             min_value=0.0,
             max_value=10000.0,
             value=st.session_state.overnight_es_high,
             step=0.25,
-            format="%.2f",
-            help="Highest ES price overnight (for gap down detection)"
+            format="%.2f"
         )
         st.session_state.overnight_es_high = overnight_es_high
         
         overnight_es_low = st.number_input(
-            "Overnight ES Low",
+            "ES Low",
             min_value=0.0,
             max_value=10000.0,
             value=st.session_state.overnight_es_low,
             step=0.25,
-            format="%.2f",
-            help="Lowest ES price overnight (for gap up detection)"
+            format="%.2f"
         )
         st.session_state.overnight_es_low = overnight_es_low
         
         if overnight_es_high > 0:
-            overnight_spx_high = convert_es_to_spx(overnight_es_high, es_offset)
-            st.caption(f"SPX High: **{overnight_spx_high:.2f}**")
+            spx_high = convert_es_to_spx(overnight_es_high, es_offset)
+            st.caption(f"SPX High: {spx_high:.2f}")
         
         if overnight_es_low > 0:
-            overnight_spx_low = convert_es_to_spx(overnight_es_low, es_offset)
-            st.caption(f"SPX Low: **{overnight_spx_low:.2f}**")
+            spx_low = convert_es_to_spx(overnight_es_low, es_offset)
+            st.caption(f"SPX Low: {spx_low:.2f}")
         
         st.markdown("---")
         
-        # ====================================================================
+        # --------------------------------------------------------------------
         # MANUAL PIVOTS
-        # ====================================================================
+        # --------------------------------------------------------------------
         st.markdown("### 📍 Manual Pivots")
         
-        use_manual = st.checkbox(
-            "Override Auto-Pivots",
-            value=False,
-            help="Manually enter prior session pivots"
-        )
+        use_manual = st.checkbox("Override Auto-Pivots", value=False)
         
         if 'manual_high' not in st.session_state:
             st.session_state.manual_high = 0.0
@@ -2358,15 +1947,13 @@ def main():
                 value=st.session_state.manual_high,
                 format="%.2f"
             )
-            
             st.session_state.manual_low = st.number_input(
-                "Low (Close-based)",
+                "Low (Close)",
                 min_value=0.0,
                 max_value=10000.0,
                 value=st.session_state.manual_low,
                 format="%.2f"
             )
-            
             st.session_state.manual_close = st.number_input(
                 "Close",
                 min_value=0.0,
@@ -2377,35 +1964,34 @@ def main():
         
         st.markdown("---")
         
-        # ====================================================================
+        # --------------------------------------------------------------------
         # QUICK REFERENCE
-        # ====================================================================
-        st.markdown("### 📖 Quick Reference")
-        
-        st.markdown(
-            """
-            **🟢 CALLS Entry:**
-            - VIX closes at RESISTANCE (80%+)
-            - SPX at DESCENDING rail
-            - VIX drops → SPX rises
-            
-            **🔴 PUTS Entry:**
-            - VIX closes at SUPPORT (≤20%)
-            - SPX at ASCENDING rail
-            - VIX rises → SPX drops
-            
-            **Rail Logic:**
-            - ▼ DESC = Support → CALLS
-            - ▲ ASC = Resistance → PUTS
-            
-            **Key Numbers:**
-            - Zone: 0.15 | Rail: ≤8 pts
-            - Width: ≥18 pts | Stop: 6 pts
-            """
-        )
+        # --------------------------------------------------------------------
+        with st.expander("📖 Quick Reference", expanded=False):
+            st.markdown("""
+**CALLS:**
+- VIX at RESISTANCE (80%+)
+- SPX at DESCENDING rail
+- VIX drops → SPX rises
+
+**PUTS:**
+- VIX at SUPPORT (≤20%)
+- SPX at ASCENDING rail
+- VIX rises → SPX drops
+
+**Rails:**
+- ▼ DESC = Support → CALLS
+- ▲ ASC = Resistance → PUTS
+
+**Key Numbers:**
+- Zone: 0.15
+- Rail: ≤8 pts
+- Width: ≥18 pts
+- Stop: 6 pts
+            """)
     
     # ========================================================================
-    # MAIN CONTENT - DATA FETCHING
+    # MAIN CONTENT - FETCH DATA
     # ========================================================================
     
     prior_session = fetch_prior_session_data(session_date_dt)
@@ -2413,9 +1999,9 @@ def main():
     
     if current_price is None:
         current_price = 6000.0
-        st.warning("⚠️ Could not fetch live SPX price. Using placeholder.")
+        st.warning("⚠️ Could not fetch SPX. Using placeholder.")
     
-    # Determine pivot values
+    # Determine pivots
     if use_manual and st.session_state.manual_high > 0:
         high_price = st.session_state.manual_high
         low_price = st.session_state.manual_low
@@ -2431,28 +2017,24 @@ def main():
         low_time = prior_session['low_time']
         prior_date = prior_session['date']
     else:
-        st.error("⚠️ Could not fetch prior session data. Enable **Manual Pivots** in sidebar.")
+        st.error("⚠️ No data. Enable Manual Pivots.")
         st.stop()
     
-    # Create target time
+    # Target time
     target_time = CT_TZ.localize(datetime.combine(session_date, time(10, 0)))
     
     # Create pivots
     pivots = [
         Pivot(price=high_price, time=high_time, name='High'),
         Pivot(price=low_price, time=low_time, name='Low'),
-        Pivot(
-            price=close_price,
-            time=CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(15, 0))),
-            name='Close'
-        ),
+        Pivot(price=close_price, time=CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(15, 0))), name='Close'),
     ]
     
     # Create cones
     cones = [create_cone(p, target_time) for p in pivots]
     
     # ========================================================================
-    # GAP DAY DETECTION
+    # GAP DETECTION
     # ========================================================================
     gap_analysis = None
     
@@ -2489,15 +2071,11 @@ def main():
                 cones.append(create_cone(gap_pivot, target_time))
     
     # ========================================================================
-    # CALCULATE KEY METRICS
+    # CALCULATE METRICS
     # ========================================================================
     
     nearest_cone, nearest_rail_type, nearest_distance = find_nearest_rail(current_price, cones)
-    
-    if nearest_cone:
-        cone_width = abs(nearest_cone.ascending_rail - nearest_cone.descending_rail)
-    else:
-        cone_width = 0
+    cone_width = abs(nearest_cone.ascending_rail - nearest_cone.descending_rail) if nearest_cone else 0
     
     trade_setups = generate_trade_setups(cones, current_price, gap_analysis)
     
@@ -2520,84 +2098,64 @@ def main():
         render_sidebar_status(vix_zone, nearest_distance, nearest_rail_type, cone_width)
     
     # ========================================================================
-    # MAIN LAYOUT - TWO COLUMNS
+    # MAIN LAYOUT
     # ========================================================================
-    left_col, right_col = st.columns([2, 1])
     
-    # ========================================================================
-    # LEFT COLUMN
-    # ========================================================================
-    with left_col:
-        
-        # VIX Zone Panel
-        if vix_zone and vix_zone.support > 0:
-            render_section_header("🧭", "VIX Zone Analysis")
-            render_vix_zone_panel(vix_zone)
-        
-        # Trade Setups
-        render_section_header("🎯", "Trade Setups")
-        
-        calls_setups = sorted(
-            [s for s in trade_setups if s.direction == 'CALLS'],
-            key=lambda x: abs(current_price - x.entry_price)
-        )
-        puts_setups = sorted(
-            [s for s in trade_setups if s.direction == 'PUTS'],
-            key=lambda x: abs(current_price - x.entry_price)
-        )
-        
-        tab_calls, tab_puts = st.tabs([
-            f"🟢 CALLS — Descending Rail = Support ({len(calls_setups)})",
-            f"🔴 PUTS — Ascending Rail = Resistance ({len(puts_setups)})"
-        ])
-        
-        with tab_calls:
-            if calls_setups:
-                for setup in calls_setups[:4]:
-                    render_trade_card(setup, current_price, vix_zone)
-            else:
-                st.info("No CALLS setups available. Cones may be too narrow (need ≥18 pts).")
-        
-        with tab_puts:
-            if puts_setups:
-                for setup in puts_setups[:4]:
-                    render_trade_card(setup, current_price, vix_zone)
-            else:
-                st.info("No PUTS setups available. Cones may be too narrow (need ≥18 pts).")
-        
-        # RTH Table
-        render_section_header("📊", "RTH Session Rails")
-        render_rth_table(cones, current_price, session_date)
+    # VIX Panel (full width on mobile)
+    if vix_zone and vix_zone.support > 0:
+        render_vix_zone_panel(vix_zone)
     
-    # ========================================================================
-    # RIGHT COLUMN
-    # ========================================================================
-    with right_col:
-        
-        # Checklist
-        render_section_header("📋", "Trade Checklist")
+    # Trade Setups
+    st.markdown("## 🎯 Trade Setups")
+    
+    calls_setups = sorted(
+        [s for s in trade_setups if s.direction == 'CALLS'],
+        key=lambda x: abs(current_price - x.entry_price)
+    )
+    puts_setups = sorted(
+        [s for s in trade_setups if s.direction == 'PUTS'],
+        key=lambda x: abs(current_price - x.entry_price)
+    )
+    
+    tab_calls, tab_puts = st.tabs([
+        f"🟢 CALLS ({len(calls_setups)})",
+        f"🔴 PUTS ({len(puts_setups)})"
+    ])
+    
+    with tab_calls:
+        if calls_setups:
+            for setup in calls_setups[:4]:
+                render_trade_card(setup, current_price, vix_zone)
+        else:
+            st.info("No CALLS setups. Cones may be too narrow.")
+    
+    with tab_puts:
+        if puts_setups:
+            for setup in puts_setups[:4]:
+                render_trade_card(setup, current_price, vix_zone)
+        else:
+            st.info("No PUTS setups. Cones may be too narrow.")
+    
+    # Two columns for desktop, stacks on mobile
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
         render_checklist(cones, current_price, vix_zone)
-        
-        # Pivots
-        render_section_header("📍", "Prior Session")
         render_pivots_panel(high_price, low_price, close_price, prior_date)
-        
-        # 10am Rails
-        render_section_header("📐", "10:00 AM Rails")
+    
+    with col2:
         render_rails_panel(cones)
-        
-        # Legend
-        render_section_header("📚", "Trading Rules")
         render_legend()
     
-    # ========================================================================
-    # FOOTER
-    # ========================================================================
+    # RTH Table (full width)
+    render_rth_table(cones, current_price, session_date)
+    
+    # Footer
     render_footer()
 
 
 # ============================================================================
-# RUN APPLICATION
+# RUN
 # ============================================================================
 
 if __name__ == "__main__":
