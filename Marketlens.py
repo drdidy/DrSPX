@@ -4722,7 +4722,9 @@ def main():
                 </div>
             </div>
             """
-            st.markdown(vix_html, unsafe_allow_html=True)
+            # Use components.html for reliable rendering
+            import streamlit.components.v1 as components
+            components.html(vix_html, height=600, scrolling=True)
     
     st.markdown(f"### 🎯 10:00 AM Setups — {active_cone_name} Cone Active{reversal_badge}")
     st.caption(cone_reason)
