@@ -3231,9 +3231,9 @@ def inject_premium_css():
 
 def render_header():
     st.markdown("""
-    <div class="prophet-header">
-        <h1 class="prophet-title">SPX PROPHET</h1>
-        <p class="prophet-tagline">WHERE STRUCTURE BECOMES FORESIGHT</p>
+    <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 20px 24px; border-radius: 10px; margin-bottom: 16px; text-align: center; border: 1px solid #334155;">
+        <h1 style="font-size: 28px; font-weight: 700; color: #f8fafc; margin: 0; letter-spacing: -0.5px;">SPX PROPHET</h1>
+        <p style="font-size: 11px; color: #fbbf24; text-transform: uppercase; letter-spacing: 3px; margin: 8px 0 0 0;">Where Structure Becomes Foresight</p>
     </div>
     """, unsafe_allow_html=True)
 
