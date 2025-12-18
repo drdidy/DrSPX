@@ -3644,8 +3644,8 @@ def main():
         st.markdown("### 🎯 SPX-VIX Confluence")
         st.caption("BOTH must align: VIX zone + SPX rail")
         st.markdown("""
-        <div style="background: #fef3c7; border-left: 3px solid #d97706; padding: 8px 12px; margin-bottom: 12px; border-radius: 0 6px 6px 0; font-size: 0.75rem; color: #78350f;">
-            ⚠️ <strong style="color: #92400e;">30-MIN CLOSE matters!</strong> Wicks can pierce levels — wait for candle CLOSE to confirm.
+        <div style="background: #fef3c7; border-left: 3px solid #d97706; padding: 6px 10px; margin-bottom: 10px; border-radius: 0 4px 4px 0; font-size: 0.65rem; color: #78350f;">
+            ⚠️ <strong style="color: #92400e;">30-MIN CLOSE matters!</strong><br>Wait for candle CLOSE to confirm.
         </div>
         """, unsafe_allow_html=True)
         
@@ -3793,31 +3793,31 @@ def main():
             elif zone_size > 0:
                 st.info(f"Zone = {num_zones} level(s) ({zone_size:.2f})")
             
-            # Trade bias indicator
+            # Trade bias indicator - compact for sidebar
             if trade_bias == "CALLS":
                 st.markdown(f"""
-                <div style="background: #d1fae5; border: 2px solid #10b981; border-radius: 8px; padding: 12px; text-align: center;">
-                    <div style="font-size: 1.5rem;">🟢</div>
-                    <div style="font-weight: 700; color: #059669; font-size: 1.1rem;">CALLS</div>
-                    <div style="font-size: 0.75rem; color: #065f46;">{trade_action}</div>
-                    <div style="font-size: 0.7rem; color: #064e3b; margin-top: 4px;">Entry: SPX {entry_rail}</div>
+                <div style="background: #d1fae5; border: 2px solid #10b981; border-radius: 6px; padding: 8px; text-align: center;">
+                    <div style="font-size: 1.2rem;">🟢</div>
+                    <div style="font-weight: 700; color: #047857; font-size: 1rem;">CALLS</div>
+                    <div style="font-size: 0.65rem; color: #065f46;">{trade_action}</div>
+                    <div style="font-size: 0.6rem; color: #064e3b; margin-top: 2px;">Entry: SPX {entry_rail}</div>
                 </div>
                 """, unsafe_allow_html=True)
             elif trade_bias == "PUTS":
                 st.markdown(f"""
-                <div style="background: #fee2e2; border: 2px solid #ef4444; border-radius: 8px; padding: 12px; text-align: center;">
-                    <div style="font-size: 1.5rem;">🔴</div>
-                    <div style="font-weight: 700; color: #dc2626; font-size: 1.1rem;">PUTS</div>
-                    <div style="font-size: 0.75rem; color: #991b1b;">{trade_action}</div>
-                    <div style="font-size: 0.7rem; color: #7f1d1d; margin-top: 4px;">Entry: SPX {entry_rail}</div>
+                <div style="background: #fee2e2; border: 2px solid #ef4444; border-radius: 6px; padding: 8px; text-align: center;">
+                    <div style="font-size: 1.2rem;">🔴</div>
+                    <div style="font-weight: 700; color: #b91c1c; font-size: 1rem;">PUTS</div>
+                    <div style="font-size: 0.65rem; color: #7f1d1d;">{trade_action}</div>
+                    <div style="font-size: 0.6rem; color: #7f1d1d; margin-top: 2px;">Entry: SPX {entry_rail}</div>
                 </div>
                 """, unsafe_allow_html=True)
             elif trade_bias == "WAIT":
                 st.markdown(f"""
-                <div style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 12px; text-align: center;">
-                    <div style="font-size: 1.5rem;">🟡</div>
-                    <div style="font-weight: 700; color: #d97706; font-size: 1.1rem;">WAIT</div>
-                    <div style="font-size: 0.75rem; color: #92400e;">{trade_action}</div>
+                <div style="background: #fef3c7; border: 2px solid #d97706; border-radius: 6px; padding: 8px; text-align: center;">
+                    <div style="font-size: 1.2rem;">🟡</div>
+                    <div style="font-weight: 700; color: #92400e; font-size: 1rem;">WAIT</div>
+                    <div style="font-size: 0.65rem; color: #78350f;">{trade_action}</div>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -3827,39 +3827,39 @@ def main():
             
             # ===== VIX ZONE LADDER =====
             st.markdown("---")
-            st.markdown("**📊 Zone Ladder**")
+            st.markdown("**Zone Ladder**")
             
-            # Build ladder HTML
-            ladder_html = '<div style="font-family: monospace; font-size: 0.75rem; line-height: 1.6;">'
+            # Build ladder HTML - compact for sidebar
+            ladder_html = '<div style="font-family: monospace; font-size: 0.65rem; line-height: 1.4;">'
             
             # Zones above (reversed to show highest first)
             for i in range(3, -1, -1):
                 level = zones_above[i]
                 is_target = zone_status == "BREAKOUT_UP" and vix_current > 0 and level > vix_current and (i == 0 or zones_above[i-1] < vix_current if i > 0 else True)
-                style = 'color: #dc2626; font-weight: 600;' if is_target else 'color: #6b7280;'
-                marker = ' ◀ TARGET' if is_target else ''
-                ladder_html += f'<div style="{style}">+{i+1}: {level:.2f} <span style="color: #b91c1c; font-size: 0.65rem;">(PUTS extend){marker}</span></div>'
+                if is_target:
+                    ladder_html += f'<div style="color: #dc2626; font-weight: 600;">+{i+1}: {level:.2f} ◀</div>'
+                else:
+                    ladder_html += f'<div style="color: #374151;">+{i+1}: {level:.2f}</div>'
             
             # Zone top (resistance)
-            top_style = 'background: #d1fae5; padding: 4px 8px; border-radius: 4px; margin: 4px 0;'
-            ladder_html += f'<div style="{top_style}"><strong style="color: #047857;">TOP: {zone_top:.2f}</strong> <span style="color: #065f46; font-size: 0.7rem;">← CALLS entry / PUTS exit</span></div>'
+            ladder_html += f'<div style="background: #d1fae5; padding: 3px 6px; border-radius: 3px; margin: 3px 0; color: #047857; font-weight: 600;">TOP: {zone_top:.2f} ← CALLS</div>'
             
             # Current VIX position (if in zone)
             if zone_status == "CONTAINED" and vix_current > 0:
                 pos_pct = vix_signal.get('position_in_zone', 50)
-                ladder_html += f'<div style="background: #dbeafe; padding: 4px 8px; border-radius: 4px; margin: 4px 0;"><strong style="color: #1e40af;">NOW: {vix_current:.2f}</strong> <span style="color: #1e3a8a; font-size: 0.7rem;">({pos_pct:.0f}% in zone)</span></div>'
+                ladder_html += f'<div style="background: #dbeafe; padding: 3px 6px; border-radius: 3px; margin: 3px 0; color: #1e3a8a; font-weight: 600;">NOW: {vix_current:.2f} ({pos_pct:.0f}%)</div>'
             
             # Zone bottom (support)
-            bot_style = 'background: #fee2e2; padding: 4px 8px; border-radius: 4px; margin: 4px 0;'
-            ladder_html += f'<div style="{bot_style}"><strong style="color: #b91c1c;">BOT: {zone_bottom:.2f}</strong> <span style="color: #7f1d1d; font-size: 0.7rem;">← PUTS entry / CALLS exit</span></div>'
+            ladder_html += f'<div style="background: #fee2e2; padding: 3px 6px; border-radius: 3px; margin: 3px 0; color: #991b1b; font-weight: 600;">BOT: {zone_bottom:.2f} ← PUTS</div>'
             
             # Zones below
             for i in range(4):
                 level = zones_below[i]
                 is_target = zone_status == "BREAKOUT_DOWN" and vix_current > 0 and level < vix_current and (i == 0 or zones_below[i-1] > vix_current if i > 0 else True)
-                style = 'color: #059669; font-weight: 600;' if is_target else 'color: #6b7280;'
-                marker = ' ◀ TARGET' if is_target else ''
-                ladder_html += f'<div style="{style}">-{i+1}: {level:.2f} <span style="color: #047857; font-size: 0.65rem;">(CALLS extend){marker}</span></div>'
+                if is_target:
+                    ladder_html += f'<div style="color: #047857; font-weight: 600;">-{i+1}: {level:.2f} ◀</div>'
+                else:
+                    ladder_html += f'<div style="color: #374151;">-{i+1}: {level:.2f}</div>'
             
             ladder_html += '</div>'
             st.markdown(ladder_html, unsafe_allow_html=True)
