@@ -1,10 +1,11 @@
 """
 SPX PROPHET - Daily Trading Plan Dashboard
-Version 3.0 - Complete Unified View
+Version 3.1 - Complete Unified View with Secondary Pivots
 
 A comprehensive 0DTE options trading system that combines:
 - VIX Zone Analysis (0.15 increments)
 - SPX Structural Cones (Prior High/Low/Close)
+- Secondary Pivots (High² and Low²)
 - ES Overnight Validation
 - EMA Confirmation (8/21 on 1-min)
 - Profit Calculations & Position Sizing
@@ -33,10 +34,15 @@ ET_TZ = pytz.timezone('America/New_York')
 SLOPE_ASCENDING = 0.45
 SLOPE_DESCENDING = 0.45
 VIX_ZONE_INCREMENT = 0.15
-MIN_CONE_WIDTH = 25.0
+MIN_CONE_WIDTH = 18.0
 AT_RAIL_THRESHOLD = 5.0
 STOP_LOSS_PTS = 3.0
 STRIKE_OFFSET = 17.5
+CONFLUENCE_THRESHOLD = 5.0
+
+# Secondary Pivot Detection
+SECONDARY_PIVOT_MIN_PULLBACK_PCT = 0.003  # 0.3% = ~18 pts on SPX 6000
+SECONDARY_PIVOT_MIN_DISTANCE = 5.0
 
 def get_ct_now() -> datetime:
     return datetime.now(CT_TZ)
@@ -76,6 +82,7 @@ class TradeSetup:
     rr_ratio: float
     cone_name: str
     rail_type: str  # ascending or descending
+    distance_from_price: float = 0.0
 
 # ============================================================================
 # DATA FETCHING
@@ -83,23 +90,51 @@ class TradeSetup:
 
 @st.cache_data(ttl=300)
 def fetch_prior_session(session_date: datetime) -> Optional[Dict]:
-    """Fetch prior day's High, Low, Close."""
+    """Fetch prior day's High, Low, Close with timestamps."""
     try:
         spx = yf.Ticker("^GSPC")
         end = session_date
         start = end - timedelta(days=10)
-        df = spx.history(start=start, end=end, interval='1d')
-        if len(df) >= 1:
-            last = df.iloc[-1]
-            return {
-                'high': float(last['High']),
-                'low': float(last['Low']),
-                'close': float(last['Close']),
-                'date': df.index[-1]
-            }
-    except:
-        pass
-    return None
+        
+        # Get daily data for H/L/C values
+        df_daily = spx.history(start=start, end=end, interval='1d')
+        
+        # Get intraday data for precise pivot times
+        df_intraday = spx.history(start=start, end=end, interval='30m')
+        
+        if len(df_daily) < 1:
+            return None
+            
+        last = df_daily.iloc[-1]
+        prior_date = df_daily.index[-1]
+        
+        # Find precise times from intraday data
+        if not df_intraday.empty:
+            df_intraday.index = df_intraday.index.tz_convert(CT_TZ)
+            day_data = df_intraday[df_intraday.index.date == prior_date.date()]
+            
+            if not day_data.empty:
+                high_time = day_data['High'].idxmax()
+                low_time = day_data['Low'].idxmin()
+            else:
+                # Default to 3:00 PM CT (close)
+                high_time = CT_TZ.localize(datetime.combine(prior_date.date(), time(15, 0)))
+                low_time = high_time
+        else:
+            high_time = CT_TZ.localize(datetime.combine(prior_date.date(), time(15, 0)))
+            low_time = high_time
+        
+        return {
+            'high': float(last['High']),
+            'low': float(last['Low']),
+            'close': float(last['Close']),
+            'date': prior_date,
+            'high_time': high_time,
+            'low_time': low_time,
+            'close_time': CT_TZ.localize(datetime.combine(prior_date.date(), time(15, 0)))
+        }
+    except Exception as e:
+        return None
 
 @st.cache_data(ttl=60)
 def fetch_current_spx() -> Optional[float]:
@@ -124,6 +159,27 @@ def fetch_es_current() -> Optional[float]:
     except:
         pass
     return None
+
+@st.cache_data(ttl=300)
+def fetch_today_session_data() -> Dict:
+    """Fetch today's session high/low for secondary pivot detection."""
+    try:
+        spx = yf.Ticker("^GSPC")
+        df = spx.history(period='1d', interval='5m')
+        
+        if df.empty:
+            return {'high': None, 'low': None, 'high_time': None, 'low_time': None}
+        
+        df.index = df.index.tz_convert(CT_TZ)
+        
+        return {
+            'high': float(df['High'].max()),
+            'low': float(df['Low'].min()),
+            'high_time': df['High'].idxmax(),
+            'low_time': df['Low'].idxmin()
+        }
+    except:
+        return {'high': None, 'low': None, 'high_time': None, 'low_time': None}
 
 # ============================================================================
 # CONE CALCULATIONS
@@ -179,6 +235,52 @@ def find_nearest_rail(price: float, cones: List[Cone]) -> Tuple[Optional[Cone], 
     
     return nearest_cone, nearest_type, nearest_dist
 
+def find_confluence_zones(cones: List[Cone], threshold: float = CONFLUENCE_THRESHOLD) -> Dict:
+    """Find where multiple rails converge."""
+    all_calls_levels = []
+    all_puts_levels = []
+    
+    for cone in cones:
+        all_calls_levels.append({'price': cone.descending_rail, 'name': f"{cone.name} ▼"})
+        all_puts_levels.append({'price': cone.ascending_rail, 'name': f"{cone.name} ▲"})
+    
+    # Find confluence zones
+    calls_confluence = []
+    puts_confluence = []
+    
+    # Check CALLS levels for confluence
+    for i, level1 in enumerate(all_calls_levels):
+        confluent_rails = [level1['name']]
+        for j, level2 in enumerate(all_calls_levels):
+            if i != j and abs(level1['price'] - level2['price']) <= threshold:
+                confluent_rails.append(level2['name'])
+        if len(confluent_rails) > 1:
+            calls_confluence.append({
+                'price': level1['price'],
+                'rails': confluent_rails,
+                'strength': len(confluent_rails)
+            })
+    
+    # Check PUTS levels for confluence
+    for i, level1 in enumerate(all_puts_levels):
+        confluent_rails = [level1['name']]
+        for j, level2 in enumerate(all_puts_levels):
+            if i != j and abs(level1['price'] - level2['price']) <= threshold:
+                confluent_rails.append(level2['name'])
+        if len(confluent_rails) > 1:
+            puts_confluence.append({
+                'price': level1['price'],
+                'rails': confluent_rails,
+                'strength': len(confluent_rails)
+            })
+    
+    return {
+        'calls_confluence': calls_confluence,
+        'puts_confluence': puts_confluence,
+        'all_calls_levels': all_calls_levels,
+        'all_puts_levels': all_puts_levels
+    }
+
 # ============================================================================
 # VIX ZONE ANALYSIS
 # ============================================================================
@@ -191,7 +293,11 @@ def analyze_vix_zone(zone_bottom: float, zone_top: float, current_vix: float) ->
             'status': 'NO_DATA',
             'bias': 'UNKNOWN',
             'action': 'Enter VIX zone data',
-            'position_pct': 0
+            'position_pct': 0,
+            'zones_above': [0,0,0,0],
+            'zones_below': [0,0,0,0],
+            'zone_top': 0,
+            'zone_bottom': 0
         }
     
     zone_size = zone_top - zone_bottom
@@ -209,7 +315,8 @@ def analyze_vix_zone(zone_bottom: float, zone_top: float, current_vix: float) ->
             'zones_above': zones_above,
             'zones_below': zones_below,
             'zone_top': zone_top,
-            'zone_bottom': zone_bottom
+            'zone_bottom': zone_bottom,
+            'current': 0
         }
     
     # Determine position
@@ -266,6 +373,7 @@ def generate_setups(cones: List[Cone], current_price: float) -> List[TradeSetup]
         entry_calls = cone.descending_rail
         target_calls = cone.ascending_rail
         move_calls = target_calls - entry_calls
+        dist_calls = abs(current_price - entry_calls)
         
         strike_calls = int(entry_calls + STRIKE_OFFSET)
         strike_calls = ((strike_calls + 4) // 5) * 5
@@ -289,13 +397,15 @@ def generate_setups(cones: List[Cone], current_price: float) -> List[TradeSetup]
             risk_dollars=risk_calls,
             rr_ratio=profit_50_calls / risk_calls if risk_calls > 0 else 0,
             cone_name=cone.name,
-            rail_type='descending'
+            rail_type='descending',
+            distance_from_price=dist_calls
         ))
         
         # PUTS setup (at ascending rail)
         entry_puts = cone.ascending_rail
         target_puts = cone.descending_rail
         move_puts = entry_puts - target_puts
+        dist_puts = abs(current_price - entry_puts)
         
         strike_puts = int(entry_puts - STRIKE_OFFSET)
         strike_puts = (strike_puts // 5) * 5
@@ -319,7 +429,8 @@ def generate_setups(cones: List[Cone], current_price: float) -> List[TradeSetup]
             risk_dollars=risk_puts,
             rr_ratio=profit_50_puts / risk_puts if risk_puts > 0 else 0,
             cone_name=cone.name,
-            rail_type='ascending'
+            rail_type='ascending',
+            distance_from_price=dist_puts
         ))
     
     return setups
@@ -335,7 +446,8 @@ def render_dashboard_html(
     setups: List[TradeSetup],
     es_price: float,
     es_offset: float,
-    prior_session: Dict
+    prior_session: Dict,
+    confluence: Dict = None
 ) -> str:
     """Render the complete dashboard as HTML."""
     
@@ -835,6 +947,12 @@ def main():
         st.session_state.vix_top = 0.0
         st.session_state.vix_current = 0.0
         st.session_state.es_offset = 8.0
+        # Secondary pivots
+        st.session_state.secondary_high = 0.0
+        st.session_state.secondary_high_time = "14:00"
+        st.session_state.secondary_low = 0.0
+        st.session_state.secondary_low_time = "14:00"
+        st.session_state.use_secondary = False
     
     # Sidebar - Inputs
     with st.sidebar:
@@ -880,6 +998,45 @@ def main():
         )
         
         st.markdown("---")
+        st.markdown("### 📐 Secondary Pivots")
+        st.session_state.use_secondary = st.checkbox("Enable Secondary Pivots", value=st.session_state.use_secondary)
+        
+        if st.session_state.use_secondary:
+            st.caption("High² (Secondary High)")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.session_state.secondary_high = st.number_input(
+                    "Price",
+                    min_value=0.0, max_value=10000.0,
+                    value=st.session_state.secondary_high,
+                    step=0.25, format="%.2f",
+                    key="sec_high_price"
+                )
+            with col2:
+                st.session_state.secondary_high_time = st.text_input(
+                    "Time (HH:MM)",
+                    value=st.session_state.secondary_high_time,
+                    key="sec_high_time"
+                )
+            
+            st.caption("Low² (Secondary Low)")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.session_state.secondary_low = st.number_input(
+                    "Price",
+                    min_value=0.0, max_value=10000.0,
+                    value=st.session_state.secondary_low,
+                    step=0.25, format="%.2f",
+                    key="sec_low_price"
+                )
+            with col2:
+                st.session_state.secondary_low_time = st.text_input(
+                    "Time (HH:MM)",
+                    value=st.session_state.secondary_low_time,
+                    key="sec_low_time"
+                )
+        
+        st.markdown("---")
         if st.button("🔄 Refresh Data", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
@@ -889,22 +1046,50 @@ def main():
     current_spx = fetch_current_spx() or (prior_session['close'] if prior_session else 6000)
     current_es = fetch_es_current()
     
-    # Build pivots and cones
+    # Build pivots including secondary if enabled
     pivots = []
     if prior_session:
-        base_time = session_dt.replace(hour=15, minute=0) - timedelta(days=1)
+        # Use actual times if available, otherwise default to 3pm
+        high_time = prior_session.get('high_time') or CT_TZ.localize(datetime.combine(prior_session['date'].date(), time(15, 0)))
+        low_time = prior_session.get('low_time') or CT_TZ.localize(datetime.combine(prior_session['date'].date(), time(15, 0)))
+        close_time = prior_session.get('close_time') or CT_TZ.localize(datetime.combine(prior_session['date'].date(), time(15, 0)))
+        
         pivots = [
-            Pivot(prior_session['high'], base_time, 'High'),
-            Pivot(prior_session['low'], base_time, 'Low'),
-            Pivot(prior_session['close'], base_time, 'Close'),
+            Pivot(prior_session['high'], high_time, 'High'),
+            Pivot(prior_session['low'], low_time, 'Low'),
+            Pivot(prior_session['close'], close_time, 'Close'),
         ]
+        
+        # Add secondary pivots if enabled
+        if st.session_state.use_secondary:
+            if st.session_state.secondary_high > 0:
+                try:
+                    h, m = map(int, st.session_state.secondary_high_time.split(':'))
+                    sec_high_time = CT_TZ.localize(datetime.combine(prior_session['date'].date(), time(h, m)))
+                    pivots.append(Pivot(st.session_state.secondary_high, sec_high_time, 'High²'))
+                except:
+                    pass
+            
+            if st.session_state.secondary_low > 0:
+                try:
+                    h, m = map(int, st.session_state.secondary_low_time.split(':'))
+                    sec_low_time = CT_TZ.localize(datetime.combine(prior_session['date'].date(), time(h, m)))
+                    pivots.append(Pivot(st.session_state.secondary_low, sec_low_time, 'Low²'))
+                except:
+                    pass
     
     # Evaluate at 10:00 AM
-    eval_time = session_dt.replace(hour=10, minute=0)
+    eval_time = CT_TZ.localize(datetime.combine(session_date, time(10, 0)))
     cones = build_cones(pivots, eval_time) if pivots else []
+    
+    # Find confluence zones
+    confluence = find_confluence_zones(cones) if cones else {}
     
     # Generate setups
     setups = generate_setups(cones, current_spx) if cones else []
+    
+    # Sort setups by distance from current price
+    setups.sort(key=lambda x: x.distance_from_price)
     
     # Analyze VIX
     vix_data = analyze_vix_zone(
@@ -921,10 +1106,11 @@ def main():
         setups=setups,
         es_price=current_es,
         es_offset=st.session_state.es_offset,
-        prior_session=prior_session
+        prior_session=prior_session,
+        confluence=confluence
     )
     
-    components.html(dashboard_html, height=1400, scrolling=True)
+    components.html(dashboard_html, height=1600, scrolling=True)
 
 if __name__ == "__main__":
     main()
