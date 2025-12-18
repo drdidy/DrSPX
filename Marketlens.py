@@ -2802,57 +2802,72 @@ def inject_premium_css():
     
     .stApp { background: var(--bg-primary); }
     * { font-family: 'Inter', -apple-system, sans-serif; }
-    #MainMenu, footer, header { visibility: hidden; }
+    #MainMenu, footer { visibility: hidden; }
     
     /* ============================================
-       SIDEBAR - Readable & Compact
+       MOBILE: Show sidebar toggle button
+       ============================================ */
+    @media (max-width: 768px) {
+        [data-testid="stSidebar"] {
+            min-width: 280px !important;
+            max-width: 280px !important;
+        }
+        [data-testid="collapsedControl"] {
+            display: flex !important;
+            visibility: visible !important;
+        }
+        header { visibility: visible !important; }
+    }
+    
+    /* ============================================
+       SIDEBAR - Readable fonts
        ============================================ */
     [data-testid="stSidebar"] {
         background: #f9fafb;
         border-right: 1px solid #e5e7eb;
     }
     [data-testid="stSidebar"] * {
-        font-size: 13px !important;
+        font-size: 14px !important;
         color: #374151 !important;
     }
     [data-testid="stSidebar"] h1, 
     [data-testid="stSidebar"] h2, 
     [data-testid="stSidebar"] h3 {
-        font-size: 14px !important;
+        font-size: 15px !important;
         font-weight: 600 !important;
         color: #111827 !important;
-        margin-bottom: 8px !important;
+        margin-bottom: 10px !important;
     }
     [data-testid="stSidebar"] label {
-        font-size: 12px !important;
+        font-size: 13px !important;
         color: #374151 !important;
         font-weight: 500 !important;
     }
     [data-testid="stSidebar"] .stNumberInput input,
     [data-testid="stSidebar"] .stSelectbox > div > div {
-        font-size: 13px !important;
+        font-size: 14px !important;
         font-family: 'JetBrains Mono', monospace !important;
     }
     [data-testid="stSidebar"] .stMetric label {
-        font-size: 11px !important;
+        font-size: 12px !important;
         color: #6b7280 !important;
     }
     [data-testid="stSidebar"] .stMetric [data-testid="stMetricValue"] {
-        font-size: 15px !important;
+        font-size: 16px !important;
         color: #111827 !important;
     }
     [data-testid="stSidebar"] .stCaption {
-        font-size: 11px !important;
+        font-size: 12px !important;
         color: #6b7280 !important;
     }
     [data-testid="stSidebar"] .stCheckbox label span {
-        font-size: 12px !important;
+        font-size: 13px !important;
     }
     [data-testid="stSidebar"] button {
-        font-size: 12px !important;
+        font-size: 13px !important;
     }
     [data-testid="stSidebar"] hr {
-        margin: 10px 0 !important;
+        margin: 12px 0 !important;
         border-color: #e5e7eb !important;
     }
     
@@ -4646,81 +4661,125 @@ def main():
             elif zone_status == "BREAKOUT_DOWN":
                 breakout_badge = '<div style="background: #d1fae5; color: #059669; padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; margin-top: 12px;">⚡ VIX BROKE DOWN — CALLS targets extend</div>'
             
-            # Build main VIX Zone HTML - Readable fonts
+            # Build main VIX Zone HTML - Clean & Organized
             vix_html = f"""
-            <div style="background: #ffffff; border: 2px solid {main_color}; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-                
-                <!-- Main Trade Signal -->
-                <div style="background: {main_bg}; border-radius: 10px; padding: 20px; margin-bottom: 20px; text-align: center;">
-                    <div style="font-size: 48px; margin-bottom: 8px;">{main_icon}</div>
-                    <div style="font-weight: 700; color: {main_color}; font-size: 28px;">{trade_bias}</div>
-                    <div style="color: #374151; font-size: 14px; margin-top: 8px;">{trade_action}</div>
-                    <div style="color: #1f2937; font-size: 13px; margin-top: 4px; font-weight: 500;">{spx_direction}</div>
-                    {breakout_badge}
-                </div>
-                
-                <!-- VIX Zone Ladder (Visual) -->
-                <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 16px; margin-bottom: 20px;">
-                    
-                    <!-- Zones Above (PUTS extend) -->
-                    <div style="text-align: center;">
-                        <div style="font-size: 11px; color: #b91c1c; text-transform: uppercase; font-weight: 600; margin-bottom: 10px;">PUTS Extend ↑</div>
-                        <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6b7280; line-height: 2;">
-                            {f'+4: {zones_above[3]:.2f}' if len(zones_above) > 3 else ''}<br>
-                            {f'+3: {zones_above[2]:.2f}' if len(zones_above) > 2 else ''}<br>
-                            {f'+2: {zones_above[1]:.2f}' if len(zones_above) > 1 else ''}<br>
-                            {f'+1: {zones_above[0]:.2f}' if len(zones_above) > 0 else ''}
-                        </div>
+            <html>
+            <head>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+                <style>
+                    * {{ font-family: 'Inter', sans-serif; margin: 0; padding: 0; box-sizing: border-box; }}
+                    .container {{ background: #fff; border-radius: 16px; padding: 24px; border: 2px solid {main_color}; }}
+                    .signal-box {{ background: {main_bg}; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px; }}
+                    .signal-icon {{ font-size: 56px; margin-bottom: 8px; }}
+                    .signal-title {{ font-size: 32px; font-weight: 700; color: {main_color}; }}
+                    .signal-desc {{ font-size: 15px; color: #374151; margin-top: 8px; }}
+                    .signal-dir {{ font-size: 14px; color: #1f2937; font-weight: 500; margin-top: 4px; }}
+                    .zone-grid {{ display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 20px; margin-bottom: 24px; }}
+                    .zone-side {{ text-align: center; }}
+                    .zone-label {{ font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 12px; }}
+                    .zone-label.puts {{ color: #dc2626; }}
+                    .zone-label.calls {{ color: #059669; }}
+                    .zone-levels {{ font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #6b7280; line-height: 2.2; }}
+                    .zone-box {{ border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 12px; }}
+                    .zone-box.top {{ background: linear-gradient(135deg, #d1fae5, #a7f3d0); border: 2px solid #10b981; }}
+                    .zone-box.current {{ background: #0f172a; }}
+                    .zone-box.bottom {{ background: linear-gradient(135deg, #fee2e2, #fecaca); border: 2px solid #ef4444; }}
+                    .zone-title {{ font-size: 11px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }}
+                    .zone-title.green {{ color: #047857; }}
+                    .zone-title.white {{ color: #94a3b8; }}
+                    .zone-title.red {{ color: #b91c1c; }}
+                    .zone-value {{ font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; margin: 8px 0; }}
+                    .zone-value.green {{ color: #047857; }}
+                    .zone-value.white {{ color: #f8fafc; }}
+                    .zone-value.red {{ color: #b91c1c; }}
+                    .zone-hint {{ font-size: 12px; }}
+                    .zone-hint.green {{ color: #065f46; }}
+                    .zone-hint.gray {{ color: #94a3b8; }}
+                    .zone-hint.red {{ color: #7f1d1d; }}
+                    .info-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }}
+                    .info-box {{ padding: 16px; border-radius: 8px; }}
+                    .info-box.entry {{ background: #f0fdf4; border-left: 4px solid #10b981; }}
+                    .info-box.exit {{ background: #fef2f2; border-left: 4px solid #ef4444; }}
+                    .info-label {{ font-size: 11px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }}
+                    .info-label.green {{ color: #065f46; }}
+                    .info-label.red {{ color: #7f1d1d; }}
+                    .info-value {{ font-size: 16px; font-weight: 600; margin-top: 6px; }}
+                    .info-value.green {{ color: #047857; }}
+                    .info-value.red {{ color: #b91c1c; }}
+                    .breakout {{ padding: 12px 16px; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 12px; text-align: center; }}
+                    @media (max-width: 600px) {{
+                        .zone-grid {{ grid-template-columns: 1fr; gap: 16px; }}
+                        .zone-side {{ display: none; }}
+                        .info-grid {{ grid-template-columns: 1fr; }}
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="signal-box">
+                        <div class="signal-icon">{main_icon}</div>
+                        <div class="signal-title">{trade_bias}</div>
+                        <div class="signal-desc">{trade_action}</div>
+                        <div class="signal-dir">{spx_direction}</div>
+                        {f'<div class="breakout" style="background:#fee2e2;color:#dc2626;">⚠️ VIX BROKE UP — PUTS targets extend</div>' if zone_status == "BREAKOUT_UP" else ''}
+                        {f'<div class="breakout" style="background:#d1fae5;color:#059669;">⚡ VIX BROKE DOWN — CALLS targets extend</div>' if zone_status == "BREAKOUT_DOWN" else ''}
                     </div>
                     
-                    <!-- Current Zone -->
-                    <div>
-                        <!-- Zone Top -->
-                        <div style="background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-radius: 10px; padding: 14px; text-align: center; margin-bottom: 10px; border: 2px solid #10b981;">
-                            <div style="font-size: 11px; color: #047857; text-transform: uppercase; font-weight: 600;">Zone Top (Resistance)</div>
-                            <div style="font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: #047857;">{zone_top:.2f}</div>
-                            <div style="font-size: 11px; color: #065f46;">VIX CLOSES here → SPX UP → <strong>CALLS</strong></div>
+                    <div class="zone-grid">
+                        <div class="zone-side">
+                            <div class="zone-label puts">PUTS Extend ↑</div>
+                            <div class="zone-levels">
+                                {f'+4: {zones_above[3]:.2f}' if len(zones_above) > 3 else ''}<br>
+                                {f'+3: {zones_above[2]:.2f}' if len(zones_above) > 2 else ''}<br>
+                                {f'+2: {zones_above[1]:.2f}' if len(zones_above) > 1 else ''}<br>
+                                {f'+1: {zones_above[0]:.2f}' if len(zones_above) > 0 else ''}
+                            </div>
                         </div>
                         
-                        <!-- Current VIX -->
-                        <div style="background: #0f172a; border-radius: 10px; padding: 14px; text-align: center; margin-bottom: 10px;">
-                            <div style="font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Current VIX</div>
-                            <div style="font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: #f8fafc;">{f'{vix_current:.2f}' if vix_current > 0 else '—'}</div>
-                            <div style="font-size: 12px; color: #94a3b8;">{f'{position_in_zone:.0f}% in zone' if zone_status == 'CONTAINED' and position_in_zone else zone_status_text}</div>
+                        <div>
+                            <div class="zone-box top">
+                                <div class="zone-title green">Zone Top (Resistance)</div>
+                                <div class="zone-value green">{zone_top:.2f}</div>
+                                <div class="zone-hint green">VIX closes here → <strong>CALLS</strong></div>
+                            </div>
+                            
+                            <div class="zone-box current">
+                                <div class="zone-title white">Current VIX</div>
+                                <div class="zone-value white">{f'{vix_current:.2f}' if vix_current > 0 else '—'}</div>
+                                <div class="zone-hint gray">{f'{position_in_zone:.0f}% in zone' if zone_status == 'CONTAINED' and position_in_zone else zone_status_text}</div>
+                            </div>
+                            
+                            <div class="zone-box bottom">
+                                <div class="zone-title red">Zone Bottom (Support)</div>
+                                <div class="zone-value red">{zone_bottom:.2f}</div>
+                                <div class="zone-hint red">VIX closes here → <strong>PUTS</strong></div>
+                            </div>
                         </div>
                         
-                        <!-- Zone Bottom -->
-                        <div style="background: linear-gradient(135deg, #fee2e2, #fecaca); border-radius: 10px; padding: 14px; text-align: center; border: 2px solid #ef4444;">
-                            <div style="font-size: 11px; color: #b91c1c; text-transform: uppercase; font-weight: 600;">Zone Bottom (Support)</div>
-                            <div style="font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: #b91c1c;">{zone_bottom:.2f}</div>
-                            <div style="font-size: 11px; color: #7f1d1d;">VIX CLOSES here → SPX DOWN → <strong>PUTS</strong></div>
+                        <div class="zone-side">
+                            <div class="zone-label calls">CALLS Extend ↓</div>
+                            <div class="zone-levels">
+                                {f'-1: {zones_below[0]:.2f}' if len(zones_below) > 0 else ''}<br>
+                                {f'-2: {zones_below[1]:.2f}' if len(zones_below) > 1 else ''}<br>
+                                {f'-3: {zones_below[2]:.2f}' if len(zones_below) > 2 else ''}<br>
+                                {f'-4: {zones_below[3]:.2f}' if len(zones_below) > 3 else ''}
+                            </div>
                         </div>
                     </div>
                     
-                    <!-- Zones Below (CALLS extend) -->
-                    <div style="text-align: center;">
-                        <div style="font-size: 11px; color: #047857; text-transform: uppercase; font-weight: 600; margin-bottom: 10px;">CALLS Extend ↓</div>
-                        <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6b7280; line-height: 2;">
-                            {f'-1: {zones_below[0]:.2f}' if len(zones_below) > 0 else ''}<br>
-                            {f'-2: {zones_below[1]:.2f}' if len(zones_below) > 1 else ''}<br>
-                            {f'-3: {zones_below[2]:.2f}' if len(zones_below) > 2 else ''}<br>
-                            {f'-4: {zones_below[3]:.2f}' if len(zones_below) > 3 else ''}
+                    <div class="info-grid">
+                        <div class="info-box entry">
+                            <div class="info-label green">Entry Rail</div>
+                            <div class="info-value green">SPX {entry_rail}</div>
+                        </div>
+                        <div class="info-box exit">
+                            <div class="info-label red">Exit Target</div>
+                            <div class="info-value red">{exit_target if exit_target else 'Enter VIX data'}</div>
                         </div>
                     </div>
                 </div>
-                
-                <!-- Entry and Exit Info -->
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div style="background: #f0fdf4; border-left: 4px solid #10b981; padding: 14px; border-radius: 0 8px 8px 0;">
-                        <div style="font-size: 11px; color: #065f46; text-transform: uppercase; font-weight: 600;">Entry Rail</div>
-                        <div style="font-size: 15px; color: #047857; font-weight: 600; margin-top: 4px;">SPX {entry_rail}</div>
-                    </div>
-                    <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 14px; border-radius: 0 8px 8px 0;">
-                        <div style="font-size: 11px; color: #7f1d1d; text-transform: uppercase; font-weight: 600;">Exit Target</div>
-                        <div style="font-size: 15px; color: #b91c1c; font-weight: 600; margin-top: 4px;">{exit_target if exit_target else 'Enter VIX data'}</div>
-                    </div>
-                </div>
-            </div>
+            </body>
+            </html>
             """
             # Use components.html for reliable rendering
             import streamlit.components.v1 as components
