@@ -2802,6 +2802,49 @@ def inject_premium_css():
         background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
     }
     
+    /* ============================================ */
+    /* SIDEBAR - Compact fonts for all elements    */
+    /* ============================================ */
+    [data-testid="stSidebar"] {
+        background: #f8fafc;
+    }
+    [data-testid="stSidebar"] .stMarkdown p,
+    [data-testid="stSidebar"] .stMarkdown span,
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] label {
+        font-size: 0.75rem !important;
+        color: #1f2937 !important;
+    }
+    [data-testid="stSidebar"] h3 {
+        font-size: 0.9rem !important;
+        color: #111827 !important;
+    }
+    [data-testid="stSidebar"] .stMetric label {
+        font-size: 0.65rem !important;
+        color: #374151 !important;
+    }
+    [data-testid="stSidebar"] .stMetric [data-testid="stMetricValue"] {
+        font-size: 0.9rem !important;
+        color: #111827 !important;
+    }
+    [data-testid="stSidebar"] .stNumberInput label,
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stCheckbox label {
+        font-size: 0.7rem !important;
+        color: #374151 !important;
+    }
+    [data-testid="stSidebar"] .stNumberInput input {
+        font-size: 0.8rem !important;
+    }
+    [data-testid="stSidebar"] .stCaption {
+        font-size: 0.65rem !important;
+        color: #4b5563 !important;
+    }
+    [data-testid="stSidebar"] strong {
+        color: #111827 !important;
+    }
+    /* ============================================ */
+    
     /* Override Streamlit defaults for light theme */
     .stApp > header { background: transparent; }
     .stMarkdown, .stText, p, span, label { color: var(--text-primary) !important; }
@@ -3644,8 +3687,8 @@ def main():
         st.markdown("### 🎯 SPX-VIX Confluence")
         st.caption("BOTH must align: VIX zone + SPX rail")
         st.markdown("""
-        <div style="background: #fef3c7; border-left: 3px solid #d97706; padding: 6px 10px; margin-bottom: 10px; border-radius: 0 4px 4px 0; font-size: 0.65rem; color: #78350f;">
-            ⚠️ <strong style="color: #92400e;">30-MIN CLOSE matters!</strong><br>Wait for candle CLOSE to confirm.
+        <div style="background: #fef3c7; border-left: 3px solid #d97706; padding: 4px 8px; margin-bottom: 8px; border-radius: 0 4px 4px 0; font-size: 0.6rem; color: #78350f; line-height: 1.3;">
+            ⚠️ <strong style="color: #92400e;">30-MIN CLOSE matters!</strong><br>Wait for candle CLOSE.
         </div>
         """, unsafe_allow_html=True)
         
@@ -3796,28 +3839,28 @@ def main():
             # Trade bias indicator - compact for sidebar
             if trade_bias == "CALLS":
                 st.markdown(f"""
-                <div style="background: #d1fae5; border: 2px solid #10b981; border-radius: 6px; padding: 8px; text-align: center;">
-                    <div style="font-size: 1.2rem;">🟢</div>
-                    <div style="font-weight: 700; color: #047857; font-size: 1rem;">CALLS</div>
-                    <div style="font-size: 0.65rem; color: #065f46;">{trade_action}</div>
-                    <div style="font-size: 0.6rem; color: #064e3b; margin-top: 2px;">Entry: SPX {entry_rail}</div>
+                <div style="background: #d1fae5; border: 2px solid #10b981; border-radius: 6px; padding: 6px; text-align: center;">
+                    <div style="font-size: 1rem;">🟢</div>
+                    <div style="font-weight: 700; color: #047857; font-size: 0.85rem;">CALLS</div>
+                    <div style="font-size: 0.55rem; color: #065f46; line-height: 1.2;">{trade_action}</div>
+                    <div style="font-size: 0.55rem; color: #064e3b; margin-top: 2px;">Entry: SPX {entry_rail}</div>
                 </div>
                 """, unsafe_allow_html=True)
             elif trade_bias == "PUTS":
                 st.markdown(f"""
-                <div style="background: #fee2e2; border: 2px solid #ef4444; border-radius: 6px; padding: 8px; text-align: center;">
-                    <div style="font-size: 1.2rem;">🔴</div>
-                    <div style="font-weight: 700; color: #b91c1c; font-size: 1rem;">PUTS</div>
-                    <div style="font-size: 0.65rem; color: #7f1d1d;">{trade_action}</div>
-                    <div style="font-size: 0.6rem; color: #7f1d1d; margin-top: 2px;">Entry: SPX {entry_rail}</div>
+                <div style="background: #fee2e2; border: 2px solid #ef4444; border-radius: 6px; padding: 6px; text-align: center;">
+                    <div style="font-size: 1rem;">🔴</div>
+                    <div style="font-weight: 700; color: #b91c1c; font-size: 0.85rem;">PUTS</div>
+                    <div style="font-size: 0.55rem; color: #7f1d1d; line-height: 1.2;">{trade_action}</div>
+                    <div style="font-size: 0.55rem; color: #7f1d1d; margin-top: 2px;">Entry: SPX {entry_rail}</div>
                 </div>
                 """, unsafe_allow_html=True)
             elif trade_bias == "WAIT":
                 st.markdown(f"""
-                <div style="background: #fef3c7; border: 2px solid #d97706; border-radius: 6px; padding: 8px; text-align: center;">
-                    <div style="font-size: 1.2rem;">🟡</div>
-                    <div style="font-weight: 700; color: #92400e; font-size: 1rem;">WAIT</div>
-                    <div style="font-size: 0.65rem; color: #78350f;">{trade_action}</div>
+                <div style="background: #fef3c7; border: 2px solid #d97706; border-radius: 6px; padding: 6px; text-align: center;">
+                    <div style="font-size: 1rem;">🟡</div>
+                    <div style="font-weight: 700; color: #92400e; font-size: 0.85rem;">WAIT</div>
+                    <div style="font-size: 0.55rem; color: #78350f; line-height: 1.2;">{trade_action}</div>
                 </div>
                 """, unsafe_allow_html=True)
             
@@ -3829,28 +3872,28 @@ def main():
             st.markdown("---")
             st.markdown("**Zone Ladder**")
             
-            # Build ladder HTML - compact for sidebar
-            ladder_html = '<div style="font-family: monospace; font-size: 0.65rem; line-height: 1.4;">'
+            # Build ladder HTML - very compact for sidebar
+            ladder_html = '<div style="font-family: monospace; font-size: 0.6rem; line-height: 1.3;">'
             
             # Zones above (reversed to show highest first)
             for i in range(3, -1, -1):
                 level = zones_above[i]
                 is_target = zone_status == "BREAKOUT_UP" and vix_current > 0 and level > vix_current and (i == 0 or zones_above[i-1] < vix_current if i > 0 else True)
                 if is_target:
-                    ladder_html += f'<div style="color: #dc2626; font-weight: 600;">+{i+1}: {level:.2f} ◀</div>'
+                    ladder_html += f'<div style="color: #b91c1c; font-weight: 600;">+{i+1}: {level:.2f} ◀</div>'
                 else:
-                    ladder_html += f'<div style="color: #374151;">+{i+1}: {level:.2f}</div>'
+                    ladder_html += f'<div style="color: #4b5563;">+{i+1}: {level:.2f}</div>'
             
             # Zone top (resistance)
-            ladder_html += f'<div style="background: #d1fae5; padding: 3px 6px; border-radius: 3px; margin: 3px 0; color: #047857; font-weight: 600;">TOP: {zone_top:.2f} ← CALLS</div>'
+            ladder_html += f'<div style="background: #d1fae5; padding: 2px 4px; border-radius: 2px; margin: 2px 0; color: #047857; font-weight: 600;">TOP: {zone_top:.2f} ←CALLS</div>'
             
             # Current VIX position (if in zone)
             if zone_status == "CONTAINED" and vix_current > 0:
                 pos_pct = vix_signal.get('position_in_zone', 50)
-                ladder_html += f'<div style="background: #dbeafe; padding: 3px 6px; border-radius: 3px; margin: 3px 0; color: #1e3a8a; font-weight: 600;">NOW: {vix_current:.2f} ({pos_pct:.0f}%)</div>'
+                ladder_html += f'<div style="background: #dbeafe; padding: 2px 4px; border-radius: 2px; margin: 2px 0; color: #1e3a8a; font-weight: 600;">NOW: {vix_current:.2f} ({pos_pct:.0f}%)</div>'
             
             # Zone bottom (support)
-            ladder_html += f'<div style="background: #fee2e2; padding: 3px 6px; border-radius: 3px; margin: 3px 0; color: #991b1b; font-weight: 600;">BOT: {zone_bottom:.2f} ← PUTS</div>'
+            ladder_html += f'<div style="background: #fee2e2; padding: 2px 4px; border-radius: 2px; margin: 2px 0; color: #991b1b; font-weight: 600;">BOT: {zone_bottom:.2f} ←PUTS</div>'
             
             # Zones below
             for i in range(4):
@@ -3859,7 +3902,7 @@ def main():
                 if is_target:
                     ladder_html += f'<div style="color: #047857; font-weight: 600;">-{i+1}: {level:.2f} ◀</div>'
                 else:
-                    ladder_html += f'<div style="color: #374151;">-{i+1}: {level:.2f}</div>'
+                    ladder_html += f'<div style="color: #4b5563;">-{i+1}: {level:.2f}</div>'
             
             ladder_html += '</div>'
             st.markdown(ladder_html, unsafe_allow_html=True)
