@@ -3097,6 +3097,134 @@ def inject_premium_css():
     .stat-indicator.green { background: #10b981; }
     .stat-indicator.red { background: #ef4444; }
     .stat-indicator.gold { background: #f59e0b; }
+    .stat-text { font-size: 12px; color: #374151; }
+    
+    /* Terminal Header */
+    .terminal-header {
+        background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+        border-radius: 10px;
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .terminal-logo { display: flex; align-items: center; gap: 12px; }
+    .terminal-logo-icon {
+        width: 40px; height: 40px;
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 18px; font-weight: 700; color: #1f2937;
+    }
+    .terminal-title { font-size: 20px; font-weight: 700; color: #fff; }
+    .terminal-subtitle { font-size: 10px; color: #fbbf24; text-transform: uppercase; letter-spacing: 1px; }
+    .terminal-status { display: flex; gap: 20px; }
+    .status-item { text-align: right; }
+    .status-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; }
+    .status-value { font-size: 14px; font-weight: 600; color: #fff; font-family: 'JetBrains Mono', monospace; }
+    .status-live { display: flex; align-items: center; gap: 6px; }
+    .live-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    
+    /* Prophet Header (alternate) */
+    .prophet-header { 
+        background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+        padding: 16px 20px; border-radius: 10px; margin-bottom: 16px; text-align: center;
+    }
+    .prophet-title { font-size: 22px; font-weight: 700; color: #fff; margin: 0; }
+    .prophet-tagline { font-size: 10px; color: #fbbf24; text-transform: uppercase; letter-spacing: 2px; margin-top: 4px; }
+    
+    /* Trade Panel */
+    .trade-panel {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 12px;
+    }
+    .trade-panel-header {
+        background: #f9fafb;
+        padding: 10px 14px;
+        border-bottom: 1px solid #e5e7eb;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .trade-panel-title { font-size: 13px; font-weight: 600; color: #111827; }
+    .trade-panel-badge {
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 600;
+    }
+    .badge-calls, .calls { background: #d1fae5; color: #047857; }
+    .badge-puts, .puts { background: #fee2e2; color: #b91c1c; }
+    .badge-neutral, .neutral { background: #fef3c7; color: #92400e; }
+    .trade-panel-body { padding: 14px; }
+    
+    /* Entry Rows */
+    .entry-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+    .entry-item { text-align: center; }
+    .entry-label { font-size: 10px; color: #6b7280; text-transform: uppercase; margin-bottom: 2px; }
+    .entry-value { font-size: 14px; font-weight: 600; color: #111827; font-family: 'JetBrains Mono', monospace; }
+    .entry-value.green { color: #059669; }
+    .entry-value.red { color: #dc2626; }
+    .entry-value.gold { color: #d97706; }
+    
+    /* Profit Grid */
+    .profit-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid #e5e7eb;
+    }
+    .profit-item {
+        background: #f0fdf4;
+        border-radius: 6px;
+        padding: 8px;
+        text-align: center;
+    }
+    .profit-label { font-size: 9px; color: #047857; text-transform: uppercase; }
+    .profit-value { font-size: 14px; font-weight: 700; color: #047857; font-family: 'JetBrains Mono', monospace; }
+    
+    /* Data Grid */
+    .data-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+        margin-bottom: 16px;
+    }
+    
+    /* Metric Card */
+    .metric-card {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 14px;
+    }
+    .metric-label { font-size: 10px; color: #6b7280; text-transform: uppercase; margin-bottom: 4px; }
+    .metric-value { font-size: 18px; font-weight: 700; color: #111827; font-family: 'JetBrains Mono', monospace; }
+    .metric-value.positive { color: #059669; }
+    .metric-value.negative { color: #dc2626; }
+    .metric-value.gold { color: #d97706; }
+    .metric-delta { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    
+    /* Confidence Meter */
+    .confidence-meter { margin-top: 10px; }
+    .confidence-bar { height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
+    .confidence-fill { height: 100%; border-radius: 3px; }
+    .confidence-fill.high { background: #10b981; }
+    .confidence-fill.medium { background: #f59e0b; }
+    .confidence-fill.low { background: #ef4444; }
+    
     </style>
     """, unsafe_allow_html=True)
     
