@@ -1606,28 +1606,25 @@ def render_pivots_panel(high_price: float, low_price: float, close_price: float,
 
 
 # ============================================================================
-# SECTION 3.9: RAILS PANEL - Native Streamlit
+# SECTION 3.9: RAILS PANEL - Clean Native Streamlit
 # ============================================================================
 
 def render_rails_panel(cones: List[Cone]):
-    """Render 10am rails using native Streamlit."""
+    """Render 10am rails - clean and readable."""
     
     st.markdown("### 📐 10:00 AM Rails")
-    st.caption("▲ ASC = PUTS entry | ▼ DESC = CALLS entry")
     
+    # Create a nice DataFrame
+    rails_data = []
     for cone in cones:
-        col1, col2, col3 = st.columns([2, 2, 2])
-        
-        with col1:
-            st.markdown(f"**{cone.name}**")
-        
-        with col2:
-            st.metric(label="▲ ASC", value=f"{cone.ascending_rail:.2f}")
-        
-        with col3:
-            st.metric(label="▼ DESC", value=f"{cone.descending_rail:.2f}")
+        rails_data.append({
+            "Cone": cone.name,
+            "▲ Ascending (PUTS)": f"{cone.ascending_rail:.2f}",
+            "▼ Descending (CALLS)": f"{cone.descending_rail:.2f}"
+        })
     
-    st.markdown("---")
+    df = pd.DataFrame(rails_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ============================================================================
