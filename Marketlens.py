@@ -1606,34 +1606,28 @@ def render_pivots_panel(high_price: float, low_price: float, close_price: float,
 
 
 # ============================================================================
-# SECTION 3.9: RAILS PANEL - Beautiful HTML
+# SECTION 3.9: RAILS PANEL - Native Streamlit
 # ============================================================================
 
 def render_rails_panel(cones: List[Cone]):
-    """Render 10am rails with beautiful styling."""
+    """Render 10am rails using native Streamlit."""
     
-    rows_html = ""
+    st.markdown("### 📐 10:00 AM Rails")
+    st.caption("▲ ASC = PUTS entry | ▼ DESC = CALLS entry")
+    
     for cone in cones:
-        rows_html += f"""
-        <div class="info-row">
-            <span class="info-label">{cone.name}</span>
-            <span>
-                <span style="color:#dc2626;font-weight:600;">▲{cone.ascending_rail:.2f}</span>
-                <span style="margin:0 8px;color:#cbd5e1;">|</span>
-                <span style="color:#16a34a;font-weight:600;">▼{cone.descending_rail:.2f}</span>
-            </span>
-        </div>
-        """
+        col1, col2, col3 = st.columns([2, 2, 2])
+        
+        with col1:
+            st.markdown(f"**{cone.name}**")
+        
+        with col2:
+            st.metric(label="▲ ASC", value=f"{cone.ascending_rail:.2f}")
+        
+        with col3:
+            st.metric(label="▼ DESC", value=f"{cone.descending_rail:.2f}")
     
-    panel_html = f"""
-    <div class="info-panel">
-        <div class="info-title">📐 10:00 AM Rails</div>
-        <div style="font-size:0.7rem;color:#64748b;margin-bottom:8px;">▲ ASC=PUTS | ▼ DESC=CALLS</div>
-        {rows_html}
-    </div>
-    """
-    
-    st.markdown(panel_html, unsafe_allow_html=True)
+    st.markdown("---")
 
 
 # ============================================================================
