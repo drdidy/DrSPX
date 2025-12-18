@@ -740,20 +740,6 @@ def render_dashboard(
         bias_icon = '⏳'
         bias_border = '#9ca3af'
     
-    # Assessment colors
-    if assessment.recommendation == 'FULL':
-        assess_color = '#059669'
-        assess_bg = '#ecfdf5'
-        assess_text = '✅ TRADEABLE DAY'
-    elif assessment.recommendation == 'REDUCED':
-        assess_color = '#d97706'
-        assess_bg = '#fffbeb'
-        assess_text = '⚠️ REDUCED SIZE'
-    else:
-        assess_color = '#dc2626'
-        assess_bg = '#fef2f2'
-        assess_text = '❌ CONSIDER SKIPPING'
-    
     # VIX action text
     if vix.bias == 'CALLS':
         vix_action = f"VIX at TOP ({vix.position_pct:.0f}%) → Expect VIX to fall → SPX UP"
@@ -852,10 +838,6 @@ def render_dashboard(
             <td style="padding:10px 12px;font-family:'SF Mono',monospace;">{c.width:.1f}</td>
         </tr>
         '''
-    
-    # Assessment details
-    reasons_html = ''.join([f'<div style="color:#059669;font-size:13px;">✓ {r}</div>' for r in assessment.reasons])
-    warnings_html = ''.join([f'<div style="color:#d97706;font-size:13px;">⚠ {w}</div>' for w in assessment.warnings])
     
     # VIX zones ladder
     vix_ladder_html = ''
@@ -1057,15 +1039,6 @@ def render_dashboard(
                                 <div class="signal-action">{vix_action}</div>
                             </div>
                             
-                            <div class="assessment">
-                                <div class="assessment-title">{assess_text}</div>
-                                <div class="assessment-score">Edge Score: {assessment.score}/100</div>
-                                <div style="margin-top:8px;">
-                                    {reasons_html}
-                                    {warnings_html}
-                                </div>
-                            </div>
-                            
                             <div class="vix-zone">
                                 <div class="zone-box zone-top">
                                     <div class="zone-label" style="color:#047857;">Zone Top</div>
@@ -1162,132 +1135,100 @@ def render_dashboard(
     return html
 
 def render_historical_section(results: List, session_data: Dict) -> str:
-    """Render the historical results section."""
-    if not results or not session_data:
+    """Render simplified historical view - just show what levels existed and session range."""
+    if not session_data:
         return ''
     
-    # Check if results were filtered by VIX
-    vix_filtered = session_data.get('vix_filtered', False)
-    vix_bias = session_data.get('vix_bias', 'UNKNOWN')
+    session_high = session_data.get('high', 0)
+    session_low = session_data.get('low', 0)
+    session_range = session_high - session_low
     
-    # Calculate summary
-    wins = [r for r in results if r.outcome.startswith('WIN')]
-    losses = [r for r in results if r.outcome == 'STOPPED']
-    no_triggers = [r for r in results if r.outcome == 'NO_TRIGGER']
+    # Build simple level check for each setup
+    levels_html = ''
     
-    total_profit = sum(r.profit for r in results)
-    
-    # VIX warning banner
-    if vix_filtered:
-        vix_banner = f'''
-        <div style="background:#ecfdf5;border:1px solid #10b981;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
-            <div style="font-size:13px;color:#065f46;">
-                <strong>✓ VIX Filtered:</strong> Only showing <strong>{vix_bias}</strong> setups (VIX bias was {vix_bias})
-            </div>
-        </div>
-        '''
-    else:
-        vix_banner = '''
-        <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
-            <div style="font-size:13px;color:#92400e;">
-                <strong>⚠️ No VIX Data:</strong> Showing ALL setups. Enter the VIX zone for that day to see only valid entries.
-            </div>
-        </div>
-        '''
-    
-    # Build results HTML
-    results_html = ''
-    for r in results:
-        if r.outcome == 'NO_TRIGGER':
-            icon = '⚪'
-            color = '#6b7280'
-            bg = '#f9fafb'
-            status = 'NOT TRIGGERED'
-            detail = f"Entry {r.setup.entry:.2f} never reached"
-        elif r.outcome == 'STOPPED':
-            icon = '🔴'
-            color = '#dc2626'
-            bg = '#fef2f2'
-            status = 'STOPPED OUT'
-            detail = f"Entry {r.trigger_time} → Stop hit {r.exit_time}"
-        elif r.outcome.startswith('WIN'):
-            icon = '🟢'
-            color = '#059669'
-            bg = '#ecfdf5'
-            pct = r.outcome.split('_')[1]
-            status = f'WIN ({pct}% Target)'
-            detail = f"Entry {r.trigger_time} → Target hit {r.exit_time}"
-        else:
-            icon = '🟡'
-            color = '#d97706'
-            bg = '#fffbeb'
-            status = 'OPEN (No Exit)'
-            detail = f"Entry {r.trigger_time} → Still open at close"
-        
-        dir_label = f"{r.setup.cone_name} {'▼' if r.setup.direction == 'CALLS' else '▲'} {r.setup.direction}"
-        profit_color = '#059669' if r.profit >= 0 else '#dc2626'
-        profit_text = f"+${r.profit:,.0f}" if r.profit >= 0 else f"-${abs(r.profit):,.0f}"
-        
-        results_html += f'''
-        <div style="background:{bg};border-radius:10px;padding:14px 16px;margin-bottom:10px;border-left:4px solid {color};">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <div style="font-weight:600;font-size:14px;color:#1f2937;">{icon} {dir_label}</div>
-                    <div style="font-size:12px;color:#6b7280;margin-top:2px;">{status}</div>
-                    <div style="font-size:11px;color:#9ca3af;margin-top:2px;">{detail}</div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:{profit_color};">{profit_text}</div>
-                    <div style="font-size:10px;color:#6b7280;">/contract</div>
-                </div>
-            </div>
-        </div>
-        '''
-    
-    summary_color = '#059669' if total_profit >= 0 else '#dc2626'
-    summary_text = f"+${total_profit:,.0f}" if total_profit >= 0 else f"-${abs(total_profit):,.0f}"
+    if results:
+        for r in results:
+            entry = r.setup.entry
+            target = r.setup.target_100
+            stop = r.setup.stop
+            direction = r.setup.direction
+            cone = r.setup.cone_name
+            arrow = '▼' if direction == 'CALLS' else '▲'
+            
+            # Did price reach entry?
+            if direction == 'CALLS':
+                entry_reached = session_low <= entry
+                target_reached = session_high >= target
+                stop_reached = session_low <= stop
+            else:
+                entry_reached = session_high >= entry
+                target_reached = session_low <= target
+                stop_reached = session_high >= stop
+            
+            entry_icon = '✓' if entry_reached else '✗'
+            entry_color = '#059669' if entry_reached else '#dc2626'
+            target_icon = '✓' if target_reached else '✗'
+            stop_icon = '✓' if stop_reached else '✗'
+            
+            dir_color = '#059669' if direction == 'CALLS' else '#dc2626'
+            
+            levels_html += f'''
+            <tr>
+                <td style="padding:10px 12px;font-weight:500;color:{dir_color};">{cone} {arrow} {direction}</td>
+                <td style="padding:10px 12px;font-family:'DM Mono',monospace;text-align:center;">
+                    <span style="color:{entry_color};">{entry_icon}</span> {entry:.2f}
+                </td>
+                <td style="padding:10px 12px;font-family:'DM Mono',monospace;text-align:center;">
+                    <span style="color:{'#059669' if target_reached else '#6b7280'};">{target_icon}</span> {target:.2f}
+                </td>
+                <td style="padding:10px 12px;font-family:'DM Mono',monospace;text-align:center;">
+                    <span style="color:{'#dc2626' if stop_reached else '#6b7280'};">{stop_icon}</span> {stop:.2f}
+                </td>
+            </tr>
+            '''
     
     return f'''
     <div class="card" style="margin-top:20px;">
-        <div class="card-header" style="background:#1e293b;color:#f8fafc;">📊 HISTORICAL RESULTS - What Actually Happened</div>
+        <div class="card-header" style="background:#1e293b;color:#f8fafc;">📊 HISTORICAL - Session Range & Levels</div>
         <div class="card-body">
-            {vix_banner}
-            
             <!-- Session Stats -->
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;padding:16px;background:#f8fafc;border-radius:10px;">
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;padding:20px;background:#f8fafc;border-radius:10px;">
                 <div style="text-align:center;">
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Session High</div>
-                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:600;color:#059669;">{session_data.get('high', 0):,.2f}</div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Session High</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:24px;font-weight:700;color:#059669;">{session_high:,.2f}</div>
                 </div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Session Low</div>
-                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:600;color:#dc2626;">{session_data.get('low', 0):,.2f}</div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Session Low</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:24px;font-weight:700;color:#dc2626;">{session_low:,.2f}</div>
                 </div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Range</div>
-                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:600;color:#1f2937;">{session_data.get('high', 0) - session_data.get('low', 0):,.1f} pts</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;">Net P/L</div>
-                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:{summary_color};">{summary_text}</div>
+                    <div style="font-size:11px;color:#6b7280;text-transform:uppercase;margin-bottom:4px;">Range</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:24px;font-weight:700;color:#1f2937;">{session_range:,.1f} pts</div>
                 </div>
             </div>
             
-            <!-- Summary -->
-            <div style="display:flex;gap:16px;margin-bottom:16px;">
-                <div style="background:#ecfdf5;padding:8px 16px;border-radius:8px;font-size:13px;color:#059669;font-weight:600;">
-                    🟢 {len(wins)} Wins
-                </div>
-                <div style="background:#fef2f2;padding:8px 16px;border-radius:8px;font-size:13px;color:#dc2626;font-weight:600;">
-                    🔴 {len(losses)} Stopped
-                </div>
-                <div style="background:#f3f4f6;padding:8px 16px;border-radius:8px;font-size:13px;color:#6b7280;font-weight:600;">
-                    ⚪ {len(no_triggers)} No Trigger
-                </div>
+            <!-- Levels Table -->
+            <div style="font-size:13px;color:#6b7280;margin-bottom:12px;">
+                ✓ = Price reached this level during session &nbsp;&nbsp; ✗ = Price did not reach
             </div>
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="background:#f9fafb;">
+                        <th style="padding:12px;text-align:left;font-size:11px;text-transform:uppercase;color:#6b7280;">Setup</th>
+                        <th style="padding:12px;text-align:center;font-size:11px;text-transform:uppercase;color:#6b7280;">Entry</th>
+                        <th style="padding:12px;text-align:center;font-size:11px;text-transform:uppercase;color:#6b7280;">Target (100%)</th>
+                        <th style="padding:12px;text-align:center;font-size:11px;text-transform:uppercase;color:#6b7280;">Stop</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {levels_html if levels_html else '<tr><td colspan="4" style="text-align:center;padding:20px;color:#6b7280;">No setups to display</td></tr>'}
+                </tbody>
+            </table>
             
-            <!-- Individual Results -->
-            {results_html}
+            <div style="margin-top:16px;padding:12px 16px;background:#fffbeb;border-radius:8px;font-size:12px;color:#92400e;">
+                <strong>Note:</strong> This shows IF price levels were reached, not IF the trade was valid per your VIX rules. 
+                Check your VIX notes to confirm if entries were valid that day.
+            </div>
         </div>
     </div>
     '''
