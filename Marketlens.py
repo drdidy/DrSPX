@@ -930,17 +930,6 @@ def render_dashboard(
             .signal-title {{ font-size:32px; font-weight:700; color:{bias_color}; }}
             .signal-action {{ font-size:14px; color:#4b5563; margin-top:8px; line-height:1.5; }}
             
-            /* Assessment */
-            .assessment {{
-                background:{assess_bg};
-                border:2px solid {assess_color};
-                border-radius:12px;
-                padding:16px 20px;
-                margin-top:16px;
-            }}
-            .assessment-title {{ font-weight:700; font-size:16px; color:{assess_color}; margin-bottom:8px; }}
-            .assessment-score {{ font-family:'DM Mono',monospace; font-size:14px; color:#6b7280; }}
-            
             /* VIX Zone */
             .vix-zone {{ margin-top:16px; }}
             .zone-box {{
