@@ -754,7 +754,8 @@ def render_dashboard(
     prior: Dict,
     historical_results: List = None,
     session_data: Dict = None,
-    is_historical: bool = False
+    is_historical: bool = False,
+    dark_mode: bool = False
 ) -> str:
     """Render the complete dashboard HTML."""
     
@@ -896,6 +897,36 @@ def render_dashboard(
     for i, z in enumerate(vix.zones_below):
         vix_ladder_below_html += f'<div style="font-family:\'SF Mono\',monospace;font-size:12px;color:#6b7280;">-{i+1}: {z:.2f}</div>'
     
+    # Theme colors based on dark_mode
+    if dark_mode:
+        theme = {
+            'bg': '#0f172a',
+            'card_bg': '#1e293b',
+            'card_border': '#334155',
+            'text': '#f8fafc',
+            'text_muted': '#94a3b8',
+            'text_secondary': '#cbd5e1',
+            'header_bg': 'linear-gradient(135deg,#0f172a 0%,#1e293b 100%)',
+            'table_header_bg': '#334155',
+            'table_row_hover': '#334155',
+            'input_bg': '#334155',
+            'zone_current_bg': '#334155',
+        }
+    else:
+        theme = {
+            'bg': '#f8fafc',
+            'card_bg': 'white',
+            'card_border': '#e5e7eb',
+            'text': '#1f2937',
+            'text_muted': '#6b7280',
+            'text_secondary': '#4b5563',
+            'header_bg': 'linear-gradient(135deg,#1e293b 0%,#334155 100%)',
+            'table_header_bg': '#f9fafb',
+            'table_row_hover': '#f9fafb',
+            'input_bg': '#f9fafb',
+            'zone_current_bg': '#334155',
+        }
+    
     html = f'''
     <!DOCTYPE html>
     <html>
@@ -903,13 +934,13 @@ def render_dashboard(
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
         <style>
             * {{ margin:0; padding:0; box-sizing:border-box; font-family:'DM Sans',system-ui,sans-serif; }}
-            body {{ background:#f8fafc; color:#1f2937; }}
+            body {{ background:{theme['bg']}; color:{theme['text']}; }}
             
             .dashboard {{ max-width:1400px; margin:0 auto; padding:20px; }}
             
             /* Header */
             .header {{
-                background:linear-gradient(135deg,#1e293b 0%,#334155 100%);
+                background:{theme['header_bg']};
                 border-radius:16px;
                 padding:24px 32px;
                 margin-bottom:20px;
@@ -938,18 +969,19 @@ def render_dashboard(
             
             /* Cards */
             .card {{
-                background:white;
+                background:{theme['card_bg']};
                 border-radius:16px;
-                border:1px solid #e5e7eb;
+                border:1px solid {theme['card_border']};
                 overflow:hidden;
                 box-shadow:0 1px 3px rgba(0,0,0,0.04);
             }}
             .card-header {{
                 padding:16px 20px;
-                border-bottom:1px solid #f3f4f6;
+                border-bottom:1px solid {theme['card_border']};
                 font-weight:600;
                 font-size:14px;
-                color:#374151;
+                color:{theme['text']};
+                background:{theme['table_header_bg']};
                 display:flex;
                 align-items:center;
                 gap:8px;
@@ -976,7 +1008,7 @@ def render_dashboard(
             }}
             .signal-icon {{ font-size:48px; margin-bottom:8px; }}
             .signal-title {{ font-size:32px; font-weight:700; color:{bias_color}; }}
-            .signal-action {{ font-size:14px; color:#4b5563; margin-top:8px; line-height:1.5; }}
+            .signal-action {{ font-size:14px; color:{theme['text_secondary']}; margin-top:8px; line-height:1.5; }}
             
             /* VIX Zone */
             .vix-zone {{ margin-top:16px; }}
@@ -987,7 +1019,7 @@ def render_dashboard(
                 margin-bottom:8px;
             }}
             .zone-top {{ background:linear-gradient(135deg,#ecfdf5,#d1fae5); border:2px solid #10b981; }}
-            .zone-current {{ background:#1e293b; }}
+            .zone-current {{ background:{theme['zone_current_bg']}; }}
             .zone-bottom {{ background:linear-gradient(135deg,#fef2f2,#fee2e2); border:2px solid #ef4444; }}
             .zone-label {{ font-size:11px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }}
             .zone-value {{ font-family:'DM Mono',monospace; font-size:24px; font-weight:700; margin:6px 0; }}
@@ -995,8 +1027,8 @@ def render_dashboard(
             
             /* Table */
             table {{ width:100%; border-collapse:collapse; }}
-            th {{ text-align:left; padding:12px; background:#f9fafb; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#6b7280; font-weight:600; }}
-            td {{ padding:10px 12px; border-bottom:1px solid #f3f4f6; font-size:14px; }}
+            th {{ text-align:left; padding:12px; background:{theme['table_header_bg']}; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:{theme['text_muted']}; font-weight:600; }}
+            td {{ padding:10px 12px; border-bottom:1px solid {theme['card_border']}; font-size:14px; color:{theme['text']}; }}
             
             /* Warning Banner */
             .warning-banner {{
@@ -1024,7 +1056,7 @@ def render_dashboard(
                 font-size:13px;
             }}
             .check-pass {{ background:#ecfdf5; color:#065f46; }}
-            .check-wait {{ background:#f9fafb; color:#6b7280; }}
+            .check-wait {{ background:{theme['table_header_bg']}; color:{theme['text_muted']}; }}
             .check-fail {{ background:#fef2f2; color:#991b1b; }}
         </style>
     </head>
@@ -1337,6 +1369,8 @@ def main():
         st.session_state.manual_close = 0.0
     if 'use_manual_pivots' not in st.session_state:
         st.session_state.use_manual_pivots = False
+    if 'dark_mode' not in st.session_state:
+        st.session_state.dark_mode = False  # Default to light mode
     
     # Sidebar
     with st.sidebar:
@@ -1392,9 +1426,18 @@ def main():
                 st.session_state.sec_low_time = st.text_input("Time (CT)", value=st.session_state.sec_low_time, key="slt")
         
         st.markdown("---")
-        if st.button("🔄 Refresh", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+        
+        # Theme toggle
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("🔄 Refresh", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+        with col2:
+            theme_label = "🌙 Dark" if not st.session_state.dark_mode else "☀️ Light"
+            if st.button(theme_label, use_container_width=True):
+                st.session_state.dark_mode = not st.session_state.dark_mode
+                st.rerun()
     
     # Fetch data
     prior = fetch_prior_session(session_dt)
@@ -1504,7 +1547,8 @@ def main():
         spx, vix, cones, setups, assessment, prior,
         historical_results=historical_results,
         session_data=session_data,
-        is_historical=is_historical
+        is_historical=is_historical,
+        dark_mode=st.session_state.dark_mode
     )
     
     # Adjust height based on historical content
