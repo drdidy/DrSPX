@@ -236,18 +236,143 @@ def analyze_vix(bottom: float, top: float, current: float, breakout_hour: int = 
 # ============================================================================
 
 def count_blocks(start: datetime, end: datetime) -> int:
-    """Count 30-minute blocks between two times."""
+    """
+    Count 30-minute blocks between two times, SKIPPING WEEKENDS.
+    
+    Market schedule:
+    - Friday: Market closes 4pm CT, futures resume Sunday 5pm CT
+    - Saturday/Sunday before 5pm: DOES NOT COUNT
+    - Sunday 5pm CT onwards: Counts as continuation from Friday 4pm
+    
+    So Friday 4pm → Sunday 5pm is treated as NO TIME PASSED.
+    Monday is the next trading day after Friday.
+    """
     if end <= start:
         return 1
-    diff = (end - start).total_seconds()
-    blocks = int(diff // 1800)
+    
+    # Get day of week (0=Monday, 4=Friday, 5=Saturday, 6=Sunday)
+    start_dow = start.weekday()
+    end_dow = end.weekday()
+    
+    # If same day or no weekend in between, simple calculation
+    if start_dow <= 4 and end_dow <= 4 and (end - start).days < 2:
+        # Check if we cross a weekend
+        if end_dow >= start_dow or (end - start).days == 0:
+            diff = (end - start).total_seconds()
+            blocks = int(diff // 1800)
+            return max(blocks, 1)
+    
+    # Weekend handling: Friday → Monday calculation
+    # We need to subtract the dead time (Friday 4pm to Sunday 5pm = 49 hours)
+    
+    total_seconds = (end - start).total_seconds()
+    
+    # Count how many weekends are in between
+    days_between = (end.date() - start.date()).days
+    
+    # Calculate weekend hours to subtract
+    weekend_hours = 0
+    
+    current = start
+    while current.date() < end.date():
+        current_dow = current.weekday()
+        
+        # If Friday, we skip to Sunday 5pm
+        if current_dow == 4:  # Friday
+            # Friday 4pm to Sunday 5pm = 49 hours of dead time
+            friday_4pm = current.replace(hour=16, minute=0, second=0, microsecond=0)
+            if current <= friday_4pm:
+                weekend_hours += 49  # Skip Fri 4pm to Sun 5pm
+        
+        current = current + timedelta(days=1)
+    
+    # Subtract weekend dead time
+    adjusted_seconds = total_seconds - (weekend_hours * 3600)
+    adjusted_seconds = max(adjusted_seconds, 1800)  # At least 1 block
+    
+    blocks = int(adjusted_seconds // 1800)
     return max(blocks, 1)
+
+def count_blocks_v2(pivot_time: datetime, eval_time: datetime) -> int:
+    """
+    Simplified block counting for trading days.
+    
+    For Monday eval with Friday pivot:
+    - Count blocks from pivot to Friday 4pm (market close)
+    - Add blocks from Sunday 5pm to Monday eval time
+    - Skip Saturday and Sunday before 5pm entirely
+    """
+    if eval_time <= pivot_time:
+        return 1
+    
+    pivot_dow = pivot_time.weekday()
+    eval_dow = eval_time.weekday()
+    
+    # Same day - simple calculation
+    if pivot_time.date() == eval_time.date():
+        diff = (eval_time - pivot_time).total_seconds()
+        return max(int(diff // 1800), 1)
+    
+    # Check if we're spanning a weekend (Friday pivot, Monday eval)
+    # or any case where pivot is Fri or earlier and eval is Mon or later
+    
+    total_blocks = 0
+    
+    # If pivot is on Friday (4) or earlier, and eval is Monday (0) or later
+    # AND there's a weekend between them
+    spans_weekend = False
+    
+    if pivot_dow <= 4:  # Pivot is Mon-Fri
+        # Check if eval is after the weekend
+        days_diff = (eval_time.date() - pivot_time.date()).days
+        if days_diff >= 2:
+            # Could span weekend - check if Friday and Monday are involved
+            temp = pivot_time
+            while temp.date() < eval_time.date():
+                if temp.weekday() == 4:  # Found a Friday
+                    spans_weekend = True
+                    break
+                temp = temp + timedelta(days=1)
+    
+    if spans_weekend:
+        # Find the Friday in between
+        friday = pivot_time
+        while friday.weekday() != 4:
+            friday = friday + timedelta(days=1)
+        
+        # Friday 4pm CT (market close)
+        friday_close = friday.replace(hour=16, minute=0, second=0, microsecond=0)
+        if friday_close.tzinfo is None:
+            friday_close = CT_TZ.localize(friday_close)
+        
+        # Sunday 5pm CT (futures reopen)
+        sunday_open = friday + timedelta(days=2)
+        sunday_open = sunday_open.replace(hour=17, minute=0, second=0, microsecond=0)
+        if sunday_open.tzinfo is None:
+            sunday_open = CT_TZ.localize(sunday_open)
+        
+        # Blocks from pivot to Friday close
+        if pivot_time < friday_close:
+            blocks_to_friday = (friday_close - pivot_time).total_seconds() // 1800
+            total_blocks += int(blocks_to_friday)
+        
+        # Blocks from Sunday open to eval
+        if eval_time > sunday_open:
+            blocks_from_sunday = (eval_time - sunday_open).total_seconds() // 1800
+            total_blocks += int(blocks_from_sunday)
+        
+        return max(total_blocks, 1)
+    
+    else:
+        # No weekend - simple calculation
+        diff = (eval_time - pivot_time).total_seconds()
+        return max(int(diff // 1800), 1)
 
 def build_cones(pivots: List[Pivot], eval_time: datetime) -> List[Cone]:
     """Build cones from pivots at evaluation time."""
     cones = []
     for pivot in pivots:
-        blocks = count_blocks(pivot.time, eval_time)
+        blocks = count_blocks_v2(pivot.time, eval_time)
         ascending = pivot.price + (blocks * SLOPE_PER_30MIN)
         descending = pivot.price - (blocks * SLOPE_PER_30MIN)
         width = ascending - descending
@@ -693,16 +818,24 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
 
 @st.cache_data(ttl=300)
 def fetch_prior_session(session_date: datetime) -> Optional[Dict]:
-    """Fetch prior session High, Low, Close."""
+    """
+    Fetch prior session High, Low, Close.
+    
+    NOTE: For Monday, this returns FRIDAY's data since market is closed Sat/Sun.
+    Yahoo Finance only returns market days, so iloc[-1] automatically gives us
+    the last trading day before session_date.
+    """
     try:
         spx = yf.Ticker("^GSPC")
         end = session_date
-        start = end - timedelta(days=10)
+        start = end - timedelta(days=10)  # Go back enough to cover weekends/holidays
         
         df_daily = spx.history(start=start, end=end, interval='1d')
         if len(df_daily) < 1:
             return None
         
+        # This gives us the last trading day BEFORE session_date
+        # For Monday, this is Friday. For Tuesday, this is Monday. etc.
         last = df_daily.iloc[-1]
         prior_date = df_daily.index[-1]
         
