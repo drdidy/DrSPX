@@ -822,6 +822,9 @@ def render_vix_zone(zone):
 
 
 def render_checklist(zone, phase, setup, price):
+    st.markdown('<div class="prophet-card">', unsafe_allow_html=True)
+    st.markdown('<p class="prophet-label" style="margin-bottom: 12px;">✅ Entry Checklist</p>', unsafe_allow_html=True)
+    
     checks = [
         ("VIX at zone edge (≤25% or ≥75%)", zone.position_pct >= 75 or zone.position_pct <= 25, f"{zone.position_pct:.0f}%"),
         ("Reliable timing window", phase in [Phase.ZONE_LOCK, Phase.RTH], phase.label),
@@ -830,20 +833,19 @@ def render_checklist(zone, phase, setup, price):
         ("Cone width ≥ 18 pts", setup and setup.cone.is_tradeable if setup else False, f"{setup.cone.width:.1f}" if setup else "No setup")
     ]
     
-    items_html = ""
     for label, passed, note in checks:
         icon = "✓" if passed else "○"
         icon_color = "#10b981" if passed else "#475569"
         text_color = "#e2e8f0" if passed else "#64748b"
-        items_html += f"""
-        <div class="check-item">
+        st.markdown(f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1e293b;">
             <div style="display: flex; align-items: center; gap: 10px;">
                 <span style="font-size: 1.1rem; color: {icon_color};">{icon}</span>
                 <span style="font-family: 'Inter', sans-serif; font-size: 0.8rem; color: {text_color};">{label}</span>
             </div>
             <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #64748b;">{note}</span>
         </div>
-        """
+        """, unsafe_allow_html=True)
     
     all_pass = all(p for _, p, _ in checks)
     status_bg = "#064e3b" if all_pass else "#1e293b"
@@ -851,16 +853,12 @@ def render_checklist(zone, phase, setup, price):
     status_border = "#10b981" if all_pass else "#334155"
     status_text = "✓ READY TO ENTER" if all_pass else "WAITING FOR CONDITIONS"
     
-    html = f"""
-    <div class="prophet-card">
-        <p class="prophet-label" style="margin-bottom: 12px;">✅ Entry Checklist</p>
-        {items_html}
-        <div style="margin-top: 14px; padding: 12px; background: {status_bg}; border-radius: 8px; text-align: center; border: 1px solid {status_border};">
-            <p style="font-family: 'Inter', sans-serif; font-size: 0.8rem; font-weight: 600; color: {status_color}; margin: 0; text-transform: uppercase; letter-spacing: 1px;">{status_text}</p>
-        </div>
+    st.markdown(f"""
+    <div style="margin-top: 14px; padding: 12px; background: {status_bg}; border-radius: 8px; text-align: center; border: 1px solid {status_border};">
+        <p style="font-family: 'Inter', sans-serif; font-size: 0.8rem; font-weight: 600; color: {status_color}; margin: 0; text-transform: uppercase; letter-spacing: 1px;">{status_text}</p>
     </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render_cone_table(cones, best_name):
@@ -1236,21 +1234,40 @@ def main():
             
             render_cone_table(cones, best_name)
             
+            # Position Calculator for Historical Mode
+            st.markdown("---")
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                render_position_calculator(engine, best_setup)
+            with col2:
+                render_trade_rules()
+            
             if setups:
                 st.markdown("### Setup Analysis")
                 for setup in setups:
+                    hits = engine.analyze_level_hits(setup, session_data['high'], session_data['low'])
+                    pnl_1, note = engine.calculate_theoretical_pnl(setup, hits, 1)
+                    
                     col1, col2 = st.columns([2, 1])
                     with col1:
                         render_setup_card(setup, session_data['close'], engine, setup.cone.pivot.name == best_name)
                     with col2:
-                        hits = engine.analyze_level_hits(setup, session_data['high'], session_data['low'])
-                        pnl, note = engine.calculate_theoretical_pnl(setup, hits)
-                        
+                        st.markdown("**Level Hits:**")
                         for hit in hits:
                             st.markdown(f"<span style='color: {hit.status.color};'>{hit.status.icon}</span> **{hit.level_name}**: {hit.level_price:,.2f}", unsafe_allow_html=True)
                         
-                        pnl_color = "#10b981" if pnl >= 0 else "#ef4444"
-                        st.markdown(f"**P&L:** <span style='color: {pnl_color};'>${pnl:,.2f}</span> ({note})", unsafe_allow_html=True)
+                        st.markdown("---")
+                        st.markdown("**Potential Profits:**")
+                        
+                        # Calculate profits at different contract sizes
+                        risk_per = engine.calculate_profit(Config.STOP_LOSS_PTS, 1)
+                        
+                        for contracts in [1, 5, 10]:
+                            pnl_c, _ = engine.calculate_theoretical_pnl(setup, hits, contracts)
+                            risk_c = engine.calculate_profit(Config.STOP_LOSS_PTS, contracts)
+                            pnl_color = "#10b981" if pnl_c >= 0 else "#ef4444"
+                            pnl_prefix = "+" if pnl_c >= 0 else ""
+                            st.markdown(f"**{contracts} contract{'s' if contracts > 1 else ''}:** <span style='color: {pnl_color};'>{pnl_prefix}${pnl_c:,.2f}</span> (risk: ${risk_c:,.0f})", unsafe_allow_html=True)
         else:
             st.error(f"No data for {session_date}. May be weekend/holiday.")
     
