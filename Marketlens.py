@@ -1054,20 +1054,20 @@ def render_header(spx: float, phase: Phase, engine: SPXProphetEngine):
     now = engine.get_current_time_ct()
     
     st.markdown(f"""
-    <div class="prophet-card-accent">
+    <div style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.04);">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
             <div>
-                <h1 class="prophet-title">⚡ SPX Prophet</h1>
-                <p class="prophet-subtitle">Institutional SPX Prediction System</p>
+                <h1 style="font-family: -apple-system, sans-serif; font-size: 2rem; font-weight: 700; color: #0f172a; margin: 0; letter-spacing: -0.5px;">⚡ SPX Prophet</h1>
+                <p style="font-family: -apple-system, sans-serif; font-size: 0.8rem; color: #64748b; font-weight: 500; letter-spacing: 0.5px; margin: 4px 0 0 0;">Institutional SPX Prediction System</p>
             </div>
             <div style="display: flex; gap: 32px; align-items: center;">
                 <div style="text-align: right;">
-                    <p class="prophet-label">SPX</p>
-                    <p class="prophet-value-hero" style="color: #1e293b;">{spx:,.2f}</p>
+                    <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">SPX</p>
+                    <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: #1e293b; margin: 0; letter-spacing: -1px;">{spx:,.2f}</p>
                 </div>
                 <div style="text-align: right; padding-left: 32px; border-left: 2px solid #e2e8f0;">
-                    <p class="prophet-label">{now.strftime('%I:%M %p')} CT</p>
-                    <p class="prophet-value-medium" style="color: {phase.color};">{phase.icon} {phase.label}</p>
+                    <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">{now.strftime('%I:%M %p')} CT</p>
+                    <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: {phase.color}; margin: 0;">{phase.icon} {phase.label}</p>
                     <p style="font-size: 0.75rem; color: #94a3b8; margin: 4px 0 0 0;">{phase.time_range}</p>
                 </div>
             </div>
@@ -1080,26 +1080,37 @@ def render_expected_move(zone: VIXZone):
     em_low, em_high = zone.get_expected_move()
     
     st.markdown(f"""
-    <div class="prophet-card" style="text-align: center;">
-        <p class="prophet-section-title">Expected Move</p>
-        <p class="prophet-value-hero" style="color: #3b82f6;">{em_low:.0f} - {em_high:.0f}</p>
-        <p class="prophet-label" style="margin-top: 8px;">POINTS FROM ENTRY</p>
+    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); text-align: center;">
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Expected Move</p>
+        <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: #3b82f6; margin: 0; letter-spacing: -1px;">{em_low:.0f} - {em_high:.0f}</p>
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 8px 0 0 0;">POINTS FROM ENTRY</p>
         <div style="margin-top: 16px; padding: 12px; background: #f1f5f9; border-radius: 8px;">
-            <p class="prophet-text">Based on VIX zone size of <strong>{zone.size:.2f}</strong></p>
+            <p style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569; margin: 0;">Based on VIX zone size of <strong>{zone.size:.2f}</strong></p>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 
 def render_bias_card(bias: Bias, confidence: Confidence, explanation: str):
+    # Set background based on bias
+    if bias == Bias.CALLS:
+        bg = "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)"
+        border = "2px solid #059669"
+    elif bias == Bias.PUTS:
+        bg = "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+        border = "2px solid #dc2626"
+    else:
+        bg = "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
+        border = "2px solid #d97706"
+    
     st.markdown(f"""
-    <div class="prophet-card {bias.css}-bg" style="text-align: center;">
-        <p class="prophet-section-title">Directional Bias</p>
-        <p class="prophet-value-hero {bias.css}-text">{bias.arrow} {bias.label}</p>
+    <div style="background: {bg}; border: {border}; border-radius: 16px; padding: 24px; margin-bottom: 16px; text-align: center;">
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Directional Bias</p>
+        <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: {bias.color}; margin: 0; letter-spacing: -1px;">{bias.arrow} {bias.label}</p>
         <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; color: {confidence.color}; margin: 12px 0;">{confidence.dots}</p>
-        <p class="prophet-label" style="color: {confidence.color};">{confidence.label} CONFIDENCE</p>
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: {confidence.color}; text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">{confidence.label} CONFIDENCE</p>
         <div style="margin-top: 16px; padding: 12px; background: rgba(255,255,255,0.7); border-radius: 8px;">
-            <p class="prophet-text">{explanation}</p>
+            <p style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569; line-height: 1.5; margin: 0;">{explanation}</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1107,47 +1118,47 @@ def render_bias_card(bias: Bias, confidence: Confidence, explanation: str):
 
 def render_algo_triggers(zone: VIXZone):
     st.markdown(f"""
-    <div class="prophet-card">
-        <p class="prophet-section-title">Algo Trigger Zones</p>
+    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Algo Trigger Zones</p>
         
         <div style="margin-bottom: 16px;">
-            <p class="prophet-label">Current VIX</p>
-            <p class="prophet-value-large">{zone.current:.2f}</p>
+            <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">Current VIX</p>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 600; color: #1e293b; margin: 0;">{zone.current:.2f}</p>
             <p style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">📍 {zone.current_zone}</p>
         </div>
         
-        <div class="trigger-buy">
+        <div style="background: linear-gradient(90deg, #dcfce7 0%, #bbf7d0 100%); border-left: 4px solid #059669; padding: 12px 16px; border-radius: 8px; margin: 4px 0;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <p style="font-weight: 600; color: #059669; margin: 0; font-size: 0.85rem;">↑ BUY ALGO TRIGGER</p>
                     <p style="font-size: 0.75rem; color: #065f46; margin: 2px 0 0 0;">VIX tops here → SPX rallies</p>
                 </div>
                 <div style="text-align: right;">
-                    <p class="prophet-value-medium" style="color: #059669;">{zone.nearest_buy_trigger:.2f}</p>
+                    <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #059669; margin: 0;">{zone.nearest_buy_trigger:.2f}</p>
                     <p style="font-size: 0.75rem; color: #065f46; margin: 2px 0 0 0;">{zone.distance_to_buy_trigger:+.2f} away</p>
                 </div>
             </div>
         </div>
         
-        <div class="trigger-sell">
+        <div style="background: linear-gradient(90deg, #fee2e2 0%, #fecaca 100%); border-left: 4px solid #dc2626; padding: 12px 16px; border-radius: 8px; margin: 4px 0;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <p style="font-weight: 600; color: #dc2626; margin: 0; font-size: 0.85rem;">↓ SELL ALGO TRIGGER</p>
                     <p style="font-size: 0.75rem; color: #991b1b; margin: 2px 0 0 0;">VIX bottoms here → SPX sells</p>
                 </div>
                 <div style="text-align: right;">
-                    <p class="prophet-value-medium" style="color: #dc2626;">{zone.nearest_sell_trigger:.2f}</p>
+                    <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #dc2626; margin: 0;">{zone.nearest_sell_trigger:.2f}</p>
                     <p style="font-size: 0.75rem; color: #991b1b; margin: 2px 0 0 0;">{zone.distance_to_sell_trigger:.2f} away</p>
                 </div>
             </div>
         </div>
         
         <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
-            <p class="prophet-label">Zone Boundaries</p>
+            <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">Zone Boundaries</p>
             <div style="display: flex; justify-content: space-between; margin-top: 8px;">
-                <span class="prophet-text">Top: <strong>{zone.top:.2f}</strong></span>
-                <span class="prophet-text">Bottom: <strong>{zone.bottom:.2f}</strong></span>
-                <span class="prophet-text">Size: <strong>{zone.size:.2f}</strong></span>
+                <span style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569;">Top: <strong>{zone.top:.2f}</strong></span>
+                <span style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569;">Bottom: <strong>{zone.bottom:.2f}</strong></span>
+                <span style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569;">Size: <strong>{zone.size:.2f}</strong></span>
             </div>
         </div>
     </div>
@@ -1165,8 +1176,8 @@ def render_vix_ladder(zone: VIXZone):
         ("-2", zone.get_extension(-2), "extension"),
     ]
     
-    st.markdown('<div class="prophet-card">', unsafe_allow_html=True)
-    st.markdown('<p class="prophet-section-title">VIX Zone Ladder</p>', unsafe_allow_html=True)
+    st.markdown('<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">', unsafe_allow_html=True)
+    st.markdown('<p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">VIX Zone Ladder</p>', unsafe_allow_html=True)
     
     for label, value, level_type in levels:
         if level_type == "current":
@@ -1205,9 +1216,9 @@ def render_confluence_alerts(support_levels: List[ConfluentLevel], resistance_le
         return
     
     st.markdown("""
-    <div class="prophet-card">
-        <p class="prophet-section-title">🎯 Confluence Zones</p>
-        <p class="prophet-text" style="margin-bottom: 16px;">Multiple cones converging = stronger levels</p>
+    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">🎯 Confluence Zones</p>
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569; margin: 0 0 16px 0;">Multiple cones converging = stronger levels</p>
     """, unsafe_allow_html=True)
     
     for level in resistance_levels:
@@ -1258,61 +1269,75 @@ def render_setup_card(setup: TradeSetup, spx: float, engine: SPXProphetEngine, i
     if setup.is_confluent:
         badge += '<span style="background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%); color: #fff; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; margin-left: 8px;">🎯 CONFLUENCE</span>'
     
-    card_class = f"{setup.direction.css}-bg" if is_best else "prophet-card"
+    # Set background based on direction for best setup
+    if is_best:
+        if setup.direction == Bias.CALLS:
+            bg = "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)"
+            border = "2px solid #059669"
+        else:
+            bg = "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+            border = "2px solid #dc2626"
+    else:
+        bg = "#ffffff"
+        border = "1px solid #e2e8f0"
+    
+    label_style = "font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;"
+    value_style = "font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #1e293b; margin: 0;"
+    small_value = "font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 500; color: #334155; margin: 0;"
     
     st.markdown(f"""
-    <div class="{card_class}" style="border-radius: 16px; padding: 20px;">
+    <div style="background: {bg}; border: {border}; border-radius: 16px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <div>
                 <span style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: {setup.direction.color};">{setup.direction.arrow} {setup.direction.label}</span>
                 {badge}
             </div>
-            <span class="prophet-label">{setup.cone.pivot.name} Cone</span>
+            <span style="{label_style}">{setup.cone.pivot.name} Cone</span>
         </div>
         
         <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px;">
             <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center; border: 2px solid {setup.direction.color};">
-                <p class="prophet-label">Entry</p>
-                <p class="prophet-value-medium">{setup.entry:,.2f}</p>
+                <p style="{label_style}">Entry</p>
+                <p style="{value_style}">{setup.entry:,.2f}</p>
             </div>
             <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center; border: 1px solid #fca5a5;">
-                <p class="prophet-label">Stop</p>
-                <p class="prophet-value-medium" style="color: #dc2626;">{setup.stop:,.2f}</p>
+                <p style="{label_style}">Stop</p>
+                <p style="{value_style} color: #dc2626;">{setup.stop:,.2f}</p>
             </div>
             <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center;">
-                <p class="prophet-label">12.5%</p>
-                <p class="prophet-value-medium">{setup.target_1:,.2f}</p>
+                <p style="{label_style}">12.5%</p>
+                <p style="{value_style}">{setup.target_1:,.2f}</p>
             </div>
             <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center;">
-                <p class="prophet-label">25%</p>
-                <p class="prophet-value-medium">{setup.target_2:,.2f}</p>
+                <p style="{label_style}">25%</p>
+                <p style="{value_style}">{setup.target_2:,.2f}</p>
             </div>
             <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center;">
-                <p class="prophet-label">50%</p>
-                <p class="prophet-value-medium">{setup.target_3:,.2f}</p>
+                <p style="{label_style}">50%</p>
+                <p style="{value_style}">{setup.target_3:,.2f}</p>
             </div>
         </div>
         
         <div style="display: flex; justify-content: space-between; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.1);">
             <div style="text-align: center;">
-                <p class="prophet-label">Distance</p>
-                <p class="prophet-value-small">{distance:+.2f} pts</p>
+                <p style="{label_style}">Distance</p>
+                <p style="{small_value}">{distance:+.2f} pts</p>
             </div>
             <div style="text-align: center;">
-                <p class="prophet-label">Strike</p>
-                <p class="prophet-value-small">{setup.strike}</p>
+                <p style="{label_style}">Strike</p>
+                <p style="{small_value}">{setup.strike}</p>
             </div>
             <div style="text-align: center;">
-                <p class="prophet-label">Width</p>
-                <p class="prophet-value-small">{setup.cone.width:.1f} pts</p>
+                <p style="{label_style}">Width</p>
+                <p style="{small_value}">{setup.cone.width:.1f} pts</p>
             </div>
             <div style="text-align: center;">
-                <p class="prophet-label">R:R @25%</p>
-                <p class="prophet-value-small">{rr:.1f}:1</p>
+                <p style="{label_style}">R:R @25%</p>
+                <p style="{small_value}">{rr:.1f}:1</p>
             </div>
             <div style="text-align: center;">
-                <p class="prophet-label">Profit @25%</p>
-                <p class="prophet-value-small" style="color: #059669;">${p2:,.0f}</p>
+                <p style="{label_style}">Profit @25%</p>
+                <p style="{small_value} color: #059669;">${p2:,.0f}</p>
             </div>
         </div>
     </div>
@@ -1320,8 +1345,11 @@ def render_setup_card(setup: TradeSetup, spx: float, engine: SPXProphetEngine, i
 
 
 def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSetup]):
-    st.markdown('<div class="prophet-card">', unsafe_allow_html=True)
-    st.markdown('<p class="prophet-section-title">Position Calculator</p>', unsafe_allow_html=True)
+    label_style = "font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;"
+    value_style = "font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #1e293b; margin: 0;"
+    
+    st.markdown('<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">', unsafe_allow_html=True)
+    st.markdown('<p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Position Calculator</p>', unsafe_allow_html=True)
     
     risk_budget = st.number_input("Risk Budget ($)", min_value=100, max_value=100000, value=1000, step=100, key="pos_calc_risk")
     
@@ -1334,26 +1362,26 @@ def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSe
         
         st.markdown(f"""
         <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-radius: 12px; margin: 16px 0;">
-            <p class="prophet-label">Max Contracts</p>
-            <p class="prophet-value-hero" style="color: #1e40af;">{contracts}</p>
+            <p style="{label_style}">Max Contracts</p>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: #1e40af; margin: 0; letter-spacing: -1px;">{contracts}</p>
         </div>
         
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
             <div style="background: #fef2f2; padding: 16px; border-radius: 10px; text-align: center;">
-                <p class="prophet-label">Max Risk</p>
-                <p class="prophet-value-medium" style="color: #dc2626;">${risk_total:,.0f}</p>
+                <p style="{label_style}">Max Risk</p>
+                <p style="{value_style} color: #dc2626;">${risk_total:,.0f}</p>
             </div>
             <div style="background: #f0fdf4; padding: 16px; border-radius: 10px; text-align: center;">
-                <p class="prophet-label">@ 12.5%</p>
-                <p class="prophet-value-medium" style="color: #059669;">${p1:,.0f}</p>
+                <p style="{label_style}">@ 12.5%</p>
+                <p style="{value_style} color: #059669;">${p1:,.0f}</p>
             </div>
             <div style="background: #f0fdf4; padding: 16px; border-radius: 10px; text-align: center;">
-                <p class="prophet-label">@ 25%</p>
-                <p class="prophet-value-medium" style="color: #059669;">${p2:,.0f}</p>
+                <p style="{label_style}">@ 25%</p>
+                <p style="{value_style} color: #059669;">${p2:,.0f}</p>
             </div>
             <div style="background: #f0fdf4; padding: 16px; border-radius: 10px; text-align: center;">
-                <p class="prophet-label">@ 50%</p>
-                <p class="prophet-value-medium" style="color: #059669;">${p3:,.0f}</p>
+                <p style="{label_style}">@ 50%</p>
+                <p style="{value_style} color: #059669;">${p3:,.0f}</p>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1364,7 +1392,7 @@ def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSe
 
 
 def render_cone_table(cones: List[ConeRails], best_name: str):
-    st.markdown('<p class="prophet-section-title" style="margin-top: 24px;">Cone Rails</p>', unsafe_allow_html=True)
+    st.markdown('<p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 24px 0 12px 0;">Cone Rails</p>', unsafe_allow_html=True)
     
     data = []
     for c in cones:
@@ -1384,36 +1412,39 @@ def render_cone_table(cones: List[ConeRails], best_name: str):
 
 def render_historical_results(session_data: Dict, setup: TradeSetup, hits: List[LevelHit], 
                              pnl: float, pnl_note: str, engine: SPXProphetEngine):
+    label_style = "font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;"
+    value_style = "font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 500; color: #334155; margin: 0;"
+    
     st.markdown(f"""
-    <div class="prophet-card">
-        <p class="prophet-section-title">Session Results</p>
+    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Session Results</p>
         <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px;">
             <div style="text-align: center; padding: 12px; background: #f8fafc; border-radius: 8px;">
-                <p class="prophet-label">Open</p>
-                <p class="prophet-value-small">{session_data['open']:,.2f}</p>
+                <p style="{label_style}">Open</p>
+                <p style="{value_style}">{session_data['open']:,.2f}</p>
             </div>
             <div style="text-align: center; padding: 12px; background: #f0fdf4; border-radius: 8px;">
-                <p class="prophet-label">High</p>
-                <p class="prophet-value-small" style="color: #059669;">{session_data['high']:,.2f}</p>
+                <p style="{label_style}">High</p>
+                <p style="{value_style} color: #059669;">{session_data['high']:,.2f}</p>
             </div>
             <div style="text-align: center; padding: 12px; background: #fef2f2; border-radius: 8px;">
-                <p class="prophet-label">Low</p>
-                <p class="prophet-value-small" style="color: #dc2626;">{session_data['low']:,.2f}</p>
+                <p style="{label_style}">Low</p>
+                <p style="{value_style} color: #dc2626;">{session_data['low']:,.2f}</p>
             </div>
             <div style="text-align: center; padding: 12px; background: #f8fafc; border-radius: 8px;">
-                <p class="prophet-label">Close</p>
-                <p class="prophet-value-small">{session_data['close']:,.2f}</p>
+                <p style="{label_style}">Close</p>
+                <p style="{value_style}">{session_data['close']:,.2f}</p>
             </div>
             <div style="text-align: center; padding: 12px; background: #eff6ff; border-radius: 8px;">
-                <p class="prophet-label">Range</p>
-                <p class="prophet-value-small" style="color: #1e40af;">{session_data['range']:.2f}</p>
+                <p style="{label_style}">Range</p>
+                <p style="{value_style} color: #1e40af;">{session_data['range']:.2f}</p>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
     # Level hits
-    st.markdown('<p class="prophet-section-title">Level Hits</p>', unsafe_allow_html=True)
+    st.markdown('<p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 12px 0;">Level Hits</p>', unsafe_allow_html=True)
     
     for hit in hits:
         icon = "✓" if hit.was_hit else "○"
@@ -1439,9 +1470,9 @@ def render_historical_results(session_data: Dict, setup: TradeSetup, hits: List[
     
     st.markdown(f"""
     <div style="margin-top: 16px; padding: 20px; background: {pnl_bg}; border-radius: 12px; text-align: center;">
-        <p class="prophet-label">Theoretical P&L (1 Contract)</p>
-        <p class="prophet-value-hero" style="color: {pnl_color};">{pnl_prefix}${abs(pnl):,.2f}</p>
-        <p class="prophet-text" style="margin-top: 8px;">{pnl_note}</p>
+        <p style="{label_style}">Theoretical P&L (1 Contract)</p>
+        <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: {pnl_color}; margin: 0; letter-spacing: -1px;">{pnl_prefix}${abs(pnl):,.2f}</p>
+        <p style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569; margin-top: 8px;">{pnl_note}</p>
     </div>
     """, unsafe_allow_html=True)
 
