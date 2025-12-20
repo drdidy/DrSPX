@@ -624,152 +624,311 @@ def main():
     # RENDER
     # =========================================================================
     
-    # Header
-    st.title("⚡ SPX Prophet")
+    # Header Row
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.title("⚡ SPX Prophet")
+        st.caption("Institutional SPX Prediction System")
+    with col2:
+        st.metric("S&P 500", f"{spx:,.2f}")
     
+    # Status Bar
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("S&P 500", f"{spx:,.2f}")
-    c2.metric("Phase", f"{phase_icon} {phase_name}")
-    c3.metric("Time (CT)", now.strftime('%I:%M %p'))
-    c4.metric("Expected Move", f"{em_low:.0f} - {em_high:.0f} pts")
+    c1.metric("Phase", f"{phase_icon} {phase_name}")
+    c2.metric("Time (CT)", now.strftime('%I:%M %p'))
+    c3.metric("Expected Move", f"{em_low:.0f} - {em_high:.0f} pts")
+    c4.metric("VIX Zone Size", f"{zone.size:.2f}")
     
     st.divider()
     
-    # Chart
-    st.subheader("📈 SPX with Cone Rails")
-    intraday = fetch_intraday()
-    fig = create_chart(intraday, cones, best_setup, spx)
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    # =========================================================================
+    # MAIN LAYOUT: Chart + Key Info
+    # =========================================================================
     
-    st.divider()
+    tab1, tab2, tab3 = st.tabs(["📈 Trading View", "📊 Analysis", "⚙️ Details"])
     
-    # Key Metrics Row
-    c1, c2, c3 = st.columns(3)
-    
-    with c1:
-        st.subheader(f"{bias.arrow} {bias.label}")
-        st.caption(f"Confidence: {confidence.dots} {confidence.label}")
-        st.info(explanation)
-    
-    with c2:
-        st.subheader("Algo Triggers")
-        st.metric("Current VIX", f"{zone.current:.2f}", f"Zone: {zone.current_zone}")
+    with tab1:
+        # Chart
+        intraday = fetch_intraday()
+        fig = create_chart(intraday, cones, best_setup, spx)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         
-        tc1, tc2 = st.columns(2)
-        tc1.success(f"↑ Buy: {zone.nearest_buy_trigger:.2f}\n({zone.distance_to_buy:+.2f})")
-        tc2.error(f"↓ Sell: {zone.nearest_sell_trigger:.2f}\n({zone.distance_to_sell:.2f})")
-    
-    with c3:
-        st.subheader("VIX Ladder")
-        ladder_data = {
-            "Level": ["+2", "+1", "TOP", "VIX", "BTM", "-1", "-2"],
-            "Value": [
-                f"{zone.get_extension(2):.2f}",
-                f"{zone.get_extension(1):.2f}",
-                f"{zone.top:.2f}",
-                f"**{zone.current:.2f}**",
-                f"{zone.bottom:.2f}",
-                f"{zone.get_extension(-1):.2f}",
-                f"{zone.get_extension(-2):.2f}"
-            ]
-        }
-        st.dataframe(pd.DataFrame(ladder_data), hide_index=True, use_container_width=True)
-    
-    st.divider()
-    
-    # Best Setup
-    if best_setup:
-        st.subheader(f"⭐ Best Setup: {best_setup.cone.pivot.name} Cone")
-        
-        if best_setup.is_confluent:
-            st.success("🎯 CONFLUENCE DETECTED")
-        
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Entry", f"{best_setup.entry:,.2f}")
-        c2.metric("Stop", f"{best_setup.stop:,.2f}", f"-{Config.STOP_LOSS_PTS} pts")
-        c3.metric("T1 (12.5%)", f"{best_setup.target_1:,.2f}")
-        c4.metric("T2 (25%)", f"{best_setup.target_2:,.2f}")
-        c5.metric("T3 (50%)", f"{best_setup.target_3:,.2f}")
-        
-        # Position Calculator
-        st.divider()
-        
-        c1, c2 = st.columns([1, 2])
+        # Bias + Algo Triggers + Expected Move
+        c1, c2, c3 = st.columns(3)
         
         with c1:
-            st.subheader("Position Calculator")
-            risk_budget = st.number_input("Risk Budget ($)", 100, 100000, 1000, 100)
-            contracts = engine.max_contracts(risk_budget)
-            st.metric("Max Contracts", contracts)
+            if bias == Bias.CALLS:
+                st.success(f"### {bias.arrow} {bias.label}")
+            elif bias == Bias.PUTS:
+                st.error(f"### {bias.arrow} {bias.label}")
+            else:
+                st.warning(f"### {bias.arrow} {bias.label}")
+            st.caption(f"Confidence: {confidence.dots} {confidence.label}")
+            st.write(explanation)
         
         with c2:
-            risk = engine.calculate_profit(Config.STOP_LOSS_PTS, contracts)
-            p1 = engine.calculate_profit(best_setup.reward_1, contracts)
-            p2 = engine.calculate_profit(best_setup.reward_2, contracts)
-            p3 = engine.calculate_profit(best_setup.reward_3, contracts)
+            st.markdown("### Algo Triggers")
+            st.metric("Current VIX", f"{zone.current:.2f}", f"Zone: {zone.current_zone}")
+            tc1, tc2 = st.columns(2)
+            with tc1:
+                st.success(f"**↑ BUY**\n\n{zone.nearest_buy_trigger:.2f}\n\n{zone.distance_to_buy:+.2f} away")
+            with tc2:
+                st.error(f"**↓ SELL**\n\n{zone.nearest_sell_trigger:.2f}\n\n{zone.distance_to_sell:.2f} away")
+        
+        with c3:
+            st.markdown("### Expected Move")
+            st.metric("Points from Entry", f"{em_low:.0f} - {em_high:.0f}")
+            st.caption(f"Based on VIX zone size: {zone.size:.2f}")
+            st.info(f"Zone: {zone.bottom:.2f} - {zone.top:.2f}")
+        
+        st.divider()
+        
+        # =====================================================================
+        # BEST SETUP + POSITION SIZING
+        # =====================================================================
+        
+        if best_setup:
+            c1, c2 = st.columns([2, 1])
             
-            pc1, pc2, pc3, pc4 = st.columns(4)
-            pc1.metric("Risk", f"${risk:,.0f}")
-            pc2.metric("@ T1", f"${p1:,.0f}")
-            pc3.metric("@ T2", f"${p2:,.0f}")
-            pc4.metric("@ T3", f"${p3:,.0f}")
+            with c1:
+                if best_setup.direction == Bias.CALLS:
+                    st.success(f"### ⭐ {best_setup.direction.arrow} {best_setup.direction.label} — {best_setup.cone.pivot.name} Cone")
+                else:
+                    st.error(f"### ⭐ {best_setup.direction.arrow} {best_setup.direction.label} — {best_setup.cone.pivot.name} Cone")
+                
+                if best_setup.is_confluent:
+                    st.info("🎯 **CONFLUENCE DETECTED** — Multiple cones converge at this level")
+                
+                # Entry, Stop, Targets
+                ec1, ec2, ec3, ec4, ec5 = st.columns(5)
+                ec1.metric("Entry", f"{best_setup.entry:,.2f}")
+                ec2.metric("Stop (-6 pts)", f"{best_setup.stop:,.2f}")
+                ec3.metric("T1 (12.5%)", f"{best_setup.target_1:,.2f}")
+                ec4.metric("T2 (25%)", f"{best_setup.target_2:,.2f}")
+                ec5.metric("T3 (50%)", f"{best_setup.target_3:,.2f}")
+                
+                # Additional metrics
+                distance = spx - best_setup.entry
+                rr = engine.calculate_profit(best_setup.reward_2, 1) / engine.calculate_profit(Config.STOP_LOSS_PTS, 1)
+                
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("Distance", f"{distance:+.1f} pts")
+                mc2.metric("Strike", f"{best_setup.strike}")
+                mc3.metric("Width", f"{best_setup.cone.width:.1f} pts")
+                mc4.metric("R:R @ T2", f"{rr:.1f}:1")
+            
+            with c2:
+                st.markdown("### Position Calculator")
+                
+                # Contract selector
+                contracts = st.selectbox("Contracts", [1, 2, 3, 5, 10, 15, 20], index=0)
+                
+                # Calculate P&L
+                risk = engine.calculate_profit(Config.STOP_LOSS_PTS, contracts)
+                p1 = engine.calculate_profit(best_setup.reward_1, contracts)
+                p2 = engine.calculate_profit(best_setup.reward_2, contracts)
+                p3 = engine.calculate_profit(best_setup.reward_3, contracts)
+                
+                st.divider()
+                
+                st.error(f"**Max Loss:** -${risk:,.0f}")
+                st.success(f"**@ T1 (12.5%):** +${p1:,.0f}")
+                st.success(f"**@ T2 (25%):** +${p2:,.0f}")
+                st.success(f"**@ T3 (50%):** +${p3:,.0f}")
+                
+                st.divider()
+                
+                # Quick P&L Table for 1, 5, 10 contracts
+                st.caption("Quick P&L Reference")
+                pnl_data = []
+                for c in [1, 5, 10]:
+                    pnl_data.append({
+                        "Contracts": c,
+                        "Risk": f"-${engine.calculate_profit(Config.STOP_LOSS_PTS, c):,.0f}",
+                        "T1": f"+${engine.calculate_profit(best_setup.reward_1, c):,.0f}",
+                        "T2": f"+${engine.calculate_profit(best_setup.reward_2, c):,.0f}",
+                        "T3": f"+${engine.calculate_profit(best_setup.reward_3, c):,.0f}"
+                    })
+                st.dataframe(pd.DataFrame(pnl_data), hide_index=True, use_container_width=True)
         
-        # Additional info
-        st.divider()
-        
-        ic1, ic2, ic3, ic4 = st.columns(4)
-        distance = spx - best_setup.entry
-        rr = engine.calculate_profit(best_setup.reward_2, 1) / engine.calculate_profit(Config.STOP_LOSS_PTS, 1)
-        ic1.metric("Distance to Entry", f"{distance:+.1f} pts")
-        ic2.metric("Strike", best_setup.strike)
-        ic3.metric("Cone Width", f"{best_setup.cone.width:.1f} pts")
-        ic4.metric("R:R @ T2", f"{rr:.1f}:1")
-    
-    else:
-        if bias == Bias.WAIT:
-            st.info("📊 VIX in Base Zone. Potential trend day. Waiting for boundary touch...")
         else:
-            st.warning("No valid setups. Cones may not meet minimum width requirement.")
+            if bias == Bias.WAIT:
+                st.info("📊 VIX in Base Zone. Potential trend day. Waiting for boundary touch...")
+            else:
+                st.warning("No valid setups. Cones may not meet minimum width requirement (18 pts).")
     
-    # Confluence
-    if support or resistance:
+    with tab2:
+        # =====================================================================
+        # PIVOT TABLE
+        # =====================================================================
+        
+        st.markdown("### 📍 Pivot Table")
+        
+        pivot_data = []
+        for p in pivots:
+            pivot_data.append({
+                "Pivot": p.name,
+                "Price": f"{p.price:,.2f}",
+                "Time": p.timestamp.strftime('%I:%M %p'),
+                "Type": p.pivot_type.title()
+            })
+        
+        st.dataframe(pd.DataFrame(pivot_data), hide_index=True, use_container_width=True)
+        
         st.divider()
-        st.subheader("🎯 Confluence Zones")
+        
+        # =====================================================================
+        # VIX LADDER
+        # =====================================================================
+        
+        st.markdown("### 📶 VIX Zone Ladder")
         
         c1, c2 = st.columns(2)
         
         with c1:
-            st.caption("Support")
-            for level in support:
-                stars = "⭐⭐⭐" if level.strength == "strong" else "⭐⭐"
-                st.success(f"{stars} **{level.price:,.2f}** — {', '.join(level.cones)}")
+            ladder_data = []
+            for label, value in [("+3", zone.get_extension(3)), 
+                                  ("+2", zone.get_extension(2)),
+                                  ("+1", zone.get_extension(1)),
+                                  ("TOP", zone.top),
+                                  ("CURRENT", zone.current),
+                                  ("BOTTOM", zone.bottom),
+                                  ("-1", zone.get_extension(-1)),
+                                  ("-2", zone.get_extension(-2)),
+                                  ("-3", zone.get_extension(-3))]:
+                marker = "👉" if label == "CURRENT" else ""
+                ladder_data.append({"Level": f"{marker} {label}", "VIX": f"{value:.2f}"})
+            
+            st.dataframe(pd.DataFrame(ladder_data), hide_index=True, use_container_width=True)
         
         with c2:
-            st.caption("Resistance")
-            for level in resistance:
-                stars = "⭐⭐⭐" if level.strength == "strong" else "⭐⭐"
-                st.error(f"{stars} **{level.price:,.2f}** — {', '.join(level.cones)}")
+            st.markdown("**Zone Info**")
+            st.write(f"• **Top Boundary:** {zone.top:.2f}")
+            st.write(f"• **Bottom Boundary:** {zone.bottom:.2f}")
+            st.write(f"• **Zone Size:** {zone.size:.2f}")
+            st.write(f"• **Current VIX:** {zone.current:.2f}")
+            st.write(f"• **Current Zone:** {zone.current_zone}")
+            
+            st.divider()
+            
+            st.write(f"• **Buy Trigger:** {zone.nearest_buy_trigger:.2f} ({zone.distance_to_buy:+.2f})")
+            st.write(f"• **Sell Trigger:** {zone.nearest_sell_trigger:.2f} ({zone.distance_to_sell:.2f})")
+        
+        st.divider()
+        
+        # =====================================================================
+        # CONFLUENCE ZONES
+        # =====================================================================
+        
+        st.markdown("### 🎯 Confluence Zones")
+        
+        if support or resistance:
+            c1, c2 = st.columns(2)
+            
+            with c1:
+                st.markdown("**Support (Descending Rails)**")
+                if support:
+                    for level in support:
+                        stars = "⭐⭐⭐" if level.strength == "strong" else "⭐⭐"
+                        st.success(f"{stars} **{level.price:,.2f}**\n\n{', '.join(level.cones)}")
+                else:
+                    st.caption("No support confluence detected")
+            
+            with c2:
+                st.markdown("**Resistance (Ascending Rails)**")
+                if resistance:
+                    for level in resistance:
+                        stars = "⭐⭐⭐" if level.strength == "strong" else "⭐⭐"
+                        st.error(f"{stars} **{level.price:,.2f}**\n\n{', '.join(level.cones)}")
+                else:
+                    st.caption("No resistance confluence detected")
+        else:
+            st.info("No confluence zones detected. Rails are more than 6 points apart.")
     
-    # Cone Table
-    st.divider()
-    
-    with st.expander("📊 All Cones"):
+    with tab3:
+        # =====================================================================
+        # CONE RAILS TABLE
+        # =====================================================================
+        
+        st.markdown("### 📐 Cone Rails")
+        
         cone_data = []
         for c in cones:
-            status = "⭐ BEST" if best_cone and c.pivot.name == best_cone.pivot.name else ("✓" if c.is_tradeable else "✗")
+            is_best = best_cone and c.pivot.name == best_cone.pivot.name
+            status = "⭐ BEST" if is_best else ("✓ Valid" if c.is_tradeable else "✗ Too Narrow")
             cone_data.append({
                 "Pivot": c.pivot.name,
-                "Ascending": f"{c.ascending:,.2f}",
-                "Descending": f"{c.descending:,.2f}",
+                "Ascending ↑": f"{c.ascending:,.2f}",
+                "Descending ↓": f"{c.descending:,.2f}",
                 "Width": f"{c.width:.1f}",
                 "Blocks": c.blocks,
                 "Status": status
             })
+        
         st.dataframe(pd.DataFrame(cone_data), hide_index=True, use_container_width=True)
+        
+        st.divider()
+        
+        # =====================================================================
+        # ALL SETUPS TABLE
+        # =====================================================================
+        
+        st.markdown("### 📋 All Trade Setups")
+        
+        if setups:
+            setup_data = []
+            for i, s in enumerate(setups):
+                is_best = "⭐" if i == 0 else ""
+                conf = "🎯" if s.is_confluent else ""
+                setup_data.append({
+                    "": f"{is_best}{conf}",
+                    "Direction": f"{s.direction.arrow} {s.direction.label}",
+                    "Cone": s.cone.pivot.name,
+                    "Entry": f"{s.entry:,.2f}",
+                    "Stop": f"{s.stop:,.2f}",
+                    "T1": f"{s.target_1:,.2f}",
+                    "T2": f"{s.target_2:,.2f}",
+                    "T3": f"{s.target_3:,.2f}",
+                    "Strike": s.strike,
+                    "Width": f"{s.cone.width:.1f}"
+                })
+            
+            st.dataframe(pd.DataFrame(setup_data), hide_index=True, use_container_width=True)
+        else:
+            st.info("No valid setups available.")
+        
+        st.divider()
+        
+        # =====================================================================
+        # TRADING RULES REMINDER
+        # =====================================================================
+        
+        st.markdown("### 📖 Trading Rules")
+        
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.markdown("""
+            **Entry Rules:**
+            - Enter at descending rail for CALLS
+            - Enter at ascending rail for PUTS
+            - Wait for price to touch the rail
+            - Confirm VIX at boundary trigger
+            """)
+        
+        with c2:
+            st.markdown(f"""
+            **Risk Management:**
+            - Stop Loss: {Config.STOP_LOSS_PTS} points
+            - T1: 12.5% of cone width
+            - T2: 25% of cone width
+            - T3: 50% of cone width
+            - Min cone width: {Config.MIN_CONE_WIDTH} points
+            """)
     
     # Footer
     st.divider()
-    st.caption("SPX Prophet v7.0 | Institutional SPX Prediction System | Not Financial Advice")
+    st.caption("SPX Prophet v7.1 | Institutional SPX Prediction System | Not Financial Advice")
 
 
 if __name__ == "__main__":
