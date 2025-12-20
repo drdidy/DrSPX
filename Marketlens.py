@@ -1,9 +1,11 @@
 """
-SPX PROPHET v5.0
+SPX PROPHET v6.0 - LEGENDARY EDITION
 The Institutional SPX Prediction System
 
 Predicts SPX moves using VIX algo trigger zones, structural cones, and time-based analysis.
 Features proprietary Expected Move formula and Cone Confluence detection.
+
+Chart-centric design with premium aesthetics.
 """
 
 import streamlit as st
@@ -16,7 +18,6 @@ from dataclasses import dataclass
 from typing import Optional, List, Tuple, Dict
 from enum import Enum
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 # =============================================================================
 # PAGE CONFIG
@@ -30,235 +31,87 @@ st.set_page_config(
 )
 
 # =============================================================================
-# PREMIUM LIGHT THEME
+# PREMIUM LIGHT THEME - LEGENDARY EDITION
 # =============================================================================
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-/* Base Theme */
+:root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --bg-tertiary: #f1f5f9;
+    --border-light: #e2e8f0;
+    --border-medium: #cbd5e1;
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --text-faint: #94a3b8;
+    --accent-blue: #3b82f6;
+    --accent-green: #059669;
+    --accent-red: #dc2626;
+    --accent-amber: #d97706;
+    --accent-purple: #7c3aed;
+    --gradient-green: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    --gradient-red: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    --gradient-blue: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    --gradient-amber: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.03);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.05), 0 4px 6px -4px rgba(0,0,0,0.03);
+    --shadow-glow-green: 0 0 20px rgba(5, 150, 105, 0.15);
+    --shadow-glow-red: 0 0 20px rgba(220, 38, 38, 0.15);
+    --shadow-glow-blue: 0 0 20px rgba(59, 130, 246, 0.15);
+}
+
+/* Base */
 .stApp {
     background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 /* Sidebar */
 section[data-testid="stSidebar"] {
-    background: #ffffff;
-    border-right: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border-right: 1px solid var(--border-light);
 }
 
-section[data-testid="stSidebar"] .stMarkdown h1,
-section[data-testid="stSidebar"] .stMarkdown h2,
-section[data-testid="stSidebar"] .stMarkdown h3 {
-    color: #1e293b;
+section[data-testid="stSidebar"] .stMarkdown {
+    color: var(--text-secondary);
 }
 
-/* Hide Streamlit Elements */
+/* Hide Streamlit */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
+.stDeployButton {display: none;}
 
 /* Metrics */
 [data-testid="stMetricValue"] {
     font-family: 'JetBrains Mono', monospace;
-    font-weight: 600;
-    color: #1e293b;
+    font-weight: 700;
+    color: var(--text-primary);
 }
 
 [data-testid="stMetricLabel"] {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    color: #64748b;
-    font-weight: 500;
+    font-family: 'Inter', sans-serif;
+    color: var(--text-muted);
+    font-weight: 600;
     text-transform: uppercase;
     font-size: 0.7rem;
     letter-spacing: 0.5px;
-}
-
-[data-testid="stMetricDelta"] {
-    font-family: 'JetBrains Mono', monospace;
-}
-
-/* Cards */
-.prophet-card {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 16px;
-    padding: 24px;
-    margin-bottom: 16px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
-}
-
-.prophet-card-accent {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-    border: 1px solid #e2e8f0;
-    border-radius: 16px;
-    padding: 24px;
-    margin-bottom: 16px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.02);
-}
-
-/* Typography */
-.prophet-title {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 2rem;
-    font-weight: 700;
-    color: #0f172a;
-    margin: 0;
-    letter-spacing: -0.5px;
-}
-
-.prophet-subtitle {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 0.8rem;
-    color: #64748b;
-    font-weight: 500;
-    letter-spacing: 0.5px;
-    margin: 4px 0 0 0;
-}
-
-.prophet-section-title {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin: 0 0 16px 0;
-}
-
-.prophet-value-hero {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin: 0;
-    letter-spacing: -1px;
-}
-
-.prophet-value-large {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: #1e293b;
-    margin: 0;
-}
-
-.prophet-value-medium {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #1e293b;
-    margin: 0;
-}
-
-.prophet-value-small {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: #334155;
-    margin: 0;
-}
-
-.prophet-label {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin: 0 0 4px 0;
-}
-
-.prophet-text {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 0.9rem;
-    color: #475569;
-    line-height: 1.5;
-    margin: 0;
-}
-
-/* Bias Colors */
-.calls-text { color: #059669; }
-.puts-text { color: #dc2626; }
-.wait-text { color: #d97706; }
-
-.calls-bg { background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border: 2px solid #059669; }
-.puts-bg { background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 2px solid #dc2626; }
-.wait-bg { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border: 2px solid #d97706; }
-
-/* Trigger Zone Styling */
-.trigger-buy {
-    background: linear-gradient(90deg, #dcfce7 0%, #bbf7d0 100%);
-    border-left: 4px solid #059669;
-    padding: 12px 16px;
-    border-radius: 8px;
-    margin: 4px 0;
-}
-
-.trigger-sell {
-    background: linear-gradient(90deg, #fee2e2 0%, #fecaca 100%);
-    border-left: 4px solid #dc2626;
-    padding: 12px 16px;
-    border-radius: 8px;
-    margin: 4px 0;
-}
-
-.trigger-neutral {
-    background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 100%);
-    border-left: 4px solid #64748b;
-    padding: 12px 16px;
-    border-radius: 8px;
-    margin: 4px 0;
-}
-
-/* Confluence Badge */
-.confluence-strong {
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    border: 2px solid #f59e0b;
-    border-radius: 8px;
-    padding: 8px 12px;
-    display: inline-block;
-}
-
-/* Progress Bar */
-.proximity-bar {
-    height: 8px;
-    border-radius: 4px;
-    background: #e2e8f0;
-    overflow: hidden;
-}
-
-.proximity-fill {
-    height: 100%;
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-
-/* Data Table */
-.level-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    border-radius: 8px;
-    margin: 4px 0;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-}
-
-.level-row-highlight {
-    background: linear-gradient(90deg, #eff6ff 0%, #dbeafe 100%);
-    border: 1px solid #3b82f6;
 }
 
 /* Inputs */
 div[data-baseweb="input"] > div {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    transition: all 0.2s ease;
 }
 
 div[data-baseweb="input"] > div:focus-within {
-    border-color: #3b82f6;
+    border-color: var(--accent-blue);
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
@@ -267,50 +120,53 @@ div[data-baseweb="input"] > div:focus-within {
     background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     font-weight: 600;
-    padding: 8px 24px;
+    font-family: 'Inter', sans-serif;
+    padding: 10px 24px;
     transition: all 0.2s ease;
+    box-shadow: var(--shadow-md);
 }
 
 .stButton > button:hover {
     background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    box-shadow: var(--shadow-lg), var(--shadow-glow-blue);
+    transform: translateY(-1px);
+}
+
+/* Dataframe */
+.stDataFrame {
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    overflow: hidden;
 }
 
 /* Tabs */
 .stTabs [data-baseweb="tab-list"] {
     gap: 0;
-    background: #f1f5f9;
+    background: var(--bg-tertiary);
     padding: 4px;
     border-radius: 12px;
 }
 
 .stTabs [data-baseweb="tab"] {
     background: transparent;
-    color: #64748b;
+    color: var(--text-muted);
     border-radius: 8px;
-    padding: 8px 20px;
-    font-weight: 500;
+    padding: 10px 24px;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
 }
 
 .stTabs [aria-selected="true"] {
-    background: #ffffff;
-    color: #1e293b;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
 }
 
-/* Expander */
-.streamlit-expanderHeader {
-    background: #f8fafc;
-    border-radius: 8px;
-    font-weight: 500;
-}
-
-/* Dataframe */
-.stDataFrame {
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
+/* Plotly Chart Container */
+.js-plotly-plot {
+    border-radius: 16px;
     overflow: hidden;
 }
 </style>
@@ -328,13 +184,12 @@ class Config:
     DELTA = 0.33
     CONTRACT_MULTIPLIER = 100
     
-    TARGET_1_PCT = 0.125  # 12.5%
-    TARGET_2_PCT = 0.25   # 25%
-    TARGET_3_PCT = 0.50   # 50%
+    TARGET_1_PCT = 0.125
+    TARGET_2_PCT = 0.25
+    TARGET_3_PCT = 0.50
     
-    CONFLUENCE_THRESHOLD = 6.0  # Points
+    CONFLUENCE_THRESHOLD = 6.0
     
-    # Expected Move Formula: EM = 35 + ((zone - 0.10) × 100), cap at 65-70
     EM_BASE = 35
     EM_ZONE_BASELINE = 0.10
     EM_MULTIPLIER = 100
@@ -358,15 +213,14 @@ class Phase(Enum):
 
 
 class Bias(Enum):
-    CALLS = ("CALLS", "#059669", "↑", "calls")
-    PUTS = ("PUTS", "#dc2626", "↓", "puts")
-    WAIT = ("WAIT", "#d97706", "◆", "wait")
+    CALLS = ("CALLS", "#059669", "↑")
+    PUTS = ("PUTS", "#dc2626", "↓")
+    WAIT = ("WAIT", "#d97706", "◆")
     
-    def __init__(self, label, color, arrow, css):
+    def __init__(self, label, color, arrow):
         self.label = label
         self.color = color
         self.arrow = arrow
-        self.css = css
 
 
 class Confidence(Enum):
@@ -387,9 +241,8 @@ class Confidence(Enum):
 
 @dataclass
 class VIXZone:
-    """VIX Zone representing algo trigger boundaries"""
-    bottom: float  # Buy algo trigger
-    top: float     # Sell algo trigger
+    bottom: float
+    top: float
     current: float
     
     @property
@@ -398,47 +251,35 @@ class VIXZone:
     
     @property
     def current_zone(self) -> str:
-        """Which zone is VIX currently in"""
         if self.current > self.top:
-            extensions_above = (self.current - self.top) / self.size if self.size > 0 else 0
-            if extensions_above >= 2:
-                return "+3 Zone"
-            elif extensions_above >= 1:
-                return "+2 Zone"
-            else:
-                return "+1 Zone"
+            ext = (self.current - self.top) / self.size if self.size > 0 else 0
+            if ext >= 2: return "+3"
+            elif ext >= 1: return "+2"
+            else: return "+1"
         elif self.current < self.bottom:
-            extensions_below = (self.bottom - self.current) / self.size if self.size > 0 else 0
-            if extensions_below >= 2:
-                return "-3 Zone"
-            elif extensions_below >= 1:
-                return "-2 Zone"
-            else:
-                return "-1 Zone"
-        else:
-            return "Base Zone"
+            ext = (self.bottom - self.current) / self.size if self.size > 0 else 0
+            if ext >= 2: return "-3"
+            elif ext >= 1: return "-2"
+            else: return "-1"
+        return "BASE"
     
     @property
     def nearest_buy_trigger(self) -> float:
-        """Nearest level where buy algos activate (VIX tops/sells off)"""
         if self.current <= self.bottom:
             return self.bottom
         elif self.current <= self.top:
             return self.top
         else:
-            # Above zone - next trigger is top of current extension zone
             ext = int((self.current - self.top) / self.size) + 1 if self.size > 0 else 1
             return self.top + (ext * self.size)
     
     @property
     def nearest_sell_trigger(self) -> float:
-        """Nearest level where sell algos activate (VIX bottoms/bounces)"""
         if self.current >= self.top:
             return self.top
         elif self.current >= self.bottom:
             return self.bottom
         else:
-            # Below zone - next trigger is bottom of current extension zone
             ext = int((self.bottom - self.current) / self.size) + 1 if self.size > 0 else 1
             return self.bottom - (ext * self.size)
     
@@ -458,17 +299,12 @@ class VIXZone:
         return self.top if level == 0 else self.bottom
     
     def get_expected_move(self) -> Tuple[float, float]:
-        """Calculate proprietary Expected Move based on zone size"""
         if self.size <= 0:
             return (0, 0)
-        
         em_low = Config.EM_BASE + ((self.size - Config.EM_ZONE_BASELINE) * Config.EM_MULTIPLIER)
         em_high = em_low + 5
-        
-        # Apply cap
         em_low = min(em_low, Config.EM_CAP_LOW)
         em_high = min(em_high, Config.EM_CAP_HIGH)
-        
         return (round(max(em_low, 0), 1), round(em_high, 1))
 
 
@@ -495,11 +331,10 @@ class ConeRails:
 
 @dataclass
 class ConfluentLevel:
-    """A price level where multiple cones converge"""
     price: float
-    rail_type: str  # "support" or "resistance"
-    cones: List[str]  # Names of converging cones
-    strength: str  # "strong" if 3+, "moderate" if 2
+    rail_type: str
+    cones: List[str]
+    strength: str
 
 
 @dataclass
@@ -561,68 +396,43 @@ class SPXProphetEngine:
         if weekday >= 5:
             return Phase.CLOSED
         
-        # 5pm-6am: Zone Building
         if time(17, 0) <= t or t < time(6, 0):
             return Phase.ZONE_BUILDING
-        # 6am-9:30am: Zone Locked / Pre-RTH
         elif time(6, 0) <= t < time(9, 30):
             return Phase.PRE_RTH
-        # 9:30am-4pm: RTH
         elif time(9, 30) <= t < time(16, 0):
             return Phase.RTH
-        # 4pm-5pm: Post
         elif time(16, 0) <= t < time(17, 0):
             return Phase.POST
         
         return Phase.CLOSED
     
     def determine_bias(self, zone: VIXZone) -> Tuple[Bias, Confidence, str]:
-        """
-        Determine bias based on VIX position relative to algo triggers.
-        """
         dist_to_buy = zone.distance_to_buy_trigger
         dist_to_sell = zone.distance_to_sell_trigger
-        
         current_zone = zone.current_zone
         
-        # If VIX is near top boundary (within 0.05) - buy algos about to trigger
         if dist_to_buy <= 0.05 and dist_to_buy >= -0.05:
-            bias = Bias.CALLS
-            confidence = Confidence.HIGH
-            explanation = f"VIX at buy trigger ({zone.nearest_buy_trigger:.2f}). Buy algos active. SPX UP."
+            return Bias.CALLS, Confidence.HIGH, f"VIX at buy trigger ({zone.nearest_buy_trigger:.2f}). Buy algos active → SPX UP"
         
-        # If VIX is near bottom boundary (within 0.05) - sell algos about to trigger
-        elif dist_to_sell <= 0.05 and dist_to_sell >= -0.05:
-            bias = Bias.PUTS
-            confidence = Confidence.HIGH
-            explanation = f"VIX at sell trigger ({zone.nearest_sell_trigger:.2f}). Sell algos active. SPX DOWN."
+        if dist_to_sell <= 0.05 and dist_to_sell >= -0.05:
+            return Bias.PUTS, Confidence.HIGH, f"VIX at sell trigger ({zone.nearest_sell_trigger:.2f}). Sell algos active → SPX DOWN"
         
-        # VIX above zone - in put territory but watch for buy trigger
-        elif "+" in current_zone:
-            bias = Bias.PUTS
-            confidence = Confidence.MEDIUM if dist_to_buy > 0.10 else Confidence.LOW
-            explanation = f"VIX in {current_zone}. Put bias until buy trigger at {zone.nearest_buy_trigger:.2f}."
+        if "+" in current_zone:
+            conf = Confidence.MEDIUM if dist_to_buy > 0.10 else Confidence.LOW
+            return Bias.PUTS, conf, f"VIX in {current_zone} zone. Put bias until buy trigger at {zone.nearest_buy_trigger:.2f}"
         
-        # VIX below zone - in call territory but watch for sell trigger
-        elif "-" in current_zone:
-            bias = Bias.CALLS
-            confidence = Confidence.MEDIUM if dist_to_sell > 0.10 else Confidence.LOW
-            explanation = f"VIX in {current_zone}. Call bias until sell trigger at {zone.nearest_sell_trigger:.2f}."
+        if "-" in current_zone:
+            conf = Confidence.MEDIUM if dist_to_sell > 0.10 else Confidence.LOW
+            return Bias.CALLS, conf, f"VIX in {current_zone} zone. Call bias until sell trigger at {zone.nearest_sell_trigger:.2f}"
         
-        # VIX in base zone - trend day potential
-        else:
-            bias = Bias.WAIT
-            confidence = Confidence.NONE
-            explanation = f"VIX in Base Zone. Potential trend day. Wait for boundary touch."
-        
-        return bias, confidence, explanation
+        return Bias.WAIT, Confidence.NONE, "VIX in Base Zone. Potential trend day. Wait for boundary touch."
     
     def calculate_blocks(self, pivot_time: datetime, eval_time: datetime) -> int:
         if pivot_time.tzinfo is None:
             pivot_time = self.ct_tz.localize(pivot_time)
         if eval_time.tzinfo is None:
             eval_time = self.ct_tz.localize(eval_time)
-        
         diff = eval_time - pivot_time
         total_minutes = diff.total_seconds() / 60
         return max(int(total_minutes / 30), 1)
@@ -630,66 +440,39 @@ class SPXProphetEngine:
     def calculate_cone(self, pivot: Pivot, eval_time: datetime) -> ConeRails:
         blocks = self.calculate_blocks(pivot.timestamp, eval_time)
         expansion = blocks * Config.SLOPE_PER_30MIN
-        
         ascending = round(pivot.price + expansion, 2)
         descending = round(pivot.price - expansion, 2)
         width = round(ascending - descending, 2)
-        
-        return ConeRails(
-            pivot=pivot,
-            ascending=ascending,
-            descending=descending,
-            width=width,
-            blocks=blocks
-        )
+        return ConeRails(pivot=pivot, ascending=ascending, descending=descending, width=width, blocks=blocks)
     
     def find_confluence(self, cones: List[ConeRails]) -> Tuple[List[ConfluentLevel], List[ConfluentLevel]]:
-        """Find where cone rails converge within threshold"""
         support_levels = []
         resistance_levels = []
         
-        # Collect all rails
         ascending_rails = [(c.ascending, c.pivot.name) for c in cones if c.is_tradeable]
         descending_rails = [(c.descending, c.pivot.name) for c in cones if c.is_tradeable]
         
-        # Find ascending (resistance) confluence
         for i, (price1, name1) in enumerate(ascending_rails):
             confluent_cones = [name1]
             for j, (price2, name2) in enumerate(ascending_rails):
                 if i != j and abs(price1 - price2) <= Config.CONFLUENCE_THRESHOLD:
                     confluent_cones.append(name2)
-            
             if len(confluent_cones) >= 2:
                 avg_price = sum(p for p, n in ascending_rails if n in confluent_cones) / len(confluent_cones)
                 strength = "strong" if len(confluent_cones) >= 3 else "moderate"
-                
-                # Avoid duplicates
                 if not any(abs(r.price - avg_price) < 1 for r in resistance_levels):
-                    resistance_levels.append(ConfluentLevel(
-                        price=round(avg_price, 2),
-                        rail_type="resistance",
-                        cones=confluent_cones,
-                        strength=strength
-                    ))
+                    resistance_levels.append(ConfluentLevel(round(avg_price, 2), "resistance", confluent_cones, strength))
         
-        # Find descending (support) confluence
         for i, (price1, name1) in enumerate(descending_rails):
             confluent_cones = [name1]
             for j, (price2, name2) in enumerate(descending_rails):
                 if i != j and abs(price1 - price2) <= Config.CONFLUENCE_THRESHOLD:
                     confluent_cones.append(name2)
-            
             if len(confluent_cones) >= 2:
                 avg_price = sum(p for p, n in descending_rails if n in confluent_cones) / len(confluent_cones)
                 strength = "strong" if len(confluent_cones) >= 3 else "moderate"
-                
                 if not any(abs(s.price - avg_price) < 1 for s in support_levels):
-                    support_levels.append(ConfluentLevel(
-                        price=round(avg_price, 2),
-                        rail_type="support",
-                        cones=confluent_cones,
-                        strength=strength
-                    ))
+                    support_levels.append(ConfluentLevel(round(avg_price, 2), "support", confluent_cones, strength))
         
         return support_levels, resistance_levels
     
@@ -711,8 +494,6 @@ class SPXProphetEngine:
             t1 = entry + (move * Config.TARGET_1_PCT)
             t2 = entry + (move * Config.TARGET_2_PCT)
             t3 = entry + (move * Config.TARGET_3_PCT)
-            
-            # Check confluence
             is_confluent = any(abs(c.price - entry) <= Config.CONFLUENCE_THRESHOLD for c in support_confluence)
             conf_cones = [c.cones for c in support_confluence if abs(c.price - entry) <= Config.CONFLUENCE_THRESHOLD]
         else:
@@ -724,20 +505,13 @@ class SPXProphetEngine:
             t1 = entry - (move * Config.TARGET_1_PCT)
             t2 = entry - (move * Config.TARGET_2_PCT)
             t3 = entry - (move * Config.TARGET_3_PCT)
-            
             is_confluent = any(abs(c.price - entry) <= Config.CONFLUENCE_THRESHOLD for c in resistance_confluence)
             conf_cones = [c.cones for c in resistance_confluence if abs(c.price - entry) <= Config.CONFLUENCE_THRESHOLD]
         
         return TradeSetup(
-            direction=direction,
-            cone=cone,
-            entry=round(entry, 2),
-            stop=round(stop, 2),
-            target_1=round(t1, 2),
-            target_2=round(t2, 2),
-            target_3=round(t3, 2),
-            strike=strike,
-            is_confluent=is_confluent,
+            direction=direction, cone=cone, entry=round(entry, 2), stop=round(stop, 2),
+            target_1=round(t1, 2), target_2=round(t2, 2), target_3=round(t3, 2),
+            strike=strike, is_confluent=is_confluent,
             confluence_cones=conf_cones[0] if conf_cones else None
         )
     
@@ -752,24 +526,20 @@ class SPXProphetEngine:
         hits = []
         is_calls = setup.direction == Bias.CALLS
         
-        # Entry
         entry_hit = (session_low <= setup.entry) if is_calls else (session_high >= setup.entry)
         hits.append(LevelHit("Entry", setup.entry, entry_hit))
         
         if entry_hit:
-            # Stop
             stop_hit = (session_low <= setup.stop) if is_calls else (session_high >= setup.stop)
             hits.append(LevelHit("Stop", setup.stop, stop_hit))
-            
-            # Targets
-            for name, price in [("12.5%", setup.target_1), ("25%", setup.target_2), ("50%", setup.target_3)]:
+            for name, price in [("T1 (12.5%)", setup.target_1), ("T2 (25%)", setup.target_2), ("T3 (50%)", setup.target_3)]:
                 target_hit = (session_high >= price) if is_calls else (session_low <= price)
                 hits.append(LevelHit(name, price, target_hit))
         else:
             hits.append(LevelHit("Stop", setup.stop, False))
-            hits.append(LevelHit("12.5%", setup.target_1, False))
-            hits.append(LevelHit("25%", setup.target_2, False))
-            hits.append(LevelHit("50%", setup.target_3, False))
+            hits.append(LevelHit("T1 (12.5%)", setup.target_1, False))
+            hits.append(LevelHit("T2 (25%)", setup.target_2, False))
+            hits.append(LevelHit("T3 (50%)", setup.target_3, False))
         
         return hits
     
@@ -782,18 +552,16 @@ class SPXProphetEngine:
         if stop_hit and stop_hit.was_hit:
             return -self.calculate_profit(Config.STOP_LOSS_PTS, contracts), "Stopped out"
         
-        # Find highest target hit
-        target_hits = [h for h in hits if h.level_name in ["12.5%", "25%", "50%"] and h.was_hit]
+        target_hits = [h for h in hits if "T1" in h.level_name or "T2" in h.level_name or "T3" in h.level_name]
+        target_hits = [h for h in target_hits if h.was_hit]
         
         if not target_hits:
-            return 0.0, "Entry hit, no targets"
+            return 0.0, "Entry hit, targets pending"
         
-        # Get the highest target
-        target_order = {"12.5%": 1, "25%": 2, "50%": 3}
+        target_order = {"T1 (12.5%)": 1, "T2 (25%)": 2, "T3 (50%)": 3}
         highest = max(target_hits, key=lambda h: target_order.get(h.level_name, 0))
-        
         points = abs(highest.level_price - setup.entry)
-        return self.calculate_profit(points, contracts), f"{highest.level_name} target"
+        return self.calculate_profit(points, contracts), f"{highest.level_name} hit"
 
 
 # =============================================================================
@@ -802,273 +570,367 @@ class SPXProphetEngine:
 
 @st.cache_data(ttl=60)
 def fetch_spx_data():
-    """Fetch SPX data from Yahoo"""
     try:
         spx = yf.Ticker("^GSPC")
         hist = spx.history(period="5d", interval="1d")
-        
         if hist.empty:
             return None, None
-        
         current = float(hist['Close'].iloc[-1])
-        
         prior = None
         if len(hist) >= 2:
             p = hist.iloc[-2]
-            prior = {
-                'date': hist.index[-2],
-                'open': float(p['Open']),
-                'high': float(p['High']),
-                'low': float(p['Low']),
-                'close': float(p['Close'])
-            }
-        
+            prior = {'date': hist.index[-2], 'open': float(p['Open']), 'high': float(p['High']), 
+                    'low': float(p['Low']), 'close': float(p['Close'])}
         return current, prior
-    except Exception:
+    except:
         return None, None
 
 
 @st.cache_data(ttl=300)
 def fetch_historical_spx(target_date: date) -> Optional[Dict]:
-    """Fetch historical SPX data for a specific date"""
     try:
         spx = yf.Ticker("^GSPC")
         start = target_date - timedelta(days=10)
         end = target_date + timedelta(days=1)
         hist = spx.history(start=start, end=end)
-        
         if hist.empty:
             return None
-        
         target_str = target_date.strftime('%Y-%m-%d')
         for idx in hist.index:
             if idx.strftime('%Y-%m-%d') == target_str:
                 row = hist.loc[idx]
-                return {
-                    'date': idx,
-                    'open': float(row['Open']),
-                    'high': float(row['High']),
-                    'low': float(row['Low']),
-                    'close': float(row['Close']),
-                    'range': float(row['High'] - row['Low'])
-                }
+                return {'date': idx, 'open': float(row['Open']), 'high': float(row['High']),
+                       'low': float(row['Low']), 'close': float(row['Close']), 
+                       'range': float(row['High'] - row['Low'])}
         return None
-    except Exception:
+    except:
         return None
 
 
 @st.cache_data(ttl=300)
 def fetch_prior_day_data(session_date: date) -> Optional[Dict]:
-    """Fetch prior trading day data"""
     try:
         spx = yf.Ticker("^GSPC")
         start = session_date - timedelta(days=10)
         end = session_date + timedelta(days=1)
         hist = spx.history(start=start, end=end)
-        
         if hist.empty or len(hist) < 2:
             return None
-        
         session_str = session_date.strftime('%Y-%m-%d')
         session_idx = None
-        
         for i, idx in enumerate(hist.index):
             if idx.strftime('%Y-%m-%d') == session_str:
                 session_idx = i
                 break
-        
         if session_idx is not None and session_idx > 0:
-            prior_idx = hist.index[session_idx - 1]
             prior = hist.iloc[session_idx - 1]
-            return {
-                'date': prior_idx,
-                'high': float(prior['High']),
-                'low': float(prior['Low']),
-                'close': float(prior['Close']),
-                'open': float(prior['Open'])
-            }
-        
+            return {'date': hist.index[session_idx - 1], 'high': float(prior['High']),
+                   'low': float(prior['Low']), 'close': float(prior['Close']), 'open': float(prior['Open'])}
         if len(hist) >= 2:
             prior = hist.iloc[-2]
-            return {
-                'date': hist.index[-2],
-                'high': float(prior['High']),
-                'low': float(prior['Low']),
-                'close': float(prior['Close']),
-                'open': float(prior['Open'])
-            }
-        
+            return {'date': hist.index[-2], 'high': float(prior['High']), 'low': float(prior['Low']),
+                   'close': float(prior['Close']), 'open': float(prior['Open'])}
         return None
-    except Exception:
+    except:
         return None
 
 
 @st.cache_data(ttl=60)
 def fetch_intraday_spx() -> Optional[pd.DataFrame]:
-    """Fetch intraday SPX data for charting"""
     try:
         spx = yf.Ticker("^GSPC")
         hist = spx.history(period="2d", interval="30m")
         return hist if not hist.empty else None
-    except Exception:
+    except:
         return None
 
 
 # =============================================================================
-# CHART COMPONENT
+# LEGENDARY CHART
 # =============================================================================
 
-def create_spx_chart(intraday_data: pd.DataFrame, cones: List[ConeRails], 
-                     setups: List[TradeSetup], zone: VIXZone, bias: Bias) -> go.Figure:
-    """Create professional candlestick chart with cone projections"""
-    
-    if intraday_data is None or intraday_data.empty:
-        return None
-    
-    # Filter to today's data only
-    today = datetime.now().date()
-    today_data = intraday_data[intraday_data.index.date == today]
-    
-    if today_data.empty:
-        today_data = intraday_data.tail(13)  # Last ~6.5 hours
+def create_legendary_chart(intraday_data: pd.DataFrame, cones: List[ConeRails], 
+                          best_setup: Optional[TradeSetup], spx_price: float) -> go.Figure:
+    """Create a stunning, professional candlestick chart with cone projections"""
     
     fig = go.Figure()
     
-    # Candlestick
-    fig.add_trace(go.Candlestick(
-        x=today_data.index,
-        open=today_data['Open'],
-        high=today_data['High'],
-        low=today_data['Low'],
-        close=today_data['Close'],
-        name='SPX',
-        increasing=dict(line=dict(color='#059669', width=1), fillcolor='#dcfce7'),
-        decreasing=dict(line=dict(color='#dc2626', width=1), fillcolor='#fee2e2')
-    ))
+    if intraday_data is not None and not intraday_data.empty:
+        today = datetime.now().date()
+        today_data = intraday_data[intraday_data.index.date == today]
+        if today_data.empty:
+            today_data = intraday_data.tail(13)
+        
+        # Candlesticks
+        fig.add_trace(go.Candlestick(
+            x=today_data.index,
+            open=today_data['Open'],
+            high=today_data['High'],
+            low=today_data['Low'],
+            close=today_data['Close'],
+            name='SPX',
+            increasing=dict(line=dict(color='#10b981', width=1.5), fillcolor='#d1fae5'),
+            decreasing=dict(line=dict(color='#ef4444', width=1.5), fillcolor='#fee2e2'),
+            whiskerwidth=0.8
+        ))
+        
+        price_min = today_data['Low'].min()
+        price_max = today_data['High'].max()
+    else:
+        price_min = spx_price - 30
+        price_max = spx_price + 30
     
-    # Get price range for y-axis
-    price_min = today_data['Low'].min()
-    price_max = today_data['High'].max()
+    # Cone colors - premium palette
+    cone_colors = {
+        'Prior High': '#f59e0b',
+        'Prior Low': '#3b82f6', 
+        'Prior Close': '#8b5cf6',
+        'High²': '#f97316',
+        'Low²': '#06b6d4'
+    }
     
-    # Add cone rails
-    colors = ['#3b82f6', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899']
-    
-    for i, cone in enumerate(cones):
+    # Add cone rails as horizontal lines
+    for cone in cones:
         if not cone.is_tradeable:
             continue
         
-        color = colors[i % len(colors)]
+        color = cone_colors.get(cone.pivot.name, '#64748b')
         
-        # Ascending rail (resistance)
+        # Ascending (resistance)
         fig.add_hline(
-            y=cone.ascending, 
+            y=cone.ascending,
             line=dict(color=color, width=2, dash='dot'),
-            annotation_text=f"{cone.pivot.name} ↑ {cone.ascending:.2f}",
-            annotation_position="right",
-            annotation_font=dict(size=10, color=color)
+            annotation=dict(
+                text=f"▲ {cone.pivot.name} {cone.ascending:.0f}",
+                font=dict(size=11, color=color, family='JetBrains Mono'),
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor=color,
+                borderwidth=1,
+                borderpad=4
+            ),
+            annotation_position="right"
         )
         
-        # Descending rail (support)
+        # Descending (support)
         fig.add_hline(
-            y=cone.descending, 
+            y=cone.descending,
             line=dict(color=color, width=2, dash='dot'),
-            annotation_text=f"{cone.pivot.name} ↓ {cone.descending:.2f}",
-            annotation_position="right",
-            annotation_font=dict(size=10, color=color)
+            annotation=dict(
+                text=f"▼ {cone.pivot.name} {cone.descending:.0f}",
+                font=dict(size=11, color=color, family='JetBrains Mono'),
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor=color,
+                borderwidth=1,
+                borderpad=4
+            ),
+            annotation_position="right"
         )
         
-        # Update price range
-        price_min = min(price_min, cone.descending)
-        price_max = max(price_max, cone.ascending)
+        price_min = min(price_min, cone.descending - 5)
+        price_max = max(price_max, cone.ascending + 5)
     
-    # Add entry levels for best setup
-    if setups:
-        best_setup = setups[0]
-        entry_color = '#059669' if best_setup.direction == Bias.CALLS else '#dc2626'
+    # Best setup entry/stop/targets
+    if best_setup:
+        # Entry line - thick and prominent
+        entry_color = '#10b981' if best_setup.direction == Bias.CALLS else '#ef4444'
         
         fig.add_hline(
             y=best_setup.entry,
             line=dict(color=entry_color, width=3),
-            annotation_text=f"ENTRY {best_setup.entry:.2f}",
-            annotation_position="left",
-            annotation_font=dict(size=11, color=entry_color, family='JetBrains Mono')
+            annotation=dict(
+                text=f"◉ ENTRY {best_setup.entry:.0f}",
+                font=dict(size=12, color='white', family='JetBrains Mono', weight='bold'),
+                bgcolor=entry_color,
+                borderpad=6
+            ),
+            annotation_position="left"
         )
         
+        # Stop loss
         fig.add_hline(
             y=best_setup.stop,
             line=dict(color='#dc2626', width=2, dash='dash'),
-            annotation_text=f"STOP {best_setup.stop:.2f}",
-            annotation_position="left",
-            annotation_font=dict(size=10, color='#dc2626')
+            annotation=dict(
+                text=f"✕ STOP {best_setup.stop:.0f}",
+                font=dict(size=10, color='#dc2626', family='JetBrains Mono'),
+                bgcolor='rgba(254,226,226,0.95)',
+                bordercolor='#dc2626',
+                borderwidth=1,
+                borderpad=4
+            ),
+            annotation_position="left"
         )
         
-        for target_name, target_price in [("T1", best_setup.target_1), ("T2", best_setup.target_2), ("T3", best_setup.target_3)]:
+        # Targets
+        target_colors = ['#059669', '#047857', '#065f46']
+        for i, (name, price) in enumerate([("T1", best_setup.target_1), ("T2", best_setup.target_2), ("T3", best_setup.target_3)]):
             fig.add_hline(
-                y=target_price,
-                line=dict(color='#059669', width=1, dash='dash'),
-                annotation_text=f"{target_name} {target_price:.2f}",
-                annotation_position="left",
-                annotation_font=dict(size=9, color='#059669')
+                y=price,
+                line=dict(color=target_colors[i], width=1.5, dash='dash'),
+                annotation=dict(
+                    text=f"🎯 {name} {price:.0f}",
+                    font=dict(size=10, color=target_colors[i], family='JetBrains Mono'),
+                    bgcolor='rgba(220,252,231,0.95)',
+                    bordercolor=target_colors[i],
+                    borderwidth=1,
+                    borderpad=3
+                ),
+                annotation_position="left"
             )
-            price_max = max(price_max, target_price)
-            price_min = min(price_min, target_price)
+            price_max = max(price_max, price + 3)
+            price_min = min(price_min, price - 3)
     
-    # Layout
-    padding = (price_max - price_min) * 0.05
+    # Current price line
+    fig.add_hline(
+        y=spx_price,
+        line=dict(color='#1e293b', width=1, dash='solid'),
+        annotation=dict(
+            text=f"● NOW {spx_price:.2f}",
+            font=dict(size=11, color='#1e293b', family='JetBrains Mono'),
+            bgcolor='rgba(241,245,249,0.95)',
+            borderpad=4
+        ),
+        annotation_position="right"
+    )
+    
+    # Layout - premium styling
+    padding = (price_max - price_min) * 0.08
     
     fig.update_layout(
         title=None,
-        xaxis_title=None,
-        yaxis_title=None,
-        template='plotly_white',
-        height=500,
-        margin=dict(l=60, r=120, t=20, b=40),
+        height=420,
+        margin=dict(l=10, r=140, t=20, b=10),
         xaxis=dict(
             rangeslider=dict(visible=False),
             showgrid=True,
-            gridcolor='#f1f5f9',
-            tickfont=dict(size=10, color='#64748b')
+            gridcolor='rgba(226,232,240,0.6)',
+            gridwidth=1,
+            tickfont=dict(size=10, color='#64748b', family='Inter'),
+            showline=True,
+            linewidth=1,
+            linecolor='#e2e8f0'
         ),
         yaxis=dict(
             side='left',
             showgrid=True,
-            gridcolor='#f1f5f9',
+            gridcolor='rgba(226,232,240,0.6)',
+            gridwidth=1,
             tickfont=dict(size=11, color='#1e293b', family='JetBrains Mono'),
-            tickformat=',.2f',
-            range=[price_min - padding, price_max + padding]
+            tickformat=',.0f',
+            range=[price_min - padding, price_max + padding],
+            showline=True,
+            linewidth=1,
+            linecolor='#e2e8f0'
         ),
         plot_bgcolor='#ffffff',
         paper_bgcolor='#ffffff',
         showlegend=False,
-        hovermode='x unified'
+        hovermode='x unified',
+        hoverlabel=dict(
+            bgcolor='white',
+            font_size=12,
+            font_family='JetBrains Mono'
+        )
     )
     
     return fig
 
 
 # =============================================================================
-# UI COMPONENTS
+# LEGENDARY UI COMPONENTS
 # =============================================================================
 
-def render_header(spx: float, phase: Phase, engine: SPXProphetEngine):
+def render_legendary_header(spx: float, phase: Phase, engine: SPXProphetEngine):
     now = engine.get_current_time_ct()
     
     st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.04);">
+    <div style="
+        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 50%, #f1f5f9 100%);
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 24px 32px;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.03);
+    ">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px;">
-            <div>
-                <h1 style="font-family: -apple-system, sans-serif; font-size: 2rem; font-weight: 700; color: #0f172a; margin: 0; letter-spacing: -0.5px;">⚡ SPX Prophet</h1>
-                <p style="font-family: -apple-system, sans-serif; font-size: 0.8rem; color: #64748b; font-weight: 500; letter-spacing: 0.5px; margin: 4px 0 0 0;">Institutional SPX Prediction System</p>
-            </div>
-            <div style="display: flex; gap: 32px; align-items: center;">
-                <div style="text-align: right;">
-                    <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">SPX</p>
-                    <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: #1e293b; margin: 0; letter-spacing: -1px;">{spx:,.2f}</p>
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div style="
+                    width: 56px; height: 56px;
+                    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                    border-radius: 14px;
+                    display: flex; align-items: center; justify-content: center;
+                    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+                ">
+                    <span style="font-size: 28px;">⚡</span>
                 </div>
-                <div style="text-align: right; padding-left: 32px; border-left: 2px solid #e2e8f0;">
-                    <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">{now.strftime('%I:%M %p')} CT</p>
-                    <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: {phase.color}; margin: 0;">{phase.icon} {phase.label}</p>
-                    <p style="font-size: 0.75rem; color: #94a3b8; margin: 4px 0 0 0;">{phase.time_range}</p>
+                <div>
+                    <h1 style="
+                        font-family: 'Inter', sans-serif;
+                        font-size: 1.75rem;
+                        font-weight: 800;
+                        color: #0f172a;
+                        margin: 0;
+                        letter-spacing: -0.5px;
+                    ">SPX Prophet</h1>
+                    <p style="
+                        font-family: 'Inter', sans-serif;
+                        font-size: 0.8rem;
+                        color: #64748b;
+                        font-weight: 500;
+                        margin: 2px 0 0 0;
+                        letter-spacing: 0.3px;
+                    ">Institutional SPX Prediction System</p>
+                </div>
+            </div>
+            
+            <div style="display: flex; align-items: center; gap: 32px;">
+                <div style="text-align: right;">
+                    <p style="
+                        font-family: 'Inter', sans-serif;
+                        font-size: 0.65rem;
+                        font-weight: 700;
+                        color: #94a3b8;
+                        text-transform: uppercase;
+                        letter-spacing: 1px;
+                        margin: 0 0 4px 0;
+                    ">S&P 500</p>
+                    <p style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 2.25rem;
+                        font-weight: 700;
+                        color: #0f172a;
+                        margin: 0;
+                        letter-spacing: -1px;
+                    ">{spx:,.2f}</p>
+                </div>
+                
+                <div style="width: 1px; height: 50px; background: #e2e8f0;"></div>
+                
+                <div style="text-align: right;">
+                    <p style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 0.9rem;
+                        font-weight: 600;
+                        color: #64748b;
+                        margin: 0 0 4px 0;
+                    ">{now.strftime('%I:%M %p')} CT</p>
+                    <div style="
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        background: {phase.color}15;
+                        padding: 6px 12px;
+                        border-radius: 8px;
+                        border: 1px solid {phase.color}30;
+                    ">
+                        <span style="font-size: 14px;">{phase.icon}</span>
+                        <span style="
+                            font-family: 'Inter', sans-serif;
+                            font-size: 0.8rem;
+                            font-weight: 600;
+                            color: {phase.color};
+                        ">{phase.label}</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1076,282 +938,496 @@ def render_header(spx: float, phase: Phase, engine: SPXProphetEngine):
     """, unsafe_allow_html=True)
 
 
-def render_expected_move(zone: VIXZone):
+def render_bias_card_compact(bias: Bias, confidence: Confidence, explanation: str):
+    if bias == Bias.CALLS:
+        gradient = "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)"
+        border_color = "#10b981"
+        glow = "0 0 20px rgba(16, 185, 129, 0.15)"
+    elif bias == Bias.PUTS:
+        gradient = "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+        border_color = "#ef4444"
+        glow = "0 0 20px rgba(239, 68, 68, 0.15)"
+    else:
+        gradient = "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
+        border_color = "#f59e0b"
+        glow = "0 0 20px rgba(245, 158, 11, 0.15)"
+    
+    st.markdown(f"""
+    <div style="
+        background: {gradient};
+        border: 2px solid {border_color};
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: {glow};
+        height: 100%;
+    ">
+        <p style="
+            font-family: 'Inter', sans-serif;
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin: 0 0 12px 0;
+        ">Directional Bias</p>
+        
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+            <span style="
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 2rem;
+                font-weight: 800;
+                color: {bias.color};
+                letter-spacing: -1px;
+            ">{bias.arrow} {bias.label}</span>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <span style="
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 1.1rem;
+                color: {confidence.color};
+                letter-spacing: 2px;
+            ">{confidence.dots}</span>
+            <span style="
+                font-family: 'Inter', sans-serif;
+                font-size: 0.7rem;
+                font-weight: 600;
+                color: {confidence.color};
+                text-transform: uppercase;
+            ">{confidence.label}</span>
+        </div>
+        
+        <p style="
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            color: #475569;
+            margin: 0;
+            line-height: 1.4;
+        ">{explanation}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_algo_triggers_compact(zone: VIXZone):
+    st.markdown(f"""
+    <div style="
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        height: 100%;
+    ">
+        <p style="
+            font-family: 'Inter', sans-serif;
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin: 0 0 12px 0;
+        ">Algo Triggers</p>
+        
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 16px;">
+            <span style="
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 1.5rem;
+                font-weight: 700;
+                color: #0f172a;
+            ">{zone.current:.2f}</span>
+            <span style="
+                font-family: 'Inter', sans-serif;
+                font-size: 0.75rem;
+                font-weight: 600;
+                color: #3b82f6;
+                background: #eff6ff;
+                padding: 3px 8px;
+                border-radius: 6px;
+            ">{zone.current_zone}</span>
+        </div>
+        
+        <div style="
+            background: linear-gradient(90deg, #dcfce7 0%, #bbf7d0 100%);
+            border-left: 3px solid #10b981;
+            padding: 10px 12px;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 8px;
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-family: 'Inter', sans-serif; font-size: 0.7rem; font-weight: 600; color: #065f46;">↑ BUY TRIGGER</span>
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: #059669;">{zone.nearest_buy_trigger:.2f}</span>
+            </div>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #065f46;">{zone.distance_to_buy_trigger:+.2f} away</span>
+        </div>
+        
+        <div style="
+            background: linear-gradient(90deg, #fee2e2 0%, #fecaca 100%);
+            border-left: 3px solid #ef4444;
+            padding: 10px 12px;
+            border-radius: 0 8px 8px 0;
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-family: 'Inter', sans-serif; font-size: 0.7rem; font-weight: 600; color: #991b1b;">↓ SELL TRIGGER</span>
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: #dc2626;">{zone.nearest_sell_trigger:.2f}</span>
+            </div>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #991b1b;">{zone.distance_to_sell_trigger:.2f} away</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_expected_move_compact(zone: VIXZone):
     em_low, em_high = zone.get_expected_move()
     
     st.markdown(f"""
-    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); text-align: center;">
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Expected Move</p>
-        <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: #3b82f6; margin: 0; letter-spacing: -1px;">{em_low:.0f} - {em_high:.0f}</p>
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 8px 0 0 0;">POINTS FROM ENTRY</p>
-        <div style="margin-top: 16px; padding: 12px; background: #f1f5f9; border-radius: 8px;">
-            <p style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569; margin: 0;">Based on VIX zone size of <strong>{zone.size:.2f}</strong></p>
+    <div style="
+        background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+        border: 1px solid #bfdbfe;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
+        height: 100%;
+    ">
+        <p style="
+            font-family: 'Inter', sans-serif;
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin: 0 0 12px 0;
+        ">Expected Move</p>
+        
+        <p style="
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 2.25rem;
+            font-weight: 800;
+            color: #1e40af;
+            margin: 0;
+            letter-spacing: -1px;
+        ">{em_low:.0f} - {em_high:.0f}</p>
+        
+        <p style="
+            font-family: 'Inter', sans-serif;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: #3b82f6;
+            margin: 8px 0 0 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        ">Points from Entry</p>
+        
+        <div style="
+            margin-top: 12px;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 8px;
+        ">
+            <span style="font-family: 'Inter', sans-serif; font-size: 0.75rem; color: #475569;">
+                VIX Zone: <strong>{zone.size:.2f}</strong>
+            </span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 
-def render_bias_card(bias: Bias, confidence: Confidence, explanation: str):
-    # Set background based on bias
-    if bias == Bias.CALLS:
-        bg = "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)"
-        border = "2px solid #059669"
-    elif bias == Bias.PUTS:
-        bg = "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
-        border = "2px solid #dc2626"
-    else:
-        bg = "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
-        border = "2px solid #d97706"
-    
-    st.markdown(f"""
-    <div style="background: {bg}; border: {border}; border-radius: 16px; padding: 24px; margin-bottom: 16px; text-align: center;">
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Directional Bias</p>
-        <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: {bias.color}; margin: 0; letter-spacing: -1px;">{bias.arrow} {bias.label}</p>
-        <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.2rem; color: {confidence.color}; margin: 12px 0;">{confidence.dots}</p>
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: {confidence.color}; text-transform: uppercase; letter-spacing: 0.5px; margin: 0;">{confidence.label} CONFIDENCE</p>
-        <div style="margin-top: 16px; padding: 12px; background: rgba(255,255,255,0.7); border-radius: 8px;">
-            <p style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569; line-height: 1.5; margin: 0;">{explanation}</p>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def render_algo_triggers(zone: VIXZone):
-    st.markdown(f"""
-    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Algo Trigger Zones</p>
-        
-        <div style="margin-bottom: 16px;">
-            <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">Current VIX</p>
-            <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 600; color: #1e293b; margin: 0;">{zone.current:.2f}</p>
-            <p style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">📍 {zone.current_zone}</p>
-        </div>
-        
-        <div style="background: linear-gradient(90deg, #dcfce7 0%, #bbf7d0 100%); border-left: 4px solid #059669; padding: 12px 16px; border-radius: 8px; margin: 4px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <p style="font-weight: 600; color: #059669; margin: 0; font-size: 0.85rem;">↑ BUY ALGO TRIGGER</p>
-                    <p style="font-size: 0.75rem; color: #065f46; margin: 2px 0 0 0;">VIX tops here → SPX rallies</p>
-                </div>
-                <div style="text-align: right;">
-                    <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #059669; margin: 0;">{zone.nearest_buy_trigger:.2f}</p>
-                    <p style="font-size: 0.75rem; color: #065f46; margin: 2px 0 0 0;">{zone.distance_to_buy_trigger:+.2f} away</p>
-                </div>
-            </div>
-        </div>
-        
-        <div style="background: linear-gradient(90deg, #fee2e2 0%, #fecaca 100%); border-left: 4px solid #dc2626; padding: 12px 16px; border-radius: 8px; margin: 4px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <p style="font-weight: 600; color: #dc2626; margin: 0; font-size: 0.85rem;">↓ SELL ALGO TRIGGER</p>
-                    <p style="font-size: 0.75rem; color: #991b1b; margin: 2px 0 0 0;">VIX bottoms here → SPX sells</p>
-                </div>
-                <div style="text-align: right;">
-                    <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #dc2626; margin: 0;">{zone.nearest_sell_trigger:.2f}</p>
-                    <p style="font-size: 0.75rem; color: #991b1b; margin: 2px 0 0 0;">{zone.distance_to_sell_trigger:.2f} away</p>
-                </div>
-            </div>
-        </div>
-        
-        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
-            <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 8px 0;">Zone Boundaries</p>
-            <div style="display: flex; justify-content: space-between; margin-top: 8px;">
-                <span style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569;">Top: <strong>{zone.top:.2f}</strong></span>
-                <span style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569;">Bottom: <strong>{zone.bottom:.2f}</strong></span>
-                <span style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569;">Size: <strong>{zone.size:.2f}</strong></span>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def render_vix_ladder(zone: VIXZone):
-    levels = [
-        ("+2", zone.get_extension(2), "extension"),
-        ("+1", zone.get_extension(1), "extension"),
-        ("TOP", zone.top, "top"),
-        ("VIX", zone.current, "current"),
-        ("BOTTOM", zone.bottom, "bottom"),
-        ("-1", zone.get_extension(-1), "extension"),
-        ("-2", zone.get_extension(-2), "extension"),
-    ]
-    
-    st.markdown('<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">', unsafe_allow_html=True)
-    st.markdown('<p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">VIX Zone Ladder</p>', unsafe_allow_html=True)
-    
-    for label, value, level_type in levels:
-        if level_type == "current":
-            bg = "linear-gradient(90deg, #eff6ff 0%, #dbeafe 100%)"
-            border = "2px solid #3b82f6"
-            color = "#1e40af"
-            weight = "700"
-        elif level_type == "top":
-            bg = "#dcfce7"
-            border = "1px solid #059669"
-            color = "#059669"
-            weight = "600"
-        elif level_type == "bottom":
-            bg = "#fee2e2"
-            border = "1px solid #dc2626"
-            color = "#dc2626"
-            weight = "600"
-        else:
-            bg = "#f8fafc"
-            border = "1px solid #e2e8f0"
-            color = "#64748b"
-            weight = "400"
-        
-        st.markdown(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; margin: 4px 0; background: {bg}; border: {border}; border-radius: 8px;">
-            <span style="font-weight: {weight}; color: {color}; font-size: 0.85rem;">{label}</span>
-            <span style="font-family: 'JetBrains Mono', monospace; font-weight: {weight}; color: {color}; font-size: 0.9rem;">{value:.2f}</span>
+def render_best_setup_hero(setup: TradeSetup, spx: float, engine: SPXProphetEngine):
+    if not setup:
+        st.markdown("""
+        <div style="
+            background: #f8fafc;
+            border: 2px dashed #e2e8f0;
+            border-radius: 16px;
+            padding: 40px;
+            text-align: center;
+        ">
+            <p style="font-family: 'Inter', sans-serif; font-size: 1rem; color: #94a3b8; margin: 0;">
+                Waiting for setup...
+            </p>
         </div>
         """, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-def render_confluence_alerts(support_levels: List[ConfluentLevel], resistance_levels: List[ConfluentLevel]):
-    if not support_levels and not resistance_levels:
         return
     
-    st.markdown("""
-    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">🎯 Confluence Zones</p>
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569; margin: 0 0 16px 0;">Multiple cones converging = stronger levels</p>
-    """, unsafe_allow_html=True)
-    
-    for level in resistance_levels:
-        strength_badge = "⭐⭐⭐" if level.strength == "strong" else "⭐⭐"
-        st.markdown(f"""
-        <div style="background: linear-gradient(90deg, #fef2f2 0%, #fee2e2 100%); border: 1px solid #fca5a5; border-radius: 8px; padding: 12px 16px; margin: 8px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <span style="font-weight: 600; color: #dc2626;">RESISTANCE</span>
-                    <span style="margin-left: 8px; font-size: 0.8rem;">{strength_badge}</span>
-                </div>
-                <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #dc2626;">{level.price:,.2f}</span>
-            </div>
-            <p style="font-size: 0.75rem; color: #991b1b; margin: 4px 0 0 0;">{', '.join(level.cones)}</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    for level in support_levels:
-        strength_badge = "⭐⭐⭐" if level.strength == "strong" else "⭐⭐"
-        st.markdown(f"""
-        <div style="background: linear-gradient(90deg, #f0fdf4 0%, #dcfce7 100%); border: 1px solid #86efac; border-radius: 8px; padding: 12px 16px; margin: 8px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <span style="font-weight: 600; color: #059669;">SUPPORT</span>
-                    <span style="margin-left: 8px; font-size: 0.8rem;">{strength_badge}</span>
-                </div>
-                <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #059669;">{level.price:,.2f}</span>
-            </div>
-            <p style="font-size: 0.75rem; color: #065f46; margin: 4px 0 0 0;">{', '.join(level.cones)}</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-def render_setup_card(setup: TradeSetup, spx: float, engine: SPXProphetEngine, is_best: bool = False):
     distance = spx - setup.entry
-    
     risk = engine.calculate_profit(Config.STOP_LOSS_PTS, 1)
     p1 = engine.calculate_profit(setup.reward_1_pts, 1)
     p2 = engine.calculate_profit(setup.reward_2_pts, 1)
     p3 = engine.calculate_profit(setup.reward_3_pts, 1)
     rr = p2 / risk if risk > 0 else 0
     
-    badge = ""
-    if is_best:
-        badge = '<span style="background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%); color: #000; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; margin-left: 12px;">⭐ BEST SETUP</span>'
-    if setup.is_confluent:
-        badge += '<span style="background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%); color: #fff; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; margin-left: 8px;">🎯 CONFLUENCE</span>'
-    
-    # Set background based on direction for best setup
-    if is_best:
-        if setup.direction == Bias.CALLS:
-            bg = "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)"
-            border = "2px solid #059669"
-        else:
-            bg = "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
-            border = "2px solid #dc2626"
+    if setup.direction == Bias.CALLS:
+        gradient = "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)"
+        border = "#10b981"
+        glow = "0 8px 32px rgba(16, 185, 129, 0.2)"
     else:
-        bg = "#ffffff"
-        border = "1px solid #e2e8f0"
+        gradient = "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"
+        border = "#ef4444"
+        glow = "0 8px 32px rgba(239, 68, 68, 0.2)"
     
-    label_style = "font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;"
-    value_style = "font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #1e293b; margin: 0;"
-    small_value = "font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 500; color: #334155; margin: 0;"
+    confluence_badge = ""
+    if setup.is_confluent:
+        confluence_badge = '<span style="background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%); color: white; padding: 4px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; margin-left: 10px;">🎯 CONFLUENCE</span>'
     
     st.markdown(f"""
-    <div style="background: {bg}; border: {border}; border-radius: 16px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <div>
-                <span style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: {setup.direction.color};">{setup.direction.arrow} {setup.direction.label}</span>
-                {badge}
+    <div style="
+        background: {gradient};
+        border: 2px solid {border};
+        border-radius: 20px;
+        padding: 24px;
+        margin-bottom: 24px;
+        box-shadow: {glow};
+    ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="
+                    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+                    padding: 6px 12px;
+                    border-radius: 8px;
+                    font-family: 'Inter', sans-serif;
+                    font-size: 0.7rem;
+                    font-weight: 700;
+                    color: #000;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                ">⭐ Best Setup</span>
+                <span style="
+                    font-family: 'JetBrains Mono', monospace;
+                    font-size: 1.5rem;
+                    font-weight: 800;
+                    color: {setup.direction.color};
+                ">{setup.direction.arrow} {setup.direction.label}</span>
+                {confluence_badge}
             </div>
-            <span style="{label_style}">{setup.cone.pivot.name} Cone</span>
+            <span style="
+                font-family: 'Inter', sans-serif;
+                font-size: 0.8rem;
+                font-weight: 600;
+                color: #64748b;
+            ">{setup.cone.pivot.name} Cone</span>
         </div>
         
-        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px;">
-            <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center; border: 2px solid {setup.direction.color};">
-                <p style="{label_style}">Entry</p>
-                <p style="{value_style}">{setup.entry:,.2f}</p>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px;">
+            <div style="
+                background: rgba(255,255,255,0.9);
+                padding: 16px;
+                border-radius: 12px;
+                text-align: center;
+                border: 2px solid {setup.direction.color};
+                box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            ">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px 0;">Entry</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 700; color: #0f172a; margin: 0;">{setup.entry:,.2f}</p>
             </div>
-            <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center; border: 1px solid #fca5a5;">
-                <p style="{label_style}">Stop</p>
-                <p style="{value_style} color: #dc2626;">{setup.stop:,.2f}</p>
+            <div style="
+                background: rgba(254,226,226,0.5);
+                padding: 16px;
+                border-radius: 12px;
+                text-align: center;
+                border: 1px solid #fca5a5;
+            ">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px 0;">Stop</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 700; color: #dc2626; margin: 0;">{setup.stop:,.2f}</p>
             </div>
-            <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center;">
-                <p style="{label_style}">12.5%</p>
-                <p style="{value_style}">{setup.target_1:,.2f}</p>
+            <div style="background: rgba(255,255,255,0.7); padding: 16px; border-radius: 12px; text-align: center;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px 0;">T1 (12.5%)</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 700; color: #059669; margin: 0;">{setup.target_1:,.2f}</p>
             </div>
-            <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center;">
-                <p style="{label_style}">25%</p>
-                <p style="{value_style}">{setup.target_2:,.2f}</p>
+            <div style="background: rgba(255,255,255,0.7); padding: 16px; border-radius: 12px; text-align: center;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px 0;">T2 (25%)</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 700; color: #059669; margin: 0;">{setup.target_2:,.2f}</p>
             </div>
-            <div style="background: rgba(255,255,255,0.8); padding: 12px; border-radius: 10px; text-align: center;">
-                <p style="{label_style}">50%</p>
-                <p style="{value_style}">{setup.target_3:,.2f}</p>
+            <div style="background: rgba(255,255,255,0.7); padding: 16px; border-radius: 12px; text-align: center;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 6px 0;">T3 (50%)</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.25rem; font-weight: 700; color: #059669; margin: 0;">{setup.target_3:,.2f}</p>
             </div>
         </div>
         
-        <div style="display: flex; justify-content: space-between; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.1);">
+        <div style="
+            display: flex;
+            justify-content: space-between;
+            padding-top: 16px;
+            border-top: 1px solid rgba(0,0,0,0.08);
+        ">
             <div style="text-align: center;">
-                <p style="{label_style}">Distance</p>
-                <p style="{small_value}">{distance:+.2f} pts</p>
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; margin: 0 0 4px 0;">Distance</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 600; color: #334155; margin: 0;">{distance:+.1f} pts</p>
             </div>
             <div style="text-align: center;">
-                <p style="{label_style}">Strike</p>
-                <p style="{small_value}">{setup.strike}</p>
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; margin: 0 0 4px 0;">Strike</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 600; color: #334155; margin: 0;">{setup.strike}</p>
             </div>
             <div style="text-align: center;">
-                <p style="{label_style}">Width</p>
-                <p style="{small_value}">{setup.cone.width:.1f} pts</p>
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; margin: 0 0 4px 0;">Width</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 600; color: #334155; margin: 0;">{setup.cone.width:.1f} pts</p>
             </div>
             <div style="text-align: center;">
-                <p style="{label_style}">R:R @25%</p>
-                <p style="{small_value}">{rr:.1f}:1</p>
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; margin: 0 0 4px 0;">R:R @T2</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 600; color: #334155; margin: 0;">{rr:.1f}:1</p>
             </div>
             <div style="text-align: center;">
-                <p style="{label_style}">Profit @25%</p>
-                <p style="{small_value} color: #059669;">${p2:,.0f}</p>
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; margin: 0 0 4px 0;">Risk</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 600; color: #dc2626; margin: 0;">${risk:,.0f}</p>
+            </div>
+            <div style="text-align: center;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; margin: 0 0 4px 0;">Profit @T2</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 600; color: #059669; margin: 0;">${p2:,.0f}</p>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 
-def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSetup]):
-    label_style = "font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;"
-    value_style = "font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 600; color: #1e293b; margin: 0;"
+def render_vix_ladder_compact(zone: VIXZone):
+    levels = [
+        ("+2", zone.get_extension(2), "#94a3b8", "#f8fafc"),
+        ("+1", zone.get_extension(1), "#94a3b8", "#f8fafc"),
+        ("TOP", zone.top, "#10b981", "#dcfce7"),
+        ("VIX", zone.current, "#1e40af", "#dbeafe"),
+        ("BTM", zone.bottom, "#ef4444", "#fee2e2"),
+        ("-1", zone.get_extension(-1), "#94a3b8", "#f8fafc"),
+        ("-2", zone.get_extension(-2), "#94a3b8", "#f8fafc"),
+    ]
     
-    st.markdown('<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">', unsafe_allow_html=True)
-    st.markdown('<p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Position Calculator</p>', unsafe_allow_html=True)
+    rows_html = ""
+    for label, value, color, bg in levels:
+        weight = "700" if label in ["VIX", "TOP", "BTM"] else "500"
+        border = f"2px solid {color}" if label == "VIX" else f"1px solid #e2e8f0"
+        rows_html += f"""
+        <div style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin: 3px 0;
+            background: {bg};
+            border: {border};
+            border-radius: 8px;
+        ">
+            <span style="font-family: 'Inter', sans-serif; font-weight: {weight}; color: {color}; font-size: 0.75rem;">{label}</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-weight: {weight}; color: {color}; font-size: 0.85rem;">{value:.2f}</span>
+        </div>
+        """
     
-    risk_budget = st.number_input("Risk Budget ($)", min_value=100, max_value=100000, value=1000, step=100, key="pos_calc_risk")
+    st.markdown(f"""
+    <div style="
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    ">
+        <p style="
+            font-family: 'Inter', sans-serif;
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin: 0 0 12px 0;
+        ">VIX Ladder</p>
+        {rows_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_confluence_compact(support: List[ConfluentLevel], resistance: List[ConfluentLevel]):
+    if not support and not resistance:
+        st.markdown("""
+        <div style="
+            background: #f8fafc;
+            border: 1px dashed #e2e8f0;
+            border-radius: 16px;
+            padding: 20px;
+            text-align: center;
+        ">
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.85rem; color: #94a3b8; margin: 0;">
+                No confluence detected
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+    
+    items_html = ""
+    for level in resistance:
+        stars = "⭐⭐⭐" if level.strength == "strong" else "⭐⭐"
+        items_html += f"""
+        <div style="
+            background: linear-gradient(90deg, #fef2f2 0%, #fee2e2 100%);
+            border-left: 3px solid #ef4444;
+            padding: 10px 12px;
+            border-radius: 0 8px 8px 0;
+            margin: 6px 0;
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-family: 'Inter', sans-serif; font-size: 0.7rem; font-weight: 600; color: #dc2626;">RESISTANCE {stars}</span>
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: #dc2626;">{level.price:,.0f}</span>
+            </div>
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #991b1b; margin: 4px 0 0 0;">{', '.join(level.cones)}</p>
+        </div>
+        """
+    
+    for level in support:
+        stars = "⭐⭐⭐" if level.strength == "strong" else "⭐⭐"
+        items_html += f"""
+        <div style="
+            background: linear-gradient(90deg, #f0fdf4 0%, #dcfce7 100%);
+            border-left: 3px solid #10b981;
+            padding: 10px 12px;
+            border-radius: 0 8px 8px 0;
+            margin: 6px 0;
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-family: 'Inter', sans-serif; font-size: 0.7rem; font-weight: 600; color: #059669;">SUPPORT {stars}</span>
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; color: #059669;">{level.price:,.0f}</span>
+            </div>
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #065f46; margin: 4px 0 0 0;">{', '.join(level.cones)}</p>
+        </div>
+        """
+    
+    st.markdown(f"""
+    <div style="
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    ">
+        <p style="
+            font-family: 'Inter', sans-serif;
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin: 0 0 12px 0;
+        ">🎯 Confluence Zones</p>
+        {items_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_position_calc_compact(engine: SPXProphetEngine, setup: Optional[TradeSetup]):
+    st.markdown("""
+    <div style="
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    ">
+        <p style="
+            font-family: 'Inter', sans-serif;
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin: 0 0 12px 0;
+        ">Position Calculator</p>
+    """, unsafe_allow_html=True)
+    
+    risk_budget = st.number_input("Risk Budget", min_value=100, max_value=100000, value=1000, step=100, 
+                                  label_visibility="collapsed", key="pos_calc_main")
     
     if setup:
         contracts = engine.calculate_max_contracts(risk_budget)
@@ -1361,120 +1437,32 @@ def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSe
         p3 = engine.calculate_profit(setup.reward_3_pts, contracts)
         
         st.markdown(f"""
-        <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-radius: 12px; margin: 16px 0;">
-            <p style="{label_style}">Max Contracts</p>
-            <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: #1e40af; margin: 0; letter-spacing: -1px;">{contracts}</p>
+        <div style="text-align: center; padding: 16px; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-radius: 10px; margin: 12px 0;">
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin: 0 0 4px 0;">Contracts</p>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 2rem; font-weight: 800; color: #1e40af; margin: 0;">{contracts}</p>
         </div>
         
-        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
-            <div style="background: #fef2f2; padding: 16px; border-radius: 10px; text-align: center;">
-                <p style="{label_style}">Max Risk</p>
-                <p style="{value_style} color: #dc2626;">${risk_total:,.0f}</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div style="background: #fef2f2; padding: 10px; border-radius: 8px; text-align: center;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; font-weight: 600; color: #94a3b8; margin: 0 0 2px 0;">RISK</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 700; color: #dc2626; margin: 0;">${risk_total:,.0f}</p>
             </div>
-            <div style="background: #f0fdf4; padding: 16px; border-radius: 10px; text-align: center;">
-                <p style="{label_style}">@ 12.5%</p>
-                <p style="{value_style} color: #059669;">${p1:,.0f}</p>
+            <div style="background: #f0fdf4; padding: 10px; border-radius: 8px; text-align: center;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; font-weight: 600; color: #94a3b8; margin: 0 0 2px 0;">@T1</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 700; color: #059669; margin: 0;">${p1:,.0f}</p>
             </div>
-            <div style="background: #f0fdf4; padding: 16px; border-radius: 10px; text-align: center;">
-                <p style="{label_style}">@ 25%</p>
-                <p style="{value_style} color: #059669;">${p2:,.0f}</p>
+            <div style="background: #f0fdf4; padding: 10px; border-radius: 8px; text-align: center;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; font-weight: 600; color: #94a3b8; margin: 0 0 2px 0;">@T2</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 700; color: #059669; margin: 0;">${p2:,.0f}</p>
             </div>
-            <div style="background: #f0fdf4; padding: 16px; border-radius: 10px; text-align: center;">
-                <p style="{label_style}">@ 50%</p>
-                <p style="{value_style} color: #059669;">${p3:,.0f}</p>
+            <div style="background: #f0fdf4; padding: 10px; border-radius: 8px; text-align: center;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; font-weight: 600; color: #94a3b8; margin: 0 0 2px 0;">@T3</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 700; color: #059669; margin: 0;">${p3:,.0f}</p>
             </div>
         </div>
         """, unsafe_allow_html=True)
-    else:
-        st.info("Configure a setup to calculate position sizing")
     
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-def render_cone_table(cones: List[ConeRails], best_name: str):
-    st.markdown('<p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 24px 0 12px 0;">Cone Rails</p>', unsafe_allow_html=True)
-    
-    data = []
-    for c in cones:
-        status = "⭐ BEST" if c.pivot.name == best_name else ("✓" if c.is_tradeable else "✗")
-        data.append({
-            "Pivot": c.pivot.name,
-            "Ascending": f"{c.ascending:,.2f}",
-            "Descending": f"{c.descending:,.2f}",
-            "Width": f"{c.width:.1f}",
-            "Blocks": c.blocks,
-            "Status": status
-        })
-    
-    if data:
-        st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
-
-
-def render_historical_results(session_data: Dict, setup: TradeSetup, hits: List[LevelHit], 
-                             pnl: float, pnl_note: str, engine: SPXProphetEngine):
-    label_style = "font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;"
-    value_style = "font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 500; color: #334155; margin: 0;"
-    
-    st.markdown(f"""
-    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 16px 0;">Session Results</p>
-        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px;">
-            <div style="text-align: center; padding: 12px; background: #f8fafc; border-radius: 8px;">
-                <p style="{label_style}">Open</p>
-                <p style="{value_style}">{session_data['open']:,.2f}</p>
-            </div>
-            <div style="text-align: center; padding: 12px; background: #f0fdf4; border-radius: 8px;">
-                <p style="{label_style}">High</p>
-                <p style="{value_style} color: #059669;">{session_data['high']:,.2f}</p>
-            </div>
-            <div style="text-align: center; padding: 12px; background: #fef2f2; border-radius: 8px;">
-                <p style="{label_style}">Low</p>
-                <p style="{value_style} color: #dc2626;">{session_data['low']:,.2f}</p>
-            </div>
-            <div style="text-align: center; padding: 12px; background: #f8fafc; border-radius: 8px;">
-                <p style="{label_style}">Close</p>
-                <p style="{value_style}">{session_data['close']:,.2f}</p>
-            </div>
-            <div style="text-align: center; padding: 12px; background: #eff6ff; border-radius: 8px;">
-                <p style="{label_style}">Range</p>
-                <p style="{value_style} color: #1e40af;">{session_data['range']:.2f}</p>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Level hits
-    st.markdown('<p style="font-family: -apple-system, sans-serif; font-size: 0.7rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; margin: 0 0 12px 0;">Level Hits</p>', unsafe_allow_html=True)
-    
-    for hit in hits:
-        icon = "✓" if hit.was_hit else "○"
-        color = "#059669" if hit.was_hit else "#94a3b8"
-        bg = "#f0fdf4" if hit.was_hit else "#f8fafc"
-        
-        if hit.level_name == "Stop" and hit.was_hit:
-            icon = "✗"
-            color = "#dc2626"
-            bg = "#fef2f2"
-        
-        st.markdown(f"""
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; margin: 4px 0; background: {bg}; border-radius: 8px;">
-            <span style="color: {color}; font-weight: 600;">{icon} {hit.level_name}</span>
-            <span style="font-family: 'JetBrains Mono', monospace; color: {color};">{hit.level_price:,.2f}</span>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # P&L Summary
-    pnl_color = "#059669" if pnl >= 0 else "#dc2626"
-    pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
-    pnl_prefix = "+" if pnl >= 0 else ""
-    
-    st.markdown(f"""
-    <div style="margin-top: 16px; padding: 20px; background: {pnl_bg}; border-radius: 12px; text-align: center;">
-        <p style="{label_style}">Theoretical P&L (1 Contract)</p>
-        <p style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: {pnl_color}; margin: 0; letter-spacing: -1px;">{pnl_prefix}${abs(pnl):,.2f}</p>
-        <p style="font-family: -apple-system, sans-serif; font-size: 0.9rem; color: #475569; margin-top: 8px;">{pnl_note}</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -1482,15 +1470,17 @@ def render_historical_results(session_data: Dict, setup: TradeSetup, hits: List[
 # =============================================================================
 
 def render_sidebar(engine: SPXProphetEngine):
-    st.sidebar.markdown("## ⚙️ Configuration")
+    st.sidebar.markdown("""
+    <div style="text-align: center; padding: 10px 0 20px 0;">
+        <span style="font-size: 24px;">⚡</span>
+        <p style="font-family: 'Inter', sans-serif; font-size: 0.8rem; font-weight: 600; color: #64748b; margin: 4px 0 0 0;">Configuration</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Mode
-    st.sidebar.markdown("#### Mode")
-    mode = st.sidebar.radio("", ["Live", "Historical"], horizontal=True, label_visibility="collapsed")
+    mode = st.sidebar.radio("Mode", ["Live", "Historical"], horizontal=True, label_visibility="collapsed")
     
     st.sidebar.markdown("---")
     
-    # Date
     ct_tz = pytz.timezone('America/Chicago')
     today = datetime.now(ct_tz).date()
     
@@ -1501,9 +1491,7 @@ def render_sidebar(engine: SPXProphetEngine):
         session_date = st.sidebar.date_input("Session Date", today - timedelta(days=1), max_value=today)
     
     st.sidebar.markdown("---")
-    
-    # VIX Zone (5pm-6am CT)
-    st.sidebar.markdown("#### VIX Zone")
+    st.sidebar.markdown("##### VIX Zone")
     st.sidebar.caption("Overnight boundaries (5pm-6am CT)")
     
     col1, col2 = st.sidebar.columns(2)
@@ -1514,9 +1502,7 @@ def render_sidebar(engine: SPXProphetEngine):
     zone = VIXZone(vix_bottom, vix_top, vix_current)
     
     st.sidebar.markdown("---")
-    
-    # Prior Day Pivots
-    st.sidebar.markdown("#### Prior Day Pivots")
+    st.sidebar.markdown("##### Prior Day Pivots")
     
     prior_data = fetch_prior_day_data(session_date)
     manual = st.sidebar.checkbox("Manual Input", value=(prior_data is None))
@@ -1541,7 +1527,7 @@ def render_sidebar(engine: SPXProphetEngine):
         prior_date = prior_data['date'].date() if hasattr(prior_data['date'], 'date') else prior_data['date']
         p_high_t = time(11, 30)
         p_low_t = time(14, 0)
-        st.sidebar.success(f"✓ Loaded: {prior_date}")
+        st.sidebar.success(f"✓ {prior_date}")
         st.sidebar.caption(f"H: {p_high:,.2f} | L: {p_low:,.2f} | C: {p_close:,.2f}")
     
     pivots = [
@@ -1550,9 +1536,8 @@ def render_sidebar(engine: SPXProphetEngine):
         Pivot("Prior Close", p_close, ct_tz.localize(datetime.combine(prior_date, time(16, 0))))
     ]
     
-    # Secondary Pivots
     st.sidebar.markdown("---")
-    st.sidebar.markdown("#### Secondary Pivots")
+    st.sidebar.markdown("##### Secondary Pivots")
     
     if st.sidebar.checkbox("High²"):
         col1, col2 = st.sidebar.columns(2)
@@ -1567,7 +1552,7 @@ def render_sidebar(engine: SPXProphetEngine):
         pivots.append(Pivot("Low²", l2_p, ct_tz.localize(datetime.combine(prior_date, l2_t)), "secondary"))
     
     st.sidebar.markdown("---")
-    st.sidebar.caption("SPX Prophet v5.0")
+    st.sidebar.caption("SPX Prophet v6.0 Legendary Edition")
     
     return mode, session_date, zone, pivots
 
@@ -1580,21 +1565,16 @@ def main():
     engine = SPXProphetEngine()
     ct_tz = pytz.timezone('America/Chicago')
     
-    # Fetch data
-    spx_live, prior_data = fetch_spx_data()
+    spx_live, _ = fetch_spx_data()
     spx_price = spx_live or 6000.0
     
-    # Sidebar
     mode, session_date, zone, pivots = render_sidebar(engine)
     
-    # Get phase
     now = engine.get_current_time_ct()
     phase = engine.get_phase(now)
     
-    # Calculate bias
     bias, confidence, explanation = engine.determine_bias(zone)
     
-    # Calculate cones
     if mode == "Live":
         eval_time = ct_tz.localize(datetime.combine(now.date(), time(10, 0)))
         if now.time() > time(10, 0):
@@ -1603,16 +1583,12 @@ def main():
         eval_time = ct_tz.localize(datetime.combine(session_date, time(10, 0)))
     
     cones = [engine.calculate_cone(p, eval_time) for p in pivots]
-    
-    # Find confluence
     support_confluence, resistance_confluence = engine.find_confluence(cones)
     
-    # Find best cone
     valid_cones = [c for c in cones if c.is_tradeable]
     best_cone = max(valid_cones, key=lambda x: x.width) if valid_cones else None
     best_name = best_cone.pivot.name if best_cone else ""
     
-    # Generate setups
     setups = []
     for cone in cones:
         if cone.is_tradeable:
@@ -1620,117 +1596,94 @@ def main():
             if setup:
                 setups.append(setup)
     
-    # Sort setups - best first
     setups.sort(key=lambda s: (s.cone.pivot.name != best_name, not s.is_confluent, -s.cone.width))
-    
     best_setup = setups[0] if setups else None
     
-    # ==========================================================================
-    # RENDER
-    # ==========================================================================
+    # =========================================================================
+    # RENDER - LEGENDARY LAYOUT
+    # =========================================================================
     
-    render_header(spx_price, phase, engine)
+    # Header
+    render_legendary_header(spx_price, phase, engine)
     
-    if mode == "Live":
-        # Top row - Key metrics
-        col1, col2, col3 = st.columns([1, 1, 1])
-        
-        with col1:
-            render_expected_move(zone)
-        
-        with col2:
-            render_bias_card(bias, confidence, explanation)
-        
-        with col3:
-            render_algo_triggers(zone)
-        
-        # Chart
-        st.markdown("---")
-        intraday = fetch_intraday_spx()
-        if intraday is not None and not intraday.empty:
-            fig = create_spx_chart(intraday, cones, setups, zone, bias)
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
-        
-        # Setups
-        st.markdown("---")
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            if setups:
-                st.markdown(f"### {bias.arrow} {bias.label} Setups")
-                for i, setup in enumerate(setups):
-                    render_setup_card(setup, spx_price, engine, is_best=(i == 0))
-            elif bias == Bias.WAIT:
-                st.info("📊 VIX in Base Zone. Potential trend day. Waiting for boundary touch...")
-            else:
-                st.warning("No valid setups. Check cone widths.")
-            
-            render_cone_table(cones, best_name)
-        
-        with col2:
-            render_confluence_alerts(support_confluence, resistance_confluence)
-            render_vix_ladder(zone)
-            render_position_calculator(engine, best_setup)
+    # Chart - Hero Element
+    st.markdown("""
+    <div style="
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 20px;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+    ">
+    """, unsafe_allow_html=True)
     
-    else:
-        # Historical Mode
-        st.markdown(f"### 📊 Historical Analysis: {session_date.strftime('%B %d, %Y')}")
+    intraday = fetch_intraday_spx()
+    fig = create_legendary_chart(intraday, cones, best_setup, spx_price)
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Key Metrics Row
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        render_bias_card_compact(bias, confidence, explanation)
+    
+    with col2:
+        render_algo_triggers_compact(zone)
+    
+    with col3:
+        render_expected_move_compact(zone)
+    
+    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
+    
+    # Best Setup - Prominent
+    render_best_setup_hero(best_setup, spx_price, engine)
+    
+    # Bottom Row
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        render_vix_ladder_compact(zone)
+    
+    with col2:
+        render_confluence_compact(support_confluence, resistance_confluence)
+    
+    with col3:
+        render_position_calc_compact(engine, best_setup)
+    
+    # Cone Table
+    if cones:
+        st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
         
-        session_data = fetch_historical_spx(session_date)
-        
-        if session_data:
-            col1, col2 = st.columns([1, 1])
-            
-            with col1:
-                render_expected_move(zone)
-                render_bias_card(bias, confidence, explanation)
-                render_algo_triggers(zone)
-            
-            with col2:
-                if best_setup:
-                    hits = engine.analyze_level_hits(best_setup, session_data['high'], session_data['low'])
-                    pnl, pnl_note = engine.calculate_theoretical_pnl(best_setup, hits)
-                    render_historical_results(session_data, best_setup, hits, pnl, pnl_note, engine)
-                else:
-                    st.info("Configure pivots to see analysis")
-            
-            st.markdown("---")
-            
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                if setups:
-                    st.markdown("### Setup Analysis")
-                    for i, setup in enumerate(setups):
-                        render_setup_card(setup, session_data['close'], engine, is_best=(i == 0))
-                        
-                        hits = engine.analyze_level_hits(setup, session_data['high'], session_data['low'])
-                        pnl, pnl_note = engine.calculate_theoretical_pnl(setup, hits)
-                        
-                        cols = st.columns(6)
-                        for j, hit in enumerate(hits):
-                            icon = "✓" if hit.was_hit else "○"
-                            if hit.level_name == "Stop" and hit.was_hit:
-                                icon = "✗"
-                            cols[j % 6].markdown(f"**{hit.level_name}**: {icon}")
-                        
-                        st.markdown(f"**P&L (1 contract):** ${pnl:,.2f} ({pnl_note})")
-                        st.markdown("---")
-                
-                render_cone_table(cones, best_name)
-            
-            with col2:
-                render_confluence_alerts(support_confluence, resistance_confluence)
-                render_vix_ladder(zone)
-                render_position_calculator(engine, best_setup)
-        else:
-            st.error(f"No data available for {session_date}")
+        with st.expander("📊 All Cone Rails", expanded=False):
+            data = []
+            for c in cones:
+                status = "⭐ BEST" if c.pivot.name == best_name else ("✓" if c.is_tradeable else "✗")
+                data.append({
+                    "Pivot": c.pivot.name,
+                    "Ascending ↑": f"{c.ascending:,.2f}",
+                    "Descending ↓": f"{c.descending:,.2f}",
+                    "Width": f"{c.width:.1f}",
+                    "Blocks": c.blocks,
+                    "Status": status
+                })
+            st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
     
     # Footer
-    st.markdown("---")
-    st.caption("SPX Prophet v5.0 | Institutional SPX Prediction System | Data: Yahoo Finance | Not Financial Advice")
+    st.markdown("""
+    <div style="
+        text-align: center;
+        padding: 24px 0;
+        margin-top: 24px;
+        border-top: 1px solid #e2e8f0;
+    ">
+        <p style="font-family: 'Inter', sans-serif; font-size: 0.75rem; color: #94a3b8; margin: 0;">
+            SPX Prophet v6.0 Legendary Edition • Institutional SPX Prediction System • Not Financial Advice
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
