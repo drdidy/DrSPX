@@ -1,5 +1,5 @@
 """
-SPX PROPHET v4.1 - Institutional Grade 0DTE SPX Options Decision Support System
+SPX PROPHET v4.2 - Institutional Grade 0DTE SPX Options Decision Support System
 """
 
 import streamlit as st
@@ -8,8 +8,8 @@ import numpy as np
 from datetime import datetime, timedelta, time, date
 import yfinance as yf
 import pytz
-from dataclasses import dataclass, field
-from typing import Optional, Tuple, List, Dict, Any
+from dataclasses import dataclass
+from typing import Optional, Tuple, List, Dict
 from enum import Enum
 
 # =============================================================================
@@ -22,6 +22,215 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# =============================================================================
+# STYLES - Using regular string (not f-string) to avoid CSS parsing issues
+# =============================================================================
+
+GLOBAL_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+.stApp {
+    background: #0a0f1a;
+}
+
+[data-testid="stSidebar"] {
+    background: #1e293b;
+    border-right: 1px solid #334155;
+}
+
+[data-testid="stSidebar"] .stMarkdown h1,
+[data-testid="stSidebar"] .stMarkdown h2,
+[data-testid="stSidebar"] .stMarkdown h3,
+[data-testid="stSidebar"] .stMarkdown h4 {
+    color: #f8fafc;
+}
+
+[data-testid="stMetricValue"] {
+    font-family: 'JetBrains Mono', monospace;
+    color: #f8fafc;
+}
+
+[data-testid="stMetricLabel"] {
+    color: #94a3b8;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.5px;
+}
+
+.stDataFrame {
+    border-radius: 8px;
+}
+
+footer {visibility: hidden;}
+
+.prophet-card {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.prophet-header {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.prophet-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0;
+    letter-spacing: -0.5px;
+}
+
+.prophet-subtitle {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.7rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin: 4px 0 0 0;
+}
+
+.prophet-value-large {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0;
+}
+
+.prophet-value-medium {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #f8fafc;
+    margin: 0;
+}
+
+.prophet-value-small {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #f8fafc;
+    margin: 0;
+}
+
+.prophet-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.65rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 0;
+}
+
+.prophet-text {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.8rem;
+    color: #cbd5e1;
+    margin: 0;
+}
+
+.prophet-text-muted {
+    font-family: 'Inter', sans-serif;
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin: 0;
+}
+
+.bias-calls {
+    background: linear-gradient(135deg, #064e3b 0%, #1e293b 100%);
+    border: 2px solid #10b981;
+}
+
+.bias-puts {
+    background: linear-gradient(135deg, #7f1d1d 0%, #1e293b 100%);
+    border: 2px solid #ef4444;
+}
+
+.bias-wait {
+    background: linear-gradient(135deg, #78350f 0%, #1e293b 100%);
+    border: 2px solid #f59e0b;
+}
+
+.level-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 14px;
+    margin: 3px 0;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+}
+
+.level-extension {
+    background: #1e293b;
+    color: #64748b;
+}
+
+.level-top {
+    background: #064e3b;
+    color: #10b981;
+    border: 1px solid #10b981;
+}
+
+.level-bottom {
+    background: #7f1d1d;
+    color: #ef4444;
+    border: 1px solid #ef4444;
+}
+
+.level-current {
+    background: #1e3a8a;
+    color: #60a5fa;
+    border: 2px solid #3b82f6;
+    font-weight: 600;
+}
+
+.check-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #1e293b;
+}
+
+.setup-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.setup-box {
+    background: rgba(0,0,0,0.3);
+    border-radius: 6px;
+    padding: 10px 6px;
+    text-align: center;
+}
+
+.stats-row {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 12px;
+    border-top: 1px solid #334155;
+}
+
+.stat-item {
+    text-align: center;
+}
+</style>
+"""
+
+st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 # =============================================================================
 # CONSTANTS
@@ -59,14 +268,15 @@ class Phase(Enum):
 
 
 class Bias(Enum):
-    CALLS = ("CALLS", "#10b981", "📈")
-    PUTS = ("PUTS", "#ef4444", "📉")
-    WAIT = ("WAIT", "#f59e0b", "⏸️")
+    CALLS = ("CALLS", "#10b981", "📈", "bias-calls")
+    PUTS = ("PUTS", "#ef4444", "📉", "bias-puts")
+    WAIT = ("WAIT", "#f59e0b", "⏸️", "bias-wait")
     
-    def __init__(self, label, color, icon):
+    def __init__(self, label, color, icon, css_class):
         self.label = label
         self.color = color
         self.icon = icon
+        self.css_class = css_class
 
 
 class Confidence(Enum):
@@ -120,6 +330,15 @@ class VIXZone:
             return "NORMAL"
         return "HIGH"
     
+    @property
+    def potential_config(self):
+        configs = {
+            "LOW": ("⚠️", "#f59e0b"),
+            "NORMAL": ("✓", "#3b82f6"),
+            "HIGH": ("🔥", "#10b981")
+        }
+        return configs.get(self.potential, ("", "#64748b"))
+    
     def get_extension(self, level):
         if level > 0:
             return round(self.top + (level * self.size), 2)
@@ -132,7 +351,6 @@ class Pivot:
     price: float
     timestamp: datetime
     pivot_type: str = "primary"
-    enabled: bool = True
 
 
 @dataclass
@@ -241,6 +459,17 @@ class SPXProphetEngine:
         next_dt = self.ct_tz.localize(datetime.combine(tomorrow, time(17, 0)))
         return Phase.OVERNIGHT, next_dt - dt
     
+    def get_phase_guidance(self, phase):
+        guidance = {
+            Phase.OVERNIGHT: "Monitor VIX to establish zone boundaries",
+            Phase.ZONE_LOCK: "Zone locked. Identify cone entries. Reliable window.",
+            Phase.DANGER_ZONE: "⚠️ VIX reversals common. Await confirmation.",
+            Phase.RTH: "Execute setups when checklist complete.",
+            Phase.POST_SESSION: "Review session performance.",
+            Phase.MARKET_CLOSED: "Use historical mode for past sessions."
+        }
+        return guidance.get(phase, "")
+    
     def determine_bias(self, zone, phase):
         pos = zone.position_pct
         phase_penalty = 1 if phase == Phase.DANGER_ZONE else 0
@@ -254,7 +483,7 @@ class SPXProphetEngine:
             else:
                 conf_level = max(0, 1 - phase_penalty)
             confidence = [Confidence.NO_TRADE, Confidence.WEAK, Confidence.MODERATE, Confidence.STRONG][conf_level]
-            explanation = f"VIX at TOP ({pos:.0f}%) - Expect VIX down, SPX UP"
+            explanation = "VIX at TOP - Expect VIX down, SPX UP"
             
         elif pos <= Config.ZONE_BOTTOM_PCT:
             bias = Bias.PUTS
@@ -265,15 +494,12 @@ class SPXProphetEngine:
             else:
                 conf_level = max(0, 1 - phase_penalty)
             confidence = [Confidence.NO_TRADE, Confidence.WEAK, Confidence.MODERATE, Confidence.STRONG][conf_level]
-            explanation = f"VIX at BOTTOM ({pos:.0f}%) - Expect VIX up, SPX DOWN"
+            explanation = "VIX at BOTTOM - Expect VIX up, SPX DOWN"
             
         else:
             bias = Bias.WAIT
             confidence = Confidence.NO_TRADE
-            explanation = f"VIX mid-zone ({pos:.0f}%) - No edge, WAIT"
-        
-        if phase == Phase.DANGER_ZONE and bias != Bias.WAIT:
-            explanation += " ⚠️ DANGER ZONE"
+            explanation = "VIX mid-zone - No edge, WAIT"
         
         return bias, confidence, explanation
     
@@ -340,17 +566,11 @@ class SPXProphetEngine:
         hits.append(LevelHit("Entry", setup.entry, LevelStatus.HIT if entry_hit else LevelStatus.NOT_HIT))
         
         if entry_hit:
-            if is_calls:
-                stop_hit = session_low <= setup.stop
-            else:
-                stop_hit = session_high >= setup.stop
+            stop_hit = (session_low <= setup.stop) if is_calls else (session_high >= setup.stop)
             hits.append(LevelHit("Stop", setup.stop, LevelStatus.STOPPED if stop_hit else LevelStatus.NOT_HIT))
             
             for name, price in [("12.5%", setup.target_1), ("25%", setup.target_2), ("50%", setup.target_3)]:
-                if is_calls:
-                    target_hit = session_high >= price
-                else:
-                    target_hit = session_low <= price
+                target_hit = (session_high >= price) if is_calls else (session_low <= price)
                 hits.append(LevelHit(name, price, LevelStatus.HIT if target_hit else LevelStatus.NOT_HIT))
         else:
             hits.append(LevelHit("Stop", setup.stop, LevelStatus.NOT_HIT))
@@ -379,7 +599,7 @@ class SPXProphetEngine:
         highest = max(target_hits, key=lambda x: target_map.get(x[0], 0))
         points = abs(highest[1] - setup.entry)
         
-        return self.calculate_profit(points, contracts), f"{highest[0]} target hit"
+        return self.calculate_profit(points, contracts), highest[0] + " target hit"
 
 
 # =============================================================================
@@ -443,32 +663,6 @@ def fetch_historical_data(target_date):
 
 
 # =============================================================================
-# STYLES
-# =============================================================================
-
-def inject_styles():
-    css = """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    .stApp { background-color: #0f172a; }
-    
-    [data-testid="stSidebar"] {
-        background-color: #1e293b;
-        border-right: 1px solid #334155;
-    }
-    
-    [data-testid="stMetricValue"] {
-        font-family: 'JetBrains Mono', monospace !important;
-    }
-    
-    footer { visibility: hidden; }
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
-
-
-# =============================================================================
 # UI COMPONENTS
 # =============================================================================
 
@@ -480,87 +674,150 @@ def render_header(spx, vix, phase, engine):
     minutes, seconds = divmod(remainder, 60)
     countdown = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     
-    col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1.5, 1.5])
+    guidance = engine.get_phase_guidance(phase)
     
-    with col1:
-        st.markdown("## SPX PROPHET")
-        st.caption("Institutional 0DTE System")
-    
-    with col2:
-        st.metric("SPX", f"{spx:,.2f}")
-    
-    with col3:
-        st.metric("VIX", f"{vix:.2f}")
-    
-    with col4:
-        st.metric("Time (CT)", now.strftime('%I:%M %p'))
-        st.caption(f"{phase.icon} {phase.label}")
-    
-    with col5:
-        st.metric(f"Next: {next_phase.label}", countdown)
+    html = f"""
+    <div class="prophet-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+                <h1 class="prophet-title">SPX PROPHET</h1>
+                <p class="prophet-subtitle">Institutional 0DTE Decision System</p>
+            </div>
+            <div style="display: flex; gap: 24px; align-items: center;">
+                <div style="text-align: right;">
+                    <p class="prophet-label">SPX</p>
+                    <p class="prophet-value-large">{spx:,.2f}</p>
+                </div>
+                <div style="text-align: right;">
+                    <p class="prophet-label">VIX</p>
+                    <p class="prophet-value-large">{vix:.2f}</p>
+                </div>
+                <div style="text-align: right; border-left: 1px solid #334155; padding-left: 24px;">
+                    <p class="prophet-label">{now.strftime('%I:%M:%S %p')} CT</p>
+                    <p class="prophet-value-medium" style="color: {phase.color};">{phase.icon} {phase.label}</p>
+                </div>
+                <div style="text-align: right; background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 8px;">
+                    <p class="prophet-label">Next: {next_phase.label}</p>
+                    <p class="prophet-value-medium" style="color: {next_phase.color};">{countdown}</p>
+                </div>
+            </div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155;">
+            <p class="prophet-text-muted"><span style="color: {phase.color}; font-weight: 600;">{phase.mode}</span> — {guidance}</p>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
-def render_bias_card(bias, confidence, explanation, phase):
-    col1, col2, col3 = st.columns([1, 2, 1])
+def render_bias_card(bias, confidence, explanation, zone, phase):
+    danger_warning = ""
+    if phase == Phase.DANGER_ZONE and bias != Bias.WAIT:
+        danger_warning = '<p style="font-size: 0.7rem; color: #f59e0b; margin-top: 12px;">⚠️ DANGER ZONE - Await confirmation before entry</p>'
     
-    with col2:
-        if phase == Phase.DANGER_ZONE and bias != Bias.WAIT:
-            st.warning(f"⚠️ DANGER ZONE - {bias.icon} {bias.label} bias with caution")
-        
-        st.markdown(f"### {bias.icon} Today's Bias: **{bias.label}**")
-        st.markdown(f"Confidence: `{confidence.dots}` **{confidence.label}**")
-        st.info(explanation)
+    html = f"""
+    <div class="prophet-card {bias.css_class}" style="text-align: center; border-width: 2px;">
+        <p class="prophet-label" style="letter-spacing: 2px; margin-bottom: 8px;">Today's Bias</p>
+        <h2 style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: {bias.color}; margin: 0; letter-spacing: 3px;">{bias.icon} {bias.label}</h2>
+        <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; color: {confidence.color}; margin: 12px 0 4px 0; letter-spacing: 3px;">{confidence.dots}</p>
+        <p style="font-family: 'Inter', sans-serif; font-size: 0.75rem; color: {confidence.color}; margin: 0;">{confidence.label}</p>
+        <div style="margin-top: 16px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: 8px;">
+            <p class="prophet-text">{explanation} ({zone.position_pct:.0f}% in zone)</p>
+        </div>
+        {danger_warning}
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_vix_zone(zone):
-    st.markdown("#### 📊 VIX Zone Ladder")
+    pot_emoji, pot_color = zone.potential_config
     
-    potential_emoji = {"LOW": "⚠️", "NORMAL": "✓", "HIGH": "🔥"}.get(zone.potential, "")
+    levels = [
+        ("+2", zone.get_extension(2), "level-extension"),
+        ("+1", zone.get_extension(1), "level-extension"),
+        ("TOP", zone.top, "level-top"),
+        (f"VIX {zone.current:.2f}", zone.current, "level-current"),
+        ("BOTTOM", zone.bottom, "level-bottom"),
+        ("-1", zone.get_extension(-1), "level-extension"),
+        ("-2", zone.get_extension(-2), "level-extension"),
+    ]
     
-    data = []
-    data.append({"Level": "+2", "Price": f"{zone.get_extension(2):.2f}", "Type": "Extension"})
-    data.append({"Level": "+1", "Price": f"{zone.get_extension(1):.2f}", "Type": "Extension"})
-    data.append({"Level": "TOP", "Price": f"{zone.top:.2f}", "Type": "Zone Edge"})
-    data.append({"Level": "VIX NOW", "Price": f"{zone.current:.2f}", "Type": "Current"})
-    data.append({"Level": "BOTTOM", "Price": f"{zone.bottom:.2f}", "Type": "Zone Edge"})
-    data.append({"Level": "-1", "Price": f"{zone.get_extension(-1):.2f}", "Type": "Extension"})
-    data.append({"Level": "-2", "Price": f"{zone.get_extension(-2):.2f}", "Type": "Extension"})
+    rows_html = ""
+    for label, value, css_class in levels:
+        rows_html += f'<div class="level-row {css_class}"><span>{label}</span><span>{value:.2f}</span></div>'
     
-    st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Zone Size", f"{zone.size:.2f}")
-    col2.metric("Position", f"{zone.position_pct:.0f}%")
-    col3.metric("Potential", f"{potential_emoji} {zone.potential}")
+    html = f"""
+    <div class="prophet-card">
+        <p class="prophet-label" style="margin-bottom: 12px;">📊 VIX Zone Ladder</p>
+        {rows_html}
+        <div style="display: flex; justify-content: space-between; margin-top: 14px; padding-top: 14px; border-top: 1px solid #334155;">
+            <div style="text-align: center; flex: 1;">
+                <p class="prophet-label">Size</p>
+                <p class="prophet-value-small">{zone.size:.2f}</p>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <p class="prophet-label">Position</p>
+                <p class="prophet-value-small">{zone.position_pct:.0f}%</p>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <p class="prophet-label">Potential</p>
+                <p class="prophet-value-small" style="color: {pot_color};">{pot_emoji} {zone.potential}</p>
+            </div>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_checklist(zone, phase, setup, price):
-    st.markdown("#### ✅ Entry Checklist")
-    
     checks = [
-        ("VIX at zone edge", zone.position_pct >= 75 or zone.position_pct <= 25),
-        ("Reliable timing window", phase in [Phase.ZONE_LOCK, Phase.RTH]),
-        ("30-min candle closed", True),
-        ("Price at entry (within 5 pts)", setup and abs(price - setup.entry) <= 5.0),
-        ("Cone width ≥ 18 pts", setup and setup.cone.is_tradeable if setup else False)
+        ("VIX at zone edge (≤25% or ≥75%)", zone.position_pct >= 75 or zone.position_pct <= 25, f"{zone.position_pct:.0f}%"),
+        ("Reliable timing window", phase in [Phase.ZONE_LOCK, Phase.RTH], phase.label),
+        ("30-min candle closed", True, "Manual check"),
+        ("Price at entry (within 5 pts)", setup and abs(price - setup.entry) <= 5.0, f"{abs(price - setup.entry):.1f} pts" if setup else "No setup"),
+        ("Cone width ≥ 18 pts", setup and setup.cone.is_tradeable if setup else False, f"{setup.cone.width:.1f}" if setup else "No setup")
     ]
     
-    for label, passed in checks:
-        icon = "✅" if passed else "⬜"
-        st.markdown(f"{icon} {label}")
+    items_html = ""
+    for label, passed, note in checks:
+        icon = "✓" if passed else "○"
+        icon_color = "#10b981" if passed else "#475569"
+        text_color = "#e2e8f0" if passed else "#64748b"
+        items_html += f"""
+        <div class="check-item">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.1rem; color: {icon_color};">{icon}</span>
+                <span style="font-family: 'Inter', sans-serif; font-size: 0.8rem; color: {text_color};">{label}</span>
+            </div>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #64748b;">{note}</span>
+        </div>
+        """
     
-    if all(p for _, p in checks):
-        st.success("**READY TO ENTER**")
-    else:
-        st.warning("**WAITING FOR CONDITIONS**")
+    all_pass = all(p for _, p, _ in checks)
+    status_bg = "#064e3b" if all_pass else "#1e293b"
+    status_color = "#10b981" if all_pass else "#64748b"
+    status_border = "#10b981" if all_pass else "#334155"
+    status_text = "✓ READY TO ENTER" if all_pass else "WAITING FOR CONDITIONS"
+    
+    html = f"""
+    <div class="prophet-card">
+        <p class="prophet-label" style="margin-bottom: 12px;">✅ Entry Checklist</p>
+        {items_html}
+        <div style="margin-top: 14px; padding: 12px; background: {status_bg}; border-radius: 8px; text-align: center; border: 1px solid {status_border};">
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.8rem; font-weight: 600; color: {status_color}; margin: 0; text-transform: uppercase; letter-spacing: 1px;">{status_text}</p>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_cone_table(cones, best_name):
-    st.markdown("#### 📐 Cone Rails")
+    st.markdown('<p class="prophet-label" style="margin: 20px 0 10px 0;">📐 Cone Rails</p>', unsafe_allow_html=True)
     
     data = []
     for c in cones:
-        status = "⭐ BEST" if c.pivot.name == best_name else ("✓" if c.is_tradeable else "✗")
+        status = "⭐ BEST" if c.pivot.name == best_name else ("✓ Valid" if c.is_tradeable else "✗ Narrow")
         data.append({
             "Pivot": c.pivot.name,
             "Ascending": f"{c.ascending:,.2f}",
@@ -575,34 +832,60 @@ def render_cone_table(cones, best_name):
 
 
 def render_setup_card(setup, price, engine, is_best=False):
-    badge = "⭐ BEST SETUP" if is_best else ""
-    st.markdown(f"##### {setup.direction.icon} {setup.direction.label} Setup - {setup.cone.pivot.name} {badge}")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Entry", f"{setup.entry:,.2f}")
-    col2.metric("Stop", f"{setup.stop:,.2f}")
-    col3.metric("12.5%", f"{setup.target_1:,.2f}")
-    col4.metric("25%", f"{setup.target_2:,.2f}")
-    col5.metric("50%", f"{setup.target_3:,.2f}")
+    best_badge = '<span style="background: #fbbf24; color: #000; padding: 2px 8px; border-radius: 4px; font-size: 0.6rem; font-weight: 600; margin-left: 8px;">⭐ BEST</span>' if is_best else ''
     
     distance = price - setup.entry
+    dist_color = "#10b981" if abs(distance) <= 10 else "#64748b"
+    
+    p1 = engine.calculate_profit(setup.reward_1_pts, 1)
     p2 = engine.calculate_profit(setup.reward_2_pts, 1)
+    p3 = engine.calculate_profit(setup.reward_3_pts, 1)
     risk = engine.calculate_profit(Config.STOP_LOSS_PTS, 1)
     rr = p2 / risk if risk > 0 else 0
     
-    col1, col2, col3, col4 = st.columns(4)
-    col1.caption(f"Distance: **{distance:+.2f}** pts")
-    col2.caption(f"Strike: **{setup.strike}**")
-    col3.caption(f"R:R @25%: **{rr:.1f}:1**")
-    col4.caption(f"Profit @25%: **${p2:,.0f}**")
+    def box(label, value, highlight=False, is_stop=False):
+        border = f"border: 1px solid {setup.direction.color};" if highlight else ("border: 1px solid #ef4444;" if is_stop else "")
+        return f"""<div class="setup-box" style="{border}">
+            <p class="prophet-label" style="margin-bottom: 4px;">{label}</p>
+            <p class="prophet-value-small">{value:,.2f}</p>
+        </div>"""
     
-    st.markdown("---")
+    def stat(label, value, color="#f8fafc"):
+        return f"""<div class="stat-item">
+            <p class="prophet-label">{label}</p>
+            <p class="prophet-value-small" style="color: {color}; margin-top: 2px;">{value}</p>
+        </div>"""
+    
+    html = f"""
+    <div class="prophet-card {setup.direction.css_class}" style="border-width: 2px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 1rem; font-weight: 700; color: {setup.direction.color};">{setup.direction.icon} {setup.direction.label} SETUP{best_badge}</span>
+            <span class="prophet-text-muted">{setup.cone.pivot.name} Cone</span>
+        </div>
+        <div class="setup-grid">
+            {box("Entry", setup.entry, True)}
+            {box("Stop", setup.stop, False, True)}
+            {box("12.5%", setup.target_1)}
+            {box("25%", setup.target_2)}
+            {box("50%", setup.target_3)}
+        </div>
+        <div class="stats-row">
+            {stat("Distance", f"{distance:+.2f} pts", dist_color)}
+            {stat("Strike", str(setup.strike))}
+            {stat("Width", f"{setup.cone.width:.1f}")}
+            {stat("R:R @25%", f"{rr:.1f}:1")}
+            {stat("Profit @25%", f"${p2:,.0f}", "#10b981")}
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_position_calculator(engine, setup):
-    st.markdown("#### 💰 Position Calculator")
+    st.markdown('<p class="prophet-label" style="margin-bottom: 12px;">💰 Position Calculator</p>', unsafe_allow_html=True)
     
-    risk_budget = st.number_input("Risk Budget ($)", 100, 100000, 1000, 100)
+    risk_budget = st.number_input("Risk Budget ($)", 100, 100000, 1000, 100, label_visibility="collapsed")
+    st.caption("Risk Budget ($)")
     
     if setup:
         contracts = engine.calculate_max_contracts(risk_budget)
@@ -611,46 +894,109 @@ def render_position_calculator(engine, setup):
         p2 = engine.calculate_profit(setup.reward_2_pts, contracts)
         p3 = engine.calculate_profit(setup.reward_3_pts, contracts)
         
-        st.metric("Max Contracts", contracts)
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Risk", f"${risk_total:,.0f}")
-        col2.metric("@ 12.5%", f"${p1:,.0f}")
-        col3.metric("@ 25%", f"${p2:,.0f}")
-        col4.metric("@ 50%", f"${p3:,.0f}")
+        html = f"""
+        <div style="background: #1e293b; border-radius: 8px; padding: 14px; text-align: center; margin: 12px 0; border: 1px solid #334155;">
+            <p class="prophet-label">Max Contracts</p>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; color: #10b981; margin: 4px 0 0 0;">{contracts}</p>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div style="background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;">
+                <p class="prophet-label">Risk</p>
+                <p class="prophet-value-small" style="color: #ef4444; margin-top: 4px;">${risk_total:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;">
+                <p class="prophet-label">@ 12.5%</p>
+                <p class="prophet-value-small" style="color: #10b981; margin-top: 4px;">${p1:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;">
+                <p class="prophet-label">@ 25%</p>
+                <p class="prophet-value-small" style="color: #10b981; margin-top: 4px;">${p2:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;">
+                <p class="prophet-label">@ 50%</p>
+                <p class="prophet-value-small" style="color: #10b981; margin-top: 4px;">${p3:,.0f}</p>
+            </div>
+        </div>
+        """
+        st.markdown(html, unsafe_allow_html=True)
+    else:
+        st.info("Configure a valid setup first")
 
 
 def render_historical_analysis(session_data, setup, hits, pnl, pnl_note, engine):
-    st.markdown("#### 📊 Session Stats")
+    html = f"""
+    <div class="prophet-card">
+        <p class="prophet-label" style="margin-bottom: 16px;">📊 Session Stats</p>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px;">
+            <div style="text-align: center;">
+                <p class="prophet-label">Open</p>
+                <p class="prophet-value-small">{session_data['open']:,.2f}</p>
+            </div>
+            <div style="text-align: center;">
+                <p class="prophet-label">High</p>
+                <p class="prophet-value-small" style="color: #10b981;">{session_data['high']:,.2f}</p>
+            </div>
+            <div style="text-align: center;">
+                <p class="prophet-label">Low</p>
+                <p class="prophet-value-small" style="color: #ef4444;">{session_data['low']:,.2f}</p>
+            </div>
+            <div style="text-align: center;">
+                <p class="prophet-label">Close</p>
+                <p class="prophet-value-small">{session_data['close']:,.2f}</p>
+            </div>
+            <div style="text-align: center;">
+                <p class="prophet-label">Range</p>
+                <p class="prophet-value-small" style="color: #3b82f6;">{session_data['range']:.2f}</p>
+            </div>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
     
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Open", f"{session_data['open']:,.2f}")
-    col2.metric("High", f"{session_data['high']:,.2f}")
-    col3.metric("Low", f"{session_data['low']:,.2f}")
-    col4.metric("Close", f"{session_data['close']:,.2f}")
-    col5.metric("Range", f"{session_data['range']:.2f}")
+    st.markdown('<p class="prophet-label" style="margin: 16px 0 8px 0;">Level Hits</p>', unsafe_allow_html=True)
     
-    st.markdown("##### Level Hits")
+    hits_html = ""
     for hit in hits:
-        st.markdown(f"{hit.status.icon} **{hit.level_name}**: {hit.level_price:,.2f} - {hit.status.label}")
+        hits_html += f"""
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; margin: 4px 0; background: #1e293b; border-radius: 6px; border-left: 3px solid {hit.status.color};">
+            <span class="prophet-text">{hit.level_name}</span>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #94a3b8;">{hit.level_price:,.2f}</span>
+            <span style="font-family: 'Inter', sans-serif; font-size: 0.75rem; color: {hit.status.color}; font-weight: 600;">{hit.status.icon} {hit.status.label}</span>
+        </div>
+        """
     
-    pnl_display = f"+${pnl:,.2f}" if pnl >= 0 else f"-${abs(pnl):,.2f}"
-    st.metric("Theoretical P&L (1 contract)", pnl_display, delta=pnl_note)
+    pnl_color = "#10b981" if pnl >= 0 else "#ef4444"
+    pnl_prefix = "+" if pnl >= 0 else ""
+    
+    html2 = f"""
+    <div style="margin-top: 8px;">{hits_html}</div>
+    <div style="margin-top: 16px; padding: 16px; background: #1e293b; border-radius: 8px; border: 1px solid #334155;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <p class="prophet-label">Theoretical P&L (1 contract)</p>
+                <p class="prophet-text-muted" style="margin-top: 4px;">{pnl_note}</p>
+            </div>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; color: {pnl_color}; margin: 0;">{pnl_prefix}${abs(pnl):,.2f}</p>
+        </div>
+    </div>
+    """
+    st.markdown(html2, unsafe_allow_html=True)
 
 
 def render_trade_rules():
-    st.markdown("#### 📖 Trade Rules")
-    st.markdown("""
-    **Entry:** CALLS at descending rail • PUTS at ascending rail
-    
-    **Stop:** 6 points from entry
-    
-    **Targets:** 12.5% → 25% → 50% of cone width
-    
-    **Confirmation:** Wait for 30-min candle CLOSE
-    
-    **⚠️ Danger Zone:** 6:30-9:30 AM CT - Reversals common
-    """)
+    html = """
+    <div class="prophet-card">
+        <p class="prophet-label" style="margin-bottom: 12px;">📖 Trade Rules</p>
+        <div class="prophet-text" style="line-height: 1.8;">
+            <p style="margin: 0 0 8px 0;"><strong style="color: #f8fafc;">Entry:</strong> CALLS at descending rail • PUTS at ascending rail</p>
+            <p style="margin: 0 0 8px 0;"><strong style="color: #f8fafc;">Stop:</strong> 6 points from entry</p>
+            <p style="margin: 0 0 8px 0;"><strong style="color: #f8fafc;">Targets:</strong> 12.5% → 25% → 50% of cone width</p>
+            <p style="margin: 0 0 8px 0;"><strong style="color: #f8fafc;">Confirmation:</strong> Wait for 30-min candle CLOSE</p>
+            <p style="margin: 0;"><strong style="color: #f59e0b;">⚠️ Danger Zone:</strong> 6:30-9:30 AM CT</p>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -678,6 +1024,7 @@ def render_sidebar(engine, prior_data):
     st.sidebar.markdown("---")
     
     st.sidebar.markdown("#### 📊 VIX Zone")
+    st.sidebar.caption("Overnight range (5pm-2am CT)")
     c1, c2 = st.sidebar.columns(2)
     vix_bottom = c1.number_input("Bottom", 5.0, 100.0, 16.50, 0.01, format="%.2f")
     vix_top = c2.number_input("Top", 5.0, 100.0, 16.65, 0.01, format="%.2f")
@@ -695,6 +1042,7 @@ def render_sidebar(engine, prior_data):
         prior_date -= timedelta(days=prior_date.weekday() - 4)
     
     if manual or prior_data is None:
+        st.sidebar.caption(f"Pivot date: {prior_date}")
         c1, c2 = st.sidebar.columns(2)
         p_high = c1.number_input("High", 1000.0, 10000.0, 6050.0, 1.0)
         p_high_t = c2.time_input("High Time", time(11, 30))
@@ -709,7 +1057,8 @@ def render_sidebar(engine, prior_data):
         prior_date = prior_data['date'].date() if hasattr(prior_data['date'], 'date') else prior_data['date']
         p_high_t = time(11, 30)
         p_low_t = time(14, 0)
-        st.sidebar.success(f"Loaded: {prior_date}")
+        st.sidebar.success(f"✓ Loaded: {prior_date}")
+        st.sidebar.caption(f"H: {p_high:,.2f} | L: {p_low:,.2f} | C: {p_close:,.2f}")
     
     pivots = [
         Pivot("Prior High", p_high, ct_tz.localize(datetime.combine(prior_date, p_high_t))),
@@ -719,6 +1068,7 @@ def render_sidebar(engine, prior_data):
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("#### 📍 Secondary Pivots")
+    st.sidebar.caption("Optional additional levels")
     
     if st.sidebar.checkbox("Enable High²"):
         c1, c2 = st.sidebar.columns(2)
@@ -733,7 +1083,7 @@ def render_sidebar(engine, prior_data):
         pivots.append(Pivot("Low²", l2_p, ct_tz.localize(datetime.combine(prior_date, l2_t)), "secondary"))
     
     st.sidebar.markdown("---")
-    st.sidebar.caption("SPX Prophet v4.1")
+    st.sidebar.caption("SPX Prophet v4.2")
     
     return mode, session_date, zone, pivots
 
@@ -743,7 +1093,6 @@ def render_sidebar(engine, prior_data):
 # =============================================================================
 
 def main():
-    inject_styles()
     engine = SPXProphetEngine()
     ct_tz = pytz.timezone('America/Chicago')
     
@@ -785,7 +1134,7 @@ def main():
     render_header(spx_price, vix_price, phase, engine)
     
     if mode == "Live Trading":
-        render_bias_card(bias, confidence, explanation, phase)
+        render_bias_card(bias, confidence, explanation, zone, phase)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -799,22 +1148,24 @@ def main():
             st.markdown(f"### {bias.icon} {bias.label} Setups")
             for setup in setups:
                 render_setup_card(setup, spx_price, engine, setup.cone.pivot.name == best_name)
+        elif bias == Bias.WAIT:
+            st.info("📊 VIX mid-zone. No directional edge. Waiting...")
         else:
-            st.info("VIX mid-zone. Waiting for edge...")
+            st.warning("No valid setups. Check cone widths.")
         
         st.markdown("---")
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([1, 1])
         with col1:
             render_position_calculator(engine, best_setup)
         with col2:
             render_trade_rules()
     
     else:
-        st.markdown(f"### 📊 Historical: {session_date}")
+        st.markdown(f"### 📊 Historical Analysis: {session_date}")
         session_data = fetch_historical_data(session_date)
         
         if session_data:
-            render_bias_card(bias, confidence, explanation, Phase.POST_SESSION)
+            render_bias_card(bias, confidence, explanation, zone, Phase.POST_SESSION)
             
             col1, col2 = st.columns(2)
             with col1:
@@ -824,21 +1175,31 @@ def main():
                     hits = engine.analyze_level_hits(best_setup, session_data['high'], session_data['low'])
                     pnl, note = engine.calculate_theoretical_pnl(best_setup, hits)
                     render_historical_analysis(session_data, best_setup, hits, pnl, note, engine)
+                else:
+                    st.info("Configure pivots to see analysis")
             
             render_cone_table(cones, best_name)
             
             if setups:
                 st.markdown("### Setup Analysis")
                 for setup in setups:
-                    render_setup_card(setup, session_data['close'], engine, setup.cone.pivot.name == best_name)
-                    hits = engine.analyze_level_hits(setup, session_data['high'], session_data['low'])
-                    pnl, note = engine.calculate_theoretical_pnl(setup, hits)
-                    st.caption(f"Result: {note} | P&L: ${pnl:,.2f}")
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        render_setup_card(setup, session_data['close'], engine, setup.cone.pivot.name == best_name)
+                    with col2:
+                        hits = engine.analyze_level_hits(setup, session_data['high'], session_data['low'])
+                        pnl, note = engine.calculate_theoretical_pnl(setup, hits)
+                        
+                        for hit in hits:
+                            st.markdown(f"<span style='color: {hit.status.color};'>{hit.status.icon}</span> **{hit.level_name}**: {hit.level_price:,.2f}", unsafe_allow_html=True)
+                        
+                        pnl_color = "#10b981" if pnl >= 0 else "#ef4444"
+                        st.markdown(f"**P&L:** <span style='color: {pnl_color};'>${pnl:,.2f}</span> ({note})", unsafe_allow_html=True)
         else:
-            st.error(f"No data for {session_date}")
+            st.error(f"No data for {session_date}. May be weekend/holiday.")
     
     st.markdown("---")
-    st.caption("SPX Prophet v4.1 | Data: Yahoo Finance | Not Financial Advice")
+    st.caption("SPX Prophet v4.2 | Data: Yahoo Finance | Not Financial Advice")
 
 
 if __name__ == "__main__":
