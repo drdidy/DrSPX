@@ -431,6 +431,74 @@ def find_nearest(price: float, cones: List[Cone]) -> Tuple[Cone, str, float]:
     
     return nearest, rail_type, round(min_dist, 2)
 
+def find_active_cone(price: float, cones: List[Cone]) -> Dict:
+    """
+    Determine which cone the current price is inside of, or nearest to.
+    
+    Returns dict with:
+    - inside_cone: The cone price is currently inside (between rails), or None
+    - nearest_cone: Nearest cone if not inside any
+    - nearest_rail: 'ascending' or 'descending'
+    - distance: Distance to nearest rail
+    - position: 'inside', 'above_all', 'below_all', 'between_cones'
+    """
+    result = {
+        'inside_cone': None,
+        'nearest_cone': None,
+        'nearest_rail': None,
+        'distance': 0,
+        'position': 'unknown',
+        'at_rail': False,
+        'rail_type': None
+    }
+    
+    if not cones:
+        return result
+    
+    # Check if price is inside any cone
+    for cone in cones:
+        if cone.descending_rail <= price <= cone.ascending_rail:
+            result['inside_cone'] = cone
+            result['position'] = 'inside'
+            
+            # Check how close to each rail
+            dist_to_asc = cone.ascending_rail - price
+            dist_to_desc = price - cone.descending_rail
+            
+            # Within 3 points of a rail = "at rail"
+            if dist_to_asc <= 3:
+                result['at_rail'] = True
+                result['rail_type'] = 'ascending'
+                result['distance'] = round(dist_to_asc, 2)
+            elif dist_to_desc <= 3:
+                result['at_rail'] = True
+                result['rail_type'] = 'descending'
+                result['distance'] = round(dist_to_desc, 2)
+            else:
+                # In middle of cone
+                result['distance'] = round(min(dist_to_asc, dist_to_desc), 2)
+            
+            return result
+    
+    # Not inside any cone - find nearest
+    nearest, rail_type, min_dist = find_nearest(price, cones)
+    result['nearest_cone'] = nearest
+    result['nearest_rail'] = rail_type
+    result['distance'] = min_dist
+    
+    # Determine if above all or below all
+    all_ascending = [c.ascending_rail for c in cones]
+    all_descending = [c.descending_rail for c in cones]
+    
+    if price > max(all_ascending):
+        result['position'] = 'above_all'
+    elif price < min(all_descending):
+        result['position'] = 'below_all'
+    else:
+        result['position'] = 'between_cones'
+    
+    return result
+
 # ============================================================================
 # TRADE SETUP GENERATION
 # ============================================================================
@@ -921,6 +989,80 @@ def fetch_current_spx() -> float:
         pass
     return 0.0
 
+def render_active_cone_banner(active_cone_info: Dict, spx: float) -> str:
+    """Render the active cone status banner."""
+    if not active_cone_info:
+        return ''
+    
+    inside = active_cone_info.get('inside_cone')
+    nearest = active_cone_info.get('nearest_cone')
+    at_rail = active_cone_info.get('at_rail', False)
+    rail_type = active_cone_info.get('rail_type')
+    distance = active_cone_info.get('distance', 0)
+    position = active_cone_info.get('position', 'unknown')
+    
+    if inside:
+        cone_name = inside.name
+        if at_rail:
+            # At a rail - potential entry!
+            if rail_type == 'ascending':
+                icon = '🎯'
+                color = '#dc2626'
+                bg = '#fef2f2'
+                border = '#ef4444'
+                text = f"AT {cone_name} ASCENDING RAIL (PUTS entry zone)"
+                subtext = f"SPX {spx:,.2f} is {distance:.1f} pts from rail at {inside.ascending_rail:.2f}"
+            else:
+                icon = '🎯'
+                color = '#059669'
+                bg = '#ecfdf5'
+                border = '#10b981'
+                text = f"AT {cone_name} DESCENDING RAIL (CALLS entry zone)"
+                subtext = f"SPX {spx:,.2f} is {distance:.1f} pts from rail at {inside.descending_rail:.2f}"
+        else:
+            # Inside cone but not at rail
+            icon = '📍'
+            color = '#6b7280'
+            bg = '#f9fafb'
+            border = '#d1d5db'
+            text = f"INSIDE {cone_name} CONE"
+            subtext = f"SPX {spx:,.2f} — Rails: ▲{inside.ascending_rail:.2f} / ▼{inside.descending_rail:.2f}"
+    elif nearest:
+        # Outside all cones
+        cone_name = nearest.name
+        nearest_rail = active_cone_info.get('nearest_rail')
+        
+        if position == 'above_all':
+            icon = '⬆️'
+            text = f"ABOVE ALL CONES — Nearest: {cone_name} ascending"
+        elif position == 'below_all':
+            icon = '⬇️'
+            text = f"BELOW ALL CONES — Nearest: {cone_name} descending"
+        else:
+            icon = '↔️'
+            text = f"BETWEEN CONES — Nearest: {cone_name} {nearest_rail}"
+        
+        color = '#d97706'
+        bg = '#fffbeb'
+        border = '#f59e0b'
+        
+        if nearest_rail == 'ascending':
+            subtext = f"SPX {spx:,.2f} is {distance:.1f} pts from {cone_name} ascending rail at {nearest.ascending_rail:.2f}"
+        else:
+            subtext = f"SPX {spx:,.2f} is {distance:.1f} pts from {cone_name} descending rail at {nearest.descending_rail:.2f}"
+    else:
+        return ''
+    
+    return f'''
+    <div style="background:{bg};border:2px solid {border};border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:16px;">
+        <div style="font-size:32px;">{icon}</div>
+        <div>
+            <div style="font-weight:700;font-size:16px;color:{color};">{text}</div>
+            <div style="font-size:13px;color:#6b7280;margin-top:4px;">{subtext}</div>
+        </div>
+    </div>
+    '''
+
 # ============================================================================
 # BEAUTIFUL UI RENDERING
 # ============================================================================
@@ -935,7 +1077,8 @@ def render_dashboard(
     historical_results: List = None,
     session_data: Dict = None,
     is_historical: bool = False,
-    dark_mode: bool = False
+    dark_mode: bool = False,
+    active_cone_info: Dict = None
 ) -> str:
     """Render the complete dashboard HTML."""
     
@@ -1274,6 +1417,8 @@ def render_dashboard(
                     <strong>30-MINUTE CANDLE CLOSE MATTERS:</strong> VIX wicks can pierce levels — always wait for the candle to CLOSE before confirming signal.
                 </div>
             </div>
+            
+            {render_active_cone_banner(active_cone_info, spx) if active_cone_info and not is_historical else ''}
             
             <!-- Main Grid -->
             <div class="grid grid-3">
@@ -1765,17 +1910,21 @@ def main():
                 'vix_filtered': vix.bias in ['CALLS', 'PUTS']
             }
     
+    # Find which cone we're in (for RTH display)
+    active_cone_info = find_active_cone(spx, cones) if cones else None
+    
     # Render
     html = render_dashboard(
         spx, vix, cones, setups, assessment, prior,
         historical_results=historical_results,
         session_data=session_data,
         is_historical=is_historical,
-        dark_mode=st.session_state.dark_mode
+        dark_mode=st.session_state.dark_mode,
+        active_cone_info=active_cone_info
     )
     
     # Adjust height based on historical content
-    height = 1800 if is_historical and historical_results else 1400
+    height = 1800 if is_historical and historical_results else 1500
     components.html(html, height=height, scrolling=True)
 
 if __name__ == "__main__":
