@@ -72,10 +72,19 @@ def get_ct_now() -> datetime:
 
 @dataclass
 class Pivot:
-    price: float
+    price: float              # Main price (highest high for High pivot, lowest close for Low pivot)
     time: datetime
     name: str
     is_secondary: bool = False
+    price_for_ascending: float = 0.0   # Price used for ascending rail
+    price_for_descending: float = 0.0  # Price used for descending rail
+    
+    def __post_init__(self):
+        # If specific prices not set, use main price
+        if self.price_for_ascending == 0.0:
+            self.price_for_ascending = self.price
+        if self.price_for_descending == 0.0:
+            self.price_for_descending = self.price
 
 @dataclass
 class Cone:
@@ -369,12 +378,26 @@ def count_blocks_v2(pivot_time: datetime, eval_time: datetime) -> int:
         return max(int(diff // 1800), 1)
 
 def build_cones(pivots: List[Pivot], eval_time: datetime) -> List[Cone]:
-    """Build cones from pivots at evaluation time."""
+    """
+    Build cones from pivots at evaluation time.
+    
+    IMPORTANT: 
+    - Pivot candle is NOT counted - blocks start from the NEXT candle
+    - High pivot: Ascending uses high price, Descending uses high close
+    - Low pivot: Both rails use lowest close (no wicks)
+    - Close pivot: Both rails use close price
+    """
     cones = []
     for pivot in pivots:
-        blocks = count_blocks_v2(pivot.time, eval_time)
-        ascending = pivot.price + (blocks * SLOPE_PER_30MIN)
-        descending = pivot.price - (blocks * SLOPE_PER_30MIN)
+        # Add 30 minutes to pivot time to skip the pivot candle itself
+        # Counting starts from the NEXT candle after the pivot
+        start_time = pivot.time + timedelta(minutes=30)
+        
+        blocks = count_blocks_v2(start_time, eval_time)
+        
+        # Use specific prices for each rail
+        ascending = pivot.price_for_ascending + (blocks * SLOPE_PER_30MIN)
+        descending = pivot.price_for_descending - (blocks * SLOPE_PER_30MIN)
         width = ascending - descending
         
         cones.append(Cone(
@@ -819,41 +842,65 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
 @st.cache_data(ttl=300)
 def fetch_prior_session(session_date: datetime) -> Optional[Dict]:
     """
-    Fetch prior session High, Low, Close.
+    Fetch prior session High, Low, Close with specific prices for rails.
+    
+    HIGH PIVOT:
+    - Ascending rail uses: Highest PRICE (including wick)
+    - Descending rail uses: Highest 30-min CLOSE
+    
+    LOW PIVOT:
+    - Ascending rail uses: Lowest 30-min CLOSE (no wicks)
+    - Descending rail uses: Lowest 30-min CLOSE (no wicks)
     
     NOTE: For Monday, this returns FRIDAY's data since market is closed Sat/Sun.
-    Yahoo Finance only returns market days, so iloc[-1] automatically gives us
-    the last trading day before session_date.
     """
     try:
         spx = yf.Ticker("^GSPC")
         end = session_date
-        start = end - timedelta(days=10)  # Go back enough to cover weekends/holidays
+        start = end - timedelta(days=10)
         
         df_daily = spx.history(start=start, end=end, interval='1d')
         if len(df_daily) < 1:
             return None
         
-        # This gives us the last trading day BEFORE session_date
-        # For Monday, this is Friday. For Tuesday, this is Monday. etc.
         last = df_daily.iloc[-1]
         prior_date = df_daily.index[-1]
         
-        # Get intraday for pivot times
+        # Get intraday 30-min data for pivot times and close prices
         df_intra = spx.history(start=start, end=end, interval='30m')
+        
+        # Default values
+        high_price = float(last['High'])      # Highest price (with wick)
+        high_close = float(last['High'])      # Will be updated to highest close
+        low_price = float(last['Low'])        # Lowest price (with wick) - not used
+        low_close = float(last['Low'])        # Lowest close - used for both rails
+        
         high_time = CT_TZ.localize(datetime.combine(prior_date.date(), time(12, 0)))
         low_time = CT_TZ.localize(datetime.combine(prior_date.date(), time(12, 0)))
         
         if not df_intra.empty:
             df_intra.index = df_intra.index.tz_convert(CT_TZ)
             day_data = df_intra[df_intra.index.date == prior_date.date()]
+            
             if not day_data.empty:
+                # HIGH PIVOT
+                # - Time of highest HIGH (wick included)
                 high_time = day_data['High'].idxmax()
-                low_time = day_data['Low'].idxmin()
+                high_price = float(day_data['High'].max())
+                # - Highest CLOSE for descending rail
+                high_close = float(day_data['Close'].max())
+                
+                # LOW PIVOT
+                # - Time of lowest CLOSE (we use close, not low wick)
+                low_close_idx = day_data['Close'].idxmin()
+                low_time = low_close_idx
+                low_close = float(day_data['Close'].min())
         
         return {
-            'high': float(last['High']),
-            'low': float(last['Low']),
+            'high': high_price,           # Highest price (for ascending rail of High pivot)
+            'high_close': high_close,     # Highest close (for descending rail of High pivot)
+            'low': low_close,             # Lowest close (for both rails of Low pivot)
+            'low_close': low_close,       # Same as low - both rails use close
             'close': float(last['Close']),
             'date': prior_date,
             'high_time': high_time,
@@ -1606,30 +1653,73 @@ def main():
     
     spx = fetch_current_spx() or prior_close or 6000
     
-    # Build pivots
+    # Build pivots with correct prices for ascending/descending rails
+    # HIGH PIVOT: Ascending = high price (with wick), Descending = high close
+    # LOW PIVOT: Both rails use lowest close (no wicks)
+    # CLOSE PIVOT: Both rails use close price
     pivots = []
     if prior_high > 0:
+        # Get high_close from prior data if available
+        high_close = prior.get('high_close', prior_high) if prior else prior_high
+        
         pivots = [
-            Pivot(prior_high, high_time, 'High'),
-            Pivot(prior_low, low_time, 'Low'),
-            Pivot(prior_close, CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(15, 0))), 'Close'),
+            Pivot(
+                price=prior_high,
+                time=high_time,
+                name='High',
+                is_secondary=False,
+                price_for_ascending=prior_high,      # Use highest HIGH (with wick)
+                price_for_descending=high_close      # Use highest CLOSE
+            ),
+            Pivot(
+                price=prior_low,
+                time=low_time,
+                name='Low',
+                is_secondary=False,
+                price_for_ascending=prior_low,       # Use lowest CLOSE
+                price_for_descending=prior_low       # Use lowest CLOSE (both same)
+            ),
+            Pivot(
+                price=prior_close,
+                time=CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(15, 0))),
+                name='Close',
+                is_secondary=False,
+                price_for_ascending=prior_close,     # Close price
+                price_for_descending=prior_close     # Close price
+            ),
         ]
         
-        # Add High² if enabled (independent)
+        # Add High² if enabled (independent) - same rules as High
         if st.session_state.use_sec_high and st.session_state.sec_high > 0:
             try:
                 h, m = map(int, st.session_state.sec_high_time.split(':'))
                 t = CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(h, m)))
-                pivots.append(Pivot(st.session_state.sec_high, t, 'High²', True))
+                # For secondary high, user enters one price - use it for both
+                # In real usage, they should enter the high price (ascending uses it, descending should use close)
+                pivots.append(Pivot(
+                    price=st.session_state.sec_high,
+                    time=t,
+                    name='High²',
+                    is_secondary=True,
+                    price_for_ascending=st.session_state.sec_high,
+                    price_for_descending=st.session_state.sec_high  # User should enter close ideally
+                ))
             except:
                 pass
         
-        # Add Low² if enabled (independent)
+        # Add Low² if enabled (independent) - same rules as Low (both use close)
         if st.session_state.use_sec_low and st.session_state.sec_low > 0:
             try:
                 h, m = map(int, st.session_state.sec_low_time.split(':'))
                 t = CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(h, m)))
-                pivots.append(Pivot(st.session_state.sec_low, t, 'Low²', True))
+                pivots.append(Pivot(
+                    price=st.session_state.sec_low,
+                    time=t,
+                    name='Low²',
+                    is_secondary=True,
+                    price_for_ascending=st.session_state.sec_low,   # Use close
+                    price_for_descending=st.session_state.sec_low   # Use close
+                ))
             except:
                 pass
     
