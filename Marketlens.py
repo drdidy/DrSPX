@@ -32,16 +32,21 @@ CT_TZ = pytz.timezone('America/Chicago')
 # VIX Zone Constants
 VIX_ZONE_SIZE = 0.15  # Default, but actual size calculated from inputs
 VIX_ZONE_ESTABLISHMENT_START = time(17, 0)   # 5:00 PM CT
-VIX_ZONE_ESTABLISHMENT_END = time(2, 0)       # 2:00 AM CT (next day)
-VIX_RELIABLE_BREAKOUT_START = time(2, 0)      # 2:00 AM CT
+VIX_ZONE_ESTABLISHMENT_END = time(6, 0)       # 6:00 AM CT (next day)
+VIX_RELIABLE_BREAKOUT_START = time(6, 0)      # 6:00 AM CT
 VIX_RELIABLE_BREAKOUT_END = time(6, 30)       # 6:30 AM CT
 VIX_DANGER_ZONE_START = time(6, 30)           # 6:30 AM CT
 VIX_DANGER_ZONE_END = time(9, 30)             # 9:30 AM CT
 
-# VIX Zone Size Thresholds (determines expected SPX move)
-VIX_ZONE_NARROW = 0.20    # Small moves expected
-VIX_ZONE_NORMAL = 0.30    # Normal moves
-VIX_ZONE_WIDE = 0.45      # Big moves expected
+# VIX Zone Size → Expected SPX Move (based on empirical data)
+# Zone Size : (Min SPX pts, Max SPX pts)
+VIX_TO_SPX_MOVE = {
+    0.10: (35, 40),
+    0.15: (40, 45),
+    0.20: (45, 50),
+    0.25: (50, 55),
+    0.30: (55, 60),
+}
 
 # Cone Constants
 SLOPE_PER_30MIN = 0.45  # Points per 30-min block
@@ -93,7 +98,7 @@ class VIXZone:
     zones_above: List[float]
     zones_below: List[float]
     zone_size: float = 0.15  # Actual zone size
-    move_potential: str = 'NORMAL'  # NARROW, NORMAL, WIDE
+    expected_move: tuple = (40, 45)  # Expected SPX move range in points
 
 @dataclass
 class TradeSetup:
@@ -136,30 +141,36 @@ def analyze_vix(bottom: float, top: float, current: float, breakout_hour: int = 
     """
     Analyze VIX position and determine bias.
     
-    IMPORTANT: Zone size is whatever is established between 5pm-2am CT.
-    Could be 0.15, 0.30, 0.45, etc. - calculated from bottom/top inputs.
+    IMPORTANT: Zone size is whatever is established between 5pm-6am CT.
+    Could be 0.10, 0.15, 0.20, 0.25, 0.30, etc. - calculated from bottom/top inputs.
     Extension zones are MULTIPLES of that same zone size.
     
-    Zone size also indicates expected SPX move:
-    - Narrow (< 0.20): Small moves, reduce size or skip
-    - Normal (0.20-0.40): Good setups
-    - Wide (> 0.40): Big moves expected, high potential
+    Zone size indicates expected SPX move:
+    - 0.10 = 35-40 pts
+    - 0.15 = 40-45 pts
+    - 0.20 = 45-50 pts
+    - 0.25 = 50-55 pts
+    - 0.30 = 55-60 pts
     """
     
-    # Calculate zone size from inputs (NOT fixed at 0.15!)
-    zone_size = top - bottom if (top > 0 and bottom > 0 and top > bottom) else 0.15
+    # Calculate zone size from inputs (NOT fixed!)
+    zone_size = round(top - bottom, 2) if (top > 0 and bottom > 0 and top > bottom) else 0.15
     
-    # Determine move potential based on zone size
-    if zone_size < VIX_ZONE_NARROW:
-        move_potential = 'NARROW'
-    elif zone_size >= VIX_ZONE_WIDE:
-        move_potential = 'WIDE'
+    # Determine expected SPX move based on zone size
+    if zone_size <= 0.10:
+        expected_move = (35, 40)
+    elif zone_size <= 0.15:
+        expected_move = (40, 45)
+    elif zone_size <= 0.20:
+        expected_move = (45, 50)
+    elif zone_size <= 0.25:
+        expected_move = (50, 55)
     else:
-        move_potential = 'NORMAL'
+        expected_move = (55, 60)
     
     # Extension zones are multiples of the SAME zone size
-    zones_above = [top + (i * zone_size) for i in range(1, 5)]
-    zones_below = [bottom - (i * zone_size) for i in range(1, 5)]
+    zones_above = [round(top + (i * zone_size), 2) for i in range(1, 5)]
+    zones_below = [round(bottom - (i * zone_size), 2) for i in range(1, 5)]
     
     # Default values
     if bottom <= 0 or top <= 0:
@@ -167,7 +178,7 @@ def analyze_vix(bottom: float, top: float, current: float, breakout_hour: int = 
             bottom=0, top=0, current=current,
             position_pct=0, status='NO_DATA', bias='UNKNOWN',
             breakout_time='NONE', zones_above=zones_above, zones_below=zones_below,
-            zone_size=zone_size, move_potential=move_potential
+            zone_size=zone_size, expected_move=expected_move
         )
     
     if current <= 0:
@@ -175,7 +186,7 @@ def analyze_vix(bottom: float, top: float, current: float, breakout_hour: int = 
             bottom=bottom, top=top, current=0,
             position_pct=0, status='WAITING', bias='UNKNOWN',
             breakout_time='NONE', zones_above=zones_above, zones_below=zones_below,
-            zone_size=zone_size, move_potential=move_potential
+            zone_size=zone_size, expected_move=expected_move
         )
     
     # Calculate position percentage
@@ -188,7 +199,7 @@ def analyze_vix(bottom: float, top: float, current: float, breakout_hour: int = 
     ct_now = get_ct_now()
     current_time = ct_now.time()
     
-    if time(2, 0) <= current_time < time(6, 30):
+    if time(6, 0) <= current_time < time(6, 30):
         breakout_time = 'RELIABLE'
     elif time(6, 30) <= current_time < time(9, 30):
         breakout_time = 'DANGER'
@@ -217,7 +228,7 @@ def analyze_vix(bottom: float, top: float, current: float, breakout_hour: int = 
         bottom=bottom, top=top, current=current,
         position_pct=position_pct, status=status, bias=bias,
         breakout_time=breakout_time, zones_above=zones_above, zones_below=zones_below,
-        zone_size=zone_size, move_potential=move_potential
+        zone_size=zone_size, expected_move=expected_move
     )
 
 # ============================================================================
@@ -771,22 +782,11 @@ def render_dashboard(
         bias_icon = '⏳'
         bias_border = '#9ca3af'
     
-    # Move potential indicator
-    if vix.move_potential == 'WIDE':
-        move_icon = '🔥'
-        move_text = f'HIGH POTENTIAL (Zone: {vix.zone_size:.2f})'
-        move_color = '#059669'
-        move_bg = '#ecfdf5'
-    elif vix.move_potential == 'NARROW':
-        move_icon = '⚠️'
-        move_text = f'LOW POTENTIAL (Zone: {vix.zone_size:.2f})'
-        move_color = '#d97706'
-        move_bg = '#fffbeb'
-    else:
-        move_icon = '✓'
-        move_text = f'NORMAL (Zone: {vix.zone_size:.2f})'
-        move_color = '#6b7280'
-        move_bg = '#f9fafb'
+    # Expected SPX Move indicator
+    move_min, move_max = vix.expected_move
+    move_text = f'Expected SPX Move: {move_min}-{move_max} pts'
+    move_color = '#059669'
+    move_bg = '#ecfdf5'
     
     # VIX action text
     if vix.bias == 'CALLS':
@@ -1094,13 +1094,13 @@ def render_dashboard(
                                 </div>
                             </div>
                             
-                            <!-- Move Potential Indicator -->
+                            <!-- Expected SPX Move Indicator -->
                             <div style="margin-top:16px;padding:12px 16px;background:{move_bg};border-radius:10px;border:1px solid {move_color}20;">
                                 <div style="display:flex;align-items:center;gap:8px;">
-                                    <span style="font-size:20px;">{move_icon}</span>
+                                    <span style="font-size:20px;">📊</span>
                                     <div>
-                                        <div style="font-weight:600;font-size:13px;color:{move_color};">{move_text}</div>
-                                        <div style="font-size:11px;color:#6b7280;">Wider zone = Bigger SPX moves expected</div>
+                                        <div style="font-weight:600;font-size:14px;color:{move_color};">{move_text}</div>
+                                        <div style="font-size:11px;color:#6b7280;">VIX Zone: {vix.zone_size:.2f}</div>
                                     </div>
                                 </div>
                             </div>
@@ -1318,7 +1318,9 @@ def main():
         st.session_state.use_sec_high = False
         st.session_state.use_sec_low = False
         st.session_state.manual_high = 0.0
+        st.session_state.manual_high_time = "10:30"
         st.session_state.manual_low = 0.0
+        st.session_state.manual_low_time = "14:00"
         st.session_state.manual_close = 0.0
         st.session_state.use_manual_pivots = False
     
@@ -1328,7 +1330,7 @@ def main():
         session_date = st.date_input("Date", value=datetime.now().date())
         session_dt = datetime.combine(session_date, time(0, 0))
         
-        st.markdown("### 📊 VIX Zone (5pm-2am CT)")
+        st.markdown("### 📊 VIX Zone (5pm-6am CT)")
         col1, col2 = st.columns(2)
         with col1:
             st.session_state.vix_bottom = st.number_input("Bottom", min_value=0.0, max_value=100.0, value=st.session_state.vix_bottom, step=0.01, format="%.2f")
@@ -1341,8 +1343,18 @@ def main():
         st.session_state.use_manual_pivots = st.checkbox("Manual Input", value=st.session_state.use_manual_pivots, help="Override auto-fetched data")
         
         if st.session_state.use_manual_pivots:
-            st.session_state.manual_high = st.number_input("High", min_value=0.0, max_value=10000.0, value=st.session_state.manual_high, step=0.25, format="%.2f", key="man_h")
-            st.session_state.manual_low = st.number_input("Low", min_value=0.0, max_value=10000.0, value=st.session_state.manual_low, step=0.25, format="%.2f", key="man_l")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.session_state.manual_high = st.number_input("High", min_value=0.0, max_value=10000.0, value=st.session_state.manual_high, step=0.25, format="%.2f", key="man_h")
+            with col2:
+                st.session_state.manual_high_time = st.text_input("High Time (CT)", value=st.session_state.manual_high_time, key="man_ht")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.session_state.manual_low = st.number_input("Low", min_value=0.0, max_value=10000.0, value=st.session_state.manual_low, step=0.25, format="%.2f", key="man_l")
+            with col2:
+                st.session_state.manual_low_time = st.text_input("Low Time (CT)", value=st.session_state.manual_low_time, key="man_lt")
+            
             st.session_state.manual_close = st.number_input("Close", min_value=0.0, max_value=10000.0, value=st.session_state.manual_close, step=0.25, format="%.2f", key="man_c")
         
         st.markdown("### 📐 Secondary Pivots")
@@ -1378,9 +1390,17 @@ def main():
         prior_high = st.session_state.manual_high
         prior_low = st.session_state.manual_low
         prior_close = st.session_state.manual_close
-        # Use noon as default time for manual pivots
-        high_time = CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(12, 0)))
-        low_time = CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(12, 0)))
+        # Parse manual times
+        try:
+            h, m = map(int, st.session_state.manual_high_time.split(':'))
+            high_time = CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(h, m)))
+        except:
+            high_time = CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(10, 30)))
+        try:
+            h, m = map(int, st.session_state.manual_low_time.split(':'))
+            low_time = CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(h, m)))
+        except:
+            low_time = CT_TZ.localize(datetime.combine(session_date - timedelta(days=1), time(14, 0)))
     elif prior:
         prior_high = prior['high']
         prior_low = prior['low']
