@@ -638,7 +638,7 @@ def fetch_live_data():
 def fetch_historical_data(target_date):
     try:
         spx = yf.Ticker("^GSPC")
-        start = target_date - timedelta(days=5)
+        start = target_date - timedelta(days=10)
         end = target_date + timedelta(days=1)
         hist = spx.history(start=start, end=end)
         
@@ -657,6 +657,57 @@ def fetch_historical_data(target_date):
                     'close': float(row['Close']),
                     'range': float(row['High'] - row['Low'])
                 }
+        return None
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=300)
+def fetch_prior_day_data(session_date):
+    """Fetch the trading day BEFORE the given session date (for pivots)"""
+    try:
+        spx = yf.Ticker("^GSPC")
+        # Fetch 10 days of history to account for weekends/holidays
+        start = session_date - timedelta(days=10)
+        end = session_date + timedelta(days=1)
+        hist = spx.history(start=start, end=end)
+        
+        if hist.empty or len(hist) < 2:
+            return None
+        
+        # Find the session date in the index
+        session_str = session_date.strftime('%Y-%m-%d')
+        session_idx = None
+        
+        for i, idx in enumerate(hist.index):
+            if idx.strftime('%Y-%m-%d') == session_str:
+                session_idx = i
+                break
+        
+        # If session found and there's a prior day
+        if session_idx is not None and session_idx > 0:
+            prior_idx = hist.index[session_idx - 1]
+            prior = hist.iloc[session_idx - 1]
+            return {
+                'date': prior_idx,
+                'high': float(prior['High']),
+                'low': float(prior['Low']),
+                'close': float(prior['Close']),
+                'open': float(prior['Open'])
+            }
+        
+        # If session not found (might be today or future), get the last available prior day
+        # This handles the "live" case where session_date = today
+        if len(hist) >= 2:
+            prior = hist.iloc[-2]
+            return {
+                'date': hist.index[-2],
+                'high': float(prior['High']),
+                'low': float(prior['Low']),
+                'close': float(prior['Close']),
+                'open': float(prior['Open'])
+            }
+        
         return None
     except Exception:
         return None
@@ -1003,7 +1054,7 @@ def render_trade_rules():
 # SIDEBAR
 # =============================================================================
 
-def render_sidebar(engine, prior_data):
+def render_sidebar(engine):
     st.sidebar.markdown("## ⚙️ Configuration")
     
     st.sidebar.markdown("#### 📌 Mode")
@@ -1021,6 +1072,9 @@ def render_sidebar(engine, prior_data):
     else:
         session_date = st.sidebar.date_input("Date", today - timedelta(days=1), max_value=today)
     
+    # Fetch prior day data based on selected session date
+    prior_data = fetch_prior_day_data(session_date)
+    
     st.sidebar.markdown("---")
     
     st.sidebar.markdown("#### 📊 VIX Zone")
@@ -1037,9 +1091,10 @@ def render_sidebar(engine, prior_data):
     st.sidebar.markdown("#### 📍 Prior Day Pivots")
     manual = st.sidebar.checkbox("Manual Input", False)
     
+    # Calculate expected prior date (skip weekends)
     prior_date = session_date - timedelta(days=1)
-    if prior_date.weekday() >= 5:
-        prior_date -= timedelta(days=prior_date.weekday() - 4)
+    while prior_date.weekday() >= 5:  # Skip Saturday (5) and Sunday (6)
+        prior_date -= timedelta(days=1)
     
     if manual or prior_data is None:
         st.sidebar.caption(f"Pivot date: {prior_date}")
@@ -1054,6 +1109,7 @@ def render_sidebar(engine, prior_data):
         p_high = prior_data['high']
         p_low = prior_data['low']
         p_close = prior_data['close']
+        # Use the actual date from fetched data
         prior_date = prior_data['date'].date() if hasattr(prior_data['date'], 'date') else prior_data['date']
         p_high_t = time(11, 30)
         p_low_t = time(14, 0)
@@ -1096,11 +1152,11 @@ def main():
     engine = SPXProphetEngine()
     ct_tz = pytz.timezone('America/Chicago')
     
-    spx_live, vix_live, prior_data = fetch_live_data()
+    spx_live, vix_live, _ = fetch_live_data()
     spx_price = spx_live or 6000.0
     vix_price = vix_live or 16.50
     
-    mode, session_date, zone, pivots = render_sidebar(engine, prior_data)
+    mode, session_date, zone, pivots = render_sidebar(engine)
     
     if mode == "Live Trading" and vix_live:
         zone = VIXZone(zone.bottom, zone.top, vix_live)
