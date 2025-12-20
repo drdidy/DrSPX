@@ -1,14 +1,15 @@
 """
 SPX PROPHET - Institutional Grade 0DTE SPX Options Decision Support System
-Version 2.2
+Version 3.0
 
 A systematic approach to 0DTE SPX options trading using VIX zone analysis
 and structural cone methodology.
 
-CHANGES in v2.2:
-- Fixed HTML rendering issues by using native Streamlit components
-- Updated targets to 12.5%, 25%, 50% (more realistic for 0DTE)
-- Simplified UI components for reliability
+DESIGN PRINCIPLES:
+- Institutional-grade dark theme
+- Professional typography hierarchy
+- Clear visual status indicators
+- Realistic targets: 12.5%, 25%, 50%
 """
 
 import streamlit as st
@@ -22,11 +23,107 @@ from typing import Optional, Tuple, List, Dict
 from enum import Enum
 
 # =============================================================================
+# PAGE CONFIG (Must be first Streamlit command)
+# =============================================================================
+
+st.set_page_config(
+    page_title="SPX Prophet",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# =============================================================================
+# GLOBAL STYLES
+# =============================================================================
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Global dark theme */
+.stApp {
+    background: linear-gradient(180deg, #0a0f1a 0%, #0f172a 100%);
+}
+
+/* Hide default Streamlit elements */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+
+/* Container styling */
+.main .block-container {
+    padding: 1rem 2rem 2rem 2rem;
+    max-width: 1400px;
+}
+
+/* Metric styling */
+[data-testid="stMetricValue"] {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 1.1rem !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-family: 'Inter', sans-serif !important;
+    font-size: 0.7rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Dataframe styling */
+.stDataFrame {
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* Sidebar styling */
+[data-testid="stSidebar"] {
+    background: #1e293b;
+}
+
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+    font-size: 0.85rem;
+}
+
+/* Input styling */
+.stNumberInput input, .stTimeInput input, .stTextInput input {
+    background: #1e293b !important;
+    border: 1px solid #334155 !important;
+    border-radius: 6px !important;
+    color: #f8fafc !important;
+    font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* Button styling */
+.stButton > button {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+/* Card base class */
+.prophet-card {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+/* Remove extra spacing */
+.element-container {
+    margin-bottom: 0.5rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# =============================================================================
 # CONFIGURATION & CONSTANTS
 # =============================================================================
 
 class TradingConstants:
-    """Core trading system constants"""
     SLOPE_PER_30MIN = 0.45
     MIN_CONE_WIDTH = 18.0
     STOP_LOSS_PTS = 6.0
@@ -34,40 +131,35 @@ class TradingConstants:
     DELTA = 0.33
     CONTRACT_MULTIPLIER = 100
     
-    # Updated target percentages (more realistic for 0DTE)
+    # Realistic targets for 0DTE
     TARGET_1_PCT = 0.125  # 12.5%
     TARGET_2_PCT = 0.25   # 25%
     TARGET_3_PCT = 0.50   # 50%
     
-    # VIX Zone thresholds
     VIX_ZONE_LOW = 0.20
     VIX_ZONE_NORMAL = 0.30
     VIX_ZONE_HIGH = 0.45
     
-    # Zone position thresholds
     ZONE_TOP_THRESHOLD = 0.75
     ZONE_BOTTOM_THRESHOLD = 0.25
 
 
 class TradingPhase(Enum):
-    """Trading day phases"""
     OVERNIGHT = "Overnight Prep"
-    ZONE_LOCK = "Zone Lock & Analysis"
+    ZONE_LOCK = "Zone Lock"
     DANGER_ZONE = "Danger Zone"
-    RTH = "Regular Trading Hours"
-    POST_SESSION = "Post-Session Review"
+    RTH = "RTH Active"
+    POST_SESSION = "Post-Session"
     MARKET_CLOSED = "Market Closed"
 
 
 class Bias(Enum):
-    """Trading bias"""
     CALLS = "CALLS"
     PUTS = "PUTS"
     WAIT = "WAIT"
 
 
 class Confidence(Enum):
-    """Bias confidence level"""
     STRONG = "STRONG"
     MODERATE = "MODERATE"
     WEAK = "WEAK"
@@ -80,7 +172,6 @@ class Confidence(Enum):
 
 @dataclass
 class VIXZone:
-    """VIX Zone data structure"""
     bottom: float
     top: float
     current: float
@@ -107,13 +198,11 @@ class VIXZone:
     def get_extension(self, level: int) -> float:
         if level > 0:
             return self.top + (level * self.size)
-        else:
-            return self.bottom + (level * self.size)
+        return self.bottom + (level * self.size)
 
 
 @dataclass
 class Pivot:
-    """Price pivot data structure"""
     name: str
     price: float
     timestamp: datetime
@@ -123,7 +212,6 @@ class Pivot:
 
 @dataclass
 class ConeRails:
-    """Cone projection data structure"""
     pivot: Pivot
     ascending: float
     descending: float
@@ -138,28 +226,25 @@ class ConeRails:
 
 @dataclass 
 class TradeSetup:
-    """Complete trade setup with updated target percentages"""
     direction: Bias
     cone: ConeRails
     entry: float
     stop: float
-    target_12_5: float  # 12.5%
-    target_25: float    # 25%
-    target_50: float    # 50%
+    target_1: float  # 12.5%
+    target_2: float  # 25%
+    target_3: float  # 50%
     strike: int
     risk_pts: float
-    reward_12_5_pts: float
-    reward_25_pts: float
-    reward_50_pts: float
+    reward_1_pts: float
+    reward_2_pts: float
+    reward_3_pts: float
 
 
 # =============================================================================
-# CORE CALCULATION ENGINE
+# CALCULATION ENGINE
 # =============================================================================
 
 class SPXProphetEngine:
-    """Core calculation engine for SPX Prophet"""
-    
     def __init__(self):
         self.ct_tz = pytz.timezone('America/Chicago')
     
@@ -181,34 +266,23 @@ class SPXProphetEngine:
             return TradingPhase.RTH
         elif time(16, 0) <= t < time(17, 0):
             return TradingPhase.POST_SESSION
-        else:
-            return TradingPhase.MARKET_CLOSED
+        return TradingPhase.MARKET_CLOSED
     
     def determine_bias(self, zone: VIXZone) -> Tuple[Bias, Confidence, str]:
         pos = zone.position_pct
         
         if pos >= TradingConstants.ZONE_TOP_THRESHOLD * 100:
             bias = Bias.CALLS
-            explanation = f"VIX at zone TOP ({pos:.0f}%) → Expect VIX to fall → SPX UP"
-            if pos >= 85:
-                confidence = Confidence.STRONG
-            elif pos >= 75:
-                confidence = Confidence.MODERATE
-            else:
-                confidence = Confidence.WEAK
+            explanation = f"VIX at TOP ({pos:.0f}%) → Expect VIX down → SPX UP"
+            confidence = Confidence.STRONG if pos >= 85 else (Confidence.MODERATE if pos >= 75 else Confidence.WEAK)
         elif pos <= TradingConstants.ZONE_BOTTOM_THRESHOLD * 100:
             bias = Bias.PUTS
-            explanation = f"VIX at zone BOTTOM ({pos:.0f}%) → Expect VIX to rise → SPX DOWN"
-            if pos <= 15:
-                confidence = Confidence.STRONG
-            elif pos <= 25:
-                confidence = Confidence.MODERATE
-            else:
-                confidence = Confidence.WEAK
+            explanation = f"VIX at BOTTOM ({pos:.0f}%) → Expect VIX up → SPX DOWN"
+            confidence = Confidence.STRONG if pos <= 15 else (Confidence.MODERATE if pos <= 25 else Confidence.WEAK)
         else:
             bias = Bias.WAIT
             confidence = Confidence.NO_TRADE
-            explanation = f"VIX mid-zone ({pos:.0f}%) → No directional edge → WAIT"
+            explanation = f"VIX mid-zone ({pos:.0f}%) → No edge → WAIT"
         
         return bias, confidence, explanation
     
@@ -217,332 +291,371 @@ class SPXProphetEngine:
         eval_ct = eval_time.astimezone(self.ct_tz)
         diff = eval_ct - pivot_ct
         total_minutes = diff.total_seconds() / 60
-        blocks = int(total_minutes / 30)
-        return max(blocks, 1)
+        return max(int(total_minutes / 30), 1)
     
     def calculate_cone(self, pivot: Pivot, eval_time: datetime) -> ConeRails:
         blocks = self.calculate_blocks(pivot.timestamp, eval_time)
         expansion = blocks * TradingConstants.SLOPE_PER_30MIN
-        
         ascending = pivot.price + expansion
         descending = pivot.price - expansion
-        width = ascending - descending
         
         return ConeRails(
             pivot=pivot,
             ascending=round(ascending, 2),
             descending=round(descending, 2),
-            width=round(width, 2),
+            width=round(ascending - descending, 2),
             blocks=blocks,
             is_valid=pivot.enabled
         )
     
     def generate_trade_setup(self, cone: ConeRails, direction: Bias, current_price: float) -> Optional[TradeSetup]:
-        """Generate trade setup with 12.5%, 25%, 50% targets"""
         if not cone.is_tradeable or direction == Bias.WAIT:
             return None
         
         if direction == Bias.CALLS:
             entry = cone.descending
-            opposite_rail = cone.ascending
-        else:
-            entry = cone.ascending
-            opposite_rail = cone.descending
-        
-        move_distance = abs(opposite_rail - entry)
-        
-        if direction == Bias.CALLS:
+            opposite = cone.ascending
             stop = entry - TradingConstants.STOP_LOSS_PTS
-            target_12_5 = entry + (move_distance * TradingConstants.TARGET_1_PCT)
-            target_25 = entry + (move_distance * TradingConstants.TARGET_2_PCT)
-            target_50 = entry + (move_distance * TradingConstants.TARGET_3_PCT)
             strike = int(round((entry - TradingConstants.STRIKE_OTM_DISTANCE) / 5) * 5)
         else:
+            entry = cone.ascending
+            opposite = cone.descending
             stop = entry + TradingConstants.STOP_LOSS_PTS
-            target_12_5 = entry - (move_distance * TradingConstants.TARGET_1_PCT)
-            target_25 = entry - (move_distance * TradingConstants.TARGET_2_PCT)
-            target_50 = entry - (move_distance * TradingConstants.TARGET_3_PCT)
             strike = int(round((entry + TradingConstants.STRIKE_OTM_DISTANCE) / 5) * 5)
         
+        move = abs(opposite - entry)
+        
+        if direction == Bias.CALLS:
+            t1 = entry + (move * TradingConstants.TARGET_1_PCT)
+            t2 = entry + (move * TradingConstants.TARGET_2_PCT)
+            t3 = entry + (move * TradingConstants.TARGET_3_PCT)
+        else:
+            t1 = entry - (move * TradingConstants.TARGET_1_PCT)
+            t2 = entry - (move * TradingConstants.TARGET_2_PCT)
+            t3 = entry - (move * TradingConstants.TARGET_3_PCT)
+        
         return TradeSetup(
-            direction=direction,
-            cone=cone,
-            entry=round(entry, 2),
-            stop=round(stop, 2),
-            target_12_5=round(target_12_5, 2),
-            target_25=round(target_25, 2),
-            target_50=round(target_50, 2),
-            strike=strike,
-            risk_pts=TradingConstants.STOP_LOSS_PTS,
-            reward_12_5_pts=round(move_distance * TradingConstants.TARGET_1_PCT, 2),
-            reward_25_pts=round(move_distance * TradingConstants.TARGET_2_PCT, 2),
-            reward_50_pts=round(move_distance * TradingConstants.TARGET_3_PCT, 2)
+            direction=direction, cone=cone, entry=round(entry, 2), stop=round(stop, 2),
+            target_1=round(t1, 2), target_2=round(t2, 2), target_3=round(t3, 2),
+            strike=strike, risk_pts=TradingConstants.STOP_LOSS_PTS,
+            reward_1_pts=round(move * TradingConstants.TARGET_1_PCT, 2),
+            reward_2_pts=round(move * TradingConstants.TARGET_2_PCT, 2),
+            reward_3_pts=round(move * TradingConstants.TARGET_3_PCT, 2)
         )
     
     def calculate_profit(self, points: float, contracts: int = 1) -> float:
         return points * TradingConstants.DELTA * TradingConstants.CONTRACT_MULTIPLIER * contracts
     
     def calculate_max_contracts(self, risk_budget: float) -> int:
-        risk_per_contract = self.calculate_profit(TradingConstants.STOP_LOSS_PTS, 1)
-        return int(risk_budget / risk_per_contract)
+        risk_per = self.calculate_profit(TradingConstants.STOP_LOSS_PTS, 1)
+        return int(risk_budget / risk_per) if risk_per > 0 else 0
 
 
 # =============================================================================
 # DATA FETCHING
 # =============================================================================
 
-@st.cache_data(ttl=30)
-def fetch_market_data() -> Tuple[Optional[float], Optional[float], Optional[Dict]]:
+@st.cache_data(ttl=60)
+def fetch_market_data():
     try:
         spx = yf.Ticker("^GSPC")
         vix = yf.Ticker("^VIX")
         
-        spx_data = spx.history(period="1d")
+        spx_data = spx.history(period="2d")
         vix_data = vix.history(period="1d")
         
         spx_price = spx_data['Close'].iloc[-1] if not spx_data.empty else None
         vix_price = vix_data['Close'].iloc[-1] if not vix_data.empty else None
         
-        spx_hist = spx.history(period="5d")
-        if len(spx_hist) >= 2:
-            prior_day = spx_hist.iloc[-2]
+        prior_data = None
+        if len(spx_data) >= 2:
+            prior = spx_data.iloc[-2]
             prior_data = {
-                'high': prior_day['High'],
-                'low': prior_day['Low'],
-                'close': prior_day['Close'],
-                'date': spx_hist.index[-2]
+                'high': prior['High'], 'low': prior['Low'], 'close': prior['Close'],
+                'date': spx_data.index[-2]
             }
-        else:
-            prior_data = None
         
         return spx_price, vix_price, prior_data
     except Exception as e:
-        st.error(f"Error fetching market data: {e}")
         return None, None, None
 
 
 # =============================================================================
-# UI COMPONENTS (Using native Streamlit where possible)
+# UI COMPONENTS
 # =============================================================================
 
-def render_header(spx_price: float, vix_price: float, phase: TradingPhase):
-    """Render the main header using native Streamlit"""
-    ct_tz = pytz.timezone('America/Chicago')
-    current_time = datetime.now(ct_tz)
+def render_header(spx: float, vix: float, phase: TradingPhase):
+    ct = pytz.timezone('America/Chicago')
+    now = datetime.now(ct)
     
-    phase_colors = {
-        TradingPhase.OVERNIGHT: "🔵",
-        TradingPhase.ZONE_LOCK: "🟢",
-        TradingPhase.DANGER_ZONE: "🟡",
-        TradingPhase.RTH: "🟢",
-        TradingPhase.POST_SESSION: "⚪",
-        TradingPhase.MARKET_CLOSED: "⚫"
+    phase_config = {
+        TradingPhase.OVERNIGHT: ("#3b82f6", "🌙"),
+        TradingPhase.ZONE_LOCK: ("#06b6d4", "🔒"),
+        TradingPhase.DANGER_ZONE: ("#f59e0b", "⚠️"),
+        TradingPhase.RTH: ("#10b981", "🟢"),
+        TradingPhase.POST_SESSION: ("#6b7280", "📊"),
+        TradingPhase.MARKET_CLOSED: ("#374151", "🔴")
     }
+    color, icon = phase_config.get(phase, ("#374151", ""))
     
-    col1, col2, col3, col4 = st.columns([2, 1.5, 1.5, 1.5])
-    
-    with col1:
-        st.markdown("## SPX PROPHET")
-        st.caption("Institutional Grade 0DTE System")
-    
-    with col2:
-        st.metric("SPX", f"{spx_price:,.2f}")
-    
-    with col3:
-        st.metric("VIX", f"{vix_price:.2f}")
-    
-    with col4:
-        st.metric("Time (CT)", current_time.strftime('%I:%M %p'))
-        st.caption(f"{phase_colors.get(phase, '⚪')} {phase.value}")
+    header_html = f'''
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 12px; margin-bottom: 20px;">
+        <div>
+            <h1 style="font-family: 'JetBrains Mono', monospace; font-size: 1.75rem; font-weight: 700; color: #f8fafc; margin: 0;">SPX PROPHET</h1>
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.7rem; color: #64748b; margin: 4px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">Institutional 0DTE Decision System</p>
+        </div>
+        <div style="display: flex; gap: 32px; align-items: center;">
+            <div style="text-align: right;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #64748b; margin: 0; text-transform: uppercase; letter-spacing: 1px;">SPX</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; color: #f8fafc; margin: 0;">{spx:,.2f}</p>
+            </div>
+            <div style="text-align: right;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #64748b; margin: 0; text-transform: uppercase; letter-spacing: 1px;">VIX</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; color: #f8fafc; margin: 0;">{vix:.2f}</p>
+            </div>
+            <div style="text-align: right;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #64748b; margin: 0; text-transform: uppercase; letter-spacing: 1px;">{now.strftime('%I:%M %p')} CT</p>
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 600; color: {color}; margin: 4px 0 0 0;">{icon} {phase.value}</p>
+            </div>
+        </div>
+    </div>
+    '''
+    st.markdown(header_html, unsafe_allow_html=True)
 
 
-def render_bias_card(bias: Bias, confidence: Confidence, explanation: str):
-    """Render the bias determination card"""
-    
-    bias_emoji = {
-        Bias.CALLS: "📈",
-        Bias.PUTS: "📉",
-        Bias.WAIT: "⏸️"
+def render_bias_display(bias: Bias, confidence: Confidence, explanation: str):
+    colors = {
+        Bias.CALLS: ("#10b981", "#064e3b"),
+        Bias.PUTS: ("#ef4444", "#7f1d1d"),
+        Bias.WAIT: ("#f59e0b", "#78350f")
     }
+    accent, bg = colors.get(bias, ("#6b7280", "#1f2937"))
     
-    conf_indicator = {
+    conf_dots = {
         Confidence.STRONG: "●●●●",
         Confidence.MODERATE: "●●●○",
         Confidence.WEAK: "●●○○",
         Confidence.NO_TRADE: "○○○○"
+    }.get(confidence, "○○○○")
+    
+    html = f'''
+    <div style="background: linear-gradient(135deg, {bg} 0%, #1e293b 100%); border: 2px solid {accent}; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 20px;">
+        <p style="font-family: 'Inter', sans-serif; font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 8px 0;">Today's Bias</p>
+        <h2 style="font-family: 'JetBrains Mono', monospace; font-size: 2.5rem; font-weight: 700; color: {accent}; margin: 0; letter-spacing: 3px;">{bias.value}</h2>
+        <p style="font-family: 'JetBrains Mono', monospace; font-size: 1rem; color: {accent}; margin: 8px 0; letter-spacing: 3px;">{conf_dots}</p>
+        <p style="font-family: 'Inter', sans-serif; font-size: 0.75rem; color: #94a3b8; margin: 0;">{confidence.value}</p>
+        <div style="margin-top: 16px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: 8px;">
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.8rem; color: #cbd5e1; margin: 0;">{explanation}</p>
+        </div>
+    </div>
+    '''
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_vix_ladder(zone: VIXZone):
+    potential_cfg = {
+        "HIGH": ("#10b981", "🔥"),
+        "NORMAL": ("#3b82f6", "✓"),
+        "LOW": ("#f59e0b", "⚠️")
     }
+    pot_color, pot_icon = potential_cfg.get(zone.potential, ("#6b7280", ""))
     
-    col1, col2, col3 = st.columns([1, 2, 1])
+    def level_row(label: str, value: float, style: str) -> str:
+        styles = {
+            "extension": "background: #1e293b; color: #64748b;",
+            "top": "background: #064e3b; color: #10b981; border: 1px solid #10b981;",
+            "bottom": "background: #7f1d1d; color: #ef4444; border: 1px solid #ef4444;",
+            "current": "background: #1e3a8a; color: #60a5fa; border: 2px solid #3b82f6;"
+        }
+        return f'''<div style="display: flex; justify-content: space-between; padding: 8px 14px; margin: 3px 0; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; {styles.get(style, '')}">
+            <span>{label}</span><span>{value:.2f}</span>
+        </div>'''
     
-    with col2:
-        st.markdown("---")
-        st.markdown(f"### {bias_emoji.get(bias, '')} Today's Bias: **{bias.value}**")
-        st.markdown(f"Confidence: `{conf_indicator.get(confidence, '')}` {confidence.value}")
-        st.info(explanation)
-        st.markdown("---")
+    rows = ""
+    rows += level_row("+2", zone.get_extension(2), "extension")
+    rows += level_row("+1", zone.get_extension(1), "extension")
+    rows += level_row("TOP", zone.top, "top")
+    rows += level_row("VIX NOW", zone.current, "current")
+    rows += level_row("BOTTOM", zone.bottom, "bottom")
+    rows += level_row("-1", zone.get_extension(-1), "extension")
+    rows += level_row("-2", zone.get_extension(-2), "extension")
+    
+    html = f'''
+    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 12px; padding: 16px;">
+        <p style="font-family: 'Inter', sans-serif; font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 12px 0;">VIX Zone Ladder</p>
+        {rows}
+        <div style="display: flex; justify-content: space-between; margin-top: 14px; padding-top: 14px; border-top: 1px solid #334155;">
+            <div style="text-align: center; flex: 1;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #64748b; text-transform: uppercase; margin: 0;">Size</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 600; color: #f8fafc; margin: 4px 0 0 0;">{zone.size:.2f}</p>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #64748b; text-transform: uppercase; margin: 0;">Position</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 600; color: #f8fafc; margin: 4px 0 0 0;">{zone.position_pct:.0f}%</p>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #64748b; text-transform: uppercase; margin: 0;">Potential</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 600; color: {pot_color}; margin: 4px 0 0 0;">{pot_icon} {zone.potential}</p>
+            </div>
+        </div>
+    </div>
+    '''
+    st.markdown(html, unsafe_allow_html=True)
 
 
-def render_vix_zone_ladder(zone: VIXZone):
-    """Render VIX zone visualization using native Streamlit"""
+def render_checklist(zone: VIXZone, phase: TradingPhase, setup: Optional[TradeSetup], price: float):
+    checks = [
+        ("VIX at zone edge", zone.position_pct >= 75 or zone.position_pct <= 25),
+        ("Reliable timing window", phase in [TradingPhase.ZONE_LOCK, TradingPhase.RTH]),
+        ("30-min candle closed", True),
+        ("Price at rail entry", setup and abs(price - setup.entry) <= 5.0),
+        ("Cone width ≥ 18 pts", setup and setup.cone.is_tradeable if setup else False)
+    ]
     
-    st.markdown("#### VIX Zone Ladder")
+    items = ""
+    for label, passed in checks:
+        icon = "✓" if passed else "○"
+        color = "#10b981" if passed else "#475569"
+        text_color = "#e2e8f0" if passed else "#64748b"
+        items += f'''<div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #1e293b;">
+            <span style="font-size: 1rem; color: {color}; width: 20px;">{icon}</span>
+            <span style="font-family: 'Inter', sans-serif; font-size: 0.8rem; color: {text_color};">{label}</span>
+        </div>'''
     
-    potential_emoji = {"HIGH": "🔥", "NORMAL": "✓", "LOW": "⚠️"}
+    all_pass = all(p for _, p in checks)
+    status_bg = "#064e3b" if all_pass else "#1e293b"
+    status_color = "#10b981" if all_pass else "#64748b"
+    status_text = "READY TO ENTER" if all_pass else "WAITING"
     
-    # Create zone data
-    zone_data = []
-    for ext in [2, 1]:
-        zone_data.append({"Level": f"+{ext}", "Price": f"{zone.get_extension(ext):.2f}", "Type": "Extension"})
-    zone_data.append({"Level": "TOP", "Price": f"{zone.top:.2f}", "Type": "Zone Edge"})
-    zone_data.append({"Level": "VIX NOW", "Price": f"{zone.current:.2f}", "Type": "Current"})
-    zone_data.append({"Level": "BOTTOM", "Price": f"{zone.bottom:.2f}", "Type": "Zone Edge"})
-    for ext in [-1, -2]:
-        zone_data.append({"Level": str(ext), "Price": f"{zone.get_extension(ext):.2f}", "Type": "Extension"})
-    
-    df = pd.DataFrame(zone_data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    
-    # Stats row
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Zone Size", f"{zone.size:.2f}")
-    with col2:
-        st.metric("Position", f"{zone.position_pct:.0f}%")
-    with col3:
-        st.metric("Potential", f"{potential_emoji.get(zone.potential, '')} {zone.potential}")
+    html = f'''
+    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius: 12px; padding: 16px;">
+        <p style="font-family: 'Inter', sans-serif; font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 12px 0;">Entry Checklist</p>
+        {items}
+        <div style="margin-top: 14px; padding: 10px; background: {status_bg}; border-radius: 6px; text-align: center; border: 1px solid {status_color};">
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.75rem; font-weight: 600; color: {status_color}; margin: 0; text-transform: uppercase; letter-spacing: 1px;">{status_text}</p>
+        </div>
+    </div>
+    '''
+    st.markdown(html, unsafe_allow_html=True)
 
 
-def render_entry_checklist(zone: VIXZone, phase: TradingPhase, bias: Bias, 
-                          current_price: float, best_setup: Optional[TradeSetup]):
-    """Render the entry checklist using native Streamlit"""
-    
-    st.markdown("#### Entry Checklist")
-    
-    checks = {
-        "VIX at zone edge (≤25% or ≥75%)": zone.position_pct >= 75 or zone.position_pct <= 25,
-        "Reliable timing window": phase in [TradingPhase.ZONE_LOCK, TradingPhase.RTH],
-        "30-min candle closed": True,
-        "Price at rail entry (within 5 pts)": False,
-        "Cone width ≥ 18 pts": False
-    }
-    
-    if best_setup:
-        distance = abs(current_price - best_setup.entry)
-        checks["Price at rail entry (within 5 pts)"] = distance <= 5.0
-        checks["Cone width ≥ 18 pts"] = best_setup.cone.is_tradeable
-    
-    for label, passed in checks.items():
-        icon = "✅" if passed else "⬜"
-        st.markdown(f"{icon} {label}")
-    
-    all_green = all(checks.values())
-    if all_green:
-        st.success("**READY TO ENTER**")
-    else:
-        st.warning("**WAITING FOR CONDITIONS**")
-
-
-def render_cone_table(cones: List[ConeRails], best_cone_name: str = ""):
-    """Render the cone rails table"""
-    
-    st.markdown("#### Cone Rails")
+def render_cone_table(cones: List[ConeRails], best_name: str):
+    st.markdown("""
+    <p style="font-family: 'Inter', sans-serif; font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin: 20px 0 10px 0;">Cone Rails</p>
+    """, unsafe_allow_html=True)
     
     data = []
-    for cone in cones:
-        if not cone.is_valid:
+    for c in cones:
+        if not c.is_valid:
             continue
-        status = "⭐ BEST" if cone.pivot.name == best_cone_name else ("✓ Valid" if cone.is_tradeable else "✗ Narrow")
+        status = "⭐ BEST" if c.pivot.name == best_name else ("✓" if c.is_tradeable else "✗")
         data.append({
-            "Pivot": cone.pivot.name,
-            "Ascending": f"{cone.ascending:,.2f}",
-            "Descending": f"{cone.descending:,.2f}",
-            "Width": f"{cone.width:.1f}",
-            "Blocks": cone.blocks,
+            "Pivot": c.pivot.name,
+            "Ascending": f"{c.ascending:,.2f}",
+            "Descending": f"{c.descending:,.2f}",
+            "Width": f"{c.width:.1f}",
             "Status": status
         })
     
     if data:
-        df = pd.DataFrame(data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No valid cones configured")
+        st.dataframe(pd.DataFrame(data), use_container_width=True, hide_index=True)
 
 
-def render_trade_setup_card(setup: TradeSetup, current_price: float, engine: SPXProphetEngine):
-    """Render a trade setup card using native Streamlit components"""
-    
-    if setup is None:
+def render_setup_card(setup: TradeSetup, price: float, engine: SPXProphetEngine):
+    if not setup:
         return
     
-    direction_emoji = "📈" if setup.direction == Bias.CALLS else "📉"
+    color = "#10b981" if setup.direction == Bias.CALLS else "#ef4444"
+    bg = "#064e3b" if setup.direction == Bias.CALLS else "#7f1d1d"
     
-    distance = current_price - setup.entry
-    distance_str = f"{'+' if distance > 0 else ''}{distance:.2f}"
+    dist = price - setup.entry
+    dist_str = f"{'+' if dist > 0 else ''}{dist:.2f}"
     
-    # Calculate profits
-    profit_12_5 = engine.calculate_profit(setup.reward_12_5_pts, 1)
-    profit_25 = engine.calculate_profit(setup.reward_25_pts, 1)
-    risk_dollars = engine.calculate_profit(setup.risk_pts, 1)
-    rr_25 = profit_25 / risk_dollars if risk_dollars > 0 else 0
+    p1 = engine.calculate_profit(setup.reward_1_pts, 1)
+    p2 = engine.calculate_profit(setup.reward_2_pts, 1)
+    risk = engine.calculate_profit(setup.risk_pts, 1)
+    rr = p2 / risk if risk > 0 else 0
     
-    # Card container
-    with st.container():
-        st.markdown(f"##### {direction_emoji} {setup.direction.value} Setup - {setup.cone.pivot.name} Cone")
-        
-        # Levels row
-        col1, col2, col3, col4, col5 = st.columns(5)
-        with col1:
-            st.metric("Entry", f"{setup.entry:,.2f}")
-        with col2:
-            st.metric("Stop", f"{setup.stop:,.2f}")
-        with col3:
-            st.metric("12.5%", f"{setup.target_12_5:,.2f}")
-        with col4:
-            st.metric("25%", f"{setup.target_25:,.2f}")
-        with col5:
-            st.metric("50%", f"{setup.target_50:,.2f}")
-        
-        # Stats row
-        col1, col2, col3, col4, col5 = st.columns(5)
-        with col1:
-            st.caption(f"Distance: **{distance_str}** pts")
-        with col2:
-            st.caption(f"Strike: **{setup.strike}**")
-        with col3:
-            st.caption(f"Width: **{setup.cone.width:.1f}** pts")
-        with col4:
-            st.caption(f"R:R @25%: **{rr_25:.1f}:1**")
-        with col5:
-            st.caption(f"Profit @25%: **${profit_25:,.0f}**")
-        
-        st.markdown("---")
+    def box(label: str, value: str, highlight: bool = False) -> str:
+        border = f"border: 1px solid {color};" if highlight else ""
+        return f'''<div style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px 8px; text-align: center; {border}">
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">{label}</p>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 600; color: #f8fafc; margin: 0;">{value}</p>
+        </div>'''
+    
+    def stat(label: str, value: str) -> str:
+        return f'''<div style="text-align: center;">
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; color: #64748b; text-transform: uppercase; margin: 0;">{label}</p>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #f8fafc; margin: 2px 0 0 0;">{value}</p>
+        </div>'''
+    
+    html = f'''
+    <div style="background: linear-gradient(135deg, {bg} 0%, #1e293b 100%); border: 2px solid {color}; border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.95rem; font-weight: 700; color: {color};">{setup.direction.value} SETUP</span>
+            <span style="font-family: 'Inter', sans-serif; font-size: 0.7rem; color: #94a3b8;">{setup.cone.pivot.name} Cone</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px;">
+            {box("Entry", f"{setup.entry:,.2f}", True)}
+            {box("Stop", f"{setup.stop:,.2f}")}
+            {box("12.5%", f"{setup.target_1:,.2f}")}
+            {box("25%", f"{setup.target_2:,.2f}")}
+            {box("50%", f"{setup.target_3:,.2f}")}
+        </div>
+        <div style="display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid #334155;">
+            {stat("Distance", f"{dist_str} pts")}
+            {stat("Strike", str(setup.strike))}
+            {stat("Width", f"{setup.cone.width:.1f}")}
+            {stat("R:R @25%", f"{rr:.1f}:1")}
+            {stat("Profit @25%", f"${p2:,.0f}")}
+        </div>
+    </div>
+    '''
+    st.markdown(html, unsafe_allow_html=True)
 
 
-def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSetup]):
-    """Render position sizing calculator"""
+def render_position_calc(engine: SPXProphetEngine, setup: Optional[TradeSetup]):
+    st.markdown("""
+    <p style="font-family: 'Inter', sans-serif; font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 12px 0;">Position Calculator</p>
+    """, unsafe_allow_html=True)
     
-    st.markdown("#### Position Calculator")
-    
-    risk_budget = st.number_input("Risk Budget ($)", min_value=100, max_value=100000, value=1000, step=100)
+    risk_budget = st.number_input("Risk Budget ($)", min_value=100, max_value=100000, value=1000, step=100, label_visibility="collapsed")
+    st.caption("Risk Budget ($)")
     
     if setup:
-        max_contracts = engine.calculate_max_contracts(risk_budget)
-        risk_at_stop = engine.calculate_profit(setup.risk_pts, max_contracts)
-        profit_12_5 = engine.calculate_profit(setup.reward_12_5_pts, max_contracts)
-        profit_25 = engine.calculate_profit(setup.reward_25_pts, max_contracts)
-        profit_50 = engine.calculate_profit(setup.reward_50_pts, max_contracts)
+        contracts = engine.calculate_max_contracts(risk_budget)
+        risk_total = engine.calculate_profit(setup.risk_pts, contracts)
+        p1 = engine.calculate_profit(setup.reward_1_pts, contracts)
+        p2 = engine.calculate_profit(setup.reward_2_pts, contracts)
+        p3 = engine.calculate_profit(setup.reward_3_pts, contracts)
         
-        st.markdown(f"### Max Contracts: **{max_contracts}**")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Risk at Stop", f"${risk_at_stop:,.0f}", delta=None)
-            st.metric("Profit @ 25%", f"${profit_25:,.0f}", delta=f"+{profit_25/risk_at_stop:.1f}x" if risk_at_stop > 0 else None)
-        with col2:
-            st.metric("Profit @ 12.5%", f"${profit_12_5:,.0f}", delta=f"+{profit_12_5/risk_at_stop:.1f}x" if risk_at_stop > 0 else None)
-            st.metric("Profit @ 50%", f"${profit_50:,.0f}", delta=f"+{profit_50/risk_at_stop:.1f}x" if risk_at_stop > 0 else None)
+        html = f'''
+        <div style="background: #1e293b; border-radius: 8px; padding: 14px; text-align: center; margin: 12px 0; border: 1px solid #334155;">
+            <p style="font-family: 'Inter', sans-serif; font-size: 0.65rem; color: #64748b; text-transform: uppercase; margin: 0;">Max Contracts</p>
+            <p style="font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; font-weight: 700; color: #10b981; margin: 4px 0 0 0;">{contracts}</p>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div style="background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; color: #64748b; text-transform: uppercase; margin: 0 0 4px 0;">Risk</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 600; color: #ef4444; margin: 0;">${risk_total:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; color: #64748b; text-transform: uppercase; margin: 0 0 4px 0;">@ 12.5%</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 600; color: #10b981; margin: 0;">${p1:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; color: #64748b; text-transform: uppercase; margin: 0 0 4px 0;">@ 25%</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 600; color: #10b981; margin: 0;">${p2:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 6px; padding: 10px; border: 1px solid #334155;">
+                <p style="font-family: 'Inter', sans-serif; font-size: 0.6rem; color: #64748b; text-transform: uppercase; margin: 0 0 4px 0;">@ 50%</p>
+                <p style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 600; color: #10b981; margin: 0;">${p3:,.0f}</p>
+            </div>
+        </div>
+        '''
+        st.markdown(html, unsafe_allow_html=True)
     else:
-        st.info("Configure a valid trade setup to calculate position size")
+        st.info("Configure a valid setup first")
 
 
 # =============================================================================
@@ -550,210 +663,134 @@ def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSe
 # =============================================================================
 
 def render_sidebar(prior_data: Optional[Dict]) -> Tuple[VIXZone, List[Pivot]]:
-    """Render sidebar inputs and return configuration"""
+    st.sidebar.markdown("## ⚙️ Configuration")
     
-    st.sidebar.title("⚙️ Configuration")
+    st.sidebar.markdown("#### VIX Zone")
+    c1, c2 = st.sidebar.columns(2)
+    vix_bottom = c1.number_input("Bottom", 5.0, 100.0, 16.50, 0.01, format="%.2f")
+    vix_top = c2.number_input("Top", 5.0, 100.0, 16.65, 0.01, format="%.2f")
+    vix_current = st.sidebar.number_input("Current VIX", 5.0, 100.0, 16.55, 0.01, format="%.2f")
     
-    # VIX Zone Section
-    st.sidebar.markdown("### VIX Zone (5pm-2am CT)")
+    zone = VIXZone(vix_bottom, vix_top, vix_current)
     
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        vix_bottom = st.number_input("Bottom", min_value=5.0, max_value=100.0, value=16.50, step=0.01, format="%.2f")
-    with col2:
-        vix_top = st.number_input("Top", min_value=5.0, max_value=100.0, value=16.65, step=0.01, format="%.2f")
-    
-    vix_current = st.sidebar.number_input("Current VIX", min_value=5.0, max_value=100.0, value=16.55, step=0.01, format="%.2f")
-    
-    zone = VIXZone(bottom=vix_bottom, top=vix_top, current=vix_current)
-    
-    # Prior Day Pivots Section
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Prior Day Pivots")
-    
-    use_manual = st.sidebar.checkbox("Manual Input", value=False)
+    st.sidebar.markdown("#### Prior Day Pivots")
     
     ct_tz = pytz.timezone('America/Chicago')
+    manual = st.sidebar.checkbox("Manual Input", False)
     
-    if use_manual or prior_data is None:
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            prior_high = st.number_input("High", min_value=1000.0, max_value=10000.0, value=6050.0, step=1.0)
-        with col2:
-            prior_high_time = st.time_input("High Time", value=time(11, 30))
-        
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            prior_low = st.number_input("Low", min_value=1000.0, max_value=10000.0, value=6020.0, step=1.0)
-        with col2:
-            prior_low_time = st.time_input("Low Time", value=time(14, 0))
-        
-        prior_close = st.sidebar.number_input("Close", min_value=1000.0, max_value=10000.0, value=6035.0, step=1.0)
-        
-        prior_date = datetime.now(ct_tz).date() - timedelta(days=1)
+    if manual or not prior_data:
+        c1, c2 = st.sidebar.columns(2)
+        p_high = c1.number_input("High", 1000.0, 10000.0, 6050.0, 1.0)
+        p_high_t = c2.time_input("High Time", time(11, 30))
+        c1, c2 = st.sidebar.columns(2)
+        p_low = c1.number_input("Low", 1000.0, 10000.0, 6020.0, 1.0)
+        p_low_t = c2.time_input("Low Time", time(14, 0))
+        p_close = st.sidebar.number_input("Close", 1000.0, 10000.0, 6035.0, 1.0)
+        p_date = datetime.now(ct_tz).date() - timedelta(days=1)
     else:
-        prior_high = prior_data['high']
-        prior_low = prior_data['low']
-        prior_close = prior_data['close']
-        prior_date = prior_data['date'].date() if hasattr(prior_data['date'], 'date') else prior_data['date']
-        prior_high_time = time(11, 30)
-        prior_low_time = time(14, 0)
-        
-        st.sidebar.info(f"Auto-loaded: {prior_date}")
-        st.sidebar.write(f"High: {prior_high:,.2f}")
-        st.sidebar.write(f"Low: {prior_low:,.2f}")
-        st.sidebar.write(f"Close: {prior_close:,.2f}")
+        p_high, p_low, p_close = prior_data['high'], prior_data['low'], prior_data['close']
+        p_date = prior_data['date'].date() if hasattr(prior_data['date'], 'date') else prior_data['date']
+        p_high_t, p_low_t = time(11, 30), time(14, 0)
+        st.sidebar.success(f"Loaded: {p_date}")
+        st.sidebar.caption(f"H: {p_high:,.2f} | L: {p_low:,.2f} | C: {p_close:,.2f}")
     
     pivots = [
-        Pivot("Prior High", prior_high, ct_tz.localize(datetime.combine(prior_date, prior_high_time))),
-        Pivot("Prior Low", prior_low, ct_tz.localize(datetime.combine(prior_date, prior_low_time))),
-        Pivot("Prior Close", prior_close, ct_tz.localize(datetime.combine(prior_date, time(16, 0))))
+        Pivot("Prior High", p_high, ct_tz.localize(datetime.combine(p_date, p_high_t))),
+        Pivot("Prior Low", p_low, ct_tz.localize(datetime.combine(p_date, p_low_t))),
+        Pivot("Prior Close", p_close, ct_tz.localize(datetime.combine(p_date, time(16, 0))))
     ]
     
-    # Secondary Pivots Section
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Secondary Pivots (Optional)")
+    st.sidebar.markdown("#### Secondary Pivots")
     
-    enable_high2 = st.sidebar.checkbox("Enable High²")
-    if enable_high2:
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            high2_price = st.number_input("High² Price", min_value=1000.0, max_value=10000.0, value=6045.0, step=1.0)
-        with col2:
-            high2_time = st.time_input("High² Time", value=time(10, 0))
-        pivots.append(Pivot("High²", high2_price, ct_tz.localize(datetime.combine(prior_date, high2_time)), is_secondary=True))
+    if st.sidebar.checkbox("Enable High²"):
+        c1, c2 = st.sidebar.columns(2)
+        h2_p = c1.number_input("High² Price", 1000.0, 10000.0, 6045.0, 1.0)
+        h2_t = c2.time_input("High² Time", time(10, 0))
+        pivots.append(Pivot("High²", h2_p, ct_tz.localize(datetime.combine(p_date, h2_t)), True))
     
-    enable_low2 = st.sidebar.checkbox("Enable Low²")
-    if enable_low2:
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            low2_price = st.number_input("Low² Price", min_value=1000.0, max_value=10000.0, value=6025.0, step=1.0)
-        with col2:
-            low2_time = st.time_input("Low² Time", value=time(13, 0))
-        pivots.append(Pivot("Low²", low2_price, ct_tz.localize(datetime.combine(prior_date, low2_time)), is_secondary=True))
+    if st.sidebar.checkbox("Enable Low²"):
+        c1, c2 = st.sidebar.columns(2)
+        l2_p = c1.number_input("Low² Price", 1000.0, 10000.0, 6025.0, 1.0)
+        l2_t = c2.time_input("Low² Time", time(13, 0))
+        pivots.append(Pivot("Low²", l2_p, ct_tz.localize(datetime.combine(p_date, l2_t)), True))
     
     return zone, pivots
 
 
 # =============================================================================
-# MAIN APPLICATION
+# MAIN
 # =============================================================================
 
 def main():
-    """Main application entry point"""
-    
-    st.set_page_config(
-        page_title="SPX Prophet",
-        page_icon="📈",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    # Simple dark theme styling
-    st.markdown("""
-    <style>
-    .stApp {
-        background-color: #0f172a;
-    }
-    .stMetric {
-        background-color: #1e293b;
-        padding: 10px;
-        border-radius: 8px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Initialize engine
     engine = SPXProphetEngine()
     ct_tz = pytz.timezone('America/Chicago')
-    current_time = datetime.now(ct_tz)
+    now = datetime.now(ct_tz)
     
-    # Fetch market data
-    spx_price, vix_price, prior_data = fetch_market_data()
+    spx, vix, prior = fetch_market_data()
+    spx = spx or 6050.0
+    vix = vix or 16.55
     
-    if spx_price is None:
-        spx_price = 6050.0
-        st.warning("⚠️ Unable to fetch live SPX data. Using placeholder.")
+    zone, pivots = render_sidebar(prior)
+    zone = VIXZone(zone.bottom, zone.top, vix)
     
-    if vix_price is None:
-        vix_price = 16.55
-        st.warning("⚠️ Unable to fetch live VIX data. Using placeholder.")
+    phase = engine.get_current_phase(now)
+    bias, conf, expl = engine.determine_bias(zone)
     
-    # Render sidebar and get config
-    zone, pivots = render_sidebar(prior_data)
+    eval_t = ct_tz.localize(datetime.combine(now.date(), time(10, 0)))
+    if now.time() > time(10, 0):
+        eval_t = now
     
-    if vix_price:
-        zone = VIXZone(bottom=zone.bottom, top=zone.top, current=vix_price)
+    cones = [engine.calculate_cone(p, eval_t) for p in pivots]
+    valid = [c for c in cones if c.is_valid and c.is_tradeable]
+    best = max(valid, key=lambda x: x.width) if valid else None
+    best_name = best.pivot.name if best else ""
     
-    phase = engine.get_current_phase(current_time)
-    bias, confidence, explanation = engine.determine_bias(zone)
+    best_setup = engine.generate_trade_setup(best, bias, spx) if best and bias != Bias.WAIT else None
     
-    # Calculate cones
-    eval_time = ct_tz.localize(datetime.combine(current_time.date(), time(10, 0)))
-    if current_time.time() > time(10, 0):
-        eval_time = current_time
+    # ===== RENDER =====
+    render_header(spx, vix, phase)
+    render_bias_display(bias, conf, expl)
     
-    cones = [engine.calculate_cone(pivot, eval_time) for pivot in pivots]
+    c1, c2 = st.columns(2)
+    with c1:
+        render_vix_ladder(zone)
+    with c2:
+        render_checklist(zone, phase, best_setup, spx)
     
-    valid_cones = [c for c in cones if c.is_valid and c.is_tradeable]
-    best_cone = max(valid_cones, key=lambda x: x.width) if valid_cones else None
-    best_cone_name = best_cone.pivot.name if best_cone else ""
-    
-    best_setup = None
-    if best_cone and bias != Bias.WAIT:
-        best_setup = engine.generate_trade_setup(best_cone, bias, spx_price)
-    
-    # ==========================================================================
-    # RENDER UI
-    # ==========================================================================
-    
-    render_header(spx_price, vix_price, phase)
-    render_bias_card(bias, confidence, explanation)
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        render_vix_zone_ladder(zone)
-    
-    with col2:
-        render_entry_checklist(zone, phase, bias, spx_price, best_setup)
-    
-    st.markdown("---")
-    render_cone_table(cones, best_cone_name)
+    render_cone_table(cones, best_name)
     
     if bias != Bias.WAIT:
         st.markdown(f"### {bias.value} Setups")
-        
-        for cone in cones:
-            if cone.is_valid and cone.is_tradeable:
-                setup = engine.generate_trade_setup(cone, bias, spx_price)
-                if setup:
-                    render_trade_setup_card(setup, spx_price, engine)
+        for c in cones:
+            if c.is_valid and c.is_tradeable:
+                s = engine.generate_trade_setup(c, bias, spx)
+                if s:
+                    render_setup_card(s, spx, engine)
     else:
-        st.info("📊 VIX is mid-zone. No directional edge. Waiting for VIX to reach zone edge before displaying trade setups.")
+        st.info("📊 VIX mid-zone. Waiting for edge...")
     
     st.markdown("---")
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        render_position_calculator(engine, best_setup)
-    
-    with col2:
-        st.markdown("### Trade Rules Reminder")
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        render_position_calc(engine, best_setup)
+    with c2:
+        st.markdown("### Trade Rules")
         st.markdown("""
-        **Entry Logic:** CALLS enter at descending rail (support). PUTS enter at ascending rail (resistance).
+        **Entry:** CALLS at descending rail • PUTS at ascending rail
         
-        **Stop Loss:** Fixed 6 points from entry.
+        **Stop:** 6 points from entry
         
-        **Targets:** 12.5%, 25%, 50% of cone width toward opposite rail.
+        **Targets:** 12.5% → 25% → 50% of cone width
         
-        **30-Min Close Rule:** Wicks don't count. Wait for candle to CLOSE at/beyond level.
+        **Confirmation:** Wait for 30-min candle CLOSE
         
-        **Danger Zone (6:30-9:30 AM CT):** VIX can reverse. Use extra caution.
+        **Danger Zone:** 6:30-9:30 AM CT — reversals possible
         """)
     
     st.markdown("---")
-    st.caption("SPX PROPHET v2.2 | Institutional Grade 0DTE Decision Support System | Data: Yahoo Finance | Not financial advice")
+    st.caption("SPX PROPHET v3.0 • Institutional 0DTE System • Yahoo Finance • Not financial advice")
 
 
 if __name__ == "__main__":
