@@ -1,9 +1,19 @@
 """
 SPX PROPHET - Institutional Grade 0DTE SPX Options Decision Support System
-Version 2.0
+Version 2.1
 
 A systematic approach to 0DTE SPX options trading using VIX zone analysis
 and structural cone methodology.
+
+TYPOGRAPHY SYSTEM:
+- Title (App name): 24px bold
+- Hero Numbers (SPX/VIX in header): 28px bold mono
+- Section Headers: 12px uppercase, muted
+- Primary Values (prices, key numbers): 16px bold mono
+- Secondary Values (stats): 14px medium mono
+- Body Text: 13px regular
+- Labels: 11px uppercase, muted
+- Small/Caption: 11px regular, muted
 """
 
 import streamlit as st
@@ -15,6 +25,36 @@ import pytz
 from dataclasses import dataclass
 from typing import Optional, Tuple, List, Dict
 from enum import Enum
+
+# =============================================================================
+# TYPOGRAPHY CONSTANTS (Standardized sizes)
+# =============================================================================
+
+class Typography:
+    """Standardized typography sizes for consistency"""
+    # Font families
+    MONO = "'JetBrains Mono', monospace"
+    SANS = "'Inter', sans-serif"
+    
+    # Size scale (in pixels)
+    TITLE = "24px"           # App title only
+    HERO = "28px"            # Main header prices (SPX, VIX)
+    LARGE = "20px"           # Bias value (CALLS/PUTS/WAIT)
+    PRIMARY = "16px"         # Primary values (entry, stop, targets)
+    SECONDARY = "14px"       # Secondary values, body text
+    BODY = "13px"            # Standard body text
+    LABEL = "11px"           # Labels, captions
+    SMALL = "10px"           # Fine print
+    
+    # Colors
+    TEXT_PRIMARY = "#f8fafc"
+    TEXT_SECONDARY = "#cbd5e1"
+    TEXT_MUTED = "#64748b"
+    TEXT_ACCENT_GREEN = "#10b981"
+    TEXT_ACCENT_RED = "#ef4444"
+    TEXT_ACCENT_AMBER = "#f59e0b"
+    TEXT_ACCENT_BLUE = "#60a5fa"
+
 
 # =============================================================================
 # CONFIGURATION & CONSTANTS
@@ -30,13 +70,13 @@ class TradingConstants:
     CONTRACT_MULTIPLIER = 100
     
     # VIX Zone thresholds
-    VIX_ZONE_LOW = 0.20      # Low potential
-    VIX_ZONE_NORMAL = 0.30   # Normal potential
-    VIX_ZONE_HIGH = 0.45     # High potential
+    VIX_ZONE_LOW = 0.20
+    VIX_ZONE_NORMAL = 0.30
+    VIX_ZONE_HIGH = 0.45
     
     # Zone position thresholds
-    ZONE_TOP_THRESHOLD = 0.75    # 75% = at top
-    ZONE_BOTTOM_THRESHOLD = 0.25  # 25% = at bottom
+    ZONE_TOP_THRESHOLD = 0.75
+    ZONE_BOTTOM_THRESHOLD = 0.25
 
 
 class TradingPhase(Enum):
@@ -81,14 +121,12 @@ class VIXZone:
     
     @property
     def position_pct(self) -> float:
-        """Current VIX position as percentage within zone (0-100)"""
         if self.size == 0:
             return 50.0
         return ((self.current - self.bottom) / self.size) * 100
     
     @property
     def potential(self) -> str:
-        """Move potential based on zone size"""
         if self.size < TradingConstants.VIX_ZONE_LOW:
             return "LOW"
         elif self.size < TradingConstants.VIX_ZONE_HIGH:
@@ -97,7 +135,6 @@ class VIXZone:
             return "HIGH"
     
     def get_extension(self, level: int) -> float:
-        """Get extension level price"""
         if level > 0:
             return self.top + (level * self.size)
         else:
@@ -157,16 +194,13 @@ class SPXProphetEngine:
         self.ct_tz = pytz.timezone('America/Chicago')
     
     def get_current_phase(self, current_time: datetime) -> TradingPhase:
-        """Determine current trading phase based on time"""
         ct_time = current_time.astimezone(self.ct_tz)
         t = ct_time.time()
         weekday = ct_time.weekday()
         
-        # Weekend check
-        if weekday >= 5:  # Saturday or Sunday
+        if weekday >= 5:
             return TradingPhase.MARKET_CLOSED
         
-        # Phase determination (all times in CT)
         if time(17, 0) <= t <= time(23, 59) or time(0, 0) <= t < time(2, 0):
             return TradingPhase.OVERNIGHT
         elif time(2, 0) <= t < time(6, 30):
@@ -181,7 +215,6 @@ class SPXProphetEngine:
             return TradingPhase.MARKET_CLOSED
     
     def determine_bias(self, zone: VIXZone) -> Tuple[Bias, Confidence, str]:
-        """Determine trading bias from VIX zone position"""
         pos = zone.position_pct
         
         if pos >= TradingConstants.ZONE_TOP_THRESHOLD * 100:
@@ -210,20 +243,14 @@ class SPXProphetEngine:
         return bias, confidence, explanation
     
     def calculate_blocks(self, pivot_time: datetime, eval_time: datetime) -> int:
-        """Calculate number of 30-minute blocks between pivot and evaluation time"""
-        # Convert both to CT
         pivot_ct = pivot_time.astimezone(self.ct_tz)
         eval_ct = eval_time.astimezone(self.ct_tz)
-        
-        # Calculate time difference
         diff = eval_ct - pivot_ct
         total_minutes = diff.total_seconds() / 60
         blocks = int(total_minutes / 30)
-        
-        return max(blocks, 1)  # Minimum 1 block
+        return max(blocks, 1)
     
     def calculate_cone(self, pivot: Pivot, eval_time: datetime) -> ConeRails:
-        """Calculate cone rails from a pivot"""
         blocks = self.calculate_blocks(pivot.timestamp, eval_time)
         expansion = blocks * TradingConstants.SLOPE_PER_30MIN
         
@@ -241,20 +268,16 @@ class SPXProphetEngine:
         )
     
     def generate_trade_setup(self, cone: ConeRails, direction: Bias, current_price: float) -> Optional[TradeSetup]:
-        """Generate complete trade setup from cone"""
         if not cone.is_tradeable or direction == Bias.WAIT:
             return None
         
         if direction == Bias.CALLS:
-            # CALLS: Enter at descending rail (support), target ascending
             entry = cone.descending
             target_100 = cone.ascending
         else:
-            # PUTS: Enter at ascending rail (resistance), target descending
             entry = cone.ascending
             target_100 = cone.descending
         
-        # Calculate targets
         move_distance = abs(target_100 - entry)
         
         if direction == Bias.CALLS:
@@ -284,11 +307,9 @@ class SPXProphetEngine:
         )
     
     def calculate_profit(self, points: float, contracts: int = 1) -> float:
-        """Calculate dollar profit from point movement"""
         return points * TradingConstants.DELTA * TradingConstants.CONTRACT_MULTIPLIER * contracts
     
     def calculate_max_contracts(self, risk_budget: float) -> int:
-        """Calculate maximum contracts based on risk budget"""
         risk_per_contract = self.calculate_profit(TradingConstants.STOP_LOSS_PTS, 1)
         return int(risk_budget / risk_per_contract)
 
@@ -299,7 +320,6 @@ class SPXProphetEngine:
 
 @st.cache_data(ttl=30)
 def fetch_market_data() -> Tuple[Optional[float], Optional[float], Optional[Dict]]:
-    """Fetch current SPX and VIX data"""
     try:
         spx = yf.Ticker("^GSPC")
         vix = yf.Ticker("^VIX")
@@ -310,7 +330,6 @@ def fetch_market_data() -> Tuple[Optional[float], Optional[float], Optional[Dict
         spx_price = spx_data['Close'].iloc[-1] if not spx_data.empty else None
         vix_price = vix_data['Close'].iloc[-1] if not vix_data.empty else None
         
-        # Get prior day data
         spx_hist = spx.history(period="5d")
         if len(spx_hist) >= 2:
             prior_day = spx_hist.iloc[-2]
@@ -330,7 +349,7 @@ def fetch_market_data() -> Tuple[Optional[float], Optional[float], Optional[Dict
 
 
 # =============================================================================
-# UI COMPONENTS
+# UI COMPONENTS (with standardized typography)
 # =============================================================================
 
 def render_header(spx_price: float, vix_price: float, phase: TradingPhase):
@@ -338,112 +357,48 @@ def render_header(spx_price: float, vix_price: float, phase: TradingPhase):
     ct_tz = pytz.timezone('America/Chicago')
     current_time = datetime.now(ct_tz)
     
-    st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    .main-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        border-radius: 16px;
-        padding: 24px 32px;
-        margin-bottom: 24px;
-        border: 1px solid #334155;
+    phase_styles = {
+        TradingPhase.OVERNIGHT: "background: #1e3a5f; color: #60a5fa;",
+        TradingPhase.ZONE_LOCK: "background: #164e63; color: #22d3ee;",
+        TradingPhase.DANGER_ZONE: "background: #713f12; color: #fbbf24;",
+        TradingPhase.RTH: "background: #14532d; color: #4ade80;",
+        TradingPhase.POST_SESSION: "background: #3f3f46; color: #a1a1aa;",
+        TradingPhase.MARKET_CLOSED: "background: #27272a; color: #71717a;"
     }
     
-    .header-title {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 28px;
-        font-weight: 700;
-        color: #f8fafc;
-        margin: 0;
-        letter-spacing: -0.5px;
-    }
-    
-    .header-subtitle {
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        color: #64748b;
-        margin-top: 4px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    .price-display {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 32px;
-        font-weight: 700;
-        color: #f8fafc;
-    }
-    
-    .price-label {
-        font-family: 'Inter', sans-serif;
-        font-size: 11px;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 4px;
-    }
-    
-    .phase-badge {
-        display: inline-block;
-        padding: 6px 12px;
-        border-radius: 6px;
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    .phase-overnight { background: #1e3a5f; color: #60a5fa; }
-    .phase-zonelock { background: #164e63; color: #22d3ee; }
-    .phase-danger { background: #713f12; color: #fbbf24; }
-    .phase-rth { background: #14532d; color: #4ade80; }
-    .phase-post { background: #3f3f46; color: #a1a1aa; }
-    .phase-closed { background: #27272a; color: #71717a; }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    phase_class = {
-        TradingPhase.OVERNIGHT: "phase-overnight",
-        TradingPhase.ZONE_LOCK: "phase-zonelock",
-        TradingPhase.DANGER_ZONE: "phase-danger",
-        TradingPhase.RTH: "phase-rth",
-        TradingPhase.POST_SESSION: "phase-post",
-        TradingPhase.MARKET_CLOSED: "phase-closed"
-    }.get(phase, "phase-closed")
+    phase_style = phase_styles.get(phase, "background: #27272a; color: #71717a;")
     
     col1, col2, col3, col4 = st.columns([2, 1.5, 1.5, 1.5])
     
     with col1:
         st.markdown(f"""
         <div>
-            <p class="header-title">SPX PROPHET</p>
-            <p class="header-subtitle">Institutional Grade 0DTE System</p>
+            <p style="font-family: {Typography.MONO}; font-size: {Typography.TITLE}; font-weight: 700; color: {Typography.TEXT_PRIMARY}; margin: 0; letter-spacing: -0.5px;">SPX PROPHET</p>
+            <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; margin-top: 4px; text-transform: uppercase; letter-spacing: 1px;">Institutional Grade 0DTE System</p>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
         st.markdown(f"""
         <div>
-            <p class="price-label">SPX</p>
-            <p class="price-display">{spx_price:,.2f}</p>
+            <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 4px 0;">SPX</p>
+            <p style="font-family: {Typography.MONO}; font-size: {Typography.HERO}; font-weight: 700; color: {Typography.TEXT_PRIMARY}; margin: 0;">{spx_price:,.2f}</p>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
         st.markdown(f"""
         <div>
-            <p class="price-label">VIX</p>
-            <p class="price-display">{vix_price:.2f}</p>
+            <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 4px 0;">VIX</p>
+            <p style="font-family: {Typography.MONO}; font-size: {Typography.HERO}; font-weight: 700; color: {Typography.TEXT_PRIMARY}; margin: 0;">{vix_price:.2f}</p>
         </div>
         """, unsafe_allow_html=True)
     
     with col4:
         st.markdown(f"""
         <div>
-            <p class="price-label">{current_time.strftime('%I:%M %p CT')}</p>
-            <span class="phase-badge {phase_class}">{phase.value}</span>
+            <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 4px 0;">{current_time.strftime('%I:%M %p CT')}</p>
+            <span style="display: inline-block; padding: 6px 12px; border-radius: 6px; font-family: {Typography.SANS}; font-size: {Typography.LABEL}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; {phase_style}">{phase.value}</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -452,12 +407,12 @@ def render_bias_card(bias: Bias, confidence: Confidence, explanation: str):
     """Render the bias determination card"""
     
     bias_colors = {
-        Bias.CALLS: ("#10b981", "#064e3b", "#d1fae5"),
-        Bias.PUTS: ("#ef4444", "#7f1d1d", "#fee2e2"),
-        Bias.WAIT: ("#f59e0b", "#78350f", "#fef3c7")
+        Bias.CALLS: ("#10b981", "#064e3b"),
+        Bias.PUTS: ("#ef4444", "#7f1d1d"),
+        Bias.WAIT: ("#f59e0b", "#78350f")
     }
     
-    accent, bg_dark, bg_light = bias_colors[bias]
+    accent, bg_dark = bias_colors[bias]
     
     confidence_display = {
         Confidence.STRONG: ("●●●●", "#10b981"),
@@ -469,75 +424,15 @@ def render_bias_card(bias: Bias, confidence: Confidence, explanation: str):
     conf_dots, conf_color = confidence_display[confidence]
     
     st.markdown(f"""
-    <style>
-    .bias-card {{
-        background: linear-gradient(135deg, {bg_dark} 0%, #1e293b 100%);
-        border: 2px solid {accent};
-        border-radius: 16px;
-        padding: 32px;
-        text-align: center;
-        margin-bottom: 24px;
-    }}
-    
-    .bias-label {{
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        color: #94a3b8;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        margin-bottom: 8px;
-    }}
-    
-    .bias-value {{
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 48px;
-        font-weight: 700;
-        color: {accent};
-        margin: 0;
-        letter-spacing: 2px;
-    }}
-    
-    .confidence-row {{
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 12px;
-        margin-top: 16px;
-    }}
-    
-    .confidence-label {{
-        font-family: 'Inter', sans-serif;
-        font-size: 14px;
-        color: #94a3b8;
-    }}
-    
-    .confidence-dots {{
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 18px;
-        color: {conf_color};
-        letter-spacing: 2px;
-    }}
-    
-    .bias-explanation {{
-        font-family: 'Inter', sans-serif;
-        font-size: 14px;
-        color: #cbd5e1;
-        margin-top: 20px;
-        padding: 16px;
-        background: rgba(0,0,0,0.2);
-        border-radius: 8px;
-    }}
-    </style>
-    
-    <div class="bias-card">
-        <p class="bias-label">Today's Bias</p>
-        <p class="bias-value">{bias.value}</p>
-        <div class="confidence-row">
-            <span class="confidence-label">Confidence:</span>
-            <span class="confidence-dots">{conf_dots}</span>
-            <span class="confidence-label">{confidence.value}</span>
+    <div style="background: linear-gradient(135deg, {bg_dark} 0%, #1e293b 100%); border: 2px solid {accent}; border-radius: 16px; padding: 24px; text-align: center; margin-bottom: 24px;">
+        <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: #94a3b8; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px;">Today's Bias</p>
+        <p style="font-family: {Typography.MONO}; font-size: 36px; font-weight: 700; color: {accent}; margin: 0; letter-spacing: 2px;">{bias.value}</p>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 12px;">
+            <span style="font-family: {Typography.SANS}; font-size: {Typography.BODY}; color: #94a3b8;">Confidence:</span>
+            <span style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; color: {conf_color}; letter-spacing: 2px;">{conf_dots}</span>
+            <span style="font-family: {Typography.SANS}; font-size: {Typography.BODY}; color: #94a3b8;">{confidence.value}</span>
         </div>
-        <p class="bias-explanation">{explanation}</p>
+        <p style="font-family: {Typography.SANS}; font-size: {Typography.BODY}; color: {Typography.TEXT_SECONDARY}; margin-top: 16px; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px;">{explanation}</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -545,112 +440,64 @@ def render_bias_card(bias: Bias, confidence: Confidence, explanation: str):
 def render_vix_zone_ladder(zone: VIXZone):
     """Render VIX zone visualization"""
     
-    st.markdown("""
-    <style>
-    .zone-container {
-        background: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 20px;
-    }
+    potential_color = {
+        "HIGH": Typography.TEXT_ACCENT_GREEN,
+        "NORMAL": Typography.TEXT_ACCENT_BLUE,
+        "LOW": Typography.TEXT_ACCENT_AMBER
+    }.get(zone.potential, Typography.TEXT_ACCENT_BLUE)
     
-    .zone-title {
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 16px;
-    }
+    potential_icon = {"HIGH": "🔥", "NORMAL": "✓", "LOW": "⚠️"}.get(zone.potential, "")
     
-    .zone-level {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 8px 12px;
-        margin: 4px 0;
-        border-radius: 6px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 14px;
-    }
-    
-    .zone-extension { background: #1e293b; color: #64748b; }
-    .zone-top { background: #065f46; color: #10b981; border: 1px solid #10b981; }
-    .zone-bottom { background: #7f1d1d; color: #ef4444; border: 1px solid #ef4444; }
-    .zone-current { background: #1e40af; color: #60a5fa; border: 2px solid #60a5fa; }
-    
-    .zone-stats {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 16px;
-        padding-top: 16px;
-        border-top: 1px solid #334155;
-    }
-    
-    .zone-stat {
-        text-align: center;
-    }
-    
-    .zone-stat-label {
-        font-family: 'Inter', sans-serif;
-        font-size: 11px;
-        color: #64748b;
-        text-transform: uppercase;
-    }
-    
-    .zone-stat-value {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 18px;
-        font-weight: 600;
-        color: #f8fafc;
-    }
-    
-    .potential-high { color: #10b981; }
-    .potential-normal { color: #60a5fa; }
-    .potential-low { color: #f59e0b; }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    potential_class = {
-        "HIGH": "potential-high",
-        "NORMAL": "potential-normal",
-        "LOW": "potential-low"
-    }.get(zone.potential, "potential-normal")
-    
-    potential_icon = {
-        "HIGH": "🔥",
-        "NORMAL": "✓",
-        "LOW": "⚠️"
-    }.get(zone.potential, "")
-    
-    # Build zone levels
     levels_html = ""
+    
+    # Extensions above
     for ext in [2, 1]:
-        levels_html += f'<div class="zone-level zone-extension"><span>+{ext}</span><span>{zone.get_extension(ext):.2f}</span></div>'
+        levels_html += f'''
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin: 3px 0; border-radius: 6px; font-family: {Typography.MONO}; font-size: {Typography.BODY}; background: #1e293b; color: {Typography.TEXT_MUTED};">
+            <span>+{ext}</span><span>{zone.get_extension(ext):.2f}</span>
+        </div>'''
     
-    levels_html += f'<div class="zone-level zone-top"><span>TOP</span><span>{zone.top:.2f}</span></div>'
-    levels_html += f'<div class="zone-level zone-current"><span>VIX NOW</span><span>{zone.current:.2f}</span></div>'
-    levels_html += f'<div class="zone-level zone-bottom"><span>BOTTOM</span><span>{zone.bottom:.2f}</span></div>'
+    # Top
+    levels_html += f'''
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin: 3px 0; border-radius: 6px; font-family: {Typography.MONO}; font-size: {Typography.BODY}; background: #065f46; color: #10b981; border: 1px solid #10b981;">
+        <span>TOP</span><span>{zone.top:.2f}</span>
+    </div>'''
     
+    # Current
+    levels_html += f'''
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin: 3px 0; border-radius: 6px; font-family: {Typography.MONO}; font-size: {Typography.BODY}; background: #1e40af; color: #60a5fa; border: 2px solid #60a5fa;">
+        <span>VIX NOW</span><span>{zone.current:.2f}</span>
+    </div>'''
+    
+    # Bottom
+    levels_html += f'''
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin: 3px 0; border-radius: 6px; font-family: {Typography.MONO}; font-size: {Typography.BODY}; background: #7f1d1d; color: #ef4444; border: 1px solid #ef4444;">
+        <span>BOTTOM</span><span>{zone.bottom:.2f}</span>
+    </div>'''
+    
+    # Extensions below
     for ext in [-1, -2]:
-        levels_html += f'<div class="zone-level zone-extension"><span>{ext}</span><span>{zone.get_extension(ext):.2f}</span></div>'
+        levels_html += f'''
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin: 3px 0; border-radius: 6px; font-family: {Typography.MONO}; font-size: {Typography.BODY}; background: #1e293b; color: {Typography.TEXT_MUTED};">
+            <span>{ext}</span><span>{zone.get_extension(ext):.2f}</span>
+        </div>'''
     
     st.markdown(f"""
-    <div class="zone-container">
-        <p class="zone-title">VIX Zone Ladder</p>
+    <div style="background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px;">
+        <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">VIX Zone Ladder</p>
         {levels_html}
-        <div class="zone-stats">
-            <div class="zone-stat">
-                <p class="zone-stat-label">Zone Size</p>
-                <p class="zone-stat-value">{zone.size:.2f}</p>
+        <div style="display: flex; justify-content: space-between; margin-top: 12px; padding-top: 12px; border-top: 1px solid #334155;">
+            <div style="text-align: center;">
+                <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">Zone Size</p>
+                <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_PRIMARY}; margin: 4px 0 0 0;">{zone.size:.2f}</p>
             </div>
-            <div class="zone-stat">
-                <p class="zone-stat-label">Position</p>
-                <p class="zone-stat-value">{zone.position_pct:.0f}%</p>
+            <div style="text-align: center;">
+                <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">Position</p>
+                <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_PRIMARY}; margin: 4px 0 0 0;">{zone.position_pct:.0f}%</p>
             </div>
-            <div class="zone-stat">
-                <p class="zone-stat-label">Potential</p>
-                <p class="zone-stat-value {potential_class}">{potential_icon} {zone.potential}</p>
+            <div style="text-align: center;">
+                <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">Potential</p>
+                <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {potential_color}; margin: 4px 0 0 0;">{potential_icon} {zone.potential}</p>
             </div>
         </div>
     </div>
@@ -661,16 +508,14 @@ def render_entry_checklist(zone: VIXZone, phase: TradingPhase, bias: Bias,
                           current_price: float, best_setup: Optional[TradeSetup]):
     """Render the entry checklist"""
     
-    # Determine checklist status
     checks = {
         "VIX at zone edge": zone.position_pct >= 75 or zone.position_pct <= 25,
         "Reliable timing window": phase in [TradingPhase.ZONE_LOCK, TradingPhase.RTH],
-        "30-min candle closed": True,  # Would need real candle data
+        "30-min candle closed": True,
         "Price at rail entry": False,
         "Cone width ≥ 18 pts": False
     }
     
-    # Check price at rail and cone width
     if best_setup:
         distance = abs(current_price - best_setup.entry)
         checks["Price at rail entry"] = distance <= 5.0
@@ -678,74 +523,29 @@ def render_entry_checklist(zone: VIXZone, phase: TradingPhase, bias: Bias,
     
     all_green = all(checks.values())
     
-    st.markdown("""
-    <style>
-    .checklist-container {
-        background: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 20px;
-    }
-    
-    .checklist-title {
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 16px;
-    }
-    
-    .checklist-item {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 10px 0;
-        border-bottom: 1px solid #1e293b;
-        font-family: 'Inter', sans-serif;
-        font-size: 14px;
-    }
-    
-    .checklist-item:last-child { border-bottom: none; }
-    
-    .check-icon { font-size: 18px; }
-    .check-pass { color: #10b981; }
-    .check-fail { color: #64748b; }
-    .check-text-pass { color: #e2e8f0; }
-    .check-text-fail { color: #64748b; }
-    
-    .checklist-status {
-        margin-top: 16px;
-        padding: 12px 16px;
-        border-radius: 8px;
-        text-align: center;
-        font-family: 'Inter', sans-serif;
-        font-weight: 600;
-        font-size: 14px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    .status-ready { background: #064e3b; color: #10b981; border: 1px solid #10b981; }
-    .status-waiting { background: #1e293b; color: #64748b; border: 1px solid #334155; }
-    </style>
-    """, unsafe_allow_html=True)
-    
     items_html = ""
     for label, passed in checks.items():
         icon = "✓" if passed else "○"
-        icon_class = "check-pass" if passed else "check-fail"
-        text_class = "check-text-pass" if passed else "check-text-fail"
-        items_html += f'<div class="checklist-item"><span class="check-icon {icon_class}">{icon}</span><span class="{text_class}">{label}</span></div>'
+        icon_color = Typography.TEXT_ACCENT_GREEN if passed else Typography.TEXT_MUTED
+        text_color = Typography.TEXT_SECONDARY if passed else Typography.TEXT_MUTED
+        items_html += f'''
+        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #1e293b; font-family: {Typography.SANS}; font-size: {Typography.BODY};">
+            <span style="font-size: {Typography.PRIMARY}; color: {icon_color};">{icon}</span>
+            <span style="color: {text_color};">{label}</span>
+        </div>'''
     
-    status_class = "status-ready" if all_green else "status-waiting"
+    status_bg = "#064e3b" if all_green else "#1e293b"
+    status_color = Typography.TEXT_ACCENT_GREEN if all_green else Typography.TEXT_MUTED
+    status_border = "#10b981" if all_green else "#334155"
     status_text = "READY TO ENTER" if all_green else "WAITING FOR CONDITIONS"
     
     st.markdown(f"""
-    <div class="checklist-container">
-        <p class="checklist-title">Entry Checklist</p>
+    <div style="background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px;">
+        <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">Entry Checklist</p>
         {items_html}
-        <div class="checklist-status {status_class}">{status_text}</div>
+        <div style="margin-top: 12px; padding: 10px 14px; border-radius: 8px; text-align: center; font-family: {Typography.SANS}; font-weight: 600; font-size: {Typography.LABEL}; text-transform: uppercase; letter-spacing: 1px; background: {status_bg}; color: {status_color}; border: 1px solid {status_border};">
+            {status_text}
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -753,30 +553,12 @@ def render_entry_checklist(zone: VIXZone, phase: TradingPhase, bias: Bias,
 def render_cone_table(cones: List[ConeRails], best_cone_name: str = ""):
     """Render the cone rails table"""
     
-    st.markdown("""
-    <style>
-    .cone-table-container {
-        background: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 24px;
-    }
-    
-    .cone-table-title {
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 16px;
-    }
-    </style>
+    st.markdown(f"""
+    <div style="background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px; margin-bottom: 20px;">
+        <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">Cone Rails</p>
+    </div>
     """, unsafe_allow_html=True)
     
-    st.markdown('<div class="cone-table-container"><p class="cone-table-title">Cone Rails</p>', unsafe_allow_html=True)
-    
-    # Build dataframe
     data = []
     for cone in cones:
         if not cone.is_valid:
@@ -796,8 +578,6 @@ def render_cone_table(cones: List[ConeRails], best_cone_name: str = ""):
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
         st.info("No valid cones configured")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_trade_setup_card(setup: TradeSetup, current_price: float, engine: SPXProphetEngine):
@@ -806,209 +586,89 @@ def render_trade_setup_card(setup: TradeSetup, current_price: float, engine: SPX
     if setup is None:
         return
     
-    direction_color = "#10b981" if setup.direction == Bias.CALLS else "#ef4444"
+    direction_color = Typography.TEXT_ACCENT_GREEN if setup.direction == Bias.CALLS else Typography.TEXT_ACCENT_RED
     direction_bg = "#064e3b" if setup.direction == Bias.CALLS else "#7f1d1d"
     
     distance = current_price - setup.entry
     distance_str = f"{'+' if distance > 0 else ''}{distance:.2f}"
     
-    # Calculate profits for 1 contract
     profit_50 = engine.calculate_profit(setup.reward_50_pts, 1)
-    profit_75 = engine.calculate_profit(setup.reward_75_pts, 1)
-    profit_100 = engine.calculate_profit(setup.reward_100_pts, 1)
     risk_dollars = engine.calculate_profit(setup.risk_pts, 1)
-    
     rr_50 = profit_50 / risk_dollars if risk_dollars > 0 else 0
     
-    st.markdown(f"""
-    <style>
-    .setup-card {{
-        background: linear-gradient(135deg, {direction_bg} 0%, #1e293b 100%);
-        border: 2px solid {direction_color};
-        border-radius: 16px;
-        padding: 24px;
-        margin-bottom: 16px;
-    }}
-    
-    .setup-header {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-    }}
-    
-    .setup-title {{
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 20px;
-        font-weight: 700;
-        color: {direction_color};
-    }}
-    
-    .setup-cone {{
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        color: #94a3b8;
-    }}
-    
-    .setup-levels {{
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: 12px;
-        margin-bottom: 20px;
-    }}
-    
-    .level-box {{
-        background: rgba(0,0,0,0.3);
-        border-radius: 8px;
-        padding: 12px;
-        text-align: center;
-    }}
-    
-    .level-label {{
-        font-family: 'Inter', sans-serif;
-        font-size: 10px;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 4px;
-    }}
-    
-    .level-value {{
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 16px;
-        font-weight: 600;
-        color: #f8fafc;
-    }}
-    
-    .level-entry {{ border: 1px solid {direction_color}; }}
-    .level-stop {{ border: 1px solid #ef4444; }}
-    
-    .setup-meta {{
-        display: flex;
-        justify-content: space-between;
-        padding-top: 16px;
-        border-top: 1px solid #334155;
-    }}
-    
-    .meta-item {{
-        text-align: center;
-    }}
-    
-    .meta-label {{
-        font-family: 'Inter', sans-serif;
-        font-size: 11px;
-        color: #64748b;
-        text-transform: uppercase;
-    }}
-    
-    .meta-value {{
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 14px;
-        color: #f8fafc;
-    }}
-    </style>
-    
-    <div class="setup-card">
-        <div class="setup-header">
-            <span class="setup-title">{setup.direction.value} SETUP</span>
-            <span class="setup-cone">{setup.cone.pivot.name} Cone</span>
-        </div>
-        
-        <div class="setup-levels">
-            <div class="level-box level-entry">
-                <p class="level-label">Entry</p>
-                <p class="level-value">{setup.entry:,.2f}</p>
+    with st.container():
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, {direction_bg} 0%, #1e293b 100%); 
+                    border: 2px solid {direction_color}; 
+                    border-radius: 12px; 
+                    padding: 16px; 
+                    margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <span style="font-family: {Typography.MONO}; font-size: {Typography.PRIMARY}; font-weight: 700; color: {direction_color};">
+                    {setup.direction.value} SETUP
+                </span>
+                <span style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: #94a3b8;">
+                    {setup.cone.pivot.name} Cone
+                </span>
             </div>
-            <div class="level-box level-stop">
-                <p class="level-label">Stop</p>
-                <p class="level-value">{setup.stop:,.2f}</p>
+            
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px;">
+                <div style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px 6px; text-align: center; border: 1px solid {direction_color};">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.SMALL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">Entry</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_PRIMARY}; margin: 0;">{setup.entry:,.2f}</p>
+                </div>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px 6px; text-align: center; border: 1px solid #ef4444;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.SMALL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">Stop</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_PRIMARY}; margin: 0;">{setup.stop:,.2f}</p>
+                </div>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px 6px; text-align: center;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.SMALL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">50%</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_PRIMARY}; margin: 0;">{setup.target_50:,.2f}</p>
+                </div>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px 6px; text-align: center;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.SMALL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">75%</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_PRIMARY}; margin: 0;">{setup.target_75:,.2f}</p>
+                </div>
+                <div style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 10px 6px; text-align: center;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.SMALL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px 0;">100%</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_PRIMARY}; margin: 0;">{setup.target_100:,.2f}</p>
+                </div>
             </div>
-            <div class="level-box">
-                <p class="level-label">50%</p>
-                <p class="level-value">{setup.target_50:,.2f}</p>
-            </div>
-            <div class="level-box">
-                <p class="level-label">75%</p>
-                <p class="level-value">{setup.target_75:,.2f}</p>
-            </div>
-            <div class="level-box">
-                <p class="level-label">100%</p>
-                <p class="level-value">{setup.target_100:,.2f}</p>
+            
+            <div style="display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid #334155;">
+                <div style="text-align: center;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">Distance</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.BODY}; color: {Typography.TEXT_PRIMARY}; margin: 3px 0 0 0;">{distance_str} pts</p>
+                </div>
+                <div style="text-align: center;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">Strike</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.BODY}; color: {Typography.TEXT_PRIMARY}; margin: 3px 0 0 0;">{setup.strike}</p>
+                </div>
+                <div style="text-align: center;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">Width</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.BODY}; color: {Typography.TEXT_PRIMARY}; margin: 3px 0 0 0;">{setup.cone.width:.1f} pts</p>
+                </div>
+                <div style="text-align: center;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">R:R @ 50%</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.BODY}; color: {Typography.TEXT_PRIMARY}; margin: 3px 0 0 0;">{rr_50:.1f}:1</p>
+                </div>
+                <div style="text-align: center;">
+                    <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">Profit @ 50%</p>
+                    <p style="font-family: {Typography.MONO}; font-size: {Typography.BODY}; color: {Typography.TEXT_PRIMARY}; margin: 3px 0 0 0;">${profit_50:,.0f}</p>
+                </div>
             </div>
         </div>
-        
-        <div class="setup-meta">
-            <div class="meta-item">
-                <p class="meta-label">Distance</p>
-                <p class="meta-value">{distance_str} pts</p>
-            </div>
-            <div class="meta-item">
-                <p class="meta-label">Strike</p>
-                <p class="meta-value">{setup.strike}</p>
-            </div>
-            <div class="meta-item">
-                <p class="meta-label">Width</p>
-                <p class="meta-value">{setup.cone.width:.1f} pts</p>
-            </div>
-            <div class="meta-item">
-                <p class="meta-label">R:R @ 50%</p>
-                <p class="meta-value">{rr_50:.1f}:1</p>
-            </div>
-            <div class="meta-item">
-                <p class="meta-label">Profit @ 50%</p>
-                <p class="meta-value">${profit_50:,.0f}</p>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
 
 def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSetup]):
     """Render position sizing calculator"""
     
-    st.markdown("""
-    <style>
-    .calc-container {
-        background: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 20px;
-    }
-    
-    .calc-title {
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 16px;
-    }
-    
-    .calc-result {
-        background: #1e293b;
-        border-radius: 8px;
-        padding: 16px;
-        text-align: center;
-        margin-top: 16px;
-    }
-    
-    .calc-result-label {
-        font-family: 'Inter', sans-serif;
-        font-size: 11px;
-        color: #64748b;
-        text-transform: uppercase;
-    }
-    
-    .calc-result-value {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 32px;
-        font-weight: 700;
-        color: #10b981;
-    }
-    </style>
+    st.markdown(f"""
+    <div style="background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 16px;">
+        <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">Position Calculator</p>
+    </div>
     """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="calc-container"><p class="calc-title">Position Calculator</p>', unsafe_allow_html=True)
     
     risk_budget = st.number_input("Risk Budget ($)", min_value=100, max_value=100000, value=1000, step=100)
     
@@ -1020,23 +680,35 @@ def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSe
         profit_100 = engine.calculate_profit(setup.reward_100_pts, max_contracts)
         
         st.markdown(f"""
-        <div class="calc-result">
-            <p class="calc-result-label">Maximum Contracts</p>
-            <p class="calc-result-value">{max_contracts}</p>
+        <div style="background: #1e293b; border-radius: 8px; padding: 14px; text-align: center; margin: 12px 0;">
+            <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0;">Maximum Contracts</p>
+            <p style="font-family: {Typography.MONO}; font-size: {Typography.LARGE}; font-weight: 700; color: {Typography.TEXT_ACCENT_GREEN}; margin: 6px 0 0 0;">{max_contracts}</p>
         </div>
         """, unsafe_allow_html=True)
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Risk at Stop", f"${risk_at_stop:,.0f}")
-            st.metric("Reward @ 75%", f"${profit_75:,.0f}")
-        with col2:
-            st.metric("Reward @ 50%", f"${profit_50:,.0f}")
-            st.metric("Reward @ 100%", f"${profit_100:,.0f}")
+        # Use custom HTML instead of st.metric for consistent sizing
+        st.markdown(f"""
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+            <div style="background: #1e293b; border-radius: 8px; padding: 12px; border: 1px solid #334155;">
+                <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0 0 4px 0;">Risk at Stop</p>
+                <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_ACCENT_RED}; margin: 0;">${risk_at_stop:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 8px; padding: 12px; border: 1px solid #334155;">
+                <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0 0 4px 0;">Reward @ 50%</p>
+                <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_ACCENT_GREEN}; margin: 0;">${profit_50:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 8px; padding: 12px; border: 1px solid #334155;">
+                <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0 0 4px 0;">Reward @ 75%</p>
+                <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_ACCENT_GREEN}; margin: 0;">${profit_75:,.0f}</p>
+            </div>
+            <div style="background: #1e293b; border-radius: 8px; padding: 12px; border: 1px solid #334155;">
+                <p style="font-family: {Typography.SANS}; font-size: {Typography.LABEL}; color: {Typography.TEXT_MUTED}; text-transform: uppercase; margin: 0 0 4px 0;">Reward @ 100%</p>
+                <p style="font-family: {Typography.MONO}; font-size: {Typography.SECONDARY}; font-weight: 600; color: {Typography.TEXT_ACCENT_GREEN}; margin: 0;">${profit_100:,.0f}</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
         st.info("Configure a valid trade setup to calculate position size")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -1045,26 +717,6 @@ def render_position_calculator(engine: SPXProphetEngine, setup: Optional[TradeSe
 
 def render_sidebar(prior_data: Optional[Dict]) -> Tuple[VIXZone, List[Pivot]]:
     """Render sidebar inputs and return configuration"""
-    
-    st.sidebar.markdown("""
-    <style>
-    .sidebar-section {
-        background: #1e293b;
-        border-radius: 8px;
-        padding: 16px;
-        margin-bottom: 16px;
-    }
-    
-    .sidebar-title {
-        font-family: 'Inter', sans-serif;
-        font-size: 11px;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 12px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
     
     st.sidebar.title("⚙️ Configuration")
     
@@ -1104,7 +756,6 @@ def render_sidebar(prior_data: Optional[Dict]) -> Tuple[VIXZone, List[Pivot]]:
         
         prior_close = st.sidebar.number_input("Close", min_value=1000.0, max_value=10000.0, value=6035.0, step=1.0)
         
-        # Create pivot timestamps (assume prior day)
         prior_date = datetime.now(ct_tz).date() - timedelta(days=1)
     else:
         prior_high = prior_data['high']
@@ -1119,7 +770,6 @@ def render_sidebar(prior_data: Optional[Dict]) -> Tuple[VIXZone, List[Pivot]]:
         st.sidebar.write(f"Low: {prior_low:,.2f}")
         st.sidebar.write(f"Close: {prior_close:,.2f}")
     
-    # Create pivot objects
     pivots = [
         Pivot("Prior High", prior_high, ct_tz.localize(datetime.combine(prior_date, prior_high_time))),
         Pivot("Prior Low", prior_low, ct_tz.localize(datetime.combine(prior_date, prior_low_time))),
@@ -1158,7 +808,6 @@ def render_sidebar(prior_data: Optional[Dict]) -> Tuple[VIXZone, List[Pivot]]:
 def main():
     """Main application entry point"""
     
-    # Page config
     st.set_page_config(
         page_title="SPX Prophet",
         page_icon="📈",
@@ -1166,68 +815,80 @@ def main():
         initial_sidebar_state="expanded"
     )
     
-    # Global styles
-    st.markdown("""
+    # Global styles with standardized typography
+    st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
     
-    .stApp {
+    .stApp {{
         background: #0f172a;
-    }
+    }}
     
-    .main .block-container {
+    .main .block-container {{
         padding-top: 2rem;
         padding-bottom: 2rem;
         max-width: 1400px;
-    }
+    }}
     
-    h1, h2, h3, h4, h5, h6 {
-        font-family: 'Inter', sans-serif !important;
-        color: #f8fafc !important;
-    }
+    h1, h2, h3, h4, h5, h6 {{
+        font-family: {Typography.SANS} !important;
+        color: {Typography.TEXT_PRIMARY} !important;
+    }}
     
-    p, span, div {
-        font-family: 'Inter', sans-serif;
-    }
+    h3 {{
+        font-size: {Typography.PRIMARY} !important;
+    }}
     
-    .stMetric {
+    p, span, div {{
+        font-family: {Typography.SANS};
+    }}
+    
+    .stMetric {{
         background: #1e293b;
-        padding: 16px;
+        padding: 12px;
         border-radius: 8px;
         border: 1px solid #334155;
-    }
+    }}
     
-    .stMetric label {
-        color: #64748b !important;
-    }
+    .stMetric label {{
+        color: {Typography.TEXT_MUTED} !important;
+        font-size: {Typography.LABEL} !important;
+    }}
     
-    .stMetric [data-testid="stMetricValue"] {
-        font-family: 'JetBrains Mono', monospace !important;
-        color: #f8fafc !important;
-    }
+    .stMetric [data-testid="stMetricValue"] {{
+        font-family: {Typography.MONO} !important;
+        font-size: {Typography.SECONDARY} !important;
+        color: {Typography.TEXT_PRIMARY} !important;
+    }}
     
-    .stDataFrame {
+    .stDataFrame {{
         background: #1e293b;
         border-radius: 8px;
-    }
+    }}
     
-    .stNumberInput input, .stTimeInput input {
+    .stNumberInput input, .stTimeInput input {{
         background: #1e293b !important;
         border: 1px solid #334155 !important;
-        color: #f8fafc !important;
-    }
+        color: {Typography.TEXT_PRIMARY} !important;
+        font-size: {Typography.BODY} !important;
+    }}
     
-    .stCheckbox label {
-        color: #cbd5e1 !important;
-    }
+    .stCheckbox label {{
+        color: {Typography.TEXT_SECONDARY} !important;
+        font-size: {Typography.BODY} !important;
+    }}
     
-    div[data-testid="stSidebar"] {
+    div[data-testid="stSidebar"] {{
         background: #1e293b;
-    }
+    }}
     
-    div[data-testid="stSidebar"] .stMarkdown {
-        color: #cbd5e1;
-    }
+    div[data-testid="stSidebar"] .stMarkdown {{
+        color: {Typography.TEXT_SECONDARY};
+    }}
+    
+    div[data-testid="stSidebar"] h3 {{
+        font-size: {Typography.SECONDARY} !important;
+    }}
     </style>
     """, unsafe_allow_html=True)
     
@@ -1239,7 +900,6 @@ def main():
     # Fetch market data
     spx_price, vix_price, prior_data = fetch_market_data()
     
-    # Handle missing data
     if spx_price is None:
         spx_price = 6050.0
         st.warning("⚠️ Unable to fetch live SPX data. Using placeholder.")
@@ -1251,14 +911,10 @@ def main():
     # Render sidebar and get config
     zone, pivots = render_sidebar(prior_data)
     
-    # Update zone with live VIX if available
     if vix_price:
         zone = VIXZone(bottom=zone.bottom, top=zone.top, current=vix_price)
     
-    # Calculate current phase
     phase = engine.get_current_phase(current_time)
-    
-    # Determine bias
     bias, confidence, explanation = engine.determine_bias(zone)
     
     # Calculate cones
@@ -1268,12 +924,10 @@ def main():
     
     cones = [engine.calculate_cone(pivot, eval_time) for pivot in pivots]
     
-    # Find best cone (widest tradeable cone)
     valid_cones = [c for c in cones if c.is_valid and c.is_tradeable]
     best_cone = max(valid_cones, key=lambda x: x.width) if valid_cones else None
     best_cone_name = best_cone.pivot.name if best_cone else ""
     
-    # Generate trade setups
     best_setup = None
     if best_cone and bias != Bias.WAIT:
         best_setup = engine.generate_trade_setup(best_cone, bias, spx_price)
@@ -1282,13 +936,9 @@ def main():
     # RENDER UI
     # ==========================================================================
     
-    # Header
     render_header(spx_price, vix_price, phase)
-    
-    # Bias Card
     render_bias_card(bias, confidence, explanation)
     
-    # Main content area
     col1, col2 = st.columns([1, 1])
     
     with col1:
@@ -1297,11 +947,9 @@ def main():
     with col2:
         render_entry_checklist(zone, phase, bias, spx_price, best_setup)
     
-    # Cone table
     st.markdown("---")
     render_cone_table(cones, best_cone_name)
     
-    # Trade setups
     if bias != Bias.WAIT:
         st.markdown(f"### {bias.value} Setups")
         
@@ -1318,7 +966,6 @@ def main():
     else:
         st.info("📊 VIX is mid-zone. No directional edge. Waiting for VIX to reach zone edge before displaying trade setups.")
     
-    # Position Calculator
     st.markdown("---")
     col1, col2 = st.columns([1, 2])
     
@@ -1327,24 +974,23 @@ def main():
     
     with col2:
         st.markdown("### Trade Rules Reminder")
-        st.markdown("""
-        <div style="background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155;">
-            <p style="color: #94a3b8; font-size: 14px; line-height: 1.8;">
-                <strong style="color: #f8fafc;">Entry Logic:</strong> CALLS enter at descending rail (support). PUTS enter at ascending rail (resistance).<br><br>
-                <strong style="color: #f8fafc;">Stop Loss:</strong> Fixed 6 points from entry.<br><br>
-                <strong style="color: #f8fafc;">Targets:</strong> 50%, 75%, 100% of cone width to opposite rail.<br><br>
-                <strong style="color: #f8fafc;">30-Min Close Rule:</strong> Wicks don't count. Wait for candle to CLOSE at/beyond level.<br><br>
-                <strong style="color: #f8fafc;">Danger Zone (6:30-9:30 AM CT):</strong> VIX can reverse. Use extra caution.
+        st.markdown(f"""
+        <div style="background: #1e293b; border-radius: 12px; padding: 16px; border: 1px solid #334155;">
+            <p style="color: #94a3b8; font-size: {Typography.BODY}; line-height: 1.8; margin: 0;">
+                <strong style="color: {Typography.TEXT_PRIMARY};">Entry Logic:</strong> CALLS enter at descending rail (support). PUTS enter at ascending rail (resistance).<br><br>
+                <strong style="color: {Typography.TEXT_PRIMARY};">Stop Loss:</strong> Fixed 6 points from entry.<br><br>
+                <strong style="color: {Typography.TEXT_PRIMARY};">Targets:</strong> 50%, 75%, 100% of cone width to opposite rail.<br><br>
+                <strong style="color: {Typography.TEXT_PRIMARY};">30-Min Close Rule:</strong> Wicks don't count. Wait for candle to CLOSE at/beyond level.<br><br>
+                <strong style="color: {Typography.TEXT_PRIMARY};">Danger Zone (6:30-9:30 AM CT):</strong> VIX can reverse. Use extra caution.
             </p>
         </div>
         """, unsafe_allow_html=True)
     
-    # Footer
     st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; padding: 20px; color: #64748b; font-size: 12px;">
-        <p>SPX PROPHET v2.0 | Institutional Grade 0DTE Decision Support System</p>
-        <p>Data provided by Yahoo Finance. Not financial advice. Trade at your own risk.</p>
+    st.markdown(f"""
+    <div style="text-align: center; padding: 16px; color: {Typography.TEXT_MUTED}; font-size: {Typography.LABEL};">
+        <p style="margin: 0;">SPX PROPHET v2.1 | Institutional Grade 0DTE Decision Support System</p>
+        <p style="margin: 4px 0 0 0;">Data provided by Yahoo Finance. Not financial advice. Trade at your own risk.</p>
     </div>
     """, unsafe_allow_html=True)
 
