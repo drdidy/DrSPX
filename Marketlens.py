@@ -1306,22 +1306,36 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Initialize session state
+    # Initialize session state - each variable independently
     if 'vix_bottom' not in st.session_state:
         st.session_state.vix_bottom = 0.0
+    if 'vix_top' not in st.session_state:
         st.session_state.vix_top = 0.0
+    if 'vix_current' not in st.session_state:
         st.session_state.vix_current = 0.0
+    if 'sec_high' not in st.session_state:
         st.session_state.sec_high = 0.0
+    if 'sec_high_time' not in st.session_state:
         st.session_state.sec_high_time = "12:00"
+    if 'sec_low' not in st.session_state:
         st.session_state.sec_low = 0.0
+    if 'sec_low_time' not in st.session_state:
         st.session_state.sec_low_time = "12:00"
+    if 'use_sec_high' not in st.session_state:
         st.session_state.use_sec_high = False
+    if 'use_sec_low' not in st.session_state:
         st.session_state.use_sec_low = False
+    if 'manual_high' not in st.session_state:
         st.session_state.manual_high = 0.0
+    if 'manual_high_time' not in st.session_state:
         st.session_state.manual_high_time = "10:30"
+    if 'manual_low' not in st.session_state:
         st.session_state.manual_low = 0.0
+    if 'manual_low_time' not in st.session_state:
         st.session_state.manual_low_time = "14:00"
+    if 'manual_close' not in st.session_state:
         st.session_state.manual_close = 0.0
+    if 'use_manual_pivots' not in st.session_state:
         st.session_state.use_manual_pivots = False
     
     # Sidebar
