@@ -7,8 +7,7 @@
 ║  NEW IN v5.1:                                                                 ║
 ║  • Neomorphic UI Design - Soft shadows, depth, 3D tactile cards              ║
 ║  • Live SPX Options Pricing via Polygon                                      ║
-║  • SPY Fallback with automatic conversion when SPX unavailable               ║
-║  • Real bid/ask spreads for accurate entry planning                          ║
+║  • SPY Fallback with automatic conversion when SPX unavailable               ║                         
 ║  • Greeks display (Delta, Gamma, Theta)                                      ║
 ║  • Smart entry recommendations based on premium analysis                      ║
 ║                                                                               ║
@@ -546,6 +545,60 @@ def yf_fetch_current_vix() -> float:
     except:
         pass
     return 0.0
+
+@st.cache_data(ttl=300)
+def fetch_historical_day_data(ticker: str, date: datetime) -> Dict:
+    """
+    Fetch OHLC data for a specific historical date.
+    Returns: {'open': x, 'high': x, 'low': x, 'close': x}
+    """
+    try:
+        t = yf.Ticker(ticker)
+        # Fetch a few days around the target date to ensure we get it
+        start = date - timedelta(days=5)
+        end = date + timedelta(days=1)
+        data = t.history(start=start.strftime('%Y-%m-%d'), end=end.strftime('%Y-%m-%d'), interval='1d')
+        
+        if not data.empty:
+            # Find the exact date
+            target_str = date.strftime('%Y-%m-%d')
+            for idx in data.index:
+                if idx.strftime('%Y-%m-%d') == target_str:
+                    row = data.loc[idx]
+                    return {
+                        'open': float(row['Open']),
+                        'high': float(row['High']),
+                        'low': float(row['Low']),
+                        'close': float(row['Close'])
+                    }
+            
+            # If exact date not found, return last available
+            row = data.iloc[-1]
+            return {
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close'])
+            }
+    except Exception as e:
+        pass
+    return {'open': 0, 'high': 0, 'low': 0, 'close': 0}
+
+@st.cache_data(ttl=300)
+def fetch_historical_intraday_data(ticker: str, date: datetime) -> pd.DataFrame:
+    """
+    Fetch intraday data for a specific historical date.
+    Returns DataFrame with OHLCV data.
+    """
+    try:
+        t = yf.Ticker(ticker)
+        # For intraday, we need to be within 60 days
+        start = date
+        end = date + timedelta(days=1)
+        data = t.history(start=start.strftime('%Y-%m-%d'), end=end.strftime('%Y-%m-%d'), interval='30m')
+        return data
+    except:
+        return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def yf_fetch_es_futures() -> Dict:
@@ -2379,7 +2432,9 @@ def main():
         'manual_close': 0.0,
         'manual_high_time': "10:30",
         'manual_low_time': "14:00",
-        'fetch_options': True
+        'fetch_options': True,
+        'selected_date': None,
+        'use_historical': False
     }
     
     for key, value in defaults.items():
@@ -2389,6 +2444,45 @@ def main():
     # Sidebar
     with st.sidebar:
         st.markdown("## ⚙️ Configuration")
+        
+        # Date Selection
+        st.markdown("### 📅 Trading Date")
+        
+        # Get today and next trading day
+        today = get_ct_now().date()
+        next_trading = get_next_trading_day().date()
+        
+        date_mode = st.radio(
+            "Select Mode",
+            ["Live / Next Trading Day", "Historical Date"],
+            index=1 if st.session_state.use_historical else 0,
+            horizontal=True
+        )
+        
+        st.session_state.use_historical = (date_mode == "Historical Date")
+        
+        if st.session_state.use_historical:
+            # Historical date picker
+            selected = st.date_input(
+                "Select Date",
+                value=st.session_state.selected_date or today - timedelta(days=1),
+                max_value=today,
+                min_value=today - timedelta(days=365)
+            )
+            st.session_state.selected_date = selected
+            
+            # Show what date is selected
+            if selected.weekday() >= 5:
+                st.warning(f"⚠️ {selected.strftime('%A, %b %d')} is a weekend - no trading data")
+            else:
+                st.info(f"📊 Showing data for **{selected.strftime('%A, %b %d, %Y')}**")
+        else:
+            # Show next trading day info
+            trading_label = get_trading_day_label()
+            st.info(f"📊 **{trading_label}** ({next_trading.strftime('%b %d, %Y')})")
+            st.session_state.selected_date = None
+        
+        st.markdown("---")
         
         st.markdown("### 📊 VIX Zone")
         use_manual_vix = st.checkbox("Manual VIX Override", value=st.session_state.use_manual_vix)
@@ -2420,32 +2514,83 @@ def main():
             st.cache_data.clear()
             st.rerun()
     
+    # Determine if we're in historical mode
+    is_historical = st.session_state.use_historical and st.session_state.selected_date is not None
+    selected_date = st.session_state.selected_date
+    
     # Get market data
     polygon_status = PolygonStatus()
     
-    # SPX price
-    spx_snapshot = polygon_get_snapshot(POLYGON_SPX) if POLYGON_HAS_INDICES else None
-    if spx_snapshot and spx_snapshot.get('price', 0) > 0:
-        current_spx = spx_snapshot['price']
-        polygon_status.connected = True
-        polygon_status.spx_price = current_spx
+    if is_historical:
+        # HISTORICAL MODE - Fetch data for selected date
+        historical_spx = fetch_historical_day_data("^GSPC", datetime.combine(selected_date, time(0, 0)))
+        historical_vix = fetch_historical_day_data("^VIX", datetime.combine(selected_date, time(0, 0)))
+        
+        # Use close price as "current" for historical
+        current_spx = historical_spx.get('close', 0)
+        current_vix = historical_vix.get('close', 0)
+        
+        if current_spx > 0:
+            polygon_status.connected = True
+            polygon_status.spx_price = current_spx
+            polygon_status.vix_price = current_vix
+        
+        # For historical, we need prior day data (day before selected date)
+        prior_date = selected_date - timedelta(days=1)
+        # Skip weekends for prior date
+        while prior_date.weekday() >= 5:
+            prior_date -= timedelta(days=1)
+        
+        prior_data = fetch_historical_day_data("^GSPC", datetime.combine(prior_date, time(0, 0)))
+        if prior_data.get('high', 0) == 0:
+            prior_data = {'high': current_spx + 20, 'low': current_spx - 20, 'close': current_spx, 'open': current_spx}
+        
+        # VIX Zone for historical - estimate based on daily range
+        vix_range = historical_vix.get('high', current_vix) - historical_vix.get('low', current_vix)
+        if vix_range > 0:
+            vix_bottom = historical_vix.get('low', current_vix)
+            vix_top = historical_vix.get('high', current_vix)
+        else:
+            vix_bottom = current_vix - 0.15
+            vix_top = current_vix + 0.15
+        vix_auto = False
+        
+        # ES data not available for historical
+        es_data = ESData()
+        
     else:
-        current_spx = yf_fetch_current_spx()
+        # LIVE MODE - Current market data
+        # SPX price
+        spx_snapshot = polygon_get_snapshot(POLYGON_SPX) if POLYGON_HAS_INDICES else None
+        if spx_snapshot and spx_snapshot.get('price', 0) > 0:
+            current_spx = spx_snapshot['price']
+            polygon_status.connected = True
+            polygon_status.spx_price = current_spx
+        else:
+            current_spx = yf_fetch_current_spx()
+        
+        # VIX
+        vix_snapshot = polygon_get_snapshot(POLYGON_VIX) if POLYGON_HAS_INDICES else None
+        if vix_snapshot and vix_snapshot.get('price', 0) > 0:
+            current_vix = vix_snapshot['price']
+            polygon_status.vix_price = current_vix
+        else:
+            current_vix = yf_fetch_current_vix()
+        
+        # Prior day data
+        prior_data = polygon_get_prior_day_data(POLYGON_SPX) if POLYGON_HAS_INDICES else None
+        if not prior_data:
+            prior_data = {'high': current_spx + 20, 'low': current_spx - 20, 'close': current_spx, 'open': current_spx}
+        
+        # Fetch ES Futures data
+        es_raw = yf_fetch_es_futures()
     
-    # VIX
-    vix_snapshot = polygon_get_snapshot(POLYGON_VIX) if POLYGON_HAS_INDICES else None
-    if vix_snapshot and vix_snapshot.get('price', 0) > 0:
-        current_vix = vix_snapshot['price']
-        polygon_status.vix_price = current_vix
-    else:
-        current_vix = yf_fetch_current_vix()
-    
-    # VIX Zone
+    # VIX Zone - Manual override takes precedence
     if st.session_state.use_manual_vix and st.session_state.vix_bottom > 0 and st.session_state.vix_top > 0:
         vix_bottom = st.session_state.vix_bottom
         vix_top = st.session_state.vix_top
         vix_auto = False
-    else:
+    elif not is_historical:
         overnight = polygon_get_overnight_vix_range(get_ct_now()) if POLYGON_HAS_INDICES else None
         if overnight and overnight.get('bottom', 0) > 0:
             vix_bottom = overnight['bottom']
@@ -2457,48 +2602,60 @@ def main():
             vix_auto = False
     
     vix_zone = analyze_vix_zone(current_vix, vix_bottom, vix_top)
-    vix_zone.auto_detected = vix_auto
+    vix_zone.auto_detected = vix_auto if not is_historical else False
     
-    # Fetch ES Futures data
-    es_raw = yf_fetch_es_futures()
-    es_data = analyze_es_data(es_raw, current_spx, vix_zone)
-    
-    # Prior day data
-    prior_data = polygon_get_prior_day_data(POLYGON_SPX) if POLYGON_HAS_INDICES else None
-    if not prior_data:
-        prior_data = {'high': current_spx + 20, 'low': current_spx - 20, 'close': current_spx, 'open': current_spx}
+    # ES data analysis (only for live mode)
+    if not is_historical:
+        es_data = analyze_es_data(es_raw, current_spx, vix_zone)
     
     # Build pivots
     if st.session_state.use_manual_pivots and st.session_state.manual_high > 0:
-        yesterday = get_ct_now() - timedelta(days=1)
+        if is_historical:
+            pivot_date = selected_date - timedelta(days=1)
+            while pivot_date.weekday() >= 5:
+                pivot_date -= timedelta(days=1)
+        else:
+            pivot_date = get_ct_now().date() - timedelta(days=1)
+        
         h_parts = st.session_state.manual_high_time.split(':')
         l_parts = st.session_state.manual_low_time.split(':')
         
-        high_time = CT_TZ.localize(datetime.combine(yesterday.date(), time(int(h_parts[0]), int(h_parts[1]))))
-        low_time = CT_TZ.localize(datetime.combine(yesterday.date(), time(int(l_parts[0]), int(l_parts[1]))))
+        high_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(h_parts[0]), int(h_parts[1]))))
+        low_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(l_parts[0]), int(l_parts[1]))))
         
         pivots = [
             Pivot(price=st.session_state.manual_high, time=high_time, name="Prior High"),
             Pivot(price=st.session_state.manual_low, time=low_time, name="Prior Low"),
-            Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(yesterday.date(), time(16, 0))), name="Prior Close")
+            Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close")
         ]
     else:
-        yesterday = get_ct_now() - timedelta(days=1)
+        if is_historical:
+            pivot_date = selected_date - timedelta(days=1)
+            while pivot_date.weekday() >= 5:
+                pivot_date -= timedelta(days=1)
+        else:
+            pivot_date = get_ct_now().date() - timedelta(days=1)
+        
         pivots = [
-            Pivot(price=prior_data['high'], time=CT_TZ.localize(datetime.combine(yesterday.date(), time(10, 30))), name="Prior High"),
-            Pivot(price=prior_data['low'], time=CT_TZ.localize(datetime.combine(yesterday.date(), time(14, 0))), name="Prior Low"),
-            Pivot(price=prior_data['close'], time=CT_TZ.localize(datetime.combine(yesterday.date(), time(16, 0))), name="Prior Close")
+            Pivot(price=prior_data['high'], time=CT_TZ.localize(datetime.combine(pivot_date, time(10, 30))), name="Prior High"),
+            Pivot(price=prior_data['low'], time=CT_TZ.localize(datetime.combine(pivot_date, time(14, 0))), name="Prior Low"),
+            Pivot(price=prior_data['close'], time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close")
         ]
     
-    # Build cones at 10:00 AM CT
-    today_10am = CT_TZ.localize(datetime.combine(get_ct_now().date(), time(10, 0)))
-    cones = build_cones(pivots, today_10am)
+    # Build cones at 10:00 AM CT for the trading date
+    if is_historical:
+        trading_date = selected_date
+    else:
+        trading_date = get_ct_now().date()
+    
+    eval_10am = CT_TZ.localize(datetime.combine(trading_date, time(10, 0)))
+    cones = build_cones(pivots, eval_10am)
     
     # Generate setups
     setups = generate_setups(cones, current_spx, vix_zone.bias)
     
-    # Fetch live options pricing
-    if st.session_state.fetch_options:
+    # Fetch live options pricing (only for live mode)
+    if st.session_state.fetch_options and not is_historical:
         with st.spinner("Fetching live options prices..."):
             for i, setup in enumerate(setups):
                 setups[i] = get_option_pricing_for_setup(setup, current_spx)
