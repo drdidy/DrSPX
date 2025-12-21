@@ -1085,7 +1085,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             align-items: center;
             padding: 8px 16px;
             border-radius: 50px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             box-shadow: 
                 3px 3px 6px {shadow_dark},
@@ -1107,10 +1107,10 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .logo-icon {{
-            width: 56px;
-            height: 56px;
+            width: 52px;
+            height: 52px;
             background: linear-gradient(135deg, {blue} 0%, #8b5cf6 100%);
-            border-radius: 16px;
+            border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1121,20 +1121,29 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .logo-icon span {{
-            font-size: 24px;
+            font-size: 20px;
             font-weight: 800;
             color: white;
         }}
         
         .logo-text h1 {{
-            font-size: 24px;
+            font-size: 20px;
             font-weight: 800;
             color: {text_dark};
             letter-spacing: -0.5px;
+            margin-bottom: 2px;
+        }}
+        
+        .logo-tagline {{
+            font-size: 12px;
+            color: {text_med};
+            font-weight: 500;
+            font-style: italic;
+            margin-bottom: 2px;
         }}
         
         .logo-text p {{
-            font-size: 13px;
+            font-size: 11px;
             color: {text_light};
             font-weight: 500;
         }}
@@ -1168,22 +1177,22 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .price-label {{
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             color: {text_light};
             text-transform: uppercase;
-            letter-spacing: 1.5px;
+            letter-spacing: 1px;
             margin-bottom: 8px;
         }}
         
         .price-value {{
             font-family: 'JetBrains Mono', monospace;
-            font-size: 52px;
+            font-size: 36px;
             font-weight: 700;
             color: {text_dark};
-            letter-spacing: -2px;
+            letter-spacing: -1px;
             line-height: 1;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
         }}
         
         .price-meta {{
@@ -1207,7 +1216,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         
         .meta-value {{
             font-family: 'JetBrains Mono', monospace;
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 600;
             color: {text_dark};
         }}
@@ -1280,7 +1289,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .bias-icon {{
-            font-size: 48px;
+            font-size: 32px;
             color: {bias_color};
             margin-bottom: 8px;
             position: relative;
@@ -1289,7 +1298,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .bias-label {{
-            font-size: 28px;
+            font-size: 20px;
             font-weight: 800;
             color: {bias_color};
             letter-spacing: 1px;
@@ -1298,7 +1307,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .bias-sub {{
-            font-size: 14px;
+            font-size: 12px;
             color: {text_med};
             margin-top: 8px;
             position: relative;
@@ -1307,7 +1316,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         
         .bias-pct {{
             font-family: 'JetBrains Mono', monospace;
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 700;
             color: {bias_color};
             background: {card_bg};
@@ -1366,7 +1375,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .alert-content h3 {{
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 700;
             margin-bottom: 6px;
         }}
@@ -1375,7 +1384,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         .alert-banner.danger h3 {{ color: {red}; }}
         
         .alert-content p {{
-            font-size: 14px;
+            font-size: 12px;
             color: {text_med};
         }}
         
@@ -1415,7 +1424,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         
         .score-value {{
             font-family: 'JetBrains Mono', monospace;
-            font-size: 32px;
+            font-size: 24px;
             font-weight: 700;
             color: {score_color};
         }}
@@ -1432,7 +1441,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .score-title {{
-            font-size: 22px;
+            font-size: 16px;
             font-weight: 700;
             color: {text_dark};
             margin-bottom: 8px;
@@ -1442,7 +1451,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             display: inline-block;
             padding: 6px 16px;
             border-radius: 8px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 700;
             background: {score_color}20;
             color: {score_color};
@@ -1450,7 +1459,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .score-warnings {{
-            font-size: 14px;
+            font-size: 12px;
             color: {text_med};
             line-height: 1.6;
         }}
@@ -1614,7 +1623,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         
         .data-cell {{
             text-align: center;
-            padding: 20px;
+            padding: 16px;
         }}
         
         .data-cell-label {{
@@ -1623,12 +1632,12 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             color: {text_light};
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }}
         
         .data-cell-value {{
             font-family: 'JetBrains Mono', monospace;
-            font-size: 24px;
+            font-size: 16px;
             font-weight: 700;
             color: {text_dark};
         }}
@@ -1653,14 +1662,14 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         }}
         
         .greek-label {{
-            font-size: 10px;
+            font-size: 11px;
             color: {text_light};
             font-weight: 600;
         }}
         
         .greek-value {{
             font-family: 'JetBrains Mono', monospace;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             color: {text_dark};
         }}
@@ -1676,7 +1685,8 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 <div class="logo-icon"><span>SP</span></div>
                 <div class="logo-text">
                     <h1>SPX Prophet</h1>
-                    <p>v5.1 Premium • Structural Analysis + Live Options</p>
+                    <div class="logo-tagline">Where Structure Becomes Foresight</div>
+                    <p>v5.1 Premium</p>
                 </div>
             </div>
             <div class="header-right">
@@ -1792,24 +1802,24 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             <div class="neo-card">
                 <div class="price-label">ES Futures Overnight</div>
                 <div style="display:flex;align-items:center;gap:16px;margin:12px 0;">
-                    <span style="font-size:32px;color:{es_direction_color};">{es_arrow}</span>
+                    <span style="font-size:24px;color:{es_direction_color};">{es_arrow}</span>
                     <div>
-                        <div class="mono" style="font-size:28px;font-weight:700;">{es_data.current_price:,.2f}</div>
-                        <div class="mono" style="font-size:14px;color:{es_direction_color};">{es_change_sign}{es_data.overnight_change:,.2f} ({es_change_sign}{es_data.overnight_change_pct:.2f}%)</div>
+                        <div class="mono" style="font-size:20px;font-weight:700;">{es_data.current_price:,.2f}</div>
+                        <div class="mono" style="font-size:12px;color:{es_direction_color};">{es_change_sign}{es_data.overnight_change:,.2f} ({es_change_sign}{es_data.overnight_change_pct:.2f}%)</div>
                     </div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
                     <div class="neo-inset" style="padding:12px;text-align:center;">
-                        <div style="font-size:10px;color:{text_light};text-transform:uppercase;">SPX Offset</div>
-                        <div class="mono" style="font-size:16px;font-weight:600;">{es_data.spx_offset:+.2f} pts</div>
+                        <div style="font-size:11px;color:{text_light};text-transform:uppercase;">SPX Offset</div>
+                        <div class="mono" style="font-size:14px;font-weight:600;">{es_data.spx_offset:+.2f} pts</div>
                     </div>
                     <div class="neo-inset" style="padding:12px;text-align:center;">
-                        <div style="font-size:10px;color:{text_light};text-transform:uppercase;">Likely Cone</div>
-                        <div style="font-size:16px;font-weight:700;color:{es_direction_color};">{es_data.likely_cone or "—"}</div>
+                        <div style="font-size:11px;color:{text_light};text-transform:uppercase;">Likely Cone</div>
+                        <div style="font-size:14px;font-weight:700;color:{es_direction_color};">{es_data.likely_cone or "—"}</div>
                     </div>
                 </div>
-                <div style="margin-top:16px;padding:12px;background:{alignment_color}15;border-radius:8px;border-left:3px solid {alignment_color};">
-                    <span style="font-weight:600;color:{alignment_color};">{alignment_icon} {alignment_text}</span>
+                <div style="margin-top:16px;padding:10px;background:{alignment_color}15;border-radius:8px;border-left:3px solid {alignment_color};">
+                    <span style="font-weight:600;font-size:12px;color:{alignment_color};">{alignment_icon} {alignment_text}</span>
                 </div>
             </div>
 '''
@@ -1834,21 +1844,21 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             <div class="neo-card">
                 <div class="price-label">Active Cone Position</div>
                 <div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0;">
-                    <div style="font-size:22px;font-weight:700;">{detailed_cone.cone_name}</div>
+                    <div style="font-size:16px;font-weight:700;">{detailed_cone.cone_name}</div>
                     <span class="pill pill-neutral">{status_text}</span>
                     {at_rail_badge}
                 </div>
                 
                 <!-- Cone Position Bar -->
-                <div style="margin:20px 0;">
+                <div style="margin:16px 0;">
                     <div style="display:flex;justify-content:space-between;font-size:11px;color:{text_light};margin-bottom:6px;">
                         <span>▲ CALLS Zone</span>
                         <span>▼ PUTS Zone</span>
                     </div>
-                    <div style="height:12px;border-radius:6px;background:linear-gradient(90deg, {green}40 0%, {bg} 30%, {bg} 70%, {red}40 100%);position:relative;box-shadow:inset 2px 2px 4px {shadow_dark},inset -2px -2px 4px {shadow_light};">
-                        <div style="position:absolute;top:50%;left:{detailed_cone.position_pct}%;transform:translate(-50%,-50%);width:20px;height:20px;background:{position_color};border-radius:50%;border:3px solid {card_bg};box-shadow:0 0 10px {position_color};"></div>
+                    <div style="height:10px;border-radius:5px;background:linear-gradient(90deg, {green}40 0%, {bg} 30%, {bg} 70%, {red}40 100%);position:relative;box-shadow:inset 2px 2px 4px {shadow_dark},inset -2px -2px 4px {shadow_light};">
+                        <div style="position:absolute;top:50%;left:{detailed_cone.position_pct}%;transform:translate(-50%,-50%);width:16px;height:16px;background:{position_color};border-radius:50%;border:2px solid {card_bg};box-shadow:0 0 8px {position_color};"></div>
                     </div>
-                    <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:6px;">
+                    <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:6px;">
                         <span class="mono" style="color:{green};">{detailed_cone.descending_rail:,.2f}</span>
                         <span class="mono" style="color:{text_med};">SPX @ {detailed_cone.position_pct:.0f}%</span>
                         <span class="mono" style="color:{red};">{detailed_cone.ascending_rail:,.2f}</span>
@@ -1857,22 +1867,22 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
                     <div class="neo-inset" style="padding:10px;text-align:center;">
-                        <div style="font-size:10px;color:{text_light};">To Ascending</div>
-                        <div class="mono" style="font-size:14px;color:{red};">{detailed_cone.distance_to_ascending:.1f} pts</div>
+                        <div style="font-size:11px;color:{text_light};">To Ascending</div>
+                        <div class="mono" style="font-size:12px;color:{red};">{detailed_cone.distance_to_ascending:.1f} pts</div>
                     </div>
                     <div class="neo-inset" style="padding:10px;text-align:center;">
-                        <div style="font-size:10px;color:{text_light};">Cone Width</div>
-                        <div class="mono" style="font-size:14px;">{detailed_cone.cone_width:.0f} pts</div>
+                        <div style="font-size:11px;color:{text_light};">Cone Width</div>
+                        <div class="mono" style="font-size:12px;">{detailed_cone.cone_width:.0f} pts</div>
                     </div>
                     <div class="neo-inset" style="padding:10px;text-align:center;">
-                        <div style="font-size:10px;color:{text_light};">To Descending</div>
-                        <div class="mono" style="font-size:14px;color:{green};">{detailed_cone.distance_to_descending:.1f} pts</div>
+                        <div style="font-size:11px;color:{text_light};">To Descending</div>
+                        <div class="mono" style="font-size:12px;color:{green};">{detailed_cone.distance_to_descending:.1f} pts</div>
                     </div>
                 </div>
                 
-                <div style="margin-top:16px;padding:12px;background:{trade_dir_color}15;border-radius:8px;text-align:center;">
-                    <span style="font-size:20px;color:{trade_dir_color};">{trade_arrow}</span>
-                    <span style="font-weight:700;font-size:16px;color:{trade_dir_color};margin-left:8px;">Nearest: {detailed_cone.nearest_rail.upper()} RAIL → {detailed_cone.trade_direction}</span>
+                <div style="margin-top:14px;padding:10px;background:{trade_dir_color}15;border-radius:8px;text-align:center;">
+                    <span style="font-size:16px;color:{trade_dir_color};">{trade_arrow}</span>
+                    <span style="font-weight:700;font-size:12px;color:{trade_dir_color};margin-left:8px;">Nearest: {detailed_cone.nearest_rail.upper()} RAIL → {detailed_cone.trade_direction}</span>
                 </div>
             </div>
 '''
@@ -1906,64 +1916,64 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             
             html += f'''
         <div class="neo-card" style="background:linear-gradient(135deg, {trade_color}15, {trade_color}05);border:2px solid {trade_color}50;margin-bottom:24px;position:relative;overflow:hidden;">
-            <div style="position:absolute;top:0;right:0;background:{trade_color};color:white;padding:8px 20px;font-weight:700;font-size:12px;border-bottom-left-radius:12px;">
+            <div style="position:absolute;top:0;right:0;background:{trade_color};color:white;padding:6px 16px;font-weight:700;font-size:11px;border-bottom-left-radius:10px;">
                 🎯 TRADE ALERT
             </div>
             
-            <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
-                <div style="font-size:48px;color:{trade_color};">{trade_arrow}</div>
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+                <div style="font-size:28px;color:{trade_color};">{trade_arrow}</div>
                 <div>
-                    <div style="font-size:24px;font-weight:800;color:{trade_color};">{s.direction} @ {s.cone_name}</div>
-                    <div style="font-size:14px;color:{text_med};">{"Descending" if s.direction == "CALLS" else "Ascending"} Rail Entry</div>
+                    <div style="font-size:16px;font-weight:800;color:{trade_color};">{s.direction} @ {s.cone_name}</div>
+                    <div style="font-size:12px;color:{text_med};">{"Descending" if s.direction == "CALLS" else "Ascending"} Rail Entry</div>
                 </div>
             </div>
             
-            <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:16px;margin-bottom:20px;">
-                <div class="neo-inset" style="padding:16px;text-align:center;">
+            <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;margin-bottom:16px;">
+                <div class="neo-inset" style="padding:12px;text-align:center;">
                     <div style="font-size:11px;color:{text_light};text-transform:uppercase;margin-bottom:4px;">SPX Entry</div>
-                    <div class="mono" style="font-size:22px;font-weight:700;color:{trade_color};">{s.entry:,.2f}</div>
+                    <div class="mono" style="font-size:16px;font-weight:700;color:{trade_color};">{s.entry:,.2f}</div>
                 </div>
-                <div class="neo-inset" style="padding:16px;text-align:center;">
+                <div class="neo-inset" style="padding:12px;text-align:center;">
                     <div style="font-size:11px;color:{text_light};text-transform:uppercase;margin-bottom:4px;">Strike</div>
-                    <div class="mono" style="font-size:22px;font-weight:700;">{s.strike}{"C" if s.direction == "CALLS" else "P"}</div>
+                    <div class="mono" style="font-size:16px;font-weight:700;">{s.strike}{"C" if s.direction == "CALLS" else "P"}</div>
                 </div>
-                <div class="neo-inset" style="padding:16px;text-align:center;">
+                <div class="neo-inset" style="padding:12px;text-align:center;">
                     <div style="font-size:11px;color:{text_light};text-transform:uppercase;margin-bottom:4px;">Est. Premium</div>
-                    <div class="mono" style="font-size:22px;font-weight:700;color:{green};">${s.est_entry_price_10am:.1f}</div>
+                    <div class="mono" style="font-size:16px;font-weight:700;color:{green};">${s.est_entry_price_10am:.1f}</div>
                 </div>
-                <div class="neo-inset" style="padding:16px;text-align:center;background:{red}15;">
+                <div class="neo-inset" style="padding:12px;text-align:center;background:{red}15;">
                     <div style="font-size:11px;color:{red};text-transform:uppercase;margin-bottom:4px;">Stop Loss</div>
-                    <div class="mono" style="font-size:22px;font-weight:700;color:{red};">{s.stop:,.2f}</div>
+                    <div class="mono" style="font-size:16px;font-weight:700;color:{red};">{s.stop:,.2f}</div>
                 </div>
             </div>
             
-            <div style="background:{card_bg};border-radius:12px;padding:20px;box-shadow:inset 3px 3px 6px {shadow_dark},inset -3px -3px 6px {shadow_light};">
-                <div style="font-size:12px;font-weight:700;color:{text_light};text-transform:uppercase;margin-bottom:12px;">Risk / Reward Per Contract</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;">
-                    <div style="text-align:center;padding:12px;background:{red}10;border-radius:8px;">
-                        <div style="font-size:10px;color:{red};">MAX RISK</div>
-                        <div class="mono" style="font-size:20px;font-weight:700;color:{red};">-${s.stop_loss_dollars:.0f}</div>
-                        <div style="font-size:10px;color:{text_light};">6 pts stop</div>
+            <div style="background:{card_bg};border-radius:10px;padding:16px;box-shadow:inset 3px 3px 6px {shadow_dark},inset -3px -3px 6px {shadow_light};">
+                <div style="font-size:11px;font-weight:700;color:{text_light};text-transform:uppercase;margin-bottom:10px;">Risk / Reward Per Contract</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;">
+                    <div style="text-align:center;padding:10px;background:{red}10;border-radius:8px;">
+                        <div style="font-size:11px;color:{red};">MAX RISK</div>
+                        <div class="mono" style="font-size:14px;font-weight:700;color:{red};">-${s.stop_loss_dollars:.0f}</div>
+                        <div style="font-size:11px;color:{text_light};">6 pts</div>
                     </div>
-                    <div style="text-align:center;padding:12px;background:{green}10;border-radius:8px;">
-                        <div style="font-size:10px;color:{text_med};">T1 (25%)</div>
-                        <div class="mono" style="font-size:20px;font-weight:700;color:{green};">+${s.reward_t1_dollars:.0f}</div>
-                        <div style="font-size:10px;color:{text_light};">{s.target_25:,.2f}</div>
+                    <div style="text-align:center;padding:10px;background:{green}10;border-radius:8px;">
+                        <div style="font-size:11px;color:{text_med};">T1 (25%)</div>
+                        <div class="mono" style="font-size:14px;font-weight:700;color:{green};">+${s.reward_t1_dollars:.0f}</div>
+                        <div style="font-size:11px;color:{text_light};">{s.target_25:,.2f}</div>
                     </div>
-                    <div style="text-align:center;padding:12px;background:{green}15;border-radius:8px;">
-                        <div style="font-size:10px;color:{text_med};">T2 (50%)</div>
-                        <div class="mono" style="font-size:20px;font-weight:700;color:{green};">+${s.reward_t2_dollars:.0f}</div>
-                        <div style="font-size:10px;color:{text_light};">{s.target_50:,.2f}</div>
+                    <div style="text-align:center;padding:10px;background:{green}15;border-radius:8px;">
+                        <div style="font-size:11px;color:{text_med};">T2 (50%)</div>
+                        <div class="mono" style="font-size:14px;font-weight:700;color:{green};">+${s.reward_t2_dollars:.0f}</div>
+                        <div style="font-size:11px;color:{text_light};">{s.target_50:,.2f}</div>
                     </div>
-                    <div style="text-align:center;padding:12px;background:{green}20;border-radius:8px;">
-                        <div style="font-size:10px;color:{text_med};">T3 (75%)</div>
-                        <div class="mono" style="font-size:20px;font-weight:700;color:{green};">+${s.reward_t3_dollars:.0f}</div>
-                        <div style="font-size:10px;color:{text_light};">{s.target_75:,.2f}</div>
+                    <div style="text-align:center;padding:10px;background:{green}20;border-radius:8px;">
+                        <div style="font-size:11px;color:{text_med};">T3 (75%)</div>
+                        <div class="mono" style="font-size:14px;font-weight:700;color:{green};">+${s.reward_t3_dollars:.0f}</div>
+                        <div style="font-size:11px;color:{text_light};">{s.target_75:,.2f}</div>
                     </div>
                 </div>
-                <div style="margin-top:16px;text-align:center;">
-                    <span style="font-size:14px;color:{text_med};">R:R Ratio:</span>
-                    <span class="mono" style="font-size:18px;font-weight:700;color:{green};margin-left:8px;">1:{s.rr_ratio:.1f}</span>
+                <div style="margin-top:12px;text-align:center;">
+                    <span style="font-size:12px;color:{text_med};">R:R Ratio:</span>
+                    <span class="mono" style="font-size:14px;font-weight:700;color:{green};margin-left:8px;">1:{s.rr_ratio:.1f}</span>
                 </div>
             </div>
         </div>
