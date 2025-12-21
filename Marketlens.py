@@ -1062,6 +1062,212 @@ def render_active_cone_banner(active_cone_info: Dict, spx: float) -> str:
     </div>
     '''
 
+def render_entry_checklist(vix: 'VIXZone', active_cone_info: Dict, setups: List, spx: float) -> str:
+    """Render the premium 4-point entry checklist."""
+    
+    # Calculate checklist status
+    # 1. VIX Position
+    vix_check = vix.bias in ['CALLS', 'PUTS']
+    if vix_check:
+        if vix.bias == 'CALLS':
+            vix_detail = f"VIX at {vix.position_pct:.0f}% (TOP of zone) → CALLS bias confirmed"
+        else:
+            vix_detail = f"VIX at {vix.position_pct:.0f}% (BOTTOM of zone) → PUTS bias confirmed"
+    else:
+        vix_detail = f"VIX at {vix.position_pct:.0f}% (MID-ZONE) → No directional bias"
+    
+    # 2. 30-Min Candle Close
+    candle_check = False  # We can't know this in real-time without live data
+    candle_detail = "Waiting for candle to CLOSE at zone edge (not just wick)"
+    
+    # 3. Price at Rail
+    rail_check = False
+    rail_detail = "Price not near any entry rail"
+    nearest_setup = None
+    
+    if active_cone_info:
+        at_rail = active_cone_info.get('at_rail', False)
+        inside = active_cone_info.get('inside_cone')
+        distance = active_cone_info.get('distance', 0)
+        rail_type = active_cone_info.get('rail_type')
+        
+        if at_rail and inside:
+            rail_check = True
+            if rail_type == 'descending':
+                rail_detail = f"SPX {spx:,.2f} is {distance:.1f} pts from {inside.name} descending rail ({inside.descending_rail:.2f})"
+            else:
+                rail_detail = f"SPX {spx:,.2f} is {distance:.1f} pts from {inside.name} ascending rail ({inside.ascending_rail:.2f})"
+            
+            # Find matching setup
+            for s in setups:
+                if s.cone_name == inside.name:
+                    if rail_type == 'descending' and s.direction == 'CALLS':
+                        nearest_setup = s
+                        break
+                    elif rail_type == 'ascending' and s.direction == 'PUTS':
+                        nearest_setup = s
+                        break
+        elif inside:
+            dist_to_desc = spx - inside.descending_rail
+            dist_to_asc = inside.ascending_rail - spx
+            min_dist = min(dist_to_desc, dist_to_asc)
+            nearest_rail_name = 'descending' if dist_to_desc < dist_to_asc else 'ascending'
+            rail_detail = f"SPX {spx:,.2f} is {min_dist:.1f} pts from nearest rail ({inside.name} {nearest_rail_name})"
+    
+    # 4. Direction Alignment
+    align_check = False
+    align_detail = "No alignment to check (need VIX bias + price at rail)"
+    
+    if vix_check and active_cone_info:
+        rail_type = active_cone_info.get('rail_type')
+        at_rail = active_cone_info.get('at_rail', False)
+        
+        if at_rail and rail_type:
+            if (vix.bias == 'CALLS' and rail_type == 'descending') or (vix.bias == 'PUTS' and rail_type == 'ascending'):
+                align_check = True
+                align_detail = f"VIX bias ({vix.bias}) matches entry rail ({rail_type} = {vix.bias})"
+            else:
+                align_detail = f"VIX bias ({vix.bias}) does NOT match rail ({rail_type})"
+    
+    # Count confirmed
+    confirmed = sum([vix_check, candle_check, rail_check, align_check])
+    
+    # Helper for check styling
+    def check_style(passed: bool, waiting: bool = False):
+        if passed:
+            return ('#059669', '#ecfdf5', '#10b981', '✓')
+        elif waiting:
+            return ('#d97706', '#fffbeb', '#f59e0b', '⏳')
+        else:
+            return ('#dc2626', '#fef2f2', '#ef4444', '✗')
+    
+    v_color, v_bg, v_border, v_icon = check_style(vix_check, not vix_check)
+    c_color, c_bg, c_border, c_icon = check_style(candle_check, True)  # Always waiting
+    r_color, r_bg, r_border, r_icon = check_style(rail_check, not rail_check)
+    a_color, a_bg, a_border, a_icon = check_style(align_check, not align_check and vix_check)
+    
+    # Build action summary
+    if confirmed >= 3 and nearest_setup:
+        s = nearest_setup
+        action_html = f'''
+        <div style="margin-top:20px;padding:20px;background:linear-gradient(135deg,#059669,#047857);border-radius:12px;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                <span style="font-size:24px;">🎯</span>
+                <span style="font-size:18px;font-weight:700;color:#f8fafc;">READY TO ENTER: {s.cone_name.upper()} CONE {s.direction}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
+                <div style="background:rgba(255,255,255,0.15);padding:12px;border-radius:8px;text-align:center;">
+                    <div style="font-size:10px;color:#a7f3d0;text-transform:uppercase;margin-bottom:4px;">Entry</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:#f8fafc;">{s.entry:.2f}</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15);padding:12px;border-radius:8px;text-align:center;">
+                    <div style="font-size:10px;color:#a7f3d0;text-transform:uppercase;margin-bottom:4px;">Stop</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:#fca5a5;">{s.stop:.2f}</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15);padding:12px;border-radius:8px;text-align:center;">
+                    <div style="font-size:10px;color:#a7f3d0;text-transform:uppercase;margin-bottom:4px;">Target (50%)</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:18px;font-weight:700;color:#f8fafc;">{s.target_50:.2f}</div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:12px;">
+                <div style="background:rgba(255,255,255,0.1);padding:10px;border-radius:8px;text-align:center;">
+                    <div style="font-size:10px;color:#a7f3d0;">Strike</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#f8fafc;">{s.strike}{'C' if s.direction == 'CALLS' else 'P'}</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.1);padding:10px;border-radius:8px;text-align:center;">
+                    <div style="font-size:10px;color:#a7f3d0;">Risk</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#fca5a5;">${s.risk_per_contract:.0f}</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.1);padding:10px;border-radius:8px;text-align:center;">
+                    <div style="font-size:10px;color:#a7f3d0;">Reward (50%)</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#f8fafc;">${s.profit_50:.0f}</div>
+                </div>
+            </div>
+        </div>
+        '''
+    else:
+        # Not ready
+        missing = []
+        if not vix_check:
+            missing.append("VIX mid-zone (no directional bias)")
+        if not rail_check:
+            missing.append("Price not at entry rail")
+        if not align_check and vix_check:
+            missing.append("Direction misaligned with rail")
+        
+        missing_html = ''.join([f'<div style="font-size:13px;color:#fca5a5;">• {m}</div>' for m in missing[:3]])
+        
+        action_html = f'''
+        <div style="margin-top:20px;padding:20px;background:linear-gradient(135deg,#1e293b,#334155);border-radius:12px;border:1px solid #475569;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+                <span style="font-size:24px;">⏸️</span>
+                <span style="font-size:18px;font-weight:700;color:#f8fafc;">WAIT — {4 - confirmed} condition{'s' if 4 - confirmed > 1 else ''} not met</span>
+            </div>
+            {missing_html}
+        </div>
+        '''
+    
+    return f'''
+    <div style="background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:16px;padding:24px;margin-top:20px;box-shadow:0 10px 30px rgba(0,0,0,0.15);">
+        <!-- Header -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <span style="font-size:24px;">⚡</span>
+                <span style="font-size:18px;font-weight:700;color:#f8fafc;">ENTRY CHECKLIST</span>
+            </div>
+            <div style="background:{'#059669' if confirmed >= 3 else '#d97706' if confirmed >= 2 else '#475569'};padding:6px 14px;border-radius:20px;">
+                <span style="font-size:13px;font-weight:600;color:#f8fafc;">{confirmed}/4 Confirmed</span>
+            </div>
+        </div>
+        
+        <!-- 4 Checks -->
+        <div style="display:grid;gap:12px;">
+            <!-- 1. VIX Position -->
+            <div style="background:{v_bg};border:1px solid {v_border};border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+                <div style="width:32px;height:32px;background:{v_color};border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;">1</div>
+                <div style="flex:1;">
+                    <div style="font-weight:600;font-size:14px;color:{v_color};">VIX POSITION</div>
+                    <div style="font-size:12px;color:#6b7280;margin-top:2px;">{vix_detail}</div>
+                </div>
+                <div style="font-size:20px;">{v_icon}</div>
+            </div>
+            
+            <!-- 2. 30-Min Candle Close -->
+            <div style="background:{c_bg};border:1px solid {c_border};border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+                <div style="width:32px;height:32px;background:{c_color};border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;">2</div>
+                <div style="flex:1;">
+                    <div style="font-weight:600;font-size:14px;color:{c_color};">30-MIN CANDLE CLOSE</div>
+                    <div style="font-size:12px;color:#6b7280;margin-top:2px;">{candle_detail}</div>
+                </div>
+                <div style="font-size:20px;">{c_icon}</div>
+            </div>
+            
+            <!-- 3. Price at Rail -->
+            <div style="background:{r_bg};border:1px solid {r_border};border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+                <div style="width:32px;height:32px;background:{r_color};border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;">3</div>
+                <div style="flex:1;">
+                    <div style="font-weight:600;font-size:14px;color:{r_color};">PRICE AT RAIL</div>
+                    <div style="font-size:12px;color:#6b7280;margin-top:2px;">{rail_detail}</div>
+                </div>
+                <div style="font-size:20px;">{r_icon}</div>
+            </div>
+            
+            <!-- 4. Direction Alignment -->
+            <div style="background:{a_bg};border:1px solid {a_border};border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+                <div style="width:32px;height:32px;background:{a_color};border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;">4</div>
+                <div style="flex:1;">
+                    <div style="font-weight:600;font-size:14px;color:{a_color};">DIRECTION ALIGNMENT</div>
+                    <div style="font-size:12px;color:#6b7280;margin-top:2px;">{align_detail}</div>
+                </div>
+                <div style="font-size:20px;">{a_icon}</div>
+            </div>
+        </div>
+        
+        <!-- Action Summary -->
+        {action_html}
+    </div>
+    '''
+
 # ============================================================================
 # BEAUTIFUL UI RENDERING
 # ============================================================================
@@ -1516,30 +1722,8 @@ def render_dashboard(
                 </div>
             </div>
             
-            <!-- Checklist -->
-            <div class="card" style="margin-top:20px;">
-                <div class="card-header">📋 Entry Checklist</div>
-                <div class="card-body">
-                    <div class="grid grid-2">
-                        <div class="checklist">
-                            <div class="check-item {'check-pass' if vix.bias in ['CALLS','PUTS'] else 'check-wait'}">
-                                {'✓' if vix.bias in ['CALLS','PUTS'] else '⏳'} VIX at zone edge (clear bias)
-                            </div>
-                            <div class="check-item {'check-pass' if vix.breakout_time == 'RELIABLE' else 'check-fail' if vix.breakout_time == 'DANGER' else 'check-wait'}">
-                                {'✓' if vix.breakout_time == 'RELIABLE' else '⚠️' if vix.breakout_time == 'DANGER' else '⏳'} Breakout timing ({'Reliable window ✓' if vix.breakout_time == 'RELIABLE' else 'DANGER window - reversal risk!' if vix.breakout_time == 'DANGER' else 'RTH - use 30-min close'})
-                            </div>
-                        </div>
-                        <div class="checklist">
-                            <div class="check-item check-wait">
-                                ⏳ Price at rail entry (check distance)
-                            </div>
-                            <div class="check-item check-wait">
-                                ⏳ 30-min candle CLOSED (not just wick)
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Premium Entry Checklist -->
+            {render_entry_checklist(vix, active_cone_info, setups, spx)}
             
             {'<!-- Historical Results -->' + render_historical_section(historical_results, session_data) if is_historical and historical_results else ''}
         </div>
