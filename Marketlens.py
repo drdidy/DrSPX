@@ -1384,36 +1384,47 @@ def render_dashboard(
     </head>
     <body>
         <div class="dashboard">
-            <!-- Header -->
-            <div class="header">
-                <div class="logo">
-                    <div class="logo-icon">📈</div>
-                    <div class="logo-text">
-                        <div class="logo-title">SPX PROPHET</div>
-                        <div class="logo-sub">Daily Trading Plan • {ct_now.strftime('%b %d, %Y')}</div>
+            <!-- Premium Header -->
+            <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#334155 100%);border-radius:20px;padding:32px 40px;margin-bottom:24px;position:relative;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,0.15);">
+                <!-- Subtle gradient overlay -->
+                <div style="position:absolute;top:0;right:0;width:400px;height:100%;background:linear-gradient(90deg,transparent,rgba(251,191,36,0.08));pointer-events:none;"></div>
+                
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:24px;position:relative;z-index:1;">
+                    <!-- Logo & Tagline -->
+                    <div style="display:flex;align-items:center;gap:20px;">
+                        <div style="width:64px;height:64px;background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 50%,#d97706 100%);border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:32px;box-shadow:0 8px 24px rgba(251,191,36,0.35);">📈</div>
+                        <div>
+                            <div style="font-size:32px;font-weight:800;color:#f8fafc;letter-spacing:-1px;text-shadow:0 2px 4px rgba(0,0,0,0.2);">SPX PROPHET</div>
+                            <div style="font-size:13px;color:#fbbf24;letter-spacing:2px;text-transform:uppercase;font-weight:500;margin-top:4px;">Where Structure Becomes Foresight</div>
+                        </div>
                     </div>
-                </div>
-                <div class="header-stats">
-                    <div class="stat">
-                        <div class="stat-label">SPX</div>
-                        <div class="stat-value">{spx:,.2f}</div>
-                    </div>
-                    <div class="stat">
-                        <div class="stat-label">VIX</div>
-                        <div class="stat-value">{f'{vix.current:.2f}' if vix.current > 0 else '—'}</div>
-                    </div>
-                    <div class="stat">
-                        <div class="stat-label">Time CT</div>
-                        <div class="stat-value">{ct_now.strftime('%H:%M')}</div>
+                    
+                    <!-- Live Stats -->
+                    <div style="display:flex;gap:48px;">
+                        <div style="text-align:center;">
+                            <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">S&P 500</div>
+                            <div style="font-family:'DM Mono',monospace;font-size:28px;font-weight:700;color:#f8fafc;margin-top:4px;">{spx:,.2f}</div>
+                        </div>
+                        <div style="width:1px;background:linear-gradient(180deg,transparent,#475569,transparent);"></div>
+                        <div style="text-align:center;">
+                            <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">VIX</div>
+                            <div style="font-family:'DM Mono',monospace;font-size:28px;font-weight:700;color:#fbbf24;margin-top:4px;">{f'{vix.current:.2f}' if vix.current > 0 else '—'}</div>
+                        </div>
+                        <div style="width:1px;background:linear-gradient(180deg,transparent,#475569,transparent);"></div>
+                        <div style="text-align:center;">
+                            <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1.5px;font-weight:600;">{ct_now.strftime('%b %d, %Y')}</div>
+                            <div style="font-family:'DM Mono',monospace;font-size:28px;font-weight:700;color:#f8fafc;margin-top:4px;">{ct_now.strftime('%H:%M')} <span style="font-size:14px;color:#64748b;font-weight:400;">CT</span></div>
+                        </div>
                     </div>
                 </div>
             </div>
             
-            <!-- Warning Banner -->
-            <div class="warning-banner">
-                <div class="warning-icon">⏱️</div>
-                <div class="warning-text">
-                    <strong>30-MINUTE CANDLE CLOSE MATTERS:</strong> VIX wicks can pierce levels — always wait for the candle to CLOSE before confirming signal.
+            <!-- Refined Info Banner -->
+            <div style="background:linear-gradient(90deg,#1e293b,#334155);border-radius:12px;padding:14px 24px;margin-bottom:20px;display:flex;align-items:center;gap:16px;border-left:4px solid #fbbf24;">
+                <div style="font-size:20px;">⏱️</div>
+                <div style="font-size:13px;color:#cbd5e1;">
+                    <span style="color:#fbbf24;font-weight:600;">30-MIN CANDLE CLOSE RULE:</span>
+                    <span style="color:#94a3b8;">VIX wicks can pierce levels — always wait for the candle to <strong style="color:#f8fafc;">CLOSE</strong> before confirming signal.</span>
                 </div>
             </div>
             
