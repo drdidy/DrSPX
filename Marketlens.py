@@ -140,16 +140,16 @@ class TradeSetup:
     cone_width: float
     entry: float
     stop: float
-    target_12: float
-    target_25: float
-    target_50: float
+    target_25: float  # T1 = 25% of cone
+    target_50: float  # T2 = 50% of cone
+    target_75: float  # T3 = 75% of cone
     strike: int
-    spx_pts_12: float
     spx_pts_25: float
     spx_pts_50: float
-    profit_12: float
+    spx_pts_75: float
     profit_25: float
     profit_50: float
+    profit_75: float
     risk_per_contract: float
     rr_ratio: float
     distance: float
@@ -165,9 +165,9 @@ class TradeSetup:
     stop_loss_dollars: float = 0.0  # Dollar amount per contract
     # Risk/Reward in dollars
     risk_dollars: float = 0.0
-    reward_t1_dollars: float = 0.0
-    reward_t2_dollars: float = 0.0
-    reward_t3_dollars: float = 0.0
+    reward_t1_dollars: float = 0.0  # T1 = 25%
+    reward_t2_dollars: float = 0.0  # T2 = 50%
+    reward_t3_dollars: float = 0.0  # T3 = 75%
 
 @dataclass
 class ESData:
@@ -380,16 +380,20 @@ def estimate_option_price_at_entry(current_price: float, current_spx: float, ent
     
     estimated_price = current_price + price_change
     
-    # Floor at intrinsic value (can't go below 0)
-    return max(round(estimated_price, 2), 0.10)
+    # Round to nearest 0.10 and floor at 0.10
+    return max(round(estimated_price * 10) / 10, 0.10)
+
+def round_to_ten_cents(value: float) -> float:
+    """Round a price to the nearest $0.10"""
+    return round(value * 10) / 10
 
 def get_option_pricing_for_setup(setup: TradeSetup, current_spx: float) -> TradeSetup:
     """
     Fetch option pricing and estimate entry price at 10 AM.
     
     Returns:
-    - current_option_price: What the option costs RIGHT NOW
-    - est_entry_price_10am: What it should cost when SPX hits the entry rail at 10 AM
+    - current_option_price: What the option costs RIGHT NOW (rounded to $0.10)
+    - est_entry_price_10am: What it should cost when SPX hits the entry rail at 10 AM (rounded to $0.10)
     """
     expiry = get_next_trading_day()
     option_type = "C" if setup.direction == "CALLS" else "P"
@@ -417,15 +421,15 @@ def get_option_pricing_for_setup(setup: TradeSetup, current_spx: float) -> Trade
             setup.using_spy = True
             # Convert SPY to SPX equivalent (multiply by 10)
             spy_mid = spy_quote.mid if spy_quote.mid > 0 else (spy_quote.bid + spy_quote.ask) / 2
-            current_mid = round(spy_mid * 10, 2)
+            current_mid = spy_mid * 10
             if spy_quote.delta and abs(spy_quote.delta) > 0:
                 delta = abs(spy_quote.delta)
     
-    # Set current price
-    setup.current_option_price = current_mid
+    # Set current price (rounded to nearest $0.10)
+    setup.current_option_price = round_to_ten_cents(current_mid)
     setup.option_delta = delta
     
-    # Estimate price at 10 AM entry
+    # Estimate price at 10 AM entry (already rounds to $0.10)
     if current_mid > 0:
         setup.est_entry_price_10am = estimate_option_price_at_entry(
             current_price=current_mid,
@@ -439,7 +443,7 @@ def get_option_pricing_for_setup(setup: TradeSetup, current_spx: float) -> Trade
         # If no current price, estimate based on typical OTM pricing
         # Rough estimate: $0.33 per point of expected move × delta
         distance_to_strike = abs(setup.entry - setup.strike)
-        setup.est_entry_price_10am = round(max(distance_to_strike * delta * 0.5, 1.00), 2)
+        setup.est_entry_price_10am = round_to_ten_cents(max(distance_to_strike * delta * 0.5, 1.00))
     
     return setup
 
@@ -828,33 +832,33 @@ def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> L
         if cone.width < MIN_CONE_WIDTH:
             continue
         
-        # CALLS
+        # CALLS - Entry at descending rail, targets going UP
         entry_c = cone.descending_rail
         dist_c = abs(current_price - entry_c)
-        t12_c = round(entry_c + cone.width * 0.125, 2)
-        t25_c = round(entry_c + cone.width * 0.25, 2)
-        t50_c = round(entry_c + cone.width * 0.50, 2)
+        t25_c = round(entry_c + cone.width * 0.25, 2)  # T1 = 25%
+        t50_c = round(entry_c + cone.width * 0.50, 2)  # T2 = 50%
+        t75_c = round(entry_c + cone.width * 0.75, 2)  # T3 = 75%
         strike_c = int(round((entry_c - STRIKE_OTM_DISTANCE) / 5) * 5)
         
         # Calculate stop loss and risk/reward in dollars
-        stop_loss_dollars_c = round(STOP_LOSS_PTS * DELTA * CONTRACT_MULTIPLIER, 0)
-        reward_t1_c = round(cone.width * 0.125 * DELTA * CONTRACT_MULTIPLIER, 0)
-        reward_t2_c = round(cone.width * 0.25 * DELTA * CONTRACT_MULTIPLIER, 0)
-        reward_t3_c = round(cone.width * 0.50 * DELTA * CONTRACT_MULTIPLIER, 0)
+        stop_loss_dollars_c = round(STOP_LOSS_PTS * DELTA * CONTRACT_MULTIPLIER / 10) * 10  # Round to nearest 10
+        reward_t1_c = round(cone.width * 0.25 * DELTA * CONTRACT_MULTIPLIER / 10) * 10
+        reward_t2_c = round(cone.width * 0.50 * DELTA * CONTRACT_MULTIPLIER / 10) * 10
+        reward_t3_c = round(cone.width * 0.75 * DELTA * CONTRACT_MULTIPLIER / 10) * 10
         
         setup_c = TradeSetup(
             direction="CALLS", cone_name=cone.name, cone_width=cone.width,
             entry=entry_c, stop=round(entry_c - STOP_LOSS_PTS, 2),
-            target_12=t12_c, target_25=t25_c, target_50=t50_c,
+            target_25=t25_c, target_50=t50_c, target_75=t75_c,
             strike=strike_c,
-            spx_pts_12=round(cone.width * 0.125, 2),
             spx_pts_25=round(cone.width * 0.25, 2),
             spx_pts_50=round(cone.width * 0.50, 2),
-            profit_12=reward_t1_c,
-            profit_25=reward_t2_c,
-            profit_50=reward_t3_c,
+            spx_pts_75=round(cone.width * 0.75, 2),
+            profit_25=reward_t1_c,
+            profit_50=reward_t2_c,
+            profit_75=reward_t3_c,
             risk_per_contract=stop_loss_dollars_c,
-            rr_ratio=round((cone.width * 0.25) / STOP_LOSS_PTS, 2),
+            rr_ratio=round((cone.width * 0.50) / STOP_LOSS_PTS, 2),  # R:R based on T2
             distance=round(dist_c, 1),
             is_active=(dist_c <= 5 and vix_bias in ["CALLS", "WAIT"]),
             stop_loss_pts=STOP_LOSS_PTS,
@@ -866,33 +870,33 @@ def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> L
         )
         setups.append(setup_c)
         
-        # PUTS
+        # PUTS - Entry at ascending rail, targets going DOWN
         entry_p = cone.ascending_rail
         dist_p = abs(current_price - entry_p)
-        t12_p = round(entry_p - cone.width * 0.125, 2)
-        t25_p = round(entry_p - cone.width * 0.25, 2)
-        t50_p = round(entry_p - cone.width * 0.50, 2)
+        t25_p = round(entry_p - cone.width * 0.25, 2)  # T1 = 25%
+        t50_p = round(entry_p - cone.width * 0.50, 2)  # T2 = 50%
+        t75_p = round(entry_p - cone.width * 0.75, 2)  # T3 = 75%
         strike_p = int(round((entry_p + STRIKE_OTM_DISTANCE) / 5) * 5)
         
         # Calculate stop loss and risk/reward in dollars
-        stop_loss_dollars_p = round(STOP_LOSS_PTS * DELTA * CONTRACT_MULTIPLIER, 0)
-        reward_t1_p = round(cone.width * 0.125 * DELTA * CONTRACT_MULTIPLIER, 0)
-        reward_t2_p = round(cone.width * 0.25 * DELTA * CONTRACT_MULTIPLIER, 0)
-        reward_t3_p = round(cone.width * 0.50 * DELTA * CONTRACT_MULTIPLIER, 0)
+        stop_loss_dollars_p = round(STOP_LOSS_PTS * DELTA * CONTRACT_MULTIPLIER / 10) * 10
+        reward_t1_p = round(cone.width * 0.25 * DELTA * CONTRACT_MULTIPLIER / 10) * 10
+        reward_t2_p = round(cone.width * 0.50 * DELTA * CONTRACT_MULTIPLIER / 10) * 10
+        reward_t3_p = round(cone.width * 0.75 * DELTA * CONTRACT_MULTIPLIER / 10) * 10
         
         setup_p = TradeSetup(
             direction="PUTS", cone_name=cone.name, cone_width=cone.width,
             entry=entry_p, stop=round(entry_p + STOP_LOSS_PTS, 2),
-            target_12=t12_p, target_25=t25_p, target_50=t50_p,
+            target_25=t25_p, target_50=t50_p, target_75=t75_p,
             strike=strike_p,
-            spx_pts_12=round(cone.width * 0.125, 2),
             spx_pts_25=round(cone.width * 0.25, 2),
             spx_pts_50=round(cone.width * 0.50, 2),
-            profit_12=reward_t1_p,
-            profit_25=reward_t2_p,
-            profit_50=reward_t3_p,
+            spx_pts_75=round(cone.width * 0.75, 2),
+            profit_25=reward_t1_p,
+            profit_50=reward_t2_p,
+            profit_75=reward_t3_p,
             risk_per_contract=stop_loss_dollars_p,
-            rr_ratio=round((cone.width * 0.25) / STOP_LOSS_PTS, 2),
+            rr_ratio=round((cone.width * 0.50) / STOP_LOSS_PTS, 2),
             distance=round(dist_p, 1),
             is_active=(dist_p <= 5 and vix_bias in ["PUTS", "WAIT"]),
             stop_loss_pts=STOP_LOSS_PTS,
@@ -1925,7 +1929,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 </div>
                 <div class="neo-inset" style="padding:16px;text-align:center;">
                     <div style="font-size:11px;color:{text_light};text-transform:uppercase;margin-bottom:4px;">Est. Premium</div>
-                    <div class="mono" style="font-size:22px;font-weight:700;color:{green};">${s.est_entry_price_10am:.2f}</div>
+                    <div class="mono" style="font-size:22px;font-weight:700;color:{green};">${s.est_entry_price_10am:.1f}</div>
                 </div>
                 <div class="neo-inset" style="padding:16px;text-align:center;background:{red}15;">
                     <div style="font-size:11px;color:{red};text-transform:uppercase;margin-bottom:4px;">Stop Loss</div>
@@ -1942,19 +1946,19 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                         <div style="font-size:10px;color:{text_light};">6 pts stop</div>
                     </div>
                     <div style="text-align:center;padding:12px;background:{green}10;border-radius:8px;">
-                        <div style="font-size:10px;color:{text_med};">T1 (12.5%)</div>
+                        <div style="font-size:10px;color:{text_med};">T1 (25%)</div>
                         <div class="mono" style="font-size:20px;font-weight:700;color:{green};">+${s.reward_t1_dollars:.0f}</div>
-                        <div style="font-size:10px;color:{text_light};">{s.target_12:,.2f}</div>
-                    </div>
-                    <div style="text-align:center;padding:12px;background:{green}15;border-radius:8px;">
-                        <div style="font-size:10px;color:{text_med};">T2 (25%)</div>
-                        <div class="mono" style="font-size:20px;font-weight:700;color:{green};">+${s.reward_t2_dollars:.0f}</div>
                         <div style="font-size:10px;color:{text_light};">{s.target_25:,.2f}</div>
                     </div>
-                    <div style="text-align:center;padding:12px;background:{green}20;border-radius:8px;">
-                        <div style="font-size:10px;color:{text_med};">T3 (50%)</div>
-                        <div class="mono" style="font-size:20px;font-weight:700;color:{green};">+${s.reward_t3_dollars:.0f}</div>
+                    <div style="text-align:center;padding:12px;background:{green}15;border-radius:8px;">
+                        <div style="font-size:10px;color:{text_med};">T2 (50%)</div>
+                        <div class="mono" style="font-size:20px;font-weight:700;color:{green};">+${s.reward_t2_dollars:.0f}</div>
                         <div style="font-size:10px;color:{text_light};">{s.target_50:,.2f}</div>
+                    </div>
+                    <div style="text-align:center;padding:12px;background:{green}20;border-radius:8px;">
+                        <div style="font-size:10px;color:{text_med};">T3 (75%)</div>
+                        <div class="mono" style="font-size:20px;font-weight:700;color:{green};">+${s.reward_t3_dollars:.0f}</div>
+                        <div style="font-size:10px;color:{text_light};">{s.target_75:,.2f}</div>
                     </div>
                 </div>
                 <div style="margin-top:16px;text-align:center;">
@@ -2081,8 +2085,9 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                         <th>Strike</th>
                         <th>Est. Premium</th>
                         <th>Stop (pts/$)</th>
-                        <th>T1 (+$)</th>
-                        <th>T2 (+$)</th>
+                        <th>T1 25% (+$)</th>
+                        <th>T2 50% (+$)</th>
+                        <th>T3 75% (+$)</th>
                         <th>R:R</th>
                         <th style="text-align:right;">Dist</th>
                     </tr>
@@ -2094,9 +2099,9 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             
             # Estimated entry price at 10 AM
             if s.est_entry_price_10am > 0:
-                premium_html = f'<span class="mono text-green font-bold">${s.est_entry_price_10am:.2f}</span>'
+                premium_html = f'<span class="mono text-green font-bold">${s.est_entry_price_10am:.1f}</span>'
             elif s.current_option_price > 0:
-                premium_html = f'<span class="mono">${s.current_option_price:.2f}</span>'
+                premium_html = f'<span class="mono">${s.current_option_price:.1f}</span>'
             else:
                 premium_html = f'<span class="text-muted">—</span>'
             
@@ -2112,8 +2117,9 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                         <td class="mono">{s.strike}C</td>
                         <td>{premium_html}</td>
                         <td><span class="mono text-red">{s.stop:,.2f}</span><br><span style="font-size:11px;color:{red};">-${s.stop_loss_dollars:.0f}</span></td>
-                        <td><span class="mono">{s.target_12:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t1_dollars:.0f}</span></td>
-                        <td><span class="mono">{s.target_25:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t2_dollars:.0f}</span></td>
+                        <td><span class="mono">{s.target_25:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t1_dollars:.0f}</span></td>
+                        <td><span class="mono">{s.target_50:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t2_dollars:.0f}</span></td>
+                        <td><span class="mono">{s.target_75:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t3_dollars:.0f}</span></td>
                         <td class="mono" style="color:{green};font-weight:700;">1:{s.rr_ratio:.1f}</td>
                         <td style="text-align:right;"><span class="pill {dist_pill}">{s.distance:.0f}</span></td>
                     </tr>
@@ -2145,8 +2151,9 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                         <th>Strike</th>
                         <th>Est. Premium</th>
                         <th>Stop (pts/$)</th>
-                        <th>T1 (+$)</th>
-                        <th>T2 (+$)</th>
+                        <th>T1 25% (+$)</th>
+                        <th>T2 50% (+$)</th>
+                        <th>T3 75% (+$)</th>
                         <th>R:R</th>
                         <th style="text-align:right;">Dist</th>
                     </tr>
@@ -2158,9 +2165,9 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             
             # Estimated entry price at 10 AM
             if s.est_entry_price_10am > 0:
-                premium_html = f'<span class="mono text-green font-bold">${s.est_entry_price_10am:.2f}</span>'
+                premium_html = f'<span class="mono text-green font-bold">${s.est_entry_price_10am:.1f}</span>'
             elif s.current_option_price > 0:
-                premium_html = f'<span class="mono">${s.current_option_price:.2f}</span>'
+                premium_html = f'<span class="mono">${s.current_option_price:.1f}</span>'
             else:
                 premium_html = f'<span class="text-muted">—</span>'
             
@@ -2176,8 +2183,9 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                         <td class="mono">{s.strike}P</td>
                         <td>{premium_html}</td>
                         <td><span class="mono text-green">{s.stop:,.2f}</span><br><span style="font-size:11px;color:{red};">-${s.stop_loss_dollars:.0f}</span></td>
-                        <td><span class="mono">{s.target_12:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t1_dollars:.0f}</span></td>
-                        <td><span class="mono">{s.target_25:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t2_dollars:.0f}</span></td>
+                        <td><span class="mono">{s.target_25:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t1_dollars:.0f}</span></td>
+                        <td><span class="mono">{s.target_50:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t2_dollars:.0f}</span></td>
+                        <td><span class="mono">{s.target_75:,.2f}</span><br><span style="font-size:11px;color:{green};">+${s.reward_t3_dollars:.0f}</span></td>
                         <td class="mono" style="color:{green};font-weight:700;">1:{s.rr_ratio:.1f}</td>
                         <td style="text-align:right;"><span class="pill {dist_pill}">{s.distance:.0f}</span></td>
                     </tr>
