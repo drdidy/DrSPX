@@ -5,9 +5,10 @@
 ║                       NEOMORPHIC UI + LIVE OPTIONS PRICING                    ║
 ║                                                                               ║
 ║  FIXES IN THIS VERSION:                                                       ║
-║  • CALLS strikes now OTM (entry + distance instead of entry - distance)      ║
-║  • All times converted to Central Time (CT)                                  ║
+║  • CALLS strikes now OTM (entry + distance instead of entry - distance)       ║
+║  • All times converted to Central Time (CT)                                   ║
 ║  • Both current price AND estimated premium shown in tables                   ║
+║  • Block counting respects futures hours (freeze 4PM-5PM, Fri-Sun)            ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -401,7 +402,6 @@ def polygon_get_overnight_vix_range(session_date: datetime) -> Optional[Dict]:
             data = response.json()
             if data.get("results"):
                 df = pd.DataFrame(data["results"])
-                # Convert from UTC/ET to CT
                 df['datetime'] = pd.to_datetime(df['t'], unit='ms', utc=True).dt.tz_convert(CT_TZ)
                 
                 zone_start = CT_TZ.localize(datetime.combine(session_date.date(), time(2, 0)))
@@ -624,12 +624,72 @@ def analyze_vix_zone(current: float, bottom: float, top: float) -> VIXZone:
     )
 
 # ============================================================================
-# CONE & SETUP LOGIC
+# CONE & SETUP LOGIC (WITH FIXED BLOCK COUNTING)
 # ============================================================================
 
 def count_blocks(start: datetime, end: datetime) -> int:
-    diff = (end - start).total_seconds()
-    return max(int(diff // 1800), 1)
+    """
+    Count 30-minute blocks between start and end times.
+    Counts continuously except for daily freeze:
+    - Freezes at 4:00 PM CT each day
+    - Resumes at 5:00 PM CT same day (Mon-Thu)
+    - Friday: Freezes at 4:00 PM CT, resumes Sunday 5:00 PM CT
+    """
+    if end <= start:
+        return 1
+    
+    total_seconds = 0
+    current = start
+    
+    while current < end:
+        current_weekday = current.weekday()
+        current_time = current.time()
+        
+        # Saturday - jump to Sunday 5 PM CT
+        if current_weekday == 5:
+            sunday = current.date() + timedelta(days=1)
+            current = CT_TZ.localize(datetime.combine(sunday, time(17, 0)))
+            continue
+        
+        # Sunday before 5 PM CT - jump to Sunday 5 PM CT
+        if current_weekday == 6 and current_time < time(17, 0):
+            current = CT_TZ.localize(datetime.combine(current.date(), time(17, 0)))
+            continue
+        
+        # Friday after 4 PM CT - jump to Sunday 5 PM CT
+        if current_weekday == 4 and current_time >= time(16, 0):
+            sunday = current.date() + timedelta(days=2)
+            current = CT_TZ.localize(datetime.combine(sunday, time(17, 0)))
+            continue
+        
+        # Mon-Thu: In the dead zone (4 PM - 5 PM CT) - jump to 5 PM CT
+        if current_weekday in [0, 1, 2, 3] and time(16, 0) <= current_time < time(17, 0):
+            current = CT_TZ.localize(datetime.combine(current.date(), time(17, 0)))
+            continue
+        
+        # We're in active trading time - find next boundary (4 PM CT today)
+        if current_time < time(16, 0):
+            # Before 4 PM - boundary is 4 PM today
+            boundary = CT_TZ.localize(datetime.combine(current.date(), time(16, 0)))
+        else:
+            # After 5 PM - boundary is 4 PM tomorrow (or Friday→Sunday logic)
+            tomorrow = current.date() + timedelta(days=1)
+            if tomorrow.weekday() == 5:  # Tomorrow is Saturday
+                # Jump to Sunday 5 PM
+                sunday = tomorrow + timedelta(days=1)
+                boundary = CT_TZ.localize(datetime.combine(sunday, time(17, 0)))
+            else:
+                boundary = CT_TZ.localize(datetime.combine(tomorrow, time(16, 0)))
+        
+        # Calculate time until boundary or end
+        stop_at = min(boundary, end)
+        if stop_at > current:
+            total_seconds += (stop_at - current).total_seconds()
+        
+        current = stop_at
+    
+    blocks = int(total_seconds // 1800)
+    return max(blocks, 1)
 
 def build_cones(pivots: List[Pivot], eval_time: datetime) -> List[Cone]:
     cones = []
@@ -858,6 +918,7 @@ def assess_day(vix: VIXZone, cones: List[Cone]) -> DayAssessment:
     
     return DayAssessment(tradeable=score >= 50, score=score, reasons=reasons, warnings=warnings, recommendation=rec)
 
+
 # ============================================================================
 # NEOMORPHIC UI RENDERING
 # ============================================================================
@@ -866,7 +927,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                                  assessment: DayAssessment, prior: Dict, active_cone_info: Dict = None,
                                  polygon_status: PolygonStatus = None, pivots: List[Pivot] = None,
                                  es_data: ESData = None, detailed_cone: ActiveConeInfo = None,
-                                 trading_date: datetime = None, is_historical: bool = False) -> str:
+                                 trading_date = None, is_historical: bool = False) -> str:
     
     if pivots is None:
         pivots = []
@@ -1255,8 +1316,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             for pivot in pivots:
                 start_time = pivot.time + timedelta(minutes=30)
                 if slot_time > start_time:
-                    diff_sec = (slot_time - start_time).total_seconds()
-                    blocks = max(int(diff_sec // 1800), 1)
+                    blocks = count_blocks(start_time, slot_time)
                     asc = pivot.price_for_ascending + (blocks * SLOPE_PER_30MIN)
                     desc = pivot.price_for_descending - (blocks * SLOPE_PER_30MIN)
                     calls_e, puts_e = f'{desc:,.2f}', f'{asc:,.2f}'
@@ -1269,6 +1329,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
     
     html += '</div></body></html>'
     return html
+
 
 # ============================================================================
 # MAIN APPLICATION
@@ -1427,7 +1488,7 @@ def main():
         # HISTORICAL MODE
         # ====================================================================
         # selected_date = the day we want to analyze (e.g., Dec 19, 2025)
-        # pivot_date = the LAST TRADING DAY before selected_date (e.g., Dec 18, 2025)
+        # pivot_date = the LAST TRADING DAY before selected_date
         # prior_data = OHLC from pivot_date
         # current_spx/vix = closing values from selected_date
         
@@ -1472,7 +1533,6 @@ def main():
         # trading_date = the NEXT trading day (could be today if market open, or Monday if weekend)
         # pivot_date = the LAST TRADING DAY before trading_date
         # For weekend: trading_date = Monday, pivot_date = Friday
-        # For weekday after hours: trading_date = tomorrow (or Monday), pivot_date = today (or Friday)
         
         trading_date = get_next_trading_day().date()
         
@@ -1499,14 +1559,9 @@ def main():
             current_vix = yf_fetch_current_vix()
         
         # Fetch prior day data (pivot_date's OHLC)
-        # First try Polygon for the most recent prior day
         prior_data = polygon_get_prior_day_data(POLYGON_SPX) if POLYGON_HAS_INDICES else None
-        
-        # If Polygon fails or returns empty, try yfinance for pivot_date specifically
         if not prior_data or prior_data.get('high', 0) == 0:
             prior_data = fetch_historical_day_data("^GSPC", datetime.combine(pivot_date, time(0, 0)))
-        
-        # Final fallback
         if not prior_data or prior_data.get('high', 0) == 0:
             prior_data = {'high': current_spx + 20, 'low': current_spx - 20, 'close': current_spx, 'open': current_spx}
         
