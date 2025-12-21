@@ -762,9 +762,93 @@ def analyze_vix_zone(current: float, bottom: float, top: float) -> VIXZone:
 # CONE & SETUP LOGIC
 # ============================================================================
 
+def count_rth_blocks(pivot_time: datetime, eval_time: datetime) -> int:
+    """
+    Count 30-minute blocks during RTH (Regular Trading Hours: 8:30 AM - 3:00 PM CT).
+    
+    IMPORTANT: The pivot candle itself is NOT counted. Counting starts from the NEXT candle.
+    
+    Args:
+        pivot_time: When the pivot occurred (this candle is NOT counted)
+        eval_time: When we're evaluating the cone (e.g., 10:00 AM)
+    
+    Returns:
+        Number of 30-minute blocks that have elapsed during RTH (excluding pivot candle)
+    """
+    RTH_OPEN = time(8, 30)   # 8:30 AM CT
+    RTH_CLOSE = time(15, 0)  # 3:00 PM CT
+    
+    # Cone starts at the NEXT candle after pivot (pivot candle not counted)
+    # Round pivot to nearest 30-min block, then add 30 min
+    pivot_minute = pivot_time.minute
+    if pivot_minute < 30:
+        next_block_minute = 30
+        next_block_hour = pivot_time.hour
+    else:
+        next_block_minute = 0
+        next_block_hour = pivot_time.hour + 1
+    
+    cone_start = CT_TZ.localize(datetime.combine(
+        pivot_time.date(), 
+        time(next_block_hour, next_block_minute)
+    ))
+    
+    # If cone_start is at or after market close, it starts next RTH session at open
+    if cone_start.time() >= RTH_CLOSE:
+        next_day = cone_start.date() + timedelta(days=1)
+        # Skip weekends
+        while next_day.weekday() >= 5:
+            next_day += timedelta(days=1)
+        cone_start = CT_TZ.localize(datetime.combine(next_day, RTH_OPEN))
+    
+    # If cone_start is before market open, move to open
+    if cone_start.time() < RTH_OPEN:
+        cone_start = CT_TZ.localize(datetime.combine(cone_start.date(), RTH_OPEN))
+    
+    total_blocks = 0
+    current = cone_start
+    
+    while current < eval_time:
+        # If we're at or past market close on current day, jump to next RTH open
+        if current.time() >= RTH_CLOSE:
+            next_day = current.date() + timedelta(days=1)
+            while next_day.weekday() >= 5:
+                next_day += timedelta(days=1)
+            current = CT_TZ.localize(datetime.combine(next_day, RTH_OPEN))
+            continue
+        
+        # If we're before market open, jump to open
+        if current.time() < RTH_OPEN:
+            current = CT_TZ.localize(datetime.combine(current.date(), RTH_OPEN))
+            continue
+        
+        # Count one block
+        next_block = current + timedelta(minutes=30)
+        
+        # Don't count past eval_time
+        if next_block > eval_time:
+            break
+        
+        # Don't count past market close
+        if next_block.time() > RTH_CLOSE:
+            # Jump to next day
+            next_day = current.date() + timedelta(days=1)
+            while next_day.weekday() >= 5:
+                next_day += timedelta(days=1)
+            current = CT_TZ.localize(datetime.combine(next_day, RTH_OPEN))
+            continue
+        
+        total_blocks += 1
+        current = next_block
+    
+    return max(total_blocks, 1)
+
 def count_blocks(start: datetime, end: datetime) -> int:
-    diff = (end - start).total_seconds()
-    return max(int(diff // 1800), 1)
+    """Legacy wrapper - use count_rth_blocks instead."""
+    # This is called from build_cones with start = pivot.time + 30min
+    # So we need to back-calculate the pivot time
+    pivot_time = start - timedelta(minutes=30)
+    return count_rth_blocks(pivot_time, end)
 
 def build_cones(pivots: List[Pivot], eval_time: datetime) -> List[Cone]:
     cones = []
@@ -2784,8 +2868,8 @@ def main():
         low_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(l_parts[0]), int(l_parts[1]))))
         pivots.append(Pivot(price=st.session_state.manual_low_close, time=low_time, name="Prior Low"))
         
-        # Prior Close
-        pivots.append(Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close"))
+        # Prior Close (3 PM CT)
+        pivots.append(Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(pivot_date, time(15, 0))), name="Prior Close"))
         
         # Secondary High (if enabled)
         if st.session_state.use_secondary_high and st.session_state.secondary_high_wick > 0:
@@ -2809,7 +2893,7 @@ def main():
         pivots = [
             Pivot(price=prior_data['high'], time=CT_TZ.localize(datetime.combine(pivot_date, time(10, 30))), name="Prior High"),
             Pivot(price=prior_data['low'], time=CT_TZ.localize(datetime.combine(pivot_date, time(14, 0))), name="Prior Low"),
-            Pivot(price=prior_data['close'], time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close")
+            Pivot(price=prior_data['close'], time=CT_TZ.localize(datetime.combine(pivot_date, time(15, 0))), name="Prior Close")
         ]
     
     # Build cones at 10:00 AM CT for the trading date
