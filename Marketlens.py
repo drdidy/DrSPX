@@ -547,6 +547,60 @@ def yf_fetch_current_vix() -> float:
         pass
     return 0.0
 
+@st.cache_data(ttl=300)
+def fetch_historical_day_data(ticker: str, date: datetime) -> Dict:
+    """
+    Fetch OHLC data for a specific historical date.
+    Returns: {'open': x, 'high': x, 'low': x, 'close': x}
+    """
+    try:
+        t = yf.Ticker(ticker)
+        # Fetch a few days around the target date to ensure we get it
+        start = date - timedelta(days=5)
+        end = date + timedelta(days=1)
+        data = t.history(start=start.strftime('%Y-%m-%d'), end=end.strftime('%Y-%m-%d'), interval='1d')
+        
+        if not data.empty:
+            # Find the exact date
+            target_str = date.strftime('%Y-%m-%d')
+            for idx in data.index:
+                if idx.strftime('%Y-%m-%d') == target_str:
+                    row = data.loc[idx]
+                    return {
+                        'open': float(row['Open']),
+                        'high': float(row['High']),
+                        'low': float(row['Low']),
+                        'close': float(row['Close'])
+                    }
+            
+            # If exact date not found, return last available
+            row = data.iloc[-1]
+            return {
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close'])
+            }
+    except Exception as e:
+        pass
+    return {'open': 0, 'high': 0, 'low': 0, 'close': 0}
+
+@st.cache_data(ttl=300)
+def fetch_historical_intraday_data(ticker: str, date: datetime) -> pd.DataFrame:
+    """
+    Fetch intraday data for a specific historical date.
+    Returns DataFrame with OHLCV data.
+    """
+    try:
+        t = yf.Ticker(ticker)
+        # For intraday, we need to be within 60 days
+        start = date
+        end = date + timedelta(days=1)
+        data = t.history(start=start.strftime('%Y-%m-%d'), end=end.strftime('%Y-%m-%d'), interval='30m')
+        return data
+    except:
+        return pd.DataFrame()
+
 @st.cache_data(ttl=60)
 def yf_fetch_es_futures() -> Dict:
     """
@@ -955,7 +1009,8 @@ def assess_day(vix: VIXZone, cones: List[Cone]) -> DayAssessment:
 def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], setups: List[TradeSetup],
                                  assessment: DayAssessment, prior: Dict, active_cone_info: Dict = None,
                                  polygon_status: PolygonStatus = None, pivots: List[Pivot] = None,
-                                 es_data: ESData = None, detailed_cone: ActiveConeInfo = None) -> str:
+                                 es_data: ESData = None, detailed_cone: ActiveConeInfo = None,
+                                 trading_date: datetime = None, is_historical: bool = False) -> str:
     """Render premium neomorphic trading dashboard."""
     
     if pivots is None:
@@ -964,6 +1019,14 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         es_data = ESData()
     if detailed_cone is None:
         detailed_cone = ActiveConeInfo()
+    if trading_date is None:
+        trading_date = get_ct_now()
+    
+    # Ensure trading_date is a date object
+    if hasattr(trading_date, 'date'):
+        eval_date = trading_date.date()
+    else:
+        eval_date = trading_date
     
     # Color palette
     bg = "#e8eef3"
@@ -1691,16 +1754,32 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             </div>
             <div class="header-right">
                 {conn_html}
-                <div class="time-display">{get_ct_now().strftime('%H:%M')} CT</div>
+                <div class="time-display">{'📅 ' + eval_date.strftime('%b %d, %Y') if is_historical else get_ct_now().strftime('%H:%M') + ' CT'}</div>
             </div>
         </div>
-        
+'''
+    
+    # Historical Mode Banner
+    if is_historical:
+        html += f'''
+        <div class="neo-card" style="background:linear-gradient(135deg, {amber}15, {amber}05);border:2px solid {amber}50;margin-bottom:24px;">
+            <div style="display:flex;align-items:center;gap:16px;">
+                <div style="font-size:24px;">📅</div>
+                <div>
+                    <div style="font-weight:700;font-size:14px;color:{amber};">Historical Mode — {eval_date.strftime('%A, %B %d, %Y')}</div>
+                    <div style="font-size:12px;color:{text_med};margin-top:4px;">Viewing past data. SPX close: <strong>{spx:,.2f}</strong> • VIX estimated from daily range • No live options or ES data</div>
+                </div>
+            </div>
+        </div>
+'''
+    
+    html += f'''
         <!-- Hero Grid -->
         <div class="hero-grid">
             
             <!-- SPX Price Card -->
             <div class="neo-card price-card">
-                <div class="price-label">S&P 500 Index</div>
+                <div class="price-label">S&P 500 Index{' (Close)' if is_historical else ''}</div>
                 <div class="price-value">{spx:,.2f}</div>
                 <div class="price-meta">
                     <div class="meta-item">
@@ -1744,38 +1823,39 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         </div>
 '''
     
-    # Weekend/After-hours Planning Banner
-    now = get_ct_now()
-    weekday = now.weekday()
-    current_time = now.time()
-    market_open = time(9, 30)
-    market_close = time(16, 0)
-    
-    is_weekend = weekday >= 5
-    is_after_hours = weekday < 5 and (current_time < market_open or current_time > market_close)
-    
-    if is_weekend or is_after_hours:
-        next_trading = get_next_trading_day()
-        trading_label = get_trading_day_label()
+    # Weekend/After-hours Planning Banner (only for live mode)
+    if not is_historical:
+        now = get_ct_now()
+        weekday = now.weekday()
+        current_time = now.time()
+        market_open = time(9, 30)
+        market_close = time(16, 0)
         
-        if is_weekend:
-            banner_title = "📅 Weekend Planning Mode"
-            banner_text = f"Markets are closed. Showing projected setups and option prices for <strong>{trading_label} ({next_trading.strftime('%b %d')})</strong>. Prices will update when markets open."
-        else:
-            if current_time < market_open:
-                banner_title = "🌅 Pre-Market Planning"
-                banner_text = f"Market opens at 9:30 AM CT. Showing projected setups for <strong>today's session</strong>."
+        is_weekend = weekday >= 5
+        is_after_hours = weekday < 5 and (current_time < market_open or current_time > market_close)
+        
+        if is_weekend or is_after_hours:
+            next_trading = get_next_trading_day()
+            trading_label = get_trading_day_label()
+            
+            if is_weekend:
+                banner_title = "📅 Weekend Planning Mode"
+                banner_text = f"Markets are closed. Showing projected setups and option prices for <strong>{trading_label} ({next_trading.strftime('%b %d')})</strong>. Prices will update when markets open."
             else:
-                banner_title = "🌙 After-Hours Planning"
-                banner_text = f"Markets are closed. Showing projected setups for <strong>{trading_label} ({next_trading.strftime('%b %d')})</strong>."
-        
-        html += f'''
+                if current_time < market_open:
+                    banner_title = "🌅 Pre-Market Planning"
+                    banner_text = f"Market opens at 9:30 AM CT. Showing projected setups for <strong>today's session</strong>."
+                else:
+                    banner_title = "🌙 After-Hours Planning"
+                    banner_text = f"Markets are closed. Showing projected setups for <strong>{trading_label} ({next_trading.strftime('%b %d')})</strong>."
+            
+            html += f'''
         <div class="neo-card" style="background:linear-gradient(135deg, {blue}15, {blue}05);border:1px solid {blue}30;margin-bottom:24px;">
             <div style="display:flex;align-items:center;gap:16px;">
                 <div style="font-size:24px;">{banner_title.split()[0]}</div>
                 <div>
-                    <div style="font-weight:700;font-size:16px;color:{blue};">{banner_title[2:]}</div>
-                    <div style="font-size:14px;color:{text_med};margin-top:4px;">{banner_text}</div>
+                    <div style="font-weight:700;font-size:14px;color:{blue};">{banner_title[2:]}</div>
+                    <div style="font-size:12px;color:{text_med};margin-top:4px;">{banner_text}</div>
                 </div>
             </div>
         </div>
@@ -1788,8 +1868,8 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
 '''
     
-    # ES Futures Card
-    if es_data.current_price > 0:
+    # ES Futures Card (only show data for live mode)
+    if not is_historical and es_data.current_price > 0:
         es_direction_color = green if es_data.direction == "UP" else red if es_data.direction == "DOWN" else text_light
         es_arrow = "▲" if es_data.direction == "UP" else "▼" if es_data.direction == "DOWN" else "●"
         es_change_sign = "+" if es_data.overnight_change >= 0 else ""
@@ -1824,25 +1904,39 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             </div>
 '''
     else:
-        html += f'''
+        # Show appropriate message based on mode
+        if is_historical:
+            html += f'''
             <div class="neo-card">
                 <div class="price-label">ES Futures Overnight</div>
-                <div style="color:{text_light};padding:20px 0;">Loading ES data...</div>
+                <div style="padding:16px 0;text-align:center;">
+                    <div style="font-size:14px;color:{text_light};margin-bottom:8px;">📅 Historical Mode</div>
+                    <div style="font-size:12px;color:{text_light};">ES futures data not available for past dates</div>
+                </div>
+            </div>
+'''
+        else:
+            html += f'''
+            <div class="neo-card">
+                <div class="price-label">ES Futures Overnight</div>
+                <div style="color:{text_light};padding:20px 0;text-align:center;">Loading ES data...</div>
             </div>
 '''
     
-    # Active Cone Indicator
+    # Active Cone Indicator - update label for historical
+    cone_label = "Cone Position (at Close)" if is_historical else "Active Cone Position"
+    
     if detailed_cone.cone_name:
         position_color = green if detailed_cone.position_pct < 30 else red if detailed_cone.position_pct > 70 else amber
         trade_dir_color = green if detailed_cone.trade_direction == "CALLS" else red
         trade_arrow = "▲" if detailed_cone.trade_direction == "CALLS" else "▼"
         
         status_text = "INSIDE" if detailed_cone.is_inside else "OUTSIDE"
-        at_rail_badge = f'<span class="pill pill-green" style="margin-left:12px;">🎯 AT RAIL</span>' if detailed_cone.at_rail else ''
+        at_rail_badge = f'<span class="pill pill-green" style="margin-left:12px;">🎯 AT RAIL</span>' if detailed_cone.at_rail and not is_historical else ''
         
         html += f'''
             <div class="neo-card">
-                <div class="price-label">Active Cone Position</div>
+                <div class="price-label">{cone_label}</div>
                 <div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0;">
                     <div style="font-size:16px;font-weight:700;">{detailed_cone.cone_name}</div>
                     <span class="pill pill-neutral">{status_text}</span>
@@ -1899,9 +1993,9 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
 '''
     
     # ========================================================================
-    # QUICK TRADE CARD (When at Rail - within 5 pts)
+    # QUICK TRADE CARD (When at Rail - within 5 pts) - ONLY FOR LIVE MODE
     # ========================================================================
-    if detailed_cone.at_rail and detailed_cone.cone_name:
+    if not is_historical and detailed_cone.at_rail and detailed_cone.cone_name:
         # Find the matching setup
         matching_setup = None
         for s in setups:
@@ -2070,9 +2164,15 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
 '''
     
     # Get trading day label for options
-    trading_day_label = get_trading_day_label()
-    next_expiry = get_next_trading_day()
-    expiry_str = next_expiry.strftime("%b %d")
+    if is_historical:
+        trading_day_label = eval_date.strftime("%b %d, %Y")
+        expiry_str = eval_date.strftime("%b %d")
+        date_badge = f'<span class="pill pill-amber" style="font-size:11px;">📅 Historical</span>'
+    else:
+        trading_day_label = get_trading_day_label()
+        next_expiry = get_next_trading_day()
+        expiry_str = next_expiry.strftime("%b %d")
+        date_badge = f'<span class="pill pill-neutral" style="font-size:11px;">0DTE {expiry_str} ({trading_day_label})</span>'
     
     # CALLS Setups
     calls_setups = [s for s in setups if s.direction == 'CALLS']
@@ -2081,8 +2181,8 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         <div class="section-header">
             <div class="section-title" style="color:{green};">▲ Calls Setups</div>
             <div style="display:flex;align-items:center;gap:12px;">
-                <span class="pill pill-neutral" style="font-size:11px;">0DTE {expiry_str} ({trading_day_label})</span>
-                <span style="font-size:13px;color:{text_light};">Enter at Descending Rail</span>
+                {date_badge}
+                <span style="font-size:11px;color:{text_light};">Enter at Descending Rail</span>
             </div>
         </div>
         
@@ -2105,17 +2205,19 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 <tbody>
 '''
         for s in calls_setups:
-            row_class = 'row-active' if s.is_active else ''
+            row_class = 'row-active' if s.is_active and not is_historical else ''
             
-            # Estimated entry price at 10 AM
-            if s.est_entry_price_10am > 0:
+            # Premium display - different for historical
+            if is_historical:
+                premium_html = f'<span class="text-muted" style="font-size:11px;">Historical</span>'
+            elif s.est_entry_price_10am > 0:
                 premium_html = f'<span class="mono text-green font-bold">${s.est_entry_price_10am:.1f}</span>'
             elif s.current_option_price > 0:
                 premium_html = f'<span class="mono">${s.current_option_price:.1f}</span>'
             else:
                 premium_html = f'<span class="text-muted">—</span>'
             
-            if s.using_spy:
+            if s.using_spy and not is_historical:
                 premium_html += f'<br><span style="font-size:9px;color:{text_light};">SPY {s.spy_strike_used}C</span>'
             
             dist_pill = 'pill-green' if s.distance <= 5 else 'pill-amber' if s.distance <= 15 else 'pill-neutral'
@@ -2147,8 +2249,8 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         <div class="section-header">
             <div class="section-title" style="color:{red};">▼ Puts Setups</div>
             <div style="display:flex;align-items:center;gap:12px;">
-                <span class="pill pill-neutral" style="font-size:11px;">0DTE {expiry_str} ({trading_day_label})</span>
-                <span style="font-size:13px;color:{text_light};">Enter at Ascending Rail</span>
+                {date_badge}
+                <span style="font-size:11px;color:{text_light};">Enter at Ascending Rail</span>
             </div>
         </div>
         
@@ -2171,17 +2273,19 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 <tbody>
 '''
         for s in puts_setups:
-            row_class = 'row-active' if s.is_active else ''
+            row_class = 'row-active' if s.is_active and not is_historical else ''
             
-            # Estimated entry price at 10 AM
-            if s.est_entry_price_10am > 0:
+            # Premium display - different for historical
+            if is_historical:
+                premium_html = f'<span class="text-muted" style="font-size:11px;">Historical</span>'
+            elif s.est_entry_price_10am > 0:
                 premium_html = f'<span class="mono text-green font-bold">${s.est_entry_price_10am:.1f}</span>'
             elif s.current_option_price > 0:
                 premium_html = f'<span class="mono">${s.current_option_price:.1f}</span>'
             else:
                 premium_html = f'<span class="text-muted">—</span>'
             
-            if s.using_spy:
+            if s.using_spy and not is_historical:
                 premium_html += f'<br><span style="font-size:9px;color:{text_light};">SPY {s.spy_strike_used}P</span>'
             
             dist_pill = 'pill-green' if s.distance <= 5 else 'pill-amber' if s.distance <= 15 else 'pill-neutral'
@@ -2252,13 +2356,20 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 current_min = 0
                 current_hour += 1
         
-        # Get today's date for calculations
-        today = get_ct_now().date()
+        # Use the trading date for calculations (historical or current)
+        pivot_calc_date = eval_date
+        
+        # Show which date we're displaying
+        date_label = pivot_calc_date.strftime('%A, %b %d, %Y')
+        historical_badge = f'<span class="pill pill-amber" style="margin-left:12px;">📅 Historical</span>' if is_historical else ''
         
         html += f'''
         <div class="section-header" style="margin-top:32px;">
             <div class="section-title">📊 Pivot Table — All Entries by Time Block</div>
-            <span style="font-size:13px;color:{text_light};">9:30-10:00 AM = Institutional Entry Window</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:11px;color:{text_light};">{date_label}</span>
+                {historical_badge}
+            </div>
         </div>
         
         <div class="neo-card table-card" style="overflow-x:auto;">
@@ -2295,7 +2406,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         # Generate rows for each time slot
         for slot in time_slots:
             hour, minute = map(int, slot.split(':'))
-            slot_time = CT_TZ.localize(datetime.combine(today, time(hour, minute)))
+            slot_time = CT_TZ.localize(datetime.combine(pivot_calc_date, time(hour, minute)))
             
             # Check if this is the institutional window (9:30-10:00)
             is_institutional = (hour == 9 and minute >= 30) or (hour == 10 and minute == 0)
@@ -2379,7 +2490,9 @@ def main():
         'manual_close': 0.0,
         'manual_high_time': "10:30",
         'manual_low_time': "14:00",
-        'fetch_options': True
+        'fetch_options': True,
+        'selected_date': None,
+        'use_historical': False
     }
     
     for key, value in defaults.items():
@@ -2389,6 +2502,45 @@ def main():
     # Sidebar
     with st.sidebar:
         st.markdown("## ⚙️ Configuration")
+        
+        # Date Selection
+        st.markdown("### 📅 Trading Date")
+        
+        # Get today and next trading day
+        today = get_ct_now().date()
+        next_trading = get_next_trading_day().date()
+        
+        date_mode = st.radio(
+            "Select Mode",
+            ["Live / Next Trading Day", "Historical Date"],
+            index=1 if st.session_state.use_historical else 0,
+            horizontal=True
+        )
+        
+        st.session_state.use_historical = (date_mode == "Historical Date")
+        
+        if st.session_state.use_historical:
+            # Historical date picker
+            selected = st.date_input(
+                "Select Date",
+                value=st.session_state.selected_date or today - timedelta(days=1),
+                max_value=today,
+                min_value=today - timedelta(days=365)
+            )
+            st.session_state.selected_date = selected
+            
+            # Show what date is selected
+            if selected.weekday() >= 5:
+                st.warning(f"⚠️ {selected.strftime('%A, %b %d')} is a weekend - no trading data")
+            else:
+                st.info(f"📊 Showing data for **{selected.strftime('%A, %b %d, %Y')}**")
+        else:
+            # Show next trading day info
+            trading_label = get_trading_day_label()
+            st.info(f"📊 **{trading_label}** ({next_trading.strftime('%b %d, %Y')})")
+            st.session_state.selected_date = None
+        
+        st.markdown("---")
         
         st.markdown("### 📊 VIX Zone")
         use_manual_vix = st.checkbox("Manual VIX Override", value=st.session_state.use_manual_vix)
@@ -2420,32 +2572,83 @@ def main():
             st.cache_data.clear()
             st.rerun()
     
+    # Determine if we're in historical mode
+    is_historical = st.session_state.use_historical and st.session_state.selected_date is not None
+    selected_date = st.session_state.selected_date
+    
     # Get market data
     polygon_status = PolygonStatus()
     
-    # SPX price
-    spx_snapshot = polygon_get_snapshot(POLYGON_SPX) if POLYGON_HAS_INDICES else None
-    if spx_snapshot and spx_snapshot.get('price', 0) > 0:
-        current_spx = spx_snapshot['price']
-        polygon_status.connected = True
-        polygon_status.spx_price = current_spx
+    if is_historical:
+        # HISTORICAL MODE - Fetch data for selected date
+        historical_spx = fetch_historical_day_data("^GSPC", datetime.combine(selected_date, time(0, 0)))
+        historical_vix = fetch_historical_day_data("^VIX", datetime.combine(selected_date, time(0, 0)))
+        
+        # Use close price as "current" for historical
+        current_spx = historical_spx.get('close', 0)
+        current_vix = historical_vix.get('close', 0)
+        
+        if current_spx > 0:
+            polygon_status.connected = True
+            polygon_status.spx_price = current_spx
+            polygon_status.vix_price = current_vix
+        
+        # For historical, we need prior day data (day before selected date)
+        prior_date = selected_date - timedelta(days=1)
+        # Skip weekends for prior date
+        while prior_date.weekday() >= 5:
+            prior_date -= timedelta(days=1)
+        
+        prior_data = fetch_historical_day_data("^GSPC", datetime.combine(prior_date, time(0, 0)))
+        if prior_data.get('high', 0) == 0:
+            prior_data = {'high': current_spx + 20, 'low': current_spx - 20, 'close': current_spx, 'open': current_spx}
+        
+        # VIX Zone for historical - estimate based on daily range
+        vix_range = historical_vix.get('high', current_vix) - historical_vix.get('low', current_vix)
+        if vix_range > 0:
+            vix_bottom = historical_vix.get('low', current_vix)
+            vix_top = historical_vix.get('high', current_vix)
+        else:
+            vix_bottom = current_vix - 0.15
+            vix_top = current_vix + 0.15
+        vix_auto = False
+        
+        # ES data not available for historical
+        es_data = ESData()
+        
     else:
-        current_spx = yf_fetch_current_spx()
+        # LIVE MODE - Current market data
+        # SPX price
+        spx_snapshot = polygon_get_snapshot(POLYGON_SPX) if POLYGON_HAS_INDICES else None
+        if spx_snapshot and spx_snapshot.get('price', 0) > 0:
+            current_spx = spx_snapshot['price']
+            polygon_status.connected = True
+            polygon_status.spx_price = current_spx
+        else:
+            current_spx = yf_fetch_current_spx()
+        
+        # VIX
+        vix_snapshot = polygon_get_snapshot(POLYGON_VIX) if POLYGON_HAS_INDICES else None
+        if vix_snapshot and vix_snapshot.get('price', 0) > 0:
+            current_vix = vix_snapshot['price']
+            polygon_status.vix_price = current_vix
+        else:
+            current_vix = yf_fetch_current_vix()
+        
+        # Prior day data
+        prior_data = polygon_get_prior_day_data(POLYGON_SPX) if POLYGON_HAS_INDICES else None
+        if not prior_data:
+            prior_data = {'high': current_spx + 20, 'low': current_spx - 20, 'close': current_spx, 'open': current_spx}
+        
+        # Fetch ES Futures data
+        es_raw = yf_fetch_es_futures()
     
-    # VIX
-    vix_snapshot = polygon_get_snapshot(POLYGON_VIX) if POLYGON_HAS_INDICES else None
-    if vix_snapshot and vix_snapshot.get('price', 0) > 0:
-        current_vix = vix_snapshot['price']
-        polygon_status.vix_price = current_vix
-    else:
-        current_vix = yf_fetch_current_vix()
-    
-    # VIX Zone
+    # VIX Zone - Manual override takes precedence
     if st.session_state.use_manual_vix and st.session_state.vix_bottom > 0 and st.session_state.vix_top > 0:
         vix_bottom = st.session_state.vix_bottom
         vix_top = st.session_state.vix_top
         vix_auto = False
-    else:
+    elif not is_historical:
         overnight = polygon_get_overnight_vix_range(get_ct_now()) if POLYGON_HAS_INDICES else None
         if overnight and overnight.get('bottom', 0) > 0:
             vix_bottom = overnight['bottom']
@@ -2457,48 +2660,60 @@ def main():
             vix_auto = False
     
     vix_zone = analyze_vix_zone(current_vix, vix_bottom, vix_top)
-    vix_zone.auto_detected = vix_auto
+    vix_zone.auto_detected = vix_auto if not is_historical else False
     
-    # Fetch ES Futures data
-    es_raw = yf_fetch_es_futures()
-    es_data = analyze_es_data(es_raw, current_spx, vix_zone)
-    
-    # Prior day data
-    prior_data = polygon_get_prior_day_data(POLYGON_SPX) if POLYGON_HAS_INDICES else None
-    if not prior_data:
-        prior_data = {'high': current_spx + 20, 'low': current_spx - 20, 'close': current_spx, 'open': current_spx}
+    # ES data analysis (only for live mode)
+    if not is_historical:
+        es_data = analyze_es_data(es_raw, current_spx, vix_zone)
     
     # Build pivots
     if st.session_state.use_manual_pivots and st.session_state.manual_high > 0:
-        yesterday = get_ct_now() - timedelta(days=1)
+        if is_historical:
+            pivot_date = selected_date - timedelta(days=1)
+            while pivot_date.weekday() >= 5:
+                pivot_date -= timedelta(days=1)
+        else:
+            pivot_date = get_ct_now().date() - timedelta(days=1)
+        
         h_parts = st.session_state.manual_high_time.split(':')
         l_parts = st.session_state.manual_low_time.split(':')
         
-        high_time = CT_TZ.localize(datetime.combine(yesterday.date(), time(int(h_parts[0]), int(h_parts[1]))))
-        low_time = CT_TZ.localize(datetime.combine(yesterday.date(), time(int(l_parts[0]), int(l_parts[1]))))
+        high_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(h_parts[0]), int(h_parts[1]))))
+        low_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(l_parts[0]), int(l_parts[1]))))
         
         pivots = [
             Pivot(price=st.session_state.manual_high, time=high_time, name="Prior High"),
             Pivot(price=st.session_state.manual_low, time=low_time, name="Prior Low"),
-            Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(yesterday.date(), time(16, 0))), name="Prior Close")
+            Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close")
         ]
     else:
-        yesterday = get_ct_now() - timedelta(days=1)
+        if is_historical:
+            pivot_date = selected_date - timedelta(days=1)
+            while pivot_date.weekday() >= 5:
+                pivot_date -= timedelta(days=1)
+        else:
+            pivot_date = get_ct_now().date() - timedelta(days=1)
+        
         pivots = [
-            Pivot(price=prior_data['high'], time=CT_TZ.localize(datetime.combine(yesterday.date(), time(10, 30))), name="Prior High"),
-            Pivot(price=prior_data['low'], time=CT_TZ.localize(datetime.combine(yesterday.date(), time(14, 0))), name="Prior Low"),
-            Pivot(price=prior_data['close'], time=CT_TZ.localize(datetime.combine(yesterday.date(), time(16, 0))), name="Prior Close")
+            Pivot(price=prior_data['high'], time=CT_TZ.localize(datetime.combine(pivot_date, time(10, 30))), name="Prior High"),
+            Pivot(price=prior_data['low'], time=CT_TZ.localize(datetime.combine(pivot_date, time(14, 0))), name="Prior Low"),
+            Pivot(price=prior_data['close'], time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close")
         ]
     
-    # Build cones at 10:00 AM CT
-    today_10am = CT_TZ.localize(datetime.combine(get_ct_now().date(), time(10, 0)))
-    cones = build_cones(pivots, today_10am)
+    # Build cones at 10:00 AM CT for the trading date
+    if is_historical:
+        trading_date = selected_date
+    else:
+        trading_date = get_ct_now().date()
+    
+    eval_10am = CT_TZ.localize(datetime.combine(trading_date, time(10, 0)))
+    cones = build_cones(pivots, eval_10am)
     
     # Generate setups
     setups = generate_setups(cones, current_spx, vix_zone.bias)
     
-    # Fetch live options pricing
-    if st.session_state.fetch_options:
+    # Fetch live options pricing (only for live mode)
+    if st.session_state.fetch_options and not is_historical:
         with st.spinner("Fetching live options prices..."):
             for i, setup in enumerate(setups):
                 setups[i] = get_option_pricing_for_setup(setup, current_spx)
@@ -2524,7 +2739,9 @@ def main():
         polygon_status=polygon_status,
         pivots=pivots,
         es_data=es_data,
-        detailed_cone=detailed_cone
+        detailed_cone=detailed_cone,
+        trading_date=trading_date,
+        is_historical=is_historical
     )
     
     components.html(dashboard_html, height=3200, scrolling=True)
