@@ -7,7 +7,8 @@
 ║  NEW IN v5.1:                                                                 ║
 ║  • Neomorphic UI Design - Soft shadows, depth, 3D tactile cards              ║
 ║  • Live SPX Options Pricing via Polygon                                      ║
-║  • SPY Fallback with automatic conversion when SPX unavailable               ║                         
+║  • SPY Fallback with automatic conversion when SPX unavailable               ║
+║  • Real bid/ask spreads for accurate entry planning                          ║
 ║  • Greeks display (Delta, Gamma, Theta)                                      ║
 ║  • Smart entry recommendations based on premium analysis                      ║
 ║                                                                               ║
@@ -1008,7 +1009,8 @@ def assess_day(vix: VIXZone, cones: List[Cone]) -> DayAssessment:
 def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], setups: List[TradeSetup],
                                  assessment: DayAssessment, prior: Dict, active_cone_info: Dict = None,
                                  polygon_status: PolygonStatus = None, pivots: List[Pivot] = None,
-                                 es_data: ESData = None, detailed_cone: ActiveConeInfo = None) -> str:
+                                 es_data: ESData = None, detailed_cone: ActiveConeInfo = None,
+                                 trading_date: datetime = None, is_historical: bool = False) -> str:
     """Render premium neomorphic trading dashboard."""
     
     if pivots is None:
@@ -1017,6 +1019,14 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         es_data = ESData()
     if detailed_cone is None:
         detailed_cone = ActiveConeInfo()
+    if trading_date is None:
+        trading_date = get_ct_now()
+    
+    # Ensure trading_date is a date object
+    if hasattr(trading_date, 'date'):
+        eval_date = trading_date.date()
+    else:
+        eval_date = trading_date
     
     # Color palette
     bg = "#e8eef3"
@@ -2305,13 +2315,20 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 current_min = 0
                 current_hour += 1
         
-        # Get today's date for calculations
-        today = get_ct_now().date()
+        # Use the trading date for calculations (historical or current)
+        pivot_calc_date = eval_date
+        
+        # Show which date we're displaying
+        date_label = pivot_calc_date.strftime('%A, %b %d, %Y')
+        historical_badge = f'<span class="pill pill-amber" style="margin-left:12px;">📅 Historical</span>' if is_historical else ''
         
         html += f'''
         <div class="section-header" style="margin-top:32px;">
             <div class="section-title">📊 Pivot Table — All Entries by Time Block</div>
-            <span style="font-size:13px;color:{text_light};">9:30-10:00 AM = Institutional Entry Window</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:11px;color:{text_light};">{date_label}</span>
+                {historical_badge}
+            </div>
         </div>
         
         <div class="neo-card table-card" style="overflow-x:auto;">
@@ -2348,7 +2365,7 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         # Generate rows for each time slot
         for slot in time_slots:
             hour, minute = map(int, slot.split(':'))
-            slot_time = CT_TZ.localize(datetime.combine(today, time(hour, minute)))
+            slot_time = CT_TZ.localize(datetime.combine(pivot_calc_date, time(hour, minute)))
             
             # Check if this is the institutional window (9:30-10:00)
             is_institutional = (hour == 9 and minute >= 30) or (hour == 10 and minute == 0)
@@ -2681,7 +2698,9 @@ def main():
         polygon_status=polygon_status,
         pivots=pivots,
         es_data=es_data,
-        detailed_cone=detailed_cone
+        detailed_cone=detailed_cone,
+        trading_date=trading_date,
+        is_historical=is_historical
     )
     
     components.html(dashboard_html, height=3200, scrolling=True)
