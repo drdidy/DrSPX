@@ -1420,13 +1420,14 @@ def main():
     prior_data = {}
     trading_date = None
     pivot_date = None
+    es_raw = None
     
     if is_historical:
         # ====================================================================
         # HISTORICAL MODE
         # ====================================================================
         # selected_date = the day we want to analyze (e.g., Dec 19, 2025)
-        # pivot_date = the day BEFORE selected_date (e.g., Dec 18, 2025)
+        # pivot_date = the LAST TRADING DAY before selected_date (e.g., Dec 18, 2025)
         # prior_data = OHLC from pivot_date
         # current_spx/vix = closing values from selected_date
         
@@ -1468,14 +1469,19 @@ def main():
         # ====================================================================
         # LIVE MODE
         # ====================================================================
-        trading_date = get_ct_now().date()
+        # trading_date = the NEXT trading day (could be today if market open, or Monday if weekend)
+        # pivot_date = the LAST TRADING DAY before trading_date
+        # For weekend: trading_date = Monday, pivot_date = Friday
+        # For weekday after hours: trading_date = tomorrow (or Monday), pivot_date = today (or Friday)
         
-        # Get the prior trading day (skip weekends)
+        trading_date = get_next_trading_day().date()
+        
+        # Get the prior trading day (the last trading day before trading_date)
         pivot_date = trading_date - timedelta(days=1)
         while pivot_date.weekday() >= 5:
             pivot_date -= timedelta(days=1)
         
-        # Fetch current SPX
+        # Fetch current SPX (live price)
         spx_snapshot = polygon_get_snapshot(POLYGON_SPX) if POLYGON_HAS_INDICES else None
         if spx_snapshot and spx_snapshot.get('price', 0) > 0:
             current_spx = spx_snapshot['price']
@@ -1484,7 +1490,7 @@ def main():
         else:
             current_spx = yf_fetch_current_spx()
         
-        # Fetch current VIX
+        # Fetch current VIX (live price)
         vix_snapshot = polygon_get_snapshot(POLYGON_VIX) if POLYGON_HAS_INDICES else None
         if vix_snapshot and vix_snapshot.get('price', 0) > 0:
             current_vix = vix_snapshot['price']
@@ -1492,8 +1498,15 @@ def main():
         else:
             current_vix = yf_fetch_current_vix()
         
-        # Fetch prior day data
+        # Fetch prior day data (pivot_date's OHLC)
+        # First try Polygon for the most recent prior day
         prior_data = polygon_get_prior_day_data(POLYGON_SPX) if POLYGON_HAS_INDICES else None
+        
+        # If Polygon fails or returns empty, try yfinance for pivot_date specifically
+        if not prior_data or prior_data.get('high', 0) == 0:
+            prior_data = fetch_historical_day_data("^GSPC", datetime.combine(pivot_date, time(0, 0)))
+        
+        # Final fallback
         if not prior_data or prior_data.get('high', 0) == 0:
             prior_data = {'high': current_spx + 20, 'low': current_spx - 20, 'close': current_spx, 'open': current_spx}
         
@@ -1521,7 +1534,7 @@ def main():
     vix_zone.auto_detected = vix_auto
     
     # Analyze ES data (live mode only)
-    if not is_historical:
+    if not is_historical and es_raw is not None:
         es_data = analyze_es_data(es_raw, current_spx, vix_zone)
     
     # ========================================================================
