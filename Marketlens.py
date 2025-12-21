@@ -2486,11 +2486,20 @@ def main():
         'vix_bottom': 0.0,
         'vix_top': 0.0,
         'vix_current': 0.0,
-        'manual_high': 0.0,
-        'manual_low': 0.0,
-        'manual_close': 0.0,
+        # Primary pivots
+        'manual_high_wick': 0.0,        # Highest WICK for high cone
         'manual_high_time': "10:30",
+        'manual_low_close': 0.0,        # Lowest CLOSE for low cone
         'manual_low_time': "14:00",
+        'manual_close': 0.0,            # Prior close
+        # Secondary pivots (optional)
+        'use_secondary_high': False,
+        'secondary_high_wick': 0.0,
+        'secondary_high_time': "14:30",
+        'use_secondary_low': False,
+        'secondary_low_close': 0.0,
+        'secondary_low_time': "11:00",
+        # Other
         'fetch_options': True,
         'selected_date': None,
         'use_historical': False
@@ -2559,11 +2568,98 @@ def main():
         st.session_state.use_manual_pivots = use_manual_pivots
         
         if use_manual_pivots:
-            st.session_state.manual_high = st.number_input("Prior High", value=st.session_state.manual_high, step=0.01, format="%.2f")
-            st.session_state.manual_high_time = st.text_input("High Time (HH:MM)", value=st.session_state.manual_high_time)
-            st.session_state.manual_low = st.number_input("Prior Low", value=st.session_state.manual_low, step=0.01, format="%.2f")
-            st.session_state.manual_low_time = st.text_input("Low Time (HH:MM)", value=st.session_state.manual_low_time)
-            st.session_state.manual_close = st.number_input("Prior Close", value=st.session_state.manual_close, step=0.01, format="%.2f")
+            st.markdown("##### Primary Pivots")
+            
+            # High Cone - uses highest WICK
+            st.markdown("**High Cone** (highest wick)")
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.session_state.manual_high_wick = st.number_input(
+                    "Highest Wick", 
+                    value=st.session_state.manual_high_wick, 
+                    step=0.01, 
+                    format="%.2f",
+                    key="high_wick"
+                )
+            with col2:
+                st.session_state.manual_high_time = st.text_input(
+                    "Time (HH:MM)", 
+                    value=st.session_state.manual_high_time,
+                    key="high_time"
+                )
+            
+            # Low Cone - uses lowest CLOSE
+            st.markdown("**Low Cone** (lowest close in RTH)")
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.session_state.manual_low_close = st.number_input(
+                    "Lowest Close", 
+                    value=st.session_state.manual_low_close, 
+                    step=0.01, 
+                    format="%.2f",
+                    key="low_close"
+                )
+            with col2:
+                st.session_state.manual_low_time = st.text_input(
+                    "Time (HH:MM)", 
+                    value=st.session_state.manual_low_time,
+                    key="low_time"
+                )
+            
+            # Close
+            st.session_state.manual_close = st.number_input(
+                "Prior Close", 
+                value=st.session_state.manual_close, 
+                step=0.01, 
+                format="%.2f"
+            )
+            
+            st.markdown("---")
+            st.markdown("##### Secondary Pivots (Optional)")
+            
+            # Secondary High
+            st.session_state.use_secondary_high = st.checkbox(
+                "Enable Secondary High", 
+                value=st.session_state.use_secondary_high
+            )
+            if st.session_state.use_secondary_high:
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.session_state.secondary_high_wick = st.number_input(
+                        "2nd High Wick", 
+                        value=st.session_state.secondary_high_wick, 
+                        step=0.01, 
+                        format="%.2f",
+                        key="sec_high_wick"
+                    )
+                with col2:
+                    st.session_state.secondary_high_time = st.text_input(
+                        "Time", 
+                        value=st.session_state.secondary_high_time,
+                        key="sec_high_time"
+                    )
+            
+            # Secondary Low
+            st.session_state.use_secondary_low = st.checkbox(
+                "Enable Secondary Low", 
+                value=st.session_state.use_secondary_low
+            )
+            if st.session_state.use_secondary_low:
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.session_state.secondary_low_close = st.number_input(
+                        "2nd Low Close", 
+                        value=st.session_state.secondary_low_close, 
+                        step=0.01, 
+                        format="%.2f",
+                        key="sec_low_close"
+                    )
+                with col2:
+                    st.session_state.secondary_low_time = st.text_input(
+                        "Time", 
+                        value=st.session_state.secondary_low_time,
+                        key="sec_low_time"
+                    )
         
         st.markdown("### 💰 Options")
         st.session_state.fetch_options = st.checkbox("Fetch Live Option Prices", value=st.session_state.fetch_options)
@@ -2668,7 +2764,7 @@ def main():
         es_data = analyze_es_data(es_raw, current_spx, vix_zone)
     
     # Build pivots
-    if st.session_state.use_manual_pivots and st.session_state.manual_high > 0:
+    if st.session_state.use_manual_pivots and st.session_state.manual_high_wick > 0:
         if is_historical:
             pivot_date = selected_date - timedelta(days=1)
             while pivot_date.weekday() >= 5:
@@ -2676,17 +2772,32 @@ def main():
         else:
             pivot_date = get_ct_now().date() - timedelta(days=1)
         
+        pivots = []
+        
+        # Primary High (highest wick)
         h_parts = st.session_state.manual_high_time.split(':')
-        l_parts = st.session_state.manual_low_time.split(':')
-        
         high_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(h_parts[0]), int(h_parts[1]))))
-        low_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(l_parts[0]), int(l_parts[1]))))
+        pivots.append(Pivot(price=st.session_state.manual_high_wick, time=high_time, name="Prior High"))
         
-        pivots = [
-            Pivot(price=st.session_state.manual_high, time=high_time, name="Prior High"),
-            Pivot(price=st.session_state.manual_low, time=low_time, name="Prior Low"),
-            Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close")
-        ]
+        # Primary Low (lowest close)
+        l_parts = st.session_state.manual_low_time.split(':')
+        low_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(l_parts[0]), int(l_parts[1]))))
+        pivots.append(Pivot(price=st.session_state.manual_low_close, time=low_time, name="Prior Low"))
+        
+        # Prior Close
+        pivots.append(Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close"))
+        
+        # Secondary High (if enabled)
+        if st.session_state.use_secondary_high and st.session_state.secondary_high_wick > 0:
+            sh_parts = st.session_state.secondary_high_time.split(':')
+            sec_high_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(sh_parts[0]), int(sh_parts[1]))))
+            pivots.append(Pivot(price=st.session_state.secondary_high_wick, time=sec_high_time, name="2nd High"))
+        
+        # Secondary Low (if enabled)
+        if st.session_state.use_secondary_low and st.session_state.secondary_low_close > 0:
+            sl_parts = st.session_state.secondary_low_time.split(':')
+            sec_low_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(sl_parts[0]), int(sl_parts[1]))))
+            pivots.append(Pivot(price=st.session_state.secondary_low_close, time=sec_low_time, name="2nd Low"))
     else:
         if is_historical:
             pivot_date = selected_date - timedelta(days=1)
