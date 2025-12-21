@@ -930,7 +930,8 @@ def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> L
         t25_p = round(entry_p - cone.width * 0.25, 2)  # T1 = 25%
         t50_p = round(entry_p - cone.width * 0.50, 2)  # T2 = 50%
         t75_p = round(entry_p - cone.width * 0.75, 2)  # T3 = 75%
-        strike_p = int(round((entry_p + STRIKE_OTM_DISTANCE) / 5) * 5)
+        # OTM put strike should be BELOW entry price (entry - distance)
+        strike_p = int(round((entry_p - STRIKE_OTM_DISTANCE) / 5) * 5)
         
         # Calculate stop loss and risk/reward in dollars
         stop_loss_dollars_p = round(STOP_LOSS_PTS * DELTA * CONTRACT_MULTIPLIER / 10) * 10
