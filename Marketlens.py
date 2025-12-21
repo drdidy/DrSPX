@@ -116,19 +116,18 @@ class TradeSetup:
     cone_width: float
     entry: float
     stop: float
-    target_50: float
-    target_75: float
-    target_100: float
+    target_12: float      # 12.5% of cone
+    target_25: float      # 25% of cone
+    target_50: float      # 50% of cone (realistic max)
     strike: int
-    # Contract pricing
-    contract_entry_est: float    # Estimated entry price (e.g., $4.00)
-    contract_move_50: float      # Contract price move at 50%
-    contract_move_75: float      # Contract price move at 75%
-    contract_move_100: float     # Contract price move at 100%
-    # Profits per contract
+    # SPX points at each target
+    spx_pts_12: float     # SPX points gained at 12.5%
+    spx_pts_25: float     # SPX points gained at 25%
+    spx_pts_50: float     # SPX points gained at 50%
+    # Estimated profits per contract (SPX move × 0.33 delta × $100)
+    profit_12: float
+    profit_25: float
     profit_50: float
-    profit_75: float
-    profit_100: float
     risk_per_contract: float
     rr_ratio: float
     distance: float
@@ -505,19 +504,15 @@ def find_active_cone(price: float, cones: List[Cone]) -> Dict:
 
 def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> List[TradeSetup]:
     """
-    Generate trade setups with CORRECT profit calculations.
+    Generate trade setups with realistic targets and profit estimates.
     
-    The Math:
-    - Delta = 0.33 (contract moves $0.33 for every $1 SPX moves)
-    - Cone width = potential SPX move (rail to rail)
-    - Contract move = Cone width × Delta
-    - Profit = Contract move × $100 (options multiplier)
+    TARGETS: 12.5%, 25%, 50% of cone width (realistic - SPX rarely does full cone)
     
-    Example:
-    - Cone width: 27 pts
-    - Contract move: 27 × 0.33 = 8.91 pts (~$9)
-    - If entry at $4.00, exit at $13.00
-    - Profit: $9.00 × 100 = $900 per contract
+    PROFIT CALCULATION:
+    - SPX move × Delta (0.33) × $100 = Estimated profit per contract
+    
+    Example (40pt cone, 50% target = 20pt SPX move):
+    - 20 pts × 0.33 × 100 = $660/contract estimated profit
     """
     setups = []
     
@@ -527,32 +522,30 @@ def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> L
         
         # ========== CALLS SETUP (Enter at Descending Rail) ==========
         entry_c = cone.descending_rail
-        target_c = cone.ascending_rail
-        spx_move_c = cone.width  # Full rail-to-rail move
         dist_c = abs(current_price - entry_c)
+        
+        # SPX points at each target level
+        spx_pts_12_c = cone.width * 0.125  # 12.5%
+        spx_pts_25_c = cone.width * 0.25   # 25%
+        spx_pts_50_c = cone.width * 0.50   # 50%
+        
+        # Target prices
+        target_12_c = round(entry_c + spx_pts_12_c, 2)
+        target_25_c = round(entry_c + spx_pts_25_c, 2)
+        target_50_c = round(entry_c + spx_pts_50_c, 2)
         
         # Strike: ~17.5 pts OTM from entry for ~0.33 delta
         strike_c = int(entry_c + STRIKE_OTM_DISTANCE)
         strike_c = ((strike_c + 4) // 5) * 5  # Round to nearest 5
         
-        # Contract price moves (based on delta)
-        contract_move_100_c = spx_move_c * DELTA           # Full move
-        contract_move_75_c = spx_move_c * 0.75 * DELTA     # 75% move
-        contract_move_50_c = spx_move_c * 0.50 * DELTA     # 50% move
-        contract_loss_c = STOP_LOSS_PTS * DELTA            # Stop loss move
+        # Estimated profits: SPX move × delta × $100
+        profit_12_c = round(spx_pts_12_c * DELTA * CONTRACT_MULTIPLIER, 0)
+        profit_25_c = round(spx_pts_25_c * DELTA * CONTRACT_MULTIPLIER, 0)
+        profit_50_c = round(spx_pts_50_c * DELTA * CONTRACT_MULTIPLIER, 0)
+        risk_c = round(STOP_LOSS_PTS * DELTA * CONTRACT_MULTIPLIER, 0)
         
-        # Estimated contract entry price (rough estimate based on OTM distance)
-        # This is approximate - real price depends on IV, time, etc.
-        contract_entry_c = 4.00  # Typical entry for 15-20pt OTM 0DTE
-        
-        # Profits per contract (contract move × $100 multiplier)
-        profit_100_c = round(contract_move_100_c * CONTRACT_MULTIPLIER, 0)
-        profit_75_c = round(contract_move_75_c * CONTRACT_MULTIPLIER, 0)
-        profit_50_c = round(contract_move_50_c * CONTRACT_MULTIPLIER, 0)
-        risk_c = round(contract_loss_c * CONTRACT_MULTIPLIER, 0)
-        
-        # R:R ratio (50% profit vs risk)
-        rr_c = round(profit_50_c / risk_c, 1) if risk_c > 0 else 0
+        # R:R ratio (12.5% profit vs risk - most conservative)
+        rr_c = round(profit_12_c / risk_c, 1) if risk_c > 0 else 0
         
         setups.append(TradeSetup(
             direction='CALLS',
@@ -560,17 +553,16 @@ def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> L
             cone_width=cone.width,
             entry=entry_c,
             stop=round(entry_c - STOP_LOSS_PTS, 2),
-            target_50=round(entry_c + spx_move_c * 0.5, 2),
-            target_75=round(entry_c + spx_move_c * 0.75, 2),
-            target_100=target_c,
+            target_12=target_12_c,
+            target_25=target_25_c,
+            target_50=target_50_c,
             strike=strike_c,
-            contract_entry_est=contract_entry_c,
-            contract_move_50=round(contract_move_50_c, 2),
-            contract_move_75=round(contract_move_75_c, 2),
-            contract_move_100=round(contract_move_100_c, 2),
+            spx_pts_12=round(spx_pts_12_c, 1),
+            spx_pts_25=round(spx_pts_25_c, 1),
+            spx_pts_50=round(spx_pts_50_c, 1),
+            profit_12=profit_12_c,
+            profit_25=profit_25_c,
             profit_50=profit_50_c,
-            profit_75=profit_75_c,
-            profit_100=profit_100_c,
             risk_per_contract=risk_c,
             rr_ratio=rr_c,
             distance=round(dist_c, 2),
@@ -579,29 +571,29 @@ def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> L
         
         # ========== PUTS SETUP (Enter at Ascending Rail) ==========
         entry_p = cone.ascending_rail
-        target_p = cone.descending_rail
-        spx_move_p = cone.width  # Full rail-to-rail move
         dist_p = abs(current_price - entry_p)
+        
+        # SPX points at each target level
+        spx_pts_12_p = cone.width * 0.125  # 12.5%
+        spx_pts_25_p = cone.width * 0.25   # 25%
+        spx_pts_50_p = cone.width * 0.50   # 50%
+        
+        # Target prices (going DOWN for puts)
+        target_12_p = round(entry_p - spx_pts_12_p, 2)
+        target_25_p = round(entry_p - spx_pts_25_p, 2)
+        target_50_p = round(entry_p - spx_pts_50_p, 2)
         
         # Strike: ~17.5 pts OTM from entry for ~0.33 delta
         strike_p = int(entry_p - STRIKE_OTM_DISTANCE)
         strike_p = (strike_p // 5) * 5  # Round to nearest 5
         
-        # Contract price moves (based on delta)
-        contract_move_100_p = spx_move_p * DELTA
-        contract_move_75_p = spx_move_p * 0.75 * DELTA
-        contract_move_50_p = spx_move_p * 0.50 * DELTA
-        contract_loss_p = STOP_LOSS_PTS * DELTA
+        # Estimated profits: SPX move × delta × $100
+        profit_12_p = round(spx_pts_12_p * DELTA * CONTRACT_MULTIPLIER, 0)
+        profit_25_p = round(spx_pts_25_p * DELTA * CONTRACT_MULTIPLIER, 0)
+        profit_50_p = round(spx_pts_50_p * DELTA * CONTRACT_MULTIPLIER, 0)
+        risk_p = round(STOP_LOSS_PTS * DELTA * CONTRACT_MULTIPLIER, 0)
         
-        contract_entry_p = 4.00
-        
-        # Profits per contract
-        profit_100_p = round(contract_move_100_p * CONTRACT_MULTIPLIER, 0)
-        profit_75_p = round(contract_move_75_p * CONTRACT_MULTIPLIER, 0)
-        profit_50_p = round(contract_move_50_p * CONTRACT_MULTIPLIER, 0)
-        risk_p = round(contract_loss_p * CONTRACT_MULTIPLIER, 0)
-        
-        rr_p = round(profit_50_p / risk_p, 1) if risk_p > 0 else 0
+        rr_p = round(profit_12_p / risk_p, 1) if risk_p > 0 else 0
         
         setups.append(TradeSetup(
             direction='PUTS',
@@ -609,25 +601,24 @@ def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> L
             cone_width=cone.width,
             entry=entry_p,
             stop=round(entry_p + STOP_LOSS_PTS, 2),
-            target_50=round(entry_p - spx_move_p * 0.5, 2),
-            target_75=round(entry_p - spx_move_p * 0.75, 2),
-            target_100=target_p,
+            target_12=target_12_p,
+            target_25=target_25_p,
+            target_50=target_50_p,
             strike=strike_p,
-            contract_entry_est=contract_entry_p,
-            contract_move_50=round(contract_move_50_p, 2),
-            contract_move_75=round(contract_move_75_p, 2),
-            contract_move_100=round(contract_move_100_p, 2),
+            spx_pts_12=round(spx_pts_12_p, 1),
+            spx_pts_25=round(spx_pts_25_p, 1),
+            spx_pts_50=round(spx_pts_50_p, 1),
+            profit_12=profit_12_p,
+            profit_25=profit_25_p,
             profit_50=profit_50_p,
-            profit_75=profit_75_p,
-            profit_100=profit_100_p,
             risk_per_contract=risk_p,
             rr_ratio=rr_p,
             distance=round(dist_p, 2),
             is_active=(dist_p <= 5 and vix_bias == 'PUTS')
         ))
     
-    # Sort by distance from current price
-    setups.sort(key=lambda x: x.distance)
+    # Sort by distance to current price
+    setups.sort(key=lambda s: s.distance)
     return setups
 
 # ============================================================================
@@ -726,7 +717,7 @@ class TradeResult:
     triggered: bool
     trigger_time: Optional[str]
     trigger_price: Optional[float]
-    outcome: str  # 'WIN_50', 'WIN_75', 'WIN_100', 'STOPPED', 'OPEN', 'NO_TRIGGER'
+    outcome: str  # 'WIN_12', 'WIN_25', 'WIN_50', 'STOPPED', 'OPEN', 'NO_TRIGGER'
     exit_time: Optional[str]
     exit_price: Optional[float]
     profit: float
@@ -737,10 +728,10 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
     """
     Analyze what actually happened to each setup on a historical date.
     
-    IMPORTANT LOGIC:
-    - If price hits 50% target FIRST → WIN (we take profit)
-    - If price hits STOP FIRST (before 50%) → LOSS
-    - We track the BEST target reached (50%, 75%, or 100%)
+    IMPORTANT LOGIC (using new 12.5%, 25%, 50% targets):
+    - If price hits 12.5% target FIRST → WIN (we take profit)
+    - If price hits STOP FIRST (before 12.5%) → LOSS
+    - We track the BEST target reached (12.5%, 25%, or 50%)
     """
     results = []
     
@@ -788,20 +779,19 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
                         highest_after = max(highest_after, row['High'])
                         lowest_after = min(lowest_after, row['Low'])
                         
-                        # Check targets FIRST (50% is a win!)
-                        if row['High'] >= setup.target_100:
-                            best_target_hit = '100'
-                            exit_time = idx.strftime('%H:%M')
-                            exit_price = setup.target_100
-                            # Don't break yet - want to track full price action
-                        elif row['High'] >= setup.target_75 and best_target_hit != '100':
-                            best_target_hit = '75'
-                            exit_time = idx.strftime('%H:%M')
-                            exit_price = setup.target_75
-                        elif row['High'] >= setup.target_50 and best_target_hit not in ['75', '100']:
+                        # Check targets FIRST (12.5% is a win!)
+                        if row['High'] >= setup.target_50:
                             best_target_hit = '50'
                             exit_time = idx.strftime('%H:%M')
                             exit_price = setup.target_50
+                        elif row['High'] >= setup.target_25 and best_target_hit != '50':
+                            best_target_hit = '25'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_25
+                        elif row['High'] >= setup.target_12 and best_target_hit not in ['25', '50']:
+                            best_target_hit = '12'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_12
                         
                         # Check stop ONLY if no target hit yet
                         if best_target_hit is None and row['Low'] <= setup.stop:
@@ -812,15 +802,15 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
                             break
                     
                     # Set outcome based on best target hit
-                    if best_target_hit == '100':
-                        outcome = 'WIN_100'
-                        profit = setup.profit_100
-                    elif best_target_hit == '75':
-                        outcome = 'WIN_75'
-                        profit = setup.profit_75
-                    elif best_target_hit == '50':
+                    if best_target_hit == '50':
                         outcome = 'WIN_50'
                         profit = setup.profit_50
+                    elif best_target_hit == '25':
+                        outcome = 'WIN_25'
+                        profit = setup.profit_25
+                    elif best_target_hit == '12':
+                        outcome = 'WIN_12'
+                        profit = setup.profit_12
                     elif outcome != 'STOPPED':
                         outcome = 'OPEN'  # Triggered but no target or stop hit
                     
@@ -854,19 +844,19 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
                         lowest_after = min(lowest_after, row['Low'])
                         highest_after = max(highest_after, row['High'])
                         
-                        # Check targets FIRST (50% is a win!)
-                        if row['Low'] <= setup.target_100:
-                            best_target_hit = '100'
-                            exit_time = idx.strftime('%H:%M')
-                            exit_price = setup.target_100
-                        elif row['Low'] <= setup.target_75 and best_target_hit != '100':
-                            best_target_hit = '75'
-                            exit_time = idx.strftime('%H:%M')
-                            exit_price = setup.target_75
-                        elif row['Low'] <= setup.target_50 and best_target_hit not in ['75', '100']:
+                        # Check targets FIRST (12.5% is a win!)
+                        if row['Low'] <= setup.target_50:
                             best_target_hit = '50'
                             exit_time = idx.strftime('%H:%M')
                             exit_price = setup.target_50
+                        elif row['Low'] <= setup.target_25 and best_target_hit != '50':
+                            best_target_hit = '25'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_25
+                        elif row['Low'] <= setup.target_12 and best_target_hit not in ['25', '50']:
+                            best_target_hit = '12'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.target_12
                         
                         # Check stop ONLY if no target hit yet
                         if best_target_hit is None and row['High'] >= setup.stop:
@@ -877,15 +867,24 @@ def analyze_historical_trades(setups: List[TradeSetup], candles: pd.DataFrame, v
                             break
                     
                     # Set outcome based on best target hit
-                    if best_target_hit == '100':
-                        outcome = 'WIN_100'
-                        profit = setup.profit_100
-                    elif best_target_hit == '75':
-                        outcome = 'WIN_75'
-                        profit = setup.profit_75
-                    elif best_target_hit == '50':
+                        # Check stop ONLY if no target hit yet
+                        if best_target_hit is None and row['High'] >= setup.stop:
+                            outcome = 'STOPPED'
+                            exit_time = idx.strftime('%H:%M')
+                            exit_price = setup.stop
+                            profit = -setup.risk_per_contract
+                            break
+                    
+                    # Set outcome based on best target hit
+                    if best_target_hit == '50':
                         outcome = 'WIN_50'
                         profit = setup.profit_50
+                    elif best_target_hit == '25':
+                        outcome = 'WIN_25'
+                        profit = setup.profit_25
+                    elif best_target_hit == '12':
+                        outcome = 'WIN_12'
+                        profit = setup.profit_12
                     elif outcome != 'STOPPED':
                         outcome = 'OPEN'
                     
@@ -1156,8 +1155,8 @@ def render_dashboard(
                     <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#dc2626;">{s.stop:.2f}</div>
                 </div>
                 <div>
-                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;">Target</div>
-                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#059669;">{s.target_100:.2f}</div>
+                    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;">50% Target</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:14px;font-weight:600;color:#059669;">{s.target_50:.2f}</div>
                 </div>
                 <div>
                     <div style="font-size:10px;color:#6b7280;text-transform:uppercase;">Strike</div>
@@ -1165,26 +1164,26 @@ def render_dashboard(
                 </div>
             </div>
             
-            <!-- Contract Move Info -->
+            <!-- SPX Points Info -->
             <div style="font-size:11px;color:#6b7280;margin-bottom:8px;padding:0 4px;">
-                Contract moves ~${s.contract_move_100:.2f} on full rail-to-rail ({s.cone_width:.0f} × 0.33 delta)
+                12.5%: +{s.spx_pts_12:.1f}pts | 25%: +{s.spx_pts_25:.1f}pts | 50%: +{s.spx_pts_50:.1f}pts SPX
             </div>
             
-            <!-- Profits Per Contract -->
+            <!-- Estimated Profits Per Contract -->
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding-top:12px;border-top:1px solid #e5e7eb;">
                 <div style="text-align:center;">
-                    <div style="font-size:10px;color:#6b7280;">50% Move</div>
+                    <div style="font-size:10px;color:#6b7280;">12.5%</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#059669;">${s.profit_12:,.0f}</div>
+                    <div style="font-size:9px;color:#9ca3af;">/contract</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:10px;color:#6b7280;">25%</div>
+                    <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#059669;">${s.profit_25:,.0f}</div>
+                    <div style="font-size:9px;color:#9ca3af;">/contract</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:10px;color:#6b7280;">50%</div>
                     <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#059669;">${s.profit_50:,.0f}</div>
-                    <div style="font-size:9px;color:#9ca3af;">/contract</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:10px;color:#6b7280;">75% Move</div>
-                    <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#059669;">${s.profit_75:,.0f}</div>
-                    <div style="font-size:9px;color:#9ca3af;">/contract</div>
-                </div>
-                <div style="text-align:center;">
-                    <div style="font-size:10px;color:#6b7280;">100% Move</div>
-                    <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:#059669;">${s.profit_100:,.0f}</div>
                     <div style="font-size:9px;color:#9ca3af;">/contract</div>
                 </div>
                 <div style="text-align:center;">
