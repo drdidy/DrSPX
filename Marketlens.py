@@ -1754,16 +1754,32 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             </div>
             <div class="header-right">
                 {conn_html}
-                <div class="time-display">{get_ct_now().strftime('%H:%M')} CT</div>
+                <div class="time-display">{'📅 ' + eval_date.strftime('%b %d, %Y') if is_historical else get_ct_now().strftime('%H:%M') + ' CT'}</div>
             </div>
         </div>
-        
+'''
+    
+    # Historical Mode Banner
+    if is_historical:
+        html += f'''
+        <div class="neo-card" style="background:linear-gradient(135deg, {amber}15, {amber}05);border:2px solid {amber}50;margin-bottom:24px;">
+            <div style="display:flex;align-items:center;gap:16px;">
+                <div style="font-size:24px;">📅</div>
+                <div>
+                    <div style="font-weight:700;font-size:14px;color:{amber};">Historical Mode — {eval_date.strftime('%A, %B %d, %Y')}</div>
+                    <div style="font-size:12px;color:{text_med};margin-top:4px;">Viewing past data. SPX close: <strong>{spx:,.2f}</strong> • VIX estimated from daily range • No live options or ES data</div>
+                </div>
+            </div>
+        </div>
+'''
+    
+    html += f'''
         <!-- Hero Grid -->
         <div class="hero-grid">
             
             <!-- SPX Price Card -->
             <div class="neo-card price-card">
-                <div class="price-label">S&P 500 Index</div>
+                <div class="price-label">S&P 500 Index{' (Close)' if is_historical else ''}</div>
                 <div class="price-value">{spx:,.2f}</div>
                 <div class="price-meta">
                     <div class="meta-item">
@@ -1807,38 +1823,39 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         </div>
 '''
     
-    # Weekend/After-hours Planning Banner
-    now = get_ct_now()
-    weekday = now.weekday()
-    current_time = now.time()
-    market_open = time(9, 30)
-    market_close = time(16, 0)
-    
-    is_weekend = weekday >= 5
-    is_after_hours = weekday < 5 and (current_time < market_open or current_time > market_close)
-    
-    if is_weekend or is_after_hours:
-        next_trading = get_next_trading_day()
-        trading_label = get_trading_day_label()
+    # Weekend/After-hours Planning Banner (only for live mode)
+    if not is_historical:
+        now = get_ct_now()
+        weekday = now.weekday()
+        current_time = now.time()
+        market_open = time(9, 30)
+        market_close = time(16, 0)
         
-        if is_weekend:
-            banner_title = "📅 Weekend Planning Mode"
-            banner_text = f"Markets are closed. Showing projected setups and option prices for <strong>{trading_label} ({next_trading.strftime('%b %d')})</strong>. Prices will update when markets open."
-        else:
-            if current_time < market_open:
-                banner_title = "🌅 Pre-Market Planning"
-                banner_text = f"Market opens at 9:30 AM CT. Showing projected setups for <strong>today's session</strong>."
+        is_weekend = weekday >= 5
+        is_after_hours = weekday < 5 and (current_time < market_open or current_time > market_close)
+        
+        if is_weekend or is_after_hours:
+            next_trading = get_next_trading_day()
+            trading_label = get_trading_day_label()
+            
+            if is_weekend:
+                banner_title = "📅 Weekend Planning Mode"
+                banner_text = f"Markets are closed. Showing projected setups and option prices for <strong>{trading_label} ({next_trading.strftime('%b %d')})</strong>. Prices will update when markets open."
             else:
-                banner_title = "🌙 After-Hours Planning"
-                banner_text = f"Markets are closed. Showing projected setups for <strong>{trading_label} ({next_trading.strftime('%b %d')})</strong>."
-        
-        html += f'''
+                if current_time < market_open:
+                    banner_title = "🌅 Pre-Market Planning"
+                    banner_text = f"Market opens at 9:30 AM CT. Showing projected setups for <strong>today's session</strong>."
+                else:
+                    banner_title = "🌙 After-Hours Planning"
+                    banner_text = f"Markets are closed. Showing projected setups for <strong>{trading_label} ({next_trading.strftime('%b %d')})</strong>."
+            
+            html += f'''
         <div class="neo-card" style="background:linear-gradient(135deg, {blue}15, {blue}05);border:1px solid {blue}30;margin-bottom:24px;">
             <div style="display:flex;align-items:center;gap:16px;">
                 <div style="font-size:24px;">{banner_title.split()[0]}</div>
                 <div>
-                    <div style="font-weight:700;font-size:16px;color:{blue};">{banner_title[2:]}</div>
-                    <div style="font-size:14px;color:{text_med};margin-top:4px;">{banner_text}</div>
+                    <div style="font-weight:700;font-size:14px;color:{blue};">{banner_title[2:]}</div>
+                    <div style="font-size:12px;color:{text_med};margin-top:4px;">{banner_text}</div>
                 </div>
             </div>
         </div>
@@ -1851,8 +1868,8 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
 '''
     
-    # ES Futures Card
-    if es_data.current_price > 0:
+    # ES Futures Card (only show data for live mode)
+    if not is_historical and es_data.current_price > 0:
         es_direction_color = green if es_data.direction == "UP" else red if es_data.direction == "DOWN" else text_light
         es_arrow = "▲" if es_data.direction == "UP" else "▼" if es_data.direction == "DOWN" else "●"
         es_change_sign = "+" if es_data.overnight_change >= 0 else ""
@@ -1887,25 +1904,39 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
             </div>
 '''
     else:
-        html += f'''
+        # Show appropriate message based on mode
+        if is_historical:
+            html += f'''
             <div class="neo-card">
                 <div class="price-label">ES Futures Overnight</div>
-                <div style="color:{text_light};padding:20px 0;">Loading ES data...</div>
+                <div style="padding:16px 0;text-align:center;">
+                    <div style="font-size:14px;color:{text_light};margin-bottom:8px;">📅 Historical Mode</div>
+                    <div style="font-size:12px;color:{text_light};">ES futures data not available for past dates</div>
+                </div>
+            </div>
+'''
+        else:
+            html += f'''
+            <div class="neo-card">
+                <div class="price-label">ES Futures Overnight</div>
+                <div style="color:{text_light};padding:20px 0;text-align:center;">Loading ES data...</div>
             </div>
 '''
     
-    # Active Cone Indicator
+    # Active Cone Indicator - update label for historical
+    cone_label = "Cone Position (at Close)" if is_historical else "Active Cone Position"
+    
     if detailed_cone.cone_name:
         position_color = green if detailed_cone.position_pct < 30 else red if detailed_cone.position_pct > 70 else amber
         trade_dir_color = green if detailed_cone.trade_direction == "CALLS" else red
         trade_arrow = "▲" if detailed_cone.trade_direction == "CALLS" else "▼"
         
         status_text = "INSIDE" if detailed_cone.is_inside else "OUTSIDE"
-        at_rail_badge = f'<span class="pill pill-green" style="margin-left:12px;">🎯 AT RAIL</span>' if detailed_cone.at_rail else ''
+        at_rail_badge = f'<span class="pill pill-green" style="margin-left:12px;">🎯 AT RAIL</span>' if detailed_cone.at_rail and not is_historical else ''
         
         html += f'''
             <div class="neo-card">
-                <div class="price-label">Active Cone Position</div>
+                <div class="price-label">{cone_label}</div>
                 <div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0;">
                     <div style="font-size:16px;font-weight:700;">{detailed_cone.cone_name}</div>
                     <span class="pill pill-neutral">{status_text}</span>
@@ -1962,9 +1993,9 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
 '''
     
     # ========================================================================
-    # QUICK TRADE CARD (When at Rail - within 5 pts)
+    # QUICK TRADE CARD (When at Rail - within 5 pts) - ONLY FOR LIVE MODE
     # ========================================================================
-    if detailed_cone.at_rail and detailed_cone.cone_name:
+    if not is_historical and detailed_cone.at_rail and detailed_cone.cone_name:
         # Find the matching setup
         matching_setup = None
         for s in setups:
@@ -2133,9 +2164,15 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
 '''
     
     # Get trading day label for options
-    trading_day_label = get_trading_day_label()
-    next_expiry = get_next_trading_day()
-    expiry_str = next_expiry.strftime("%b %d")
+    if is_historical:
+        trading_day_label = eval_date.strftime("%b %d, %Y")
+        expiry_str = eval_date.strftime("%b %d")
+        date_badge = f'<span class="pill pill-amber" style="font-size:11px;">📅 Historical</span>'
+    else:
+        trading_day_label = get_trading_day_label()
+        next_expiry = get_next_trading_day()
+        expiry_str = next_expiry.strftime("%b %d")
+        date_badge = f'<span class="pill pill-neutral" style="font-size:11px;">0DTE {expiry_str} ({trading_day_label})</span>'
     
     # CALLS Setups
     calls_setups = [s for s in setups if s.direction == 'CALLS']
@@ -2144,8 +2181,8 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         <div class="section-header">
             <div class="section-title" style="color:{green};">▲ Calls Setups</div>
             <div style="display:flex;align-items:center;gap:12px;">
-                <span class="pill pill-neutral" style="font-size:11px;">0DTE {expiry_str} ({trading_day_label})</span>
-                <span style="font-size:13px;color:{text_light};">Enter at Descending Rail</span>
+                {date_badge}
+                <span style="font-size:11px;color:{text_light};">Enter at Descending Rail</span>
             </div>
         </div>
         
@@ -2168,17 +2205,19 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 <tbody>
 '''
         for s in calls_setups:
-            row_class = 'row-active' if s.is_active else ''
+            row_class = 'row-active' if s.is_active and not is_historical else ''
             
-            # Estimated entry price at 10 AM
-            if s.est_entry_price_10am > 0:
+            # Premium display - different for historical
+            if is_historical:
+                premium_html = f'<span class="text-muted" style="font-size:11px;">Historical</span>'
+            elif s.est_entry_price_10am > 0:
                 premium_html = f'<span class="mono text-green font-bold">${s.est_entry_price_10am:.1f}</span>'
             elif s.current_option_price > 0:
                 premium_html = f'<span class="mono">${s.current_option_price:.1f}</span>'
             else:
                 premium_html = f'<span class="text-muted">—</span>'
             
-            if s.using_spy:
+            if s.using_spy and not is_historical:
                 premium_html += f'<br><span style="font-size:9px;color:{text_light};">SPY {s.spy_strike_used}C</span>'
             
             dist_pill = 'pill-green' if s.distance <= 5 else 'pill-amber' if s.distance <= 15 else 'pill-neutral'
@@ -2210,8 +2249,8 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
         <div class="section-header">
             <div class="section-title" style="color:{red};">▼ Puts Setups</div>
             <div style="display:flex;align-items:center;gap:12px;">
-                <span class="pill pill-neutral" style="font-size:11px;">0DTE {expiry_str} ({trading_day_label})</span>
-                <span style="font-size:13px;color:{text_light};">Enter at Ascending Rail</span>
+                {date_badge}
+                <span style="font-size:11px;color:{text_light};">Enter at Ascending Rail</span>
             </div>
         </div>
         
@@ -2234,17 +2273,19 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
                 <tbody>
 '''
         for s in puts_setups:
-            row_class = 'row-active' if s.is_active else ''
+            row_class = 'row-active' if s.is_active and not is_historical else ''
             
-            # Estimated entry price at 10 AM
-            if s.est_entry_price_10am > 0:
+            # Premium display - different for historical
+            if is_historical:
+                premium_html = f'<span class="text-muted" style="font-size:11px;">Historical</span>'
+            elif s.est_entry_price_10am > 0:
                 premium_html = f'<span class="mono text-green font-bold">${s.est_entry_price_10am:.1f}</span>'
             elif s.current_option_price > 0:
                 premium_html = f'<span class="mono">${s.current_option_price:.1f}</span>'
             else:
                 premium_html = f'<span class="text-muted">—</span>'
             
-            if s.using_spy:
+            if s.using_spy and not is_historical:
                 premium_html += f'<br><span style="font-size:9px;color:{text_light};">SPY {s.spy_strike_used}P</span>'
             
             dist_pill = 'pill-green' if s.distance <= 5 else 'pill-amber' if s.distance <= 15 else 'pill-neutral'
