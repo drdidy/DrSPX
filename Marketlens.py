@@ -2852,6 +2852,9 @@ def main():
                 pivot_date -= timedelta(days=1)
         else:
             pivot_date = get_ct_now().date() - timedelta(days=1)
+            # Skip weekends for live mode too
+            while pivot_date.weekday() >= 5:
+                pivot_date -= timedelta(days=1)
         
         pivots = []
         
@@ -2886,6 +2889,9 @@ def main():
                 pivot_date -= timedelta(days=1)
         else:
             pivot_date = get_ct_now().date() - timedelta(days=1)
+            # Skip weekends for live mode too
+            while pivot_date.weekday() >= 5:
+                pivot_date -= timedelta(days=1)
         
         pivots = [
             Pivot(price=prior_data['high'], time=CT_TZ.localize(datetime.combine(pivot_date, time(10, 30))), name="Prior High"),
