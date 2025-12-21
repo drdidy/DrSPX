@@ -762,87 +762,9 @@ def analyze_vix_zone(current: float, bottom: float, top: float) -> VIXZone:
 # CONE & SETUP LOGIC
 # ============================================================================
 
-def count_blocks(start_time: datetime, eval_time: datetime) -> int:
-    """
-    Count 30-minute blocks from start_time to eval_time.
-    
-    Trading sessions (all times CT):
-    - RTH: 8:30 AM - 3:00 PM
-    - Post-RTH: 3:00 PM - 4:00 PM (2 candles)
-    - Maintenance: 4:00 PM - 5:00 PM (NO trading)
-    - Overnight: 5:00 PM - 8:30 AM next day
-    
-    Weekend: Friday 4:00 PM - Sunday 5:00 PM = NO candles
-    
-    The pivot candle is NOT counted - start_time should already be pivot + 30 min.
-    """
-    MAINTENANCE_START = time(16, 0)  # 4:00 PM
-    MAINTENANCE_END = time(17, 0)    # 5:00 PM
-    
-    # Round start_time UP to next 30-min boundary
-    start_minute = start_time.minute
-    if start_minute == 0 or start_minute == 30:
-        cone_start = start_time
-    elif start_minute < 30:
-        cone_start = start_time.replace(minute=30, second=0, microsecond=0)
-    else:
-        cone_start = (start_time.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
-    
-    # Ensure cone_start is timezone-aware
-    if cone_start.tzinfo is None:
-        cone_start = CT_TZ.localize(cone_start)
-    
-    total_blocks = 0
-    current = cone_start
-    
-    # Safety limit to prevent infinite loops
-    max_iterations = 1000
-    iterations = 0
-    
-    while current < eval_time and iterations < max_iterations:
-        iterations += 1
-        current_time = current.time()
-        current_weekday = current.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
-        
-        # Check if we're in weekend dead zone (Friday 4 PM - Sunday 5 PM)
-        is_friday_after_close = current_weekday == 4 and current_time >= MAINTENANCE_START
-        is_saturday = current_weekday == 5
-        is_sunday_before_open = current_weekday == 6 and current_time < MAINTENANCE_END
-        
-        if is_friday_after_close or is_saturday or is_sunday_before_open:
-            # Jump to Sunday 5:00 PM
-            days_until_sunday = (6 - current_weekday) % 7
-            if days_until_sunday == 0 and current_time >= MAINTENANCE_END:
-                days_until_sunday = 7  # Next Sunday
-            sunday = current.date() + timedelta(days=days_until_sunday)
-            current = CT_TZ.localize(datetime.combine(sunday, MAINTENANCE_END))
-            continue
-        
-        # Check if we're in maintenance window (4 PM - 5 PM on weekdays)
-        if MAINTENANCE_START <= current_time < MAINTENANCE_END:
-            # Jump to 5:00 PM (end of maintenance)
-            current = CT_TZ.localize(datetime.combine(current.date(), MAINTENANCE_END))
-            continue
-        
-        # Calculate next block
-        next_block = current + timedelta(minutes=30)
-        
-        # Don't count if next block exceeds eval_time
-        if next_block > eval_time:
-            break
-        
-        # Check if next block would cross into maintenance
-        if current_time < MAINTENANCE_START and next_block.time() > MAINTENANCE_START:
-            # This block ends at 4 PM, count it, then jump to 5 PM
-            total_blocks += 1
-            current = CT_TZ.localize(datetime.combine(current.date(), MAINTENANCE_END))
-            continue
-        
-        # Normal block - count it
-        total_blocks += 1
-        current = next_block
-    
-    return max(total_blocks, 1)
+def count_blocks(start: datetime, end: datetime) -> int:
+    diff = (end - start).total_seconds()
+    return max(int(diff // 1800), 1)
 
 def build_cones(pivots: List[Pivot], eval_time: datetime) -> List[Cone]:
     cones = []
@@ -970,8 +892,7 @@ def generate_setups(cones: List[Cone], current_price: float, vix_bias: str) -> L
         t25_c = round(entry_c + cone.width * 0.25, 2)  # T1 = 25%
         t50_c = round(entry_c + cone.width * 0.50, 2)  # T2 = 50%
         t75_c = round(entry_c + cone.width * 0.75, 2)  # T3 = 75%
-        # OTM call strike should be ABOVE entry price (entry + distance)
-        strike_c = int(round((entry_c + STRIKE_OTM_DISTANCE) / 5) * 5)
+        strike_c = int(round((entry_c - STRIKE_OTM_DISTANCE) / 5) * 5)
         
         # Calculate stop loss and risk/reward in dollars
         stop_loss_dollars_c = round(STOP_LOSS_PTS * DELTA * CONTRACT_MULTIPLIER / 10) * 10  # Round to nearest 10
@@ -2423,10 +2344,10 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
     # PIVOT TABLE - All entries at each 30-min block during RTH
     # ========================================================================
     if pivots:
-        # RTH time slots: 8:30 AM to 3:00 PM CT in 30-min increments
+        # RTH time slots: 9:30 AM to 4:00 PM CT in 30-min increments
         time_slots = []
-        start_hour, start_min = 8, 30
-        end_hour, end_min = 15, 0
+        start_hour, start_min = 9, 30
+        end_hour, end_min = 16, 0
         
         current_hour, current_min = start_hour, start_min
         while (current_hour < end_hour) or (current_hour == end_hour and current_min <= end_min):
@@ -2501,17 +2422,14 @@ def render_neomorphic_dashboard(spx: float, vix: VIXZone, cones: List[Cone], set
 '''
             
             for pivot in pivots:
-                # Use proper block counting that respects RTH
+                # Calculate cone values at this time
                 start_time = pivot.time + timedelta(minutes=30)
-                blocks = count_blocks(start_time, slot_time)
                 
-                # Only show values if slot_time is after the cone would have started
-                # For same-day pivots, check if slot is after pivot
-                # For prior-day pivots (like Close), always show
-                pivot_is_prior_day = pivot.time.date() < pivot_calc_date
-                slot_after_pivot = slot_time > start_time
-                
-                if pivot_is_prior_day or slot_after_pivot:
+                # Only calculate if the slot time is after the pivot started
+                if slot_time > start_time:
+                    diff_seconds = (slot_time - start_time).total_seconds()
+                    blocks = max(int(diff_seconds // 1800), 1)
+                    
                     ascending = pivot.price_for_ascending + (blocks * SLOPE_PER_30MIN)
                     descending = pivot.price_for_descending - (blocks * SLOPE_PER_30MIN)
                     
@@ -2853,9 +2771,6 @@ def main():
                 pivot_date -= timedelta(days=1)
         else:
             pivot_date = get_ct_now().date() - timedelta(days=1)
-            # Skip weekends for live mode too
-            while pivot_date.weekday() >= 5:
-                pivot_date -= timedelta(days=1)
         
         pivots = []
         
@@ -2869,8 +2784,8 @@ def main():
         low_time = CT_TZ.localize(datetime.combine(pivot_date, time(int(l_parts[0]), int(l_parts[1]))))
         pivots.append(Pivot(price=st.session_state.manual_low_close, time=low_time, name="Prior Low"))
         
-        # Prior Close (3 PM CT)
-        pivots.append(Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(pivot_date, time(15, 0))), name="Prior Close"))
+        # Prior Close
+        pivots.append(Pivot(price=st.session_state.manual_close, time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close"))
         
         # Secondary High (if enabled)
         if st.session_state.use_secondary_high and st.session_state.secondary_high_wick > 0:
@@ -2890,14 +2805,11 @@ def main():
                 pivot_date -= timedelta(days=1)
         else:
             pivot_date = get_ct_now().date() - timedelta(days=1)
-            # Skip weekends for live mode too
-            while pivot_date.weekday() >= 5:
-                pivot_date -= timedelta(days=1)
         
         pivots = [
             Pivot(price=prior_data['high'], time=CT_TZ.localize(datetime.combine(pivot_date, time(10, 30))), name="Prior High"),
             Pivot(price=prior_data['low'], time=CT_TZ.localize(datetime.combine(pivot_date, time(14, 0))), name="Prior Low"),
-            Pivot(price=prior_data['close'], time=CT_TZ.localize(datetime.combine(pivot_date, time(15, 0))), name="Prior Close")
+            Pivot(price=prior_data['close'], time=CT_TZ.localize(datetime.combine(pivot_date, time(16, 0))), name="Prior Close")
         ]
     
     # Build cones at 10:00 AM CT for the trading date
