@@ -17,5 +17,3 @@ plotly>=5.22
 
 # Timezone
 pytz>=2023.3
-
-polygon-api-client
