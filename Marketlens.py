@@ -1,12 +1,13 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║   SPX PROPHET v6.3 - "Where Structure Becomes Foresight"                      ║
-║   Using Polygon Python Library for Options Data                                ║
+║   SPX PROPHET v6.4 - "Where Structure Becomes Foresight"                      ║
+║   Using Raw Requests (No polygon library required)                             ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
 import streamlit as st
 import streamlit.components.v1 as components
+import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, date, time, timedelta
@@ -14,14 +15,12 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 import pytz
 
-# Polygon Python Library
-from polygon import RESTClient
-
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
 POLYGON_API_KEY = "jrbBZ2y12cJAOp2Buqtlay0TdprcTDIm"
+POLYGON_BASE = "https://api.polygon.io"
 
 CT_TZ = pytz.timezone('America/Chicago')
 ET_TZ = pytz.timezone('America/New_York')
@@ -195,53 +194,47 @@ def format_countdown(td: timedelta) -> str:
     return f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
 # =============================================================================
-# POLYGON API USING PYTHON LIBRARY
+# POLYGON API - RAW REQUESTS (NO LIBRARY)
 # =============================================================================
 
-@st.cache_resource
-def get_polygon_client():
-    """Get cached Polygon client"""
-    return RESTClient(POLYGON_API_KEY)
-
-def polygon_get_index_snapshot(ticker: str) -> float:
-    """Get index price (SPX, VIX) using Polygon library"""
+def polygon_get(endpoint: str, params: dict = None) -> Optional[Dict]:
+    """Make a GET request to Polygon API"""
     try:
-        client = get_polygon_client()
-        # For indices, use the snapshot endpoint
-        aggs = list(client.get_aggs(ticker, 1, "day", 
-                                    (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d"),
-                                    datetime.now().strftime("%Y-%m-%d"),
-                                    limit=5))
-        if aggs:
-            return aggs[-1].close
+        if params is None:
+            params = {}
+        params["apiKey"] = POLYGON_API_KEY
+        url = f"{POLYGON_BASE}{endpoint}"
+        resp = requests.get(url, params=params, timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
     except Exception as e:
-        st.warning(f"Could not fetch {ticker}: {e}")
-    return 0.0
+        pass
+    return None
 
 def polygon_get_daily_bars(ticker: str, from_date: date, to_date: date) -> List[Dict]:
-    """Get daily OHLC bars using Polygon library"""
-    try:
-        client = get_polygon_client()
-        aggs = list(client.get_aggs(ticker, 1, "day",
-                                    from_date.strftime("%Y-%m-%d"),
-                                    to_date.strftime("%Y-%m-%d")))
-        return [{"o": a.open, "h": a.high, "l": a.low, "c": a.close, "t": a.timestamp} for a in aggs]
-    except Exception as e:
-        pass
-    return []
+    """Get daily OHLC bars"""
+    data = polygon_get(
+        f"/v2/aggs/ticker/{ticker}/range/1/day/{from_date.strftime('%Y-%m-%d')}/{to_date.strftime('%Y-%m-%d')}",
+        {"adjusted": "true", "sort": "asc"}
+    )
+    return data.get("results", []) if data else []
 
 def polygon_get_intraday_bars(ticker: str, from_date: date, to_date: date, multiplier: int = 30) -> List[Dict]:
-    """Get intraday bars using Polygon library"""
-    try:
-        client = get_polygon_client()
-        aggs = list(client.get_aggs(ticker, multiplier, "minute",
-                                    from_date.strftime("%Y-%m-%d"),
-                                    to_date.strftime("%Y-%m-%d"),
-                                    limit=5000))
-        return [{"o": a.open, "h": a.high, "l": a.low, "c": a.close, "t": a.timestamp} for a in aggs]
-    except Exception as e:
-        pass
-    return []
+    """Get intraday bars"""
+    data = polygon_get(
+        f"/v2/aggs/ticker/{ticker}/range/{multiplier}/minute/{from_date.strftime('%Y-%m-%d')}/{to_date.strftime('%Y-%m-%d')}",
+        {"adjusted": "true", "sort": "asc", "limit": 5000}
+    )
+    return data.get("results", []) if data else []
+
+def polygon_get_index_price(ticker: str) -> float:
+    """Get latest index price from aggregates"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    data = polygon_get(f"/v2/aggs/ticker/{ticker}/range/1/day/{week_ago}/{today}", {"limit": 5})
+    if data and data.get("results"):
+        return data["results"][-1].get("c", 0)
+    return 0.0
 
 def build_option_ticker(expiry: date, strike: float, opt_type: str) -> str:
     """Build SPY option ticker: O:SPY251226C00600000"""
@@ -252,150 +245,129 @@ def build_option_ticker(expiry: date, strike: float, opt_type: str) -> str:
 
 def get_spy_option_data(spx_entry: float, opt_type: str, expiry: date) -> Optional[OptionData]:
     """
-    Get SPY option data using Polygon Python library.
+    Get SPY option data using Polygon REST API.
+    Uses multiple methods to find price data.
     """
-    try:
-        client = get_polygon_client()
-        spy_level = spx_entry / 10
+    spy_level = spx_entry / 10
+    
+    # 2 strikes OTM
+    if opt_type.upper() in ["C", "CALL", "CALLS"]:
+        spy_strike = round(spy_level) + 2
+        spx_strike = int(round(spx_entry / 5) * 5) + 10
+    else:
+        spy_strike = round(spy_level) - 2
+        spx_strike = int(round(spx_entry / 5) * 5) - 10
+    
+    ticker = build_option_ticker(expiry, spy_strike, opt_type)
+    
+    spy_price = 0.0
+    delta = 0.0
+    iv = 0.0
+    
+    # Method 1: Try snapshot endpoint (has Greeks)
+    snapshot_data = polygon_get(f"/v3/snapshot/options/{ticker}")
+    if snapshot_data and snapshot_data.get("results"):
+        snap = snapshot_data["results"]
         
-        # 2 strikes OTM (matching your example)
-        if opt_type.upper() in ["C", "CALL", "CALLS"]:
-            spy_strike = round(spy_level) + 2
-            spx_strike = int(round(spx_entry / 5) * 5) + 10
-        else:
-            spy_strike = round(spy_level) - 2
-            spx_strike = int(round(spx_entry / 5) * 5) - 10
+        # Get Greeks
+        greeks = snap.get("greeks", {})
+        delta = greeks.get("delta", 0) or 0
+        iv = snap.get("implied_volatility", 0) or 0
         
-        ticker = build_option_ticker(expiry, spy_strike, opt_type)
+        # Get price from day data or last quote
+        day = snap.get("day", {})
+        quote = snap.get("last_quote", {})
         
-        # Method 1: Try to get option snapshot (has Greeks)
-        spy_price = 0.0
-        delta = 0.0
-        iv = 0.0
+        if quote.get("bid") and quote.get("ask"):
+            spy_price = (quote["bid"] + quote["ask"]) / 2
+        elif day.get("close"):
+            spy_price = day["close"]
+    
+    # Method 2: Try aggregates (historical price)
+    if spy_price == 0:
+        from_d = (expiry - timedelta(days=10)).strftime("%Y-%m-%d")
+        to_d = expiry.strftime("%Y-%m-%d")
+        agg_data = polygon_get(f"/v2/aggs/ticker/{ticker}/range/1/day/{from_d}/{to_d}", {"limit": 10})
+        if agg_data and agg_data.get("results"):
+            spy_price = agg_data["results"][-1].get("c", 0)
+    
+    # Method 3: Try listing contracts first, then get price
+    if spy_price == 0:
+        contract_type = "call" if opt_type.upper() in ["C", "CALL", "CALLS"] else "put"
+        contracts_data = polygon_get("/v3/reference/options/contracts", {
+            "underlying_ticker": "SPY",
+            "expiration_date": expiry.strftime("%Y-%m-%d"),
+            "strike_price": spy_strike,
+            "contract_type": contract_type,
+            "limit": 1
+        })
         
-        try:
-            snapshot = client.get_snapshot_option(ticker, "SPY")
-            if snapshot:
-                if hasattr(snapshot, 'day') and snapshot.day:
-                    spy_price = snapshot.day.close or 0
-                if hasattr(snapshot, 'greeks') and snapshot.greeks:
-                    delta = snapshot.greeks.delta or 0
-                if hasattr(snapshot, 'implied_volatility'):
-                    iv = snapshot.implied_volatility or 0
-        except:
-            pass
-        
-        # Method 2: Fallback to aggregates if snapshot fails
-        if spy_price == 0:
-            try:
-                # Get last few days of data
-                from_d = (expiry - timedelta(days=7)).strftime("%Y-%m-%d")
+        if contracts_data and contracts_data.get("results"):
+            contract_ticker = contracts_data["results"][0].get("ticker")
+            if contract_ticker:
+                from_d = (expiry - timedelta(days=10)).strftime("%Y-%m-%d")
                 to_d = expiry.strftime("%Y-%m-%d")
-                aggs = list(client.get_aggs(ticker, 1, "day", from_d, to_d, limit=10))
-                if aggs:
-                    spy_price = aggs[-1].close
-            except:
-                pass
-        
-        # Method 3: Try listing contracts and getting data
-        if spy_price == 0:
-            try:
-                contracts = list(client.list_options_contracts(
-                    underlying_ticker="SPY",
-                    expiration_date=expiry,
-                    strike_price=spy_strike,
-                    contract_type="call" if opt_type.upper() in ["C", "CALL", "CALLS"] else "put",
-                    limit=1
-                ))
-                if contracts:
-                    # Get the ticker from contract and fetch price
-                    contract_ticker = contracts[0].ticker
-                    from_d = (expiry - timedelta(days=7)).strftime("%Y-%m-%d")
-                    to_d = expiry.strftime("%Y-%m-%d")
-                    aggs = list(client.get_aggs(contract_ticker, 1, "day", from_d, to_d, limit=10))
-                    if aggs:
-                        spy_price = aggs[-1].close
-            except:
-                pass
-        
-        if spy_price == 0:
-            return None
-        
-        # Calculate SPX equivalent using OTM distance ratio
-        spy_otm = abs(spy_strike - spy_level)
-        spx_otm = abs(spx_strike - spx_entry)
-        multiplier = spx_otm / spy_otm if spy_otm > 0 else 10
-        spx_price_est = spy_price * multiplier
-        
-        # Use default delta if not available
-        if delta == 0:
-            delta = DELTA_IDEAL if opt_type.upper() in ["C", "CALL", "CALLS"] else -DELTA_IDEAL
-        
-        return OptionData(
-            spy_strike=spy_strike,
-            spy_price=round(spy_price, 2),
-            spx_strike=spx_strike,
-            spx_price_est=round(spx_price_est, 2),
-            delta=delta,
-            iv=iv,
-            in_sweet_spot=(PREMIUM_SWEET_LOW <= spy_price <= PREMIUM_SWEET_HIGH)
-        )
-        
-    except Exception as e:
-        st.warning(f"Option data error: {e}")
+                agg_data = polygon_get(f"/v2/aggs/ticker/{contract_ticker}/range/1/day/{from_d}/{to_d}", {"limit": 10})
+                if agg_data and agg_data.get("results"):
+                    spy_price = agg_data["results"][-1].get("c", 0)
+    
+    if spy_price == 0:
         return None
+    
+    # Calculate SPX equivalent
+    spy_otm = abs(spy_strike - spy_level)
+    spx_otm = abs(spx_strike - spx_entry)
+    multiplier = spx_otm / spy_otm if spy_otm > 0 else 10
+    spx_price_est = spy_price * multiplier
+    
+    # Default delta if not found
+    if delta == 0:
+        delta = DELTA_IDEAL if opt_type.upper() in ["C", "CALL", "CALLS"] else -DELTA_IDEAL
+    
+    return OptionData(
+        spy_strike=spy_strike,
+        spy_price=round(spy_price, 2),
+        spx_strike=spx_strike,
+        spx_price_est=round(spx_price_est, 2),
+        delta=delta,
+        iv=iv,
+        in_sweet_spot=(PREMIUM_SWEET_LOW <= spy_price <= PREMIUM_SWEET_HIGH)
+    )
 
 def get_open_interest_levels(expiry: date, spy_price: float) -> List[Dict]:
-    """Get high OI strikes as magnet levels"""
-    try:
-        client = get_polygon_client()
+    """Get high OI strikes"""
+    oi_levels = []
+    
+    for contract_type in ["call", "put"]:
+        data = polygon_get("/v3/reference/options/contracts", {
+            "underlying_ticker": "SPY",
+            "expiration_date": expiry.strftime("%Y-%m-%d"),
+            "strike_price.gte": spy_price - 10,
+            "strike_price.lte": spy_price + 10,
+            "contract_type": contract_type,
+            "limit": 20
+        })
         
-        # Get calls
-        calls = list(client.list_options_contracts(
-            underlying_ticker="SPY",
-            expiration_date=expiry,
-            strike_price_gte=spy_price - 10,
-            strike_price_lte=spy_price + 10,
-            contract_type="call",
-            limit=20
-        ))
-        
-        # Get puts
-        puts = list(client.list_options_contracts(
-            underlying_ticker="SPY",
-            expiration_date=expiry,
-            strike_price_gte=spy_price - 10,
-            strike_price_lte=spy_price + 10,
-            contract_type="put",
-            limit=20
-        ))
-        
-        oi_levels = []
-        
-        for c in calls + puts:
-            try:
-                snapshot = client.get_snapshot_option(c.ticker, "SPY")
-                if snapshot and hasattr(snapshot, 'open_interest') and snapshot.open_interest:
-                    if snapshot.open_interest > 5000:
+        if data and data.get("results"):
+            for c in data["results"][:10]:
+                ticker = c.get("ticker")
+                snap = polygon_get(f"/v3/snapshot/options/{ticker}")
+                if snap and snap.get("results"):
+                    oi = snap["results"].get("open_interest", 0)
+                    if oi and oi > 5000:
                         oi_levels.append({
-                            "spy_strike": c.strike_price,
-                            "spx_equiv": c.strike_price * 10,
-                            "type": c.contract_type,
-                            "oi": snapshot.open_interest
+                            "spy_strike": c.get("strike_price", 0),
+                            "spx_equiv": c.get("strike_price", 0) * 10,
+                            "type": contract_type,
+                            "oi": oi
                         })
-            except:
-                pass
-        
-        oi_levels.sort(key=lambda x: x["oi"], reverse=True)
-        return oi_levels[:10]
-        
-    except Exception as e:
-        pass
-    return []
+    
+    oi_levels.sort(key=lambda x: x["oi"], reverse=True)
+    return oi_levels[:10]
 
 
 # =============================================================================
-# VIX, PIVOTS, CONES (Same as before)
+# VIX, PIVOTS, CONES
 # =============================================================================
 
 def analyze_vix_zone(vix_bottom: float, vix_top: float, vix_current: float, cones: List[Cone] = None) -> VIXZone:
@@ -414,39 +386,35 @@ def analyze_vix_zone(vix_bottom: float, vix_top: float, vix_current: float, cone
         zone.zones_away = -int(np.ceil(zones_below))
         zone.position_pct = 0
         zone.bias = "CALLS"
-        zone.bias_reason = f"VIX {abs(zone.zones_away)} zone(s) below → return to {vix_bottom:.2f} → SPX UP"
+        zone.bias_reason = f"VIX {abs(zone.zones_away)} zone(s) below → SPX UP"
     elif vix_current > vix_top:
         zones_above = (vix_current - vix_top) / zone.zone_size if zone.zone_size > 0 else 0
         zone.zones_away = int(np.ceil(zones_above))
         zone.position_pct = 100
         zone.bias = "PUTS"
-        zone.bias_reason = f"VIX {zone.zones_away} zone(s) above → return to {vix_top:.2f} → SPX DOWN"
+        zone.bias_reason = f"VIX {zone.zones_away} zone(s) above → SPX DOWN"
     else:
         zone.zones_away = 0
         zone.position_pct = ((vix_current - vix_bottom) / zone.zone_size * 100) if zone.zone_size > 0 else 50
         if zone.position_pct >= 75:
             zone.bias = "CALLS"
-            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (top 25%) → expect fall → SPX UP"
+            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (top) → SPX UP"
         elif zone.position_pct <= 25:
             zone.bias = "PUTS"
-            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (bottom 25%) → expect rise → SPX DOWN"
+            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (bottom) → SPX DOWN"
         else:
             zone.bias = "WAIT"
-            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (middle) → no clear edge"
+            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (middle)"
     
     if cones and zone.bias in ["CALLS", "PUTS"]:
         rails = []
         for c in cones:
             if c.is_tradeable:
-                if zone.bias == "CALLS":
-                    rails.append((c.descending_rail, c.name))
-                else:
-                    rails.append((c.ascending_rail, c.name))
+                rails.append((c.descending_rail if zone.bias == "CALLS" else c.ascending_rail, c.name))
         if rails:
             rails.sort(key=lambda x: x[0])
-            mid = len(rails) // 2
-            zone.matched_rail = rails[mid][0]
-            zone.matched_cone = rails[mid][1]
+            zone.matched_rail = rails[len(rails)//2][0]
+            zone.matched_cone = rails[len(rails)//2][1]
     
     return zone
 
@@ -608,9 +576,9 @@ def build_cones(pivots: List[Pivot], eval_time: datetime) -> List[Cone]:
 
 def build_pivot_table(pivots: List[Pivot], trading_date: date) -> List[PivotTableRow]:
     rows = []
-    time_blocks = [("8:30 AM", time(8, 30)), ("9:00 AM", time(9, 0)), ("9:30 AM", time(9, 30)),
-                   ("10:00 AM", time(10, 0)), ("10:30 AM", time(10, 30)), ("11:00 AM", time(11, 0)),
-                   ("11:30 AM", time(11, 30)), ("12:00 PM", time(12, 0))]
+    time_blocks = [("8:30", time(8, 30)), ("9:00", time(9, 0)), ("9:30", time(9, 30)),
+                   ("10:00", time(10, 0)), ("10:30", time(10, 30)), ("11:00", time(11, 0)),
+                   ("11:30", time(11, 30)), ("12:00", time(12, 0))]
     
     high_p = next((p for p in pivots if p.name == "Prior High"), None)
     low_p = next((p for p in pivots if p.name == "Prior Low"), None)
@@ -642,7 +610,7 @@ def build_pivot_table(pivots: List[Pivot], trading_date: date) -> List[PivotTabl
 
 
 # =============================================================================
-# SETUP GENERATION WITH PROFIT TARGETS
+# SETUPS AND SCORING
 # =============================================================================
 
 def generate_setups(cones: List[Cone], current_price: float, expiry: date, is_after_cutoff: bool = False) -> List[TradeSetup]:
@@ -704,7 +672,7 @@ def generate_setups(cones: List[Cone], current_price: float, expiry: date, is_af
     
     return setups
 
-def calculate_day_score(vix_zone: VIXZone, cones: List[Cone], setups: List[TradeSetup], current_price: float) -> DayScore:
+def calculate_day_score(vix_zone: VIXZone, cones: List[Cone], setups: List[TradeSetup]) -> DayScore:
     score = DayScore()
     
     if vix_zone.bias in ["CALLS", "PUTS"]:
@@ -715,10 +683,8 @@ def calculate_day_score(vix_zone: VIXZone, cones: List[Cone], setups: List[Trade
         score.vix_clarity = 0
     elif vix_zone.position_pct >= 75 or vix_zone.position_pct <= 25 or vix_zone.zones_away != 0:
         score.vix_clarity = 25
-    elif 60 <= vix_zone.position_pct or vix_zone.position_pct <= 40:
-        score.vix_clarity = 15
     else:
-        score.vix_clarity = 5
+        score.vix_clarity = 10
     
     tradeable = [c for c in cones if c.is_tradeable]
     if tradeable:
@@ -728,10 +694,8 @@ def calculate_day_score(vix_zone: VIXZone, cones: List[Cone], setups: List[Trade
     sweet = sum(1 for s in setups if s.option and s.option.in_sweet_spot)
     score.premium_quality = 15 if sweet >= 3 else 10 if sweet >= 1 else 5
     
-    rails = []
-    for c in tradeable:
-        rails.extend([c.ascending_rail, c.descending_rail])
-    confluence = any(abs(r1 - r2) <= 5 for i, r1 in enumerate(rails) for r2 in rails[i+1:])
+    rails = [r for c in tradeable for r in [c.ascending_rail, c.descending_rail]]
+    confluence = any(abs(rails[i] - rails[j]) <= 5 for i in range(len(rails)) for j in range(i+1, len(rails)))
     score.confluence = 15 if confluence else 0
     
     score.total = score.vix_cone_alignment + score.vix_clarity + score.cone_width + score.premium_quality + score.confluence
@@ -749,24 +713,20 @@ def calculate_day_score(vix_zone: VIXZone, cones: List[Cone], setups: List[Trade
 
 def check_alerts(setups: List[TradeSetup], vix_zone: VIXZone, current_time: time) -> List[Dict]:
     alerts = []
-    
     for s in setups:
         if s.status == "ACTIVE":
-            alerts.append({"priority": "HIGH", "message": f"🎯 {s.direction} at {s.cone_name} ACTIVE! Entry: {s.entry:,.2f}"})
+            alerts.append({"priority": "HIGH", "message": f"🎯 {s.direction} {s.cone_name} ACTIVE @ {s.entry:,.2f}"})
         elif 5 < s.distance <= 15 and s.status != "GREY":
-            alerts.append({"priority": "MEDIUM", "message": f"⚠️ {s.direction} {s.cone_name} approaching ({s.distance:.0f} pts)"})
-    
+            alerts.append({"priority": "MEDIUM", "message": f"⚠️ {s.direction} {s.cone_name} ({s.distance:.0f} pts)"})
     if vix_zone.zones_away != 0:
         alerts.append({"priority": "HIGH", "message": f"📊 VIX {abs(vix_zone.zones_away)} zone(s) {'above' if vix_zone.zones_away > 0 else 'below'}"})
-    
     if INST_WINDOW_START <= current_time <= INST_WINDOW_END:
-        alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window (9:00-9:30 CT)"})
-    
+        alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window Active"})
     return alerts
 
 
 # =============================================================================
-# UI GENERATION
+# UI DASHBOARD
 # =============================================================================
 
 def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, 
@@ -793,70 +753,69 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     html = f'''<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ font-family:'Inter',sans-serif; background:{bg}; color:{text1}; padding:20px; }}
-.container {{ max-width:1700px; margin:0 auto; }}
-.glass {{ background:{card_bg}; backdrop-filter:blur(20px); border:1px solid {border}; border-radius:20px; padding:20px; margin-bottom:16px; }}
-.section-header {{ display:flex; justify-content:space-between; align-items:center; cursor:pointer; margin-bottom:12px; }}
-.section-title {{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:2px; color:{text3}; }}
-.toggle {{ font-size:14px; color:{text3}; }}
-.collapsed .content {{ display:none; }}
-.header {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px; }}
-.logo {{ display:flex; align-items:center; gap:10px; }}
-.logo-icon {{ width:48px; height:48px; background:linear-gradient(135deg,{blue},{purple}); border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:800; color:white; }}
-.logo h1 {{ font-size:22px; font-weight:800; }}
-.tagline {{ font-size:11px; color:{text2}; font-style:italic; }}
-.header-right {{ display:flex; align-items:center; gap:16px; }}
-.time-display {{ font-family:'JetBrains Mono'; font-size:24px; font-weight:600; }}
-.countdown {{ text-align:right; }}
-.countdown-label {{ font-size:9px; text-transform:uppercase; letter-spacing:1px; color:{text3}; }}
-.countdown-value {{ font-family:'JetBrains Mono'; font-size:14px; color:{amber}; }}
-.banner {{ padding:14px 18px; border-radius:12px; display:flex; align-items:center; gap:14px; margin-bottom:14px; }}
-.banner-hist {{ background:linear-gradient(135deg,{purple}30,{purple}10); border:2px solid {purple}50; }}
-.banner-inst {{ background:linear-gradient(135deg,{amber}30,{amber}10); border:2px solid {amber}50; }}
-.grid-2 {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
-.grid-4 {{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }}
-@media(max-width:900px) {{ .grid-2,.grid-4 {{ grid-template-columns:1fr; }} }}
-.vix-ladder {{ position:relative; height:70px; background:rgba(255,255,255,0.03); border-radius:10px; margin:12px 0; }}
-.vix-bar {{ position:absolute; left:16px; right:16px; height:28px; top:50%; transform:translateY(-50%); background:linear-gradient(90deg,{green}40,{bg},{bg},{red}40); border-radius:14px; }}
-.vix-marker {{ position:absolute; width:18px; height:18px; background:{bias_color}; border-radius:50%; top:50%; transform:translate(-50%,-50%); box-shadow:0 0 16px {bias_color}; border:2px solid {card_bg}; z-index:10; }}
-.vix-labels {{ position:absolute; bottom:6px; left:16px; right:16px; display:flex; justify-content:space-between; font-family:'JetBrains Mono'; font-size:10px; color:{text3}; }}
-.bias-card {{ text-align:center; padding:24px; background:linear-gradient(135deg,{bias_color}20,{bias_color}05); border:2px solid {bias_color}50; }}
-.bias-icon {{ font-size:40px; color:{bias_color}; text-shadow:0 0 24px {bias_color}; }}
-.bias-label {{ font-size:24px; font-weight:800; color:{bias_color}; letter-spacing:2px; margin-top:6px; }}
-.bias-reason {{ font-size:12px; color:{text2}; margin-top:10px; }}
-.bias-match {{ font-size:11px; color:{blue}; margin-top:6px; }}
-.score-circle {{ width:90px; height:90px; border-radius:50%; margin:0 auto 12px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:'JetBrains Mono'; border:4px solid; }}
-.score-value {{ font-size:28px; font-weight:700; }}
-.score-grade {{ font-size:12px; font-weight:600; }}
-.stat {{ background:rgba(255,255,255,0.03); border-radius:10px; padding:14px; text-align:center; }}
-.stat-value {{ font-family:'JetBrains Mono'; font-size:18px; font-weight:600; }}
-.stat-label {{ font-size:9px; text-transform:uppercase; letter-spacing:1px; color:{text3}; margin-top:3px; }}
-table {{ width:100%; border-collapse:collapse; font-size:11px; }}
-th {{ font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:1px; color:{text3}; padding:8px 4px; text-align:left; border-bottom:1px solid {border}; }}
-td {{ padding:10px 4px; border-bottom:1px solid {border}; }}
-tr:hover {{ background:rgba(255,255,255,0.02); }}
-tr.active {{ background:linear-gradient(90deg,{green}20,transparent); }}
-tr.grey {{ opacity:0.4; }}
-.mono {{ font-family:'JetBrains Mono'; }}
-.green {{ color:{green}; }}
-.red {{ color:{red}; }}
-.amber {{ color:{amber}; }}
-.blue {{ color:{blue}; }}
-.pill {{ display:inline-block; padding:3px 8px; border-radius:100px; font-size:9px; font-weight:600; font-family:'JetBrains Mono'; }}
-.pill-green {{ background:{green}20; color:{green}; }}
-.pill-red {{ background:{red}20; color:{red}; }}
-.pill-amber {{ background:{amber}20; color:{amber}; }}
-.pill-grey {{ background:rgba(107,114,128,0.2); color:#6b7280; }}
-.sweet {{ color:{green}; }}
-.sweet::before {{ content:"★ "; }}
-.alert {{ padding:10px 14px; border-radius:8px; margin-bottom:6px; font-size:12px; }}
-.alert-HIGH {{ background:{red}15; border-left:3px solid {red}; }}
-.alert-MEDIUM {{ background:{amber}15; border-left:3px solid {amber}; }}
-.alert-INFO {{ background:{blue}15; border-left:3px solid {blue}; }}
-.footer {{ text-align:center; padding:24px; color:{text3}; font-size:10px; }}
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:'Inter',sans-serif;background:{bg};color:{text1};padding:16px}}
+.container{{max-width:1700px;margin:0 auto}}
+.glass{{background:{card_bg};backdrop-filter:blur(20px);border:1px solid {border};border-radius:16px;padding:16px;margin-bottom:12px}}
+.section-header{{display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:10px}}
+.section-title{{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:{text3}}}
+.collapsed .content{{display:none}}
+.header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px}}
+.logo{{display:flex;align-items:center;gap:8px}}
+.logo-icon{{width:40px;height:40px;background:linear-gradient(135deg,{blue},{purple});border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:white}}
+.logo h1{{font-size:20px;font-weight:800}}
+.tagline{{font-size:10px;color:{text2};font-style:italic}}
+.header-right{{display:flex;align-items:center;gap:14px}}
+.time-display{{font-family:'JetBrains Mono';font-size:20px;font-weight:600}}
+.countdown{{text-align:right}}
+.countdown-label{{font-size:8px;text-transform:uppercase;letter-spacing:1px;color:{text3}}}
+.countdown-value{{font-family:'JetBrains Mono';font-size:13px;color:{amber}}}
+.banner{{padding:12px 14px;border-radius:10px;display:flex;align-items:center;gap:12px;margin-bottom:12px}}
+.banner-hist{{background:linear-gradient(135deg,{purple}30,{purple}10);border:2px solid {purple}50}}
+.banner-inst{{background:linear-gradient(135deg,{amber}30,{amber}10);border:2px solid {amber}50}}
+.grid-2{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+.grid-4{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}}
+@media(max-width:900px){{.grid-2,.grid-4{{grid-template-columns:1fr}}}}
+.vix-ladder{{position:relative;height:60px;background:rgba(255,255,255,0.03);border-radius:8px;margin:10px 0}}
+.vix-bar{{position:absolute;left:12px;right:12px;height:24px;top:50%;transform:translateY(-50%);background:linear-gradient(90deg,{green}40,{bg},{bg},{red}40);border-radius:12px}}
+.vix-marker{{position:absolute;width:16px;height:16px;background:{bias_color};border-radius:50%;top:50%;transform:translate(-50%,-50%);box-shadow:0 0 12px {bias_color};border:2px solid {card_bg};z-index:10}}
+.vix-labels{{position:absolute;bottom:4px;left:12px;right:12px;display:flex;justify-content:space-between;font-family:'JetBrains Mono';font-size:9px;color:{text3}}}
+.bias-card{{text-align:center;padding:20px;background:linear-gradient(135deg,{bias_color}20,{bias_color}05);border:2px solid {bias_color}50}}
+.bias-icon{{font-size:32px;color:{bias_color};text-shadow:0 0 20px {bias_color}}}
+.bias-label{{font-size:20px;font-weight:800;color:{bias_color};letter-spacing:2px;margin-top:4px}}
+.bias-reason{{font-size:11px;color:{text2};margin-top:8px}}
+.bias-match{{font-size:10px;color:{blue};margin-top:4px}}
+.score-circle{{width:80px;height:80px;border-radius:50%;margin:0 auto 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'JetBrains Mono';border:4px solid}}
+.score-value{{font-size:24px;font-weight:700}}
+.score-grade{{font-size:11px;font-weight:600}}
+.stat{{background:rgba(255,255,255,0.03);border-radius:8px;padding:12px;text-align:center}}
+.stat-value{{font-family:'JetBrains Mono';font-size:16px;font-weight:600}}
+.stat-label{{font-size:8px;text-transform:uppercase;letter-spacing:1px;color:{text3};margin-top:2px}}
+table{{width:100%;border-collapse:collapse;font-size:10px}}
+th{{font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:{text3};padding:6px 3px;text-align:left;border-bottom:1px solid {border}}}
+td{{padding:8px 3px;border-bottom:1px solid {border}}}
+tr:hover{{background:rgba(255,255,255,0.02)}}
+tr.active{{background:linear-gradient(90deg,{green}20,transparent)}}
+tr.grey{{opacity:0.4}}
+.mono{{font-family:'JetBrains Mono'}}
+.green{{color:{green}}}
+.red{{color:{red}}}
+.amber{{color:{amber}}}
+.blue{{color:{blue}}}
+.pill{{display:inline-block;padding:2px 6px;border-radius:100px;font-size:8px;font-weight:600;font-family:'JetBrains Mono'}}
+.pill-green{{background:{green}20;color:{green}}}
+.pill-red{{background:{red}20;color:{red}}}
+.pill-amber{{background:{amber}20;color:{amber}}}
+.pill-grey{{background:rgba(107,114,128,0.2);color:#6b7280}}
+.sweet{{color:{green}}}
+.sweet::before{{content:"★ "}}
+.alert{{padding:8px 12px;border-radius:6px;margin-bottom:4px;font-size:11px}}
+.alert-HIGH{{background:{red}15;border-left:3px solid {red}}}
+.alert-MEDIUM{{background:{amber}15;border-left:3px solid {amber}}}
+.alert-INFO{{background:{blue}15;border-left:3px solid {blue}}}
+.footer{{text-align:center;padding:20px;color:{text3};font-size:9px}}
 </style>
 </head>
 <body>
@@ -865,25 +824,25 @@ tr.grey {{ opacity:0.4; }}
 <div class="header">
     <div class="logo">
         <div class="logo-icon">SP</div>
-        <div><h1>SPX Prophet v6.3</h1><div class="tagline">Where Structure Becomes Foresight</div></div>
+        <div><h1>SPX Prophet v6.4</h1><div class="tagline">Where Structure Becomes Foresight</div></div>
     </div>
     <div class="header-right">
         <div class="countdown"><div class="countdown-label">To 9:10 AM</div><div class="countdown-value">{format_countdown(time_to_910)}</div></div>
-        <div class="countdown"><div class="countdown-label">To 11:30 Cutoff</div><div class="countdown-value">{format_countdown(time_to_1130)}</div></div>
+        <div class="countdown"><div class="countdown-label">To 11:30</div><div class="countdown-value">{format_countdown(time_to_1130)}</div></div>
         <div class="time-display">{now.strftime("%H:%M")} CT</div>
     </div>
 </div>
 '''
     
     if is_historical:
-        html += f'<div class="banner banner-hist"><div style="font-size:24px">📅</div><div><div style="font-weight:700;color:{purple}">Historical: {trading_date.strftime("%A, %B %d, %Y")}</div></div></div>'
+        html += f'<div class="banner banner-hist"><div style="font-size:20px">📅</div><div><div style="font-weight:700;color:{purple}">Historical: {trading_date.strftime("%b %d, %Y")}</div></div></div>'
     
     is_inst = INST_WINDOW_START <= now.time() <= INST_WINDOW_END
     if is_inst and not is_historical:
-        html += f'<div class="banner banner-inst"><div style="font-size:24px">🏛️</div><div><div style="font-weight:700;color:{amber}">INSTITUTIONAL WINDOW ACTIVE</div><div style="font-size:11px;color:{text2}">9:00 - 9:30 AM CT</div></div></div>'
+        html += f'<div class="banner banner-inst"><div style="font-size:20px">🏛️</div><div><div style="font-weight:700;color:{amber}">INSTITUTIONAL WINDOW</div></div></div>'
     
     if alerts:
-        html += '<div class="glass" style="padding:14px;">'
+        html += '<div class="glass" style="padding:10px">'
         for a in alerts[:4]:
             html += f'<div class="alert alert-{a["priority"]}">{a["message"]}</div>'
         html += '</div>'
@@ -892,28 +851,28 @@ tr.grey {{ opacity:0.4; }}
     html += f'''
 <div class="glass">
     <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-        <div class="section-title">📊 VIX ZONE ANALYSIS</div><span class="toggle">▼</span>
+        <div class="section-title">📊 VIX ZONE</div><span style="color:{text3}">▼</span>
     </div>
     <div class="content">
         <div class="grid-2">
             <div>
                 <div class="vix-ladder">
                     <div class="vix-bar"></div>
-                    <div class="vix-marker" style="left:{marker_pos}%;"></div>
-                    <div class="vix-labels"><span>{vix_zone.bottom:.2f}</span><span>Zone: {vix_zone.zone_size:.2f}</span><span>{vix_zone.top:.2f}</span></div>
+                    <div class="vix-marker" style="left:{marker_pos}%"></div>
+                    <div class="vix-labels"><span>{vix_zone.bottom:.2f}</span><span>{vix_zone.zone_size:.2f}</span><span>{vix_zone.top:.2f}</span></div>
                 </div>
                 <div class="grid-4">
-                    <div class="stat"><div class="stat-value">{vix_zone.current:.2f}</div><div class="stat-label">Current VIX</div></div>
+                    <div class="stat"><div class="stat-value">{vix_zone.current:.2f}</div><div class="stat-label">VIX</div></div>
                     <div class="stat"><div class="stat-value">{vix_zone.position_pct:.0f}%</div><div class="stat-label">Position</div></div>
-                    <div class="stat"><div class="stat-value blue">±{vix_zone.expected_spx_move:.0f}</div><div class="stat-label">Exp. Move</div></div>
-                    <div class="stat"><div class="stat-value">{vix_zone.zones_away:+d}</div><div class="stat-label">Zones Away</div></div>
+                    <div class="stat"><div class="stat-value blue">±{vix_zone.expected_spx_move:.0f}</div><div class="stat-label">Exp Move</div></div>
+                    <div class="stat"><div class="stat-value">{vix_zone.zones_away:+d}</div><div class="stat-label">Zones</div></div>
                 </div>
             </div>
             <div class="bias-card glass">
                 <div class="bias-icon">{bias_icon}</div>
                 <div class="bias-label">{vix_zone.bias}</div>
                 <div class="bias-reason">{vix_zone.bias_reason}</div>
-                {"<div class='bias-match'>Matched: " + vix_zone.matched_cone + " @ " + f"{vix_zone.matched_rail:,.2f}" + "</div>" if vix_zone.matched_rail > 0 else ""}
+                {"<div class='bias-match'>→ " + vix_zone.matched_cone + " @ " + f"{vix_zone.matched_rail:,.2f}" + "</div>" if vix_zone.matched_rail > 0 else ""}
             </div>
         </div>
     </div>
@@ -928,14 +887,13 @@ tr.grey {{ opacity:0.4; }}
         h = f'''
 <div class="glass">
     <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-        <div class="section-title" style="color:{color}">{icon} {direction} SETUPS</div><span class="toggle">▼</span>
+        <div class="section-title" style="color:{color}">{icon} {direction}</div><span style="color:{text3}">▼</span>
     </div>
     <div class="content">
         <table>
             <thead><tr>
-                <th>Cone</th><th>SPX Entry</th><th>SPY $</th><th>SPY Price</th>
-                <th>SPX Est</th><th>Delta</th><th>IV</th>
-                <th>Stop</th><th>T25%</th><th>T50%</th><th>T75%</th>
+                <th>Cone</th><th>Entry</th><th>SPY</th><th>SPY$</th><th>SPX$</th><th>Δ</th>
+                <th>Stop</th><th>T25</th><th>T50</th><th>T75</th>
                 <th>+25%</th><th>+50%</th><th>+75%</th><th>Risk</th><th>Status</th>
             </tr></thead>
             <tbody>
@@ -948,20 +906,15 @@ tr.grey {{ opacity:0.4; }}
                 spy_strike = f"{int(opt.spy_strike)}{s.direction[0]}"
                 spy_price = f"${opt.spy_price:.2f}"
                 spx_est = f"${opt.spx_price_est:.0f}"
-                delta = f"{abs(opt.delta):.2f}" if opt.delta else "--"
-                iv = f"{opt.iv*100:.0f}%" if opt.iv else "--"
+                delta = f"{abs(opt.delta):.2f}"
                 sweet_cls = "sweet" if opt.in_sweet_spot else ""
             else:
-                spy_strike = "--"
-                spy_price = "--"
-                spx_est = "--"
-                delta = "--"
-                iv = "--"
+                spy_strike = spy_price = spx_est = delta = "--"
                 sweet_cls = ""
             
-            status = f'<span class="pill pill-green">🎯 ACTIVE</span>' if s.status == "ACTIVE" else \
-                     f'<span class="pill pill-grey">CLOSED</span>' if s.status == "GREY" else \
-                     f'<span class="pill pill-amber">{s.distance:.0f}pts</span>'
+            status = f'<span class="pill pill-green">🎯</span>' if s.status == "ACTIVE" else \
+                     f'<span class="pill pill-grey">--</span>' if s.status == "GREY" else \
+                     f'<span class="pill pill-amber">{s.distance:.0f}</span>'
             
             entry_cls = "green" if direction == "CALLS" else "red"
             
@@ -972,7 +925,6 @@ tr.grey {{ opacity:0.4; }}
                 <td class="mono">{spy_price}</td>
                 <td class="mono">{spx_est}</td>
                 <td class="mono">{delta}</td>
-                <td class="mono">{iv}</td>
                 <td class="mono red">{s.stop:,.2f}</td>
                 <td class="mono">{s.target_25:,.2f}</td>
                 <td class="mono">{s.target_50:,.2f}</td>
@@ -995,7 +947,7 @@ tr.grey {{ opacity:0.4; }}
 <div class="grid-2">
 <div class="glass">
     <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-        <div class="section-title">📈 PRIOR SESSION</div><span class="toggle">▼</span>
+        <div class="section-title">📈 PRIOR SESSION</div><span style="color:{text3}">▼</span>
     </div>
     <div class="content">
         <div class="grid-4">
@@ -1008,15 +960,12 @@ tr.grey {{ opacity:0.4; }}
 </div>
 <div class="glass">
     <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-        <div class="section-title">🎯 DAY SCORE</div><span class="toggle">▼</span>
+        <div class="section-title">🎯 SCORE</div><span style="color:{text3}">▼</span>
     </div>
-    <div class="content" style="text-align:center;">
-        <div class="score-circle" style="border-color:{day_score.color}; color:{day_score.color};">
+    <div class="content" style="text-align:center">
+        <div class="score-circle" style="border-color:{day_score.color};color:{day_score.color}">
             <div class="score-value">{day_score.total}</div>
-            <div class="score-grade">Grade {day_score.grade}</div>
-        </div>
-        <div style="font-size:11px; color:{text2};">
-            {"🟢 Excellent" if day_score.total >= 80 else "🔵 Good" if day_score.total >= 60 else "🟠 Marginal" if day_score.total >= 40 else "🔴 Skip"}
+            <div class="score-grade">{day_score.grade}</div>
         </div>
     </div>
 </div>
@@ -1027,49 +976,42 @@ tr.grey {{ opacity:0.4; }}
     html += f'''
 <div class="glass">
     <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-        <div class="section-title">📐 STRUCTURAL CONES</div><span class="toggle">▼</span>
+        <div class="section-title">📐 CONES</div><span style="color:{text3}">▼</span>
     </div>
     <div class="content">
-        <table><thead><tr><th>Pivot</th><th>Ascending (PUTS)</th><th>Descending (CALLS)</th><th>Width</th><th>Blocks</th><th>OK?</th></tr></thead><tbody>
+        <table><thead><tr><th>Pivot</th><th>▲ Asc</th><th>▼ Desc</th><th>Width</th><th>OK?</th></tr></thead><tbody>
 '''
     for c in cones:
-        width_cls = "green" if c.width >= 25 else "amber" if c.width >= MIN_CONE_WIDTH else "red"
-        trade_pill = f'<span class="pill pill-green">YES</span>' if c.is_tradeable else f'<span class="pill pill-red">NO</span>'
-        html += f'<tr><td><strong>{c.name}</strong></td><td class="mono red">{c.ascending_rail:,.2f}</td><td class="mono green">{c.descending_rail:,.2f}</td><td class="mono {width_cls}">{c.width:.0f}</td><td class="mono">{c.blocks}</td><td>{trade_pill}</td></tr>'
+        w_cls = "green" if c.width >= 25 else "amber" if c.width >= MIN_CONE_WIDTH else "red"
+        ok = f'<span class="pill pill-green">✓</span>' if c.is_tradeable else f'<span class="pill pill-red">✗</span>'
+        html += f'<tr><td><strong>{c.name}</strong></td><td class="mono red">{c.ascending_rail:,.2f}</td><td class="mono green">{c.descending_rail:,.2f}</td><td class="mono {w_cls}">{c.width:.0f}</td><td>{ok}</td></tr>'
     html += '</tbody></table></div></div>'
     
-    # Pivot Table
+    # Pivot Table (collapsed)
     html += f'''
 <div class="glass collapsed">
     <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-        <div class="section-title">📋 PIVOT TABLE (8:30-12PM)</div><span class="toggle">▼</span>
+        <div class="section-title">📋 PIVOT TABLE</div><span style="color:{text3}">▼</span>
     </div>
     <div class="content">
-        <table><thead><tr><th>Time</th><th>High ▲</th><th>High ▼</th><th>Low ▲</th><th>Low ▼</th><th>Close ▲</th><th>Close ▼</th></tr></thead><tbody>
+        <table><thead><tr><th>Time</th><th>H▲</th><th>H▼</th><th>L▲</th><th>L▼</th><th>C▲</th><th>C▼</th></tr></thead><tbody>
 '''
     for row in pivot_table:
         is_inst_row = INST_WINDOW_START <= row.time_ct <= INST_WINDOW_END
         style = f'background:{amber}10;' if is_inst_row else ""
-        html += f'<tr style="{style}"><td><strong>{row.time_block}</strong>{"🏛️" if is_inst_row else ""}</td><td class="mono red">{row.prior_high_asc:,.2f}</td><td class="mono green">{row.prior_high_desc:,.2f}</td><td class="mono red">{row.prior_low_asc:,.2f}</td><td class="mono green">{row.prior_low_desc:,.2f}</td><td class="mono red">{row.prior_close_asc:,.2f}</td><td class="mono green">{row.prior_close_desc:,.2f}</td></tr>'
+        html += f'<tr style="{style}"><td><strong>{row.time_block}</strong></td><td class="mono red">{row.prior_high_asc:,.2f}</td><td class="mono green">{row.prior_high_desc:,.2f}</td><td class="mono red">{row.prior_low_asc:,.2f}</td><td class="mono green">{row.prior_low_desc:,.2f}</td><td class="mono red">{row.prior_close_asc:,.2f}</td><td class="mono green">{row.prior_close_desc:,.2f}</td></tr>'
     html += '</tbody></table></div></div>'
     
-    # OI
-    if oi_levels:
-        html += '<div class="glass collapsed"><div class="section-header" onclick="this.parentElement.classList.toggle(\'collapsed\')"><div class="section-title">🎯 OPEN INTEREST</div><span class="toggle">▼</span></div><div class="content"><table><thead><tr><th>SPY</th><th>SPX</th><th>Type</th><th>OI</th></tr></thead><tbody>'
-        for oi in oi_levels[:8]:
-            t_cls = "green" if oi["type"] == "call" else "red"
-            html += f'<tr><td class="mono">{oi["spy_strike"]}</td><td class="mono">{oi["spx_equiv"]:,.0f}</td><td class="{t_cls}">{oi["type"].upper()}</td><td class="mono">{oi["oi"]:,}</td></tr>'
-        html += '</tbody></table></div></div>'
-    
-    html += f'<div class="footer">SPX Prophet v6.3 • Data via Polygon.io</div></div></body></html>'
+    html += f'<div class="footer">SPX Prophet v6.4 • Data via Polygon.io</div></div></body></html>'
     return html
+
 
 # =============================================================================
 # MAIN APP
 # =============================================================================
 
 def main():
-    st.set_page_config(page_title="SPX Prophet v6.3", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="SPX Prophet v6.4", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
     
     defaults = {
         'theme': 'light', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0,
@@ -1082,7 +1024,7 @@ def main():
             st.session_state[k] = v
     
     with st.sidebar:
-        st.markdown("## 📈 SPX Prophet v6.3")
+        st.markdown("## 📈 SPX Prophet v6.4")
         st.divider()
         
         theme = st.radio("🎨 Theme", ["Light", "Dark"], horizontal=True, index=0 if st.session_state.theme == "light" else 1)
@@ -1145,7 +1087,6 @@ def main():
         st.divider()
         if st.button("🔄 REFRESH", use_container_width=True, type="primary"):
             st.session_state.last_refresh = get_ct_now()
-            st.cache_resource.clear()
             st.rerun()
     
     # Main processing
@@ -1196,13 +1137,13 @@ def main():
     cones = build_cones(pivots, eval_time)
     vix_zone = analyze_vix_zone(st.session_state.vix_bottom, st.session_state.vix_top, st.session_state.vix_current, cones)
     
-    spx_price = polygon_get_index_snapshot("I:SPX")
+    spx_price = polygon_get_index_price("I:SPX")
     if spx_price == 0:
         spx_price = prior_session.get("close", 0)
     
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     setups = generate_setups(cones, spx_price, expiry, is_after_cutoff)
-    day_score = calculate_day_score(vix_zone, cones, setups, spx_price)
+    day_score = calculate_day_score(vix_zone, cones, setups)
     pivot_table = build_pivot_table(pivots, trading_date)
     
     spy_price = spx_price / 10 if spx_price > 0 else 600
@@ -1213,7 +1154,7 @@ def main():
     html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score,
                             oi_levels, alerts, spx_price, trading_date, is_historical, st.session_state.theme)
     
-    components.html(html, height=3200, scrolling=True)
+    components.html(html, height=2800, scrolling=True)
 
 
 if __name__ == "__main__":
