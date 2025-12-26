@@ -196,11 +196,25 @@ def get_prior_trading_day(from_date):
         prior -= timedelta(days=1)
     return prior
 
-def get_time_until(target, from_dt=None):
+def get_time_until(target, from_dt=None, trading_date=None):
+    """
+    Get time until target time on trading_date.
+    If target time has passed today, count down to next trading day.
+    """
     if from_dt is None:
         from_dt = get_ct_now()
-    target_dt = CT_TZ.localize(datetime.combine(from_dt.date(), target))
-    return max(target_dt - from_dt, timedelta(0))
+    
+    if trading_date is None:
+        trading_date = from_dt.date()
+    
+    target_dt = CT_TZ.localize(datetime.combine(trading_date, target))
+    
+    # If target time has passed, use next trading day
+    if target_dt <= from_dt:
+        next_trade_day = get_next_trading_day(from_dt.date() + timedelta(days=1))
+        target_dt = CT_TZ.localize(datetime.combine(next_trade_day, target))
+    
+    return target_dt - from_dt
 
 def format_countdown(td):
     if td.total_seconds() <= 0:
@@ -208,6 +222,10 @@ def format_countdown(td):
     total_secs = int(td.total_seconds())
     hours, remainder = divmod(total_secs, 3600)
     minutes, seconds = divmod(remainder, 60)
+    if hours >= 24:
+        days = hours // 24
+        hours = hours % 24
+        return f"{days}d {hours}h"
     if hours > 0:
         return f"{hours}h {minutes}m"
     return f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
