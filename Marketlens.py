@@ -1571,7 +1571,7 @@ body {{
     html += f'''
 <!-- CALLS SETUPS (Collapsible) -->
 <div class="setup-section" id="calls-section">
-    <div class="setup-section-header" onclick="document.getElementById('calls-section').classList.toggle('collapsed')">
+    <div class="setup-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="setup-section-title calls">
             <span>▲</span>
             <span>CALLS SETUPS</span>
@@ -1635,7 +1635,7 @@ body {{
     html += f'''
 <!-- PUTS SETUPS (Collapsible) -->
 <div class="setup-section collapsed" id="puts-section">
-    <div class="setup-section-header" onclick="document.getElementById('puts-section').classList.toggle('collapsed')">
+    <div class="setup-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
         <div class="setup-section-title puts">
             <span>▼</span>
             <span>PUTS SETUPS</span>
