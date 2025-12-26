@@ -2,11 +2,6 @@
 SPX PROPHET v7.0 - INSTITUTIONAL EDITION
 "Where Structure Becomes Foresight"
 
-FIXES:
-✓ Holiday/Half-Day handling - Correctly anchors to truncated session (Dec 24 = 12pm CT close)
-✓ Clear trade setups - Shows ALL CALLS & PUTS with entries, strikes, profit projections
-✓ Legendary UI - Glassmorphism, institutional-grade design
-"""
 
 import streamlit as st
 import streamlit.components.v1 as components
