@@ -40,20 +40,44 @@ CUTOFF_TIME = time(11, 30)
 REGULAR_CLOSE = time(16, 0)
 HALF_DAY_CLOSE = time(12, 0)
 
-HOLIDAYS_2024 = {date(2024, 12, 25): "Christmas 2024"}
 HOLIDAYS_2025 = {
-    date(2025, 1, 1): "New Year's Day", date(2025, 1, 20): "MLK Day",
-    date(2025, 2, 17): "Presidents Day", date(2025, 4, 18): "Good Friday",
-    date(2025, 5, 26): "Memorial Day", date(2025, 6, 19): "Juneteenth",
-    date(2025, 7, 4): "Independence Day", date(2025, 9, 1): "Labor Day",
-    date(2025, 11, 27): "Thanksgiving", date(2025, 12, 25): "Christmas",
+    date(2025, 1, 1): "New Year's Day",
+    date(2025, 1, 20): "MLK Day",
+    date(2025, 2, 17): "Presidents Day",
+    date(2025, 4, 18): "Good Friday",
+    date(2025, 5, 26): "Memorial Day",
+    date(2025, 6, 19): "Juneteenth",
+    date(2025, 7, 4): "Independence Day",
+    date(2025, 9, 1): "Labor Day",
+    date(2025, 11, 27): "Thanksgiving",
+    date(2025, 12, 25): "Christmas",  # Thursday Dec 25, 2025
 }
-HALF_DAYS_2024 = {date(2024, 12, 24): "Christmas Eve 2024"}
 HALF_DAYS_2025 = {
     date(2025, 7, 3): "Day before July 4th",
     date(2025, 11, 26): "Day before Thanksgiving",
     date(2025, 11, 28): "Day after Thanksgiving",
-    date(2025, 12, 24): "Christmas Eve",
+    date(2025, 12, 24): "Christmas Eve",  # Wednesday Dec 24, 2025 - closes 12pm CT
+}
+
+# 2026 Holidays and Half-Days
+HOLIDAYS_2026 = {
+    date(2026, 1, 1): "New Year's Day",  # Thursday Jan 1, 2026
+    date(2026, 1, 19): "MLK Day",
+    date(2026, 2, 16): "Presidents Day",
+    date(2026, 4, 3): "Good Friday",
+    date(2026, 5, 25): "Memorial Day",
+    date(2026, 6, 19): "Juneteenth",
+    date(2026, 7, 3): "Independence Day (observed)",  # July 4 is Saturday, observed Friday
+    date(2026, 9, 7): "Labor Day",
+    date(2026, 11, 26): "Thanksgiving",
+    date(2026, 12, 25): "Christmas",  # Friday Dec 25, 2026
+}
+HALF_DAYS_2026 = {
+    date(2025, 12, 31): "New Year's Eve",  # Wednesday Dec 31, 2025 - closes 12pm CT (for Jan 1, 2026)
+    date(2026, 7, 2): "Day before July 4th (observed)",
+    date(2026, 11, 25): "Day before Thanksgiving",
+    date(2026, 11, 27): "Day after Thanksgiving",
+    date(2026, 12, 24): "Christmas Eve",  # Thursday Dec 24, 2026 - closes 12pm CT
 }
 
 @dataclass
@@ -141,19 +165,19 @@ def get_ct_now():
     return datetime.now(CT_TZ)
 
 def is_holiday(d):
-    return d in HOLIDAYS_2025 or d in HOLIDAYS_2024
+    return d in HOLIDAYS_2025 or d in HOLIDAYS_2026
 
 def is_half_day(d):
-    return d in HALF_DAYS_2025 or d in HALF_DAYS_2024
+    return d in HALF_DAYS_2025 or d in HALF_DAYS_2026
 
 def get_market_close_time(d):
     return HALF_DAY_CLOSE if is_half_day(d) else REGULAR_CLOSE
 
 def get_session_info(d):
     if is_holiday(d):
-        return {"is_trading": False, "reason": HOLIDAYS_2025.get(d) or HOLIDAYS_2024.get(d, "Holiday")}
+        return {"is_trading": False, "reason": HOLIDAYS_2025.get(d) or HOLIDAYS_2026.get(d, "Holiday")}
     return {"is_trading": True, "is_half_day": is_half_day(d), "close_ct": get_market_close_time(d),
-            "reason": HALF_DAYS_2025.get(d) or HALF_DAYS_2024.get(d, "") if is_half_day(d) else ""}
+            "reason": HALF_DAYS_2025.get(d) or HALF_DAYS_2026.get(d, "") if is_half_day(d) else ""}
 
 def get_next_trading_day(from_date=None):
     if from_date is None:
@@ -304,37 +328,114 @@ def create_manual_pivots(high_price, high_time_str, low_price, low_time_str, clo
     return pivots
 
 def count_blocks(start_time, eval_time):
+    """
+    Count 30-min blocks between start_time and eval_time.
+    
+    CRITICAL RULES:
+    - Regular day: Market closes 3pm CT, but 2 more candles (3-3:30, 3:30-4) before maintenance
+    - Maintenance: 4pm-5pm CT daily (skip)
+    - Overnight: 5pm CT to next morning
+    - Weekends: Skip Sat, futures reopen Sun 5pm CT
+    - Holidays: Skip, futures reopen 5pm CT on the holiday
+    - Half-days: Market closes 12pm CT, 1 more candle (12-12:30) before holiday closure
+    - Evening before holiday: Skip (futures closed)
+    
+    BLOCK COUNTS:
+    - Regular weekday: 2 candles (3-4pm) + 32 overnight (5pm-9am) = 34 blocks
+    - Friday → Monday: 2 candles (3-4pm) + 32 overnight (Sun 5pm-Mon 9am) = 34 blocks  
+    - Half-day → Post-holiday: 1 candle (12-12:30) + 32 overnight (Holiday 5pm-next 9am) = 33 blocks
+    """
     if eval_time <= start_time:
         return 0
-    MAINT_START, MAINT_END = time(16, 0), time(17, 0)
+    
+    MAINT_START = time(16, 0)   # 4pm CT
+    MAINT_END = time(17, 0)     # 5pm CT
+    MARKET_CLOSE = time(15, 0)  # 3pm CT regular close
+    HALF_DAY_CLOSE = time(12, 0)  # 12pm CT half-day close
+    
     if start_time.tzinfo is None:
         start_time = CT_TZ.localize(start_time)
     if eval_time.tzinfo is None:
         eval_time = CT_TZ.localize(eval_time)
+    
     blocks = 0
     current = start_time
-    for _ in range(2000):
+    
+    for _ in range(5000):
         if current >= eval_time:
             break
-        wd, ct = current.weekday(), current.time()
-        if wd >= 5:
-            current = CT_TZ.localize(datetime.combine(current.date() + timedelta(days=(7 - wd) if wd == 5 else 1), MAINT_END))
+        
+        current_date = current.date()
+        next_date = current_date + timedelta(days=1)
+        wd = current.weekday()
+        ct = current.time()
+        
+        # WEEKENDS
+        if wd == 5:  # Saturday - skip entirely to Sunday 5pm
+            current = CT_TZ.localize(datetime.combine(current_date + timedelta(days=1), MAINT_END))
             continue
+        if wd == 6:  # Sunday
+            if ct < MAINT_END:  # Before 5pm - skip to 5pm
+                current = CT_TZ.localize(datetime.combine(current_date, MAINT_END))
+                continue
+        
+        # EVENING BEFORE HOLIDAY - futures closed
+        if is_holiday(next_date) and ct >= MAINT_END:
+            current = CT_TZ.localize(datetime.combine(next_date, MAINT_END))
+            continue
+        
+        # HOLIDAY - skip to 5pm when futures reopen
+        if is_holiday(current_date):
+            if ct < MAINT_END:
+                current = CT_TZ.localize(datetime.combine(current_date, MAINT_END))
+                continue
+        
+        # HALF DAY
+        if is_half_day(current_date):
+            # After 12:30pm on half day - check if tomorrow is holiday
+            if ct >= time(12, 30):
+                if is_holiday(next_date):
+                    # Skip to holiday 5pm
+                    current = CT_TZ.localize(datetime.combine(next_date, MAINT_END))
+                    continue
+                else:
+                    # Not before a holiday - skip to regular maintenance end
+                    if ct < MAINT_END:
+                        current = CT_TZ.localize(datetime.combine(current_date, MAINT_END))
+                        continue
+        
+        # MAINTENANCE WINDOW (4pm-5pm CT)
         if MAINT_START <= ct < MAINT_END:
-            current = CT_TZ.localize(datetime.combine(current.date(), MAINT_END))
+            current = CT_TZ.localize(datetime.combine(current_date, MAINT_END))
             continue
+        
+        # FRIDAY after 4pm - skip to Sunday 5pm
         if wd == 4 and ct >= MAINT_START:
-            current = CT_TZ.localize(datetime.combine(current.date() + timedelta(days=2), MAINT_END))
+            current = CT_TZ.localize(datetime.combine(current_date + timedelta(days=2), MAINT_END))
             continue
+        
+        # COUNT THE BLOCK
         next_block = current + timedelta(minutes=30)
+        
         if next_block > eval_time:
             break
+        
+        # Check if next block crosses into maintenance
         if ct < MAINT_START and next_block.time() >= MAINT_START:
             blocks += 1
-            current = CT_TZ.localize(datetime.combine(current.date(), MAINT_END))
+            current = CT_TZ.localize(datetime.combine(current_date, MAINT_END))
             continue
+        
+        # Check if on half-day and next block crosses 12:30 (last candle before holiday closure)
+        if is_half_day(current_date) and is_holiday(next_date):
+            if ct < time(12, 30) and next_block.time() >= time(12, 30):
+                blocks += 1
+                current = CT_TZ.localize(datetime.combine(next_date, MAINT_END))
+                continue
+        
         blocks += 1
         current = next_block
+    
     return max(blocks, 1)
 
 def build_cones(pivots, eval_time):
@@ -676,12 +777,14 @@ def main():
         with col2:
             if st.button("📆 Prior", use_container_width=True):
                 st.session_state.trading_date = get_prior_trading_day(today)
-        selected_date = st.date_input("Select", value=st.session_state.trading_date or next_trade, min_value=today - timedelta(days=730), max_value=today + timedelta(days=7))
+        selected_date = st.date_input("Select", value=st.session_state.trading_date or next_trade, min_value=today - timedelta(days=730), max_value=today + timedelta(days=400))
         st.session_state.trading_date = selected_date
         if is_holiday(selected_date):
-            st.error(f"🚫 {HOLIDAYS_2025.get(selected_date) or HOLIDAYS_2024.get(selected_date, 'Holiday')} - Closed")
+            holiday_name = HOLIDAYS_2025.get(selected_date) or HOLIDAYS_2026.get(selected_date, "Holiday")
+            st.error(f"🚫 {holiday_name} - Closed")
         elif is_half_day(selected_date):
-            st.warning(f"⏰ {HALF_DAYS_2025.get(selected_date) or HALF_DAYS_2024.get(selected_date, 'Half Day')} - 12pm CT")
+            half_day_name = HALF_DAYS_2025.get(selected_date) or HALF_DAYS_2026.get(selected_date, "Half Day")
+            st.warning(f"⏰ {half_day_name} - 12pm CT")
         prior = get_prior_trading_day(selected_date)
         prior_info = get_session_info(prior)
         if prior_info.get("is_half_day"):
