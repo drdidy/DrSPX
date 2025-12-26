@@ -259,55 +259,110 @@ def polygon_get_index_price(ticker):
         return data["results"][-1].get("c", 0)
     return 0.0
 
-def get_option_data_for_entry(entry_rail, opt_type, expiry):
+def estimate_spx_option_price(otm_distance: float) -> float:
+    """
+    Estimate SPX 0DTE option price based on OTM distance.
+    15-20 pts OTM = $4-$8 per contract ($400-$800 total cost)
+    """
+    if otm_distance <= 10:
+        return 12.0
+    elif otm_distance <= 15:
+        return 6.50
+    elif otm_distance <= 20:
+        return 4.50
+    elif otm_distance <= 25:
+        return 2.50
+    else:
+        return 1.50
+
+def get_option_data_for_entry(entry_rail, opt_type, cone_width=25):
     if opt_type.upper() in ["C", "CALL", "CALLS"]:
         spx_strike = int(round((entry_rail + OTM_DISTANCE_PTS) / 5) * 5)
     else:
         spx_strike = int(round((entry_rail - OTM_DISTANCE_PTS) / 5) * 5)
     otm_distance = abs(spx_strike - entry_rail)
-    spy_level = entry_rail / 10
-    spy_otm = otm_distance / 10
-    spy_strike = int(round(spy_level + spy_otm)) if opt_type.upper() in ["C", "CALL", "CALLS"] else int(round(spy_level - spy_otm))
-    spy_price = 5.50  # Default estimate
-    return OptionData(spy_strike=spy_strike, spy_price=spy_price, spy_delta=DELTA_IDEAL if opt_type.upper() in ["C", "CALL", "CALLS"] else -DELTA_IDEAL,
-                      spx_strike=spx_strike, spx_price_est=spy_price * 10, otm_distance=otm_distance,
-                      in_sweet_spot=(PREMIUM_SWEET_LOW <= spy_price <= PREMIUM_SWEET_HIGH))
+    
+    # Correct SPX pricing: $4-$8 for 15-20 pts OTM
+    spx_price = estimate_spx_option_price(otm_distance)
+    spx_cost = spx_price * 100  # Total cost per contract ($400-$800)
+    
+    in_sweet_spot = PREMIUM_SWEET_LOW <= spx_price <= PREMIUM_SWEET_HIGH
+    
+    # Delta based on OTM distance
+    delta = 0.40 if otm_distance <= 10 else 0.30 if otm_distance <= 15 else 0.25 if otm_distance <= 20 else 0.20
+    
+    return OptionData(
+        spy_strike=0, spy_price=0, spy_delta=delta,
+        spx_strike=spx_strike, spx_price_est=spx_price,
+        otm_distance=round(otm_distance, 1),
+        in_sweet_spot=in_sweet_spot
+    )
 
 def detect_pivots_auto(bars, pivot_date, close_time_ct):
+    """Auto-detect pivots with FALLBACK to session high/low if patterns not found"""
     if not bars:
         return []
     filtered_bars = filter_bars_to_session(bars, pivot_date, close_time_ct)
-    if not filtered_bars or len(filtered_bars) < 3:
+    if not filtered_bars or len(filtered_bars) < 2:
         return []
+    
     pivots = []
     candles = []
     for bar in filtered_bars:
         ts = bar.get("t", 0)
         dt = datetime.fromtimestamp(ts / 1000, tz=ET_TZ).astimezone(CT_TZ)
-        candles.append({"time": dt, "open": bar.get("o", 0), "high": bar.get("h", 0), "low": bar.get("l", 0), "close": bar.get("c", 0), "is_green": bar.get("c", 0) >= bar.get("o", 0)})
+        candles.append({"time": dt, "open": bar.get("o", 0), "high": bar.get("h", 0), 
+                        "low": bar.get("l", 0), "close": bar.get("c", 0), 
+                        "is_green": bar.get("c", 0) >= bar.get("o", 0)})
     
+    # Session high/low for fallback
+    session_high = max(c["high"] for c in candles)
+    session_low = min(c["low"] for c in candles)
+    session_high_candle = next(c for c in candles if c["high"] == session_high)
+    session_low_candle = next(c for c in candles if c["low"] == session_low)
+    
+    # Find HIGH pivot pattern
     high_candidates = []
     for i in range(len(candles) - 1):
         curr, nxt = candles[i], candles[i + 1]
         if curr["is_green"] and not nxt["is_green"] and nxt["close"] < curr["open"]:
             high_candidates.append({"price": curr["high"], "time": curr["time"], "open": curr["open"]})
     
+    # Find LOW pivot pattern
     low_candidates = []
     for i in range(len(candles) - 1):
         curr, nxt = candles[i], candles[i + 1]
         if not curr["is_green"] and nxt["is_green"] and nxt["close"] > curr["open"]:
             low_candidates.append({"price": curr["low"], "time": curr["time"], "open": nxt["open"]})
     
+    # Add HIGH pivot (pattern or fallback)
     if high_candidates:
         high_candidates.sort(key=lambda x: x["price"], reverse=True)
-        pivots.append(Pivot(name="Prior High", price=high_candidates[0]["price"], pivot_time=high_candidates[0]["time"], pivot_type="HIGH", candle_high=high_candidates[0]["price"], candle_open=high_candidates[0]["open"]))
+        pivots.append(Pivot(name="Prior High", price=high_candidates[0]["price"], 
+                           pivot_time=high_candidates[0]["time"], pivot_type="HIGH", 
+                           candle_high=high_candidates[0]["price"], candle_open=high_candidates[0]["open"]))
+    else:
+        pivots.append(Pivot(name="Prior High", price=session_high, 
+                           pivot_time=session_high_candle["time"], pivot_type="HIGH", 
+                           candle_high=session_high, candle_open=session_high_candle["open"]))
     
+    # Add LOW pivot (pattern or fallback to session low)
     if low_candidates:
         low_candidates.sort(key=lambda x: x["price"])
-        pivots.append(Pivot(name="Prior Low", price=low_candidates[0]["price"], pivot_time=low_candidates[0]["time"], pivot_type="LOW", candle_open=low_candidates[0]["open"]))
+        pivots.append(Pivot(name="Prior Low", price=low_candidates[0]["price"], 
+                           pivot_time=low_candidates[0]["time"], pivot_type="LOW", 
+                           candle_open=low_candidates[0]["open"]))
+    else:
+        # FALLBACK: Use session low
+        pivots.append(Pivot(name="Prior Low", price=session_low, 
+                           pivot_time=session_low_candle["time"], pivot_type="LOW", 
+                           candle_open=session_low_candle["open"]))
     
+    # Add CLOSE pivot
     if candles:
-        pivots.append(Pivot(name="Prior Close", price=candles[-1]["close"], pivot_time=CT_TZ.localize(datetime.combine(pivot_date, close_time_ct)), pivot_type="CLOSE"))
+        pivots.append(Pivot(name="Prior Close", price=candles[-1]["close"], 
+                           pivot_time=CT_TZ.localize(datetime.combine(pivot_date, close_time_ct)), 
+                           pivot_type="CLOSE"))
     
     return pivots
 
@@ -526,7 +581,7 @@ def generate_setups(cones, current_price, expiry, is_after_cutoff=False):
         # CALLS
         entry_c = cone.descending_rail
         dist_c = abs(current_price - entry_c)
-        opt_c = get_option_data_for_entry(entry_c, "C", expiry)
+        opt_c = get_option_data_for_entry(entry_c, "C", cone.width)
         delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
         setups.append(TradeSetup(
             direction="CALLS", cone_name=cone.name, cone_width=cone.width, entry=entry_c,
@@ -542,7 +597,7 @@ def generate_setups(cones, current_price, expiry, is_after_cutoff=False):
         # PUTS
         entry_p = cone.ascending_rail
         dist_p = abs(current_price - entry_p)
-        opt_p = get_option_data_for_entry(entry_p, "P", expiry)
+        opt_p = get_option_data_for_entry(entry_p, "P", cone.width)
         delta_p = abs(opt_p.spy_delta) if opt_p else DELTA_IDEAL
         setups.append(TradeSetup(
             direction="PUTS", cone_name=cone.name, cone_width=cone.width, entry=entry_p,
@@ -588,174 +643,1001 @@ def check_alerts(setups, vix_zone, current_time):
     return alerts
 
 def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme):
-    if theme == "dark":
-        bg, card_bg, text1, text2, border = "#0a0a0f", "rgba(20,20,30,0.85)", "#ffffff", "#a1a1aa", "rgba(255,255,255,0.08)"
+    # Color system
+    if theme == "light":
+        bg_main = "#f1f5f9"
+        bg_card = "#ffffff"
+        bg_elevated = "#f8fafc"
+        text_primary = "#0f172a"
+        text_secondary = "#475569"
+        text_muted = "#94a3b8"
+        border_light = "#e2e8f0"
+        border_medium = "#cbd5e1"
+        shadow_sm = "0 1px 2px rgba(0,0,0,0.05)"
+        shadow_md = "0 4px 12px rgba(0,0,0,0.08)"
+        shadow_lg = "0 10px 40px rgba(0,0,0,0.12)"
     else:
-        bg, card_bg, text1, text2, border = "#f8fafc", "rgba(255,255,255,0.9)", "#0f172a", "#475569", "rgba(0,0,0,0.08)"
-    green, red, amber, blue, purple, cyan = "#10b981", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#06b6d4"
-    bias_color = green if vix_zone.bias == "CALLS" else red if vix_zone.bias == "PUTS" else amber
-    bias_icon = "▲" if vix_zone.bias == "CALLS" else "▼" if vix_zone.bias == "PUTS" else "●"
-    now = get_ct_now()
-    marker_pos = min(max(vix_zone.position_pct, 5), 95) if vix_zone.zone_size > 0 else 50
-    session_note = f"Half Day - Closed {pivot_session_info['close_ct'].strftime('%I:%M %p')} CT" if pivot_session_info.get("is_half_day") else ""
+        bg_main = "#0c0f1a"
+        bg_card = "#151a2d"
+        bg_elevated = "#1a2038"
+        text_primary = "#f1f5f9"
+        text_secondary = "#94a3b8"
+        text_muted = "#64748b"
+        border_light = "#1e293b"
+        border_medium = "#334155"
+        shadow_sm = "0 1px 2px rgba(0,0,0,0.3)"
+        shadow_md = "0 4px 12px rgba(0,0,0,0.4)"
+        shadow_lg = "0 10px 40px rgba(0,0,0,0.5)"
     
-    html = f'''<!DOCTYPE html><html><head><meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    # Accent colors
+    green = "#10b981"
+    green_light = "#d1fae5" if theme == "light" else "#064e3b"
+    red = "#ef4444"
+    red_light = "#fee2e2" if theme == "light" else "#7f1d1d"
+    amber = "#f59e0b"
+    amber_light = "#fef3c7" if theme == "light" else "#78350f"
+    blue = "#3b82f6"
+    blue_light = "#dbeafe" if theme == "light" else "#1e3a8a"
+    purple = "#8b5cf6"
+    cyan = "#06b6d4"
+    
+    bias_color = green if vix_zone.bias == "CALLS" else red if vix_zone.bias == "PUTS" else amber
+    bias_bg = green_light if vix_zone.bias == "CALLS" else red_light if vix_zone.bias == "PUTS" else amber_light
+    bias_icon = "↑" if vix_zone.bias == "CALLS" else "↓" if vix_zone.bias == "PUTS" else "•"
+    
+    now = get_ct_now()
+    marker_pos = min(max(vix_zone.position_pct, 3), 97) if vix_zone.zone_size > 0 else 50
+    session_note = f"Half Day – {pivot_session_info['close_ct'].strftime('%I:%M %p')} CT Close" if pivot_session_info.get("is_half_day") else ""
+    
+    calls_setups = [s for s in setups if s.direction == "CALLS"]
+    puts_setups = [s for s in setups if s.direction == "PUTS"]
+    
+    # Build trading checklist
+    checklist = []
+    # 1. VIX Direction
+    if vix_zone.bias in ["CALLS", "PUTS"]:
+        if vix_zone.zones_away != 0:
+            checklist.append({"check": True, "label": "VIX Direction", "detail": f"{abs(vix_zone.zones_away)} zone(s) {'below' if vix_zone.zones_away < 0 else 'above'} – Strong signal"})
+        elif vix_zone.position_pct >= 70 or vix_zone.position_pct <= 30:
+            checklist.append({"check": True, "label": "VIX Direction", "detail": f"At {vix_zone.position_pct:.0f}% – Good edge"})
+        else:
+            checklist.append({"check": False, "label": "VIX Direction", "detail": f"At {vix_zone.position_pct:.0f}% – Weak signal"})
+    else:
+        checklist.append({"check": False, "label": "VIX Direction", "detail": "Mid-zone – No clear bias"})
+    
+    # 2. Cone Width
+    tradeable_cones = [c for c in cones if c.is_tradeable]
+    if tradeable_cones:
+        best_width = max(c.width for c in tradeable_cones)
+        if best_width >= 25:
+            checklist.append({"check": True, "label": "Cone Width", "detail": f"Best: {best_width:.0f} pts – Excellent range"})
+        else:
+            checklist.append({"check": False, "label": "Cone Width", "detail": f"Best: {best_width:.0f} pts – Narrow"})
+    else:
+        checklist.append({"check": False, "label": "Cone Width", "detail": "No tradeable cones"})
+    
+    # 3. Premium Sweet Spot
+    sweet_count = sum(1 for s in setups if s.option and s.option.in_sweet_spot)
+    if sweet_count >= 2:
+        checklist.append({"check": True, "label": "Premium Quality", "detail": f"{sweet_count} setups in $4-$8 sweet spot"})
+    else:
+        checklist.append({"check": False, "label": "Premium Quality", "detail": f"Only {sweet_count} in sweet spot"})
+    
+    # 4. Time Window
+    current_t = now.time()
+    if INST_WINDOW_START <= current_t <= INST_WINDOW_END:
+        checklist.append({"check": True, "label": "Time Window", "detail": "Inside 9:00-9:30 institutional window"})
+    elif current_t < INST_WINDOW_START:
+        checklist.append({"check": False, "label": "Time Window", "detail": "Waiting for 9:00 AM entry window"})
+    elif current_t <= CUTOFF_TIME:
+        checklist.append({"check": False, "label": "Time Window", "detail": "Past optimal window, before 11:30 cutoff"})
+    else:
+        checklist.append({"check": False, "label": "Time Window", "detail": "Past 11:30 cutoff – No new trades"})
+    
+    # 5. Setup Alignment
+    if vix_zone.bias in ["CALLS", "PUTS"]:
+        aligned = [s for s in setups if s.direction == vix_zone.bias and s.distance <= 10]
+        if aligned:
+            checklist.append({"check": True, "label": "Setup Alignment", "detail": f"{vix_zone.bias} setup within 10 pts"})
+        else:
+            checklist.append({"check": False, "label": "Setup Alignment", "detail": f"No {vix_zone.bias} setup nearby"})
+    else:
+        checklist.append({"check": False, "label": "Setup Alignment", "detail": "No VIX bias to align"})
+    
+    checks_passed = sum(1 for c in checklist if c["check"])
+    trade_ready = checks_passed >= 4
+    
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:'Outfit',sans-serif;background:{bg};color:{text1};padding:24px;line-height:1.6}}
-.container{{max-width:1800px;margin:0 auto}}
-.header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px;flex-wrap:wrap;gap:24px}}
-.logo{{display:flex;align-items:center;gap:16px}}
-.logo-mark{{width:56px;height:56px;background:linear-gradient(135deg,{blue},{purple});border-radius:14px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono';font-size:18px;font-weight:800;color:white;box-shadow:0 8px 24px {blue}40}}
-.logo h1{{font-size:26px;font-weight:800}}.tagline{{font-size:11px;color:{text2}}}
-.time-display{{font-family:'JetBrains Mono';font-size:32px;font-weight:700}}
-.countdown{{text-align:right}}.countdown-label{{font-size:9px;text-transform:uppercase;letter-spacing:2px;color:{text2}}}.countdown-value{{font-family:'JetBrains Mono';font-size:16px;color:{amber};font-weight:600}}
-.banner{{padding:14px 20px;border-radius:14px;display:flex;align-items:center;gap:14px;margin-bottom:20px}}
-.banner-session{{background:{cyan}15;border:1px solid {cyan}40}}.banner-hist{{background:{purple}15;border:1px solid {purple}40}}.banner-inst{{background:{amber}15;border:1px solid {amber}40}}
-.card{{background:{card_bg};backdrop-filter:blur(20px);border:1px solid {border};border-radius:20px;padding:24px;margin-bottom:20px}}
-.card-header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;cursor:pointer}}
-.card-title{{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:{text2};display:flex;align-items:center;gap:10px}}
-.collapsed .card-content{{display:none}}
-.alert{{padding:14px 18px;border-radius:12px;font-size:13px;font-weight:500;margin-bottom:10px}}
-.alert-HIGH{{background:{red}12;border-left:4px solid {red};color:{red}}}.alert-MEDIUM{{background:{amber}12;border-left:4px solid {amber};color:{amber}}}.alert-INFO{{background:{blue}12;border-left:4px solid {blue};color:{blue}}}
-.grid-2{{display:grid;grid-template-columns:1fr 1fr;gap:20px}}@media(max-width:1100px){{.grid-2{{grid-template-columns:1fr}}}}
-.vix-ladder{{position:relative;height:70px;margin:16px 0;background:rgba(255,255,255,0.02);border-radius:12px}}
-.vix-track{{position:absolute;left:20px;right:20px;height:36px;top:50%;transform:translateY(-50%);background:linear-gradient(90deg,{green}50,{bg},{bg},{red}50);border-radius:18px}}
-.vix-marker{{position:absolute;width:20px;height:20px;background:{bias_color};border-radius:50%;top:50%;transform:translate(-50%,-50%);box-shadow:0 0 20px {bias_color}60;border:3px solid {card_bg};z-index:10}}
-.vix-labels{{position:absolute;bottom:4px;left:20px;right:20px;display:flex;justify-content:space-between;font-family:'JetBrains Mono';font-size:11px;color:{text2}}}
-.stat-box{{background:rgba(255,255,255,0.02);border:1px solid {border};border-radius:14px;padding:14px;text-align:center}}
-.stat-value{{font-family:'JetBrains Mono';font-size:20px;font-weight:700}}.stat-value.green{{color:{green}}}.stat-value.red{{color:{red}}}.stat-value.blue{{color:{blue}}}
-.stat-label{{font-size:8px;text-transform:uppercase;letter-spacing:1.5px;color:{text2};margin-top:4px}}
-.bias-display{{background:linear-gradient(135deg,{bias_color}18,{bias_color}05);border:2px solid {bias_color}40;border-radius:20px;padding:36px;text-align:center}}
-.bias-icon{{font-size:56px;color:{bias_color};text-shadow:0 0 30px {bias_color}50}}.bias-label{{font-size:32px;font-weight:800;color:{bias_color};letter-spacing:3px;margin-top:8px}}.bias-reason{{font-size:13px;color:{text2};margin-top:12px}}.bias-match{{font-size:12px;color:{blue};margin-top:8px;font-weight:600}}
-.setup-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:20px}}
-.setup-card{{background:{card_bg};border:1px solid {border};border-radius:20px;padding:24px;transition:all 0.3s;position:relative;overflow:hidden}}
-.setup-card::before{{content:'';position:absolute;top:0;left:0;right:0;height:4px}}.setup-card.calls::before{{background:{green}}}.setup-card.puts::before{{background:{red}}}
-.setup-card.active{{border-color:{green}60;box-shadow:0 0 30px {green}25}}.setup-card.active.puts{{border-color:{red}60;box-shadow:0 0 30px {red}25}}.setup-card.grey{{opacity:0.4}}
-.setup-header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}}.setup-cone{{font-size:18px;font-weight:700}}
-.setup-badge{{font-size:10px;font-weight:700;padding:6px 14px;border-radius:100px;text-transform:uppercase}}.setup-badge.calls{{background:{green}20;color:{green}}}.setup-badge.puts{{background:{red}20;color:{red}}}
-.entry-block{{background:rgba(255,255,255,0.02);border:1px solid {border};border-radius:16px;padding:24px;text-align:center;margin-bottom:20px}}
-.entry-label{{font-size:9px;text-transform:uppercase;letter-spacing:2px;color:{text2};margin-bottom:6px}}.entry-price{{font-family:'JetBrains Mono';font-size:36px;font-weight:800}}.entry-price.calls{{color:{green}}}.entry-price.puts{{color:{red}}}
-.entry-status{{font-size:12px;color:{text2};margin-top:10px}}.entry-status.active{{color:{green};font-weight:700}}
-.contract-grid{{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px}}.contract-box{{background:rgba(255,255,255,0.02);border:1px solid {border};border-radius:14px;padding:16px;text-align:center}}
-.contract-label{{font-size:8px;text-transform:uppercase;letter-spacing:1.5px;color:{text2};margin-bottom:6px}}.contract-strike{{font-family:'JetBrains Mono';font-size:22px;font-weight:700}}.contract-strike.calls{{color:{green}}}.contract-strike.puts{{color:{red}}}
-.contract-premium{{font-size:12px;color:{text2};margin-top:4px}}.contract-otm{{font-size:9px;color:{text2}}}
-.sweet-spot{{display:inline-block;background:{amber}20;color:{amber};font-size:8px;padding:3px 8px;border-radius:100px;margin-top:6px;font-weight:600}}
-.targets-title{{font-size:9px;text-transform:uppercase;letter-spacing:2px;color:{text2};margin-bottom:12px}}
-.target-row{{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:rgba(255,255,255,0.02);border:1px solid {border};border-radius:12px;margin-bottom:8px}}
-.target-label{{font-size:12px;color:{text2}}}.target-price{{font-family:'JetBrains Mono';font-size:13px}}.target-profit{{font-family:'JetBrains Mono';font-size:15px;font-weight:700;color:{green}}}
-.risk-section{{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:{red}08;border:1px solid {red}25;border-radius:14px;margin-top:16px}}
-.risk-label{{font-size:11px;color:{red};font-weight:600}}.risk-stop{{font-family:'JetBrains Mono';font-size:13px;color:{red}}}.risk-amount{{font-family:'JetBrains Mono';font-size:16px;font-weight:700;color:{red}}}
-.score-circle{{width:100px;height:100px;border-radius:50%;margin:0 auto 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:5px solid}}
-.score-value{{font-family:'JetBrains Mono';font-size:32px;font-weight:800}}.score-grade{{font-size:14px;font-weight:700}}
-table{{width:100%;border-collapse:collapse;font-size:12px}}th{{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{text2};padding:12px 8px;text-align:left;border-bottom:1px solid {border}}}td{{padding:14px 8px;border-bottom:1px solid {border}}}.mono{{font-family:'JetBrains Mono'}}.green{{color:{green}}}.red{{color:{red}}}.amber{{color:{amber}}}
-.pill{{display:inline-block;padding:4px 10px;border-radius:100px;font-size:9px;font-weight:700}}.pill-yes{{background:{green}20;color:{green}}}.pill-no{{background:{red}20;color:{red}}}
-.footer{{text-align:center;padding:32px;color:{text2};font-size:10px;border-top:1px solid {border};margin-top:32px}}
-</style></head><body><div class="container">
+:root {{
+    --bg-main: {bg_main};
+    --bg-card: {bg_card};
+    --bg-elevated: {bg_elevated};
+    --text-primary: {text_primary};
+    --text-secondary: {text_secondary};
+    --text-muted: {text_muted};
+    --border-light: {border_light};
+    --border-medium: {border_medium};
+    --green: {green};
+    --green-light: {green_light};
+    --red: {red};
+    --red-light: {red_light};
+    --amber: {amber};
+    --amber-light: {amber_light};
+    --blue: {blue};
+    --purple: {purple};
+}}
+
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+
+body {{
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-main);
+    color: var(--text-primary);
+    line-height: 1.6;
+    padding: 24px;
+    min-height: 100vh;
+}}
+
+.container {{ max-width: 1400px; margin: 0 auto; }}
+
+/* Header */
+.header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-light);
+}}
+.brand {{ display: flex; align-items: center; gap: 14px; }}
+.brand-icon {{
+    width: 52px; height: 52px;
+    background: linear-gradient(135deg, {blue}, {purple});
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono'; font-weight: 700; font-size: 16px; color: white;
+    box-shadow: {shadow_md};
+}}
+.brand-text h1 {{ font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }}
+.brand-text span {{ font-size: 12px; color: var(--text-muted); font-weight: 500; }}
+.header-right {{ display: flex; align-items: center; gap: 24px; }}
+.clock {{
+    font-family: 'JetBrains Mono';
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text-primary);
+}}
+.countdown-group {{ display: flex; gap: 16px; }}
+.countdown-item {{ text-align: center; }}
+.countdown-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }}
+.countdown-value {{ font-family: 'JetBrains Mono'; font-size: 16px; font-weight: 600; color: {amber}; }}
+
+/* Alert Banner */
+.alert-banner {{
+    padding: 14px 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+    font-weight: 600;
+}}
+.alert-banner.info {{ background: {blue_light}; color: {blue}; border: 1px solid {blue}30; }}
+.alert-banner.warning {{ background: {amber_light}; color: {"#92400e" if theme == "light" else amber}; border: 1px solid {amber}30; }}
+.alert-banner.historical {{ background: {"#f3e8ff" if theme == "light" else "#3b0764"}; color: {purple}; border: 1px solid {purple}30; }}
+
+/* Card */
+.card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 16px;
+    margin-bottom: 20px;
+    box-shadow: {shadow_sm};
+    overflow: hidden;
+}}
+.card-header {{
+    padding: 18px 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid transparent;
+}}
+.card-header:hover {{ background: var(--bg-elevated); }}
+.card-title {{
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}}
+.card-title-icon {{ font-size: 18px; }}
+.card-chevron {{
+    width: 20px; height: 20px;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}}
+.card.collapsed .card-content {{ display: none; }}
+.card.collapsed .card-chevron {{ transform: rotate(-90deg); }}
+.card-content {{ padding: 22px; }}
+
+/* Main Grid */
+.main-grid {{
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 20px;
+    margin-bottom: 20px;
+}}
+@media (max-width: 1100px) {{ .main-grid {{ grid-template-columns: 1fr; }} }}
+
+/* VIX Zone */
+.vix-section {{ display: flex; flex-direction: column; gap: 20px; }}
+.vix-meter {{
+    background: var(--bg-elevated);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid var(--border-light);
+}}
+.vix-bar {{
+    position: relative;
+    height: 12px;
+    background: linear-gradient(90deg, {green}40, var(--bg-main) 35%, var(--bg-main) 65%, {red}40);
+    border-radius: 6px;
+    margin: 12px 0;
+}}
+.vix-marker {{
+    position: absolute;
+    width: 18px; height: 18px;
+    background: {bias_color};
+    border: 3px solid var(--bg-card);
+    border-radius: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 4px {bias_color}30, {shadow_sm};
+}}
+.vix-labels {{
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono';
+    font-size: 12px;
+    color: var(--text-muted);
+}}
+.vix-stats {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 16px;
+}}
+.vix-stat {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+}}
+.vix-stat-value {{
+    font-family: 'JetBrains Mono';
+    font-size: 20px;
+    font-weight: 700;
+}}
+.vix-stat-label {{
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}}
+
+/* Bias Display */
+.bias-card {{
+    background: {bias_bg};
+    border: 2px solid {bias_color}50;
+    border-radius: 16px;
+    padding: 28px;
+    text-align: center;
+}}
+.bias-icon {{
+    font-size: 48px;
+    font-weight: 800;
+    color: {bias_color};
+    line-height: 1;
+}}
+.bias-label {{
+    font-size: 28px;
+    font-weight: 800;
+    color: {bias_color};
+    margin-top: 8px;
+    letter-spacing: 2px;
+}}
+.bias-reason {{
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 10px;
+}}
+
+/* Trading Checklist */
+.checklist-card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 16px;
+    overflow: hidden;
+}}
+.checklist-header {{
+    padding: 16px 20px;
+    background: {"#f0fdf4" if trade_ready else "#fef2f2"} ;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}}
+.checklist-title {{
+    font-size: 14px;
+    font-weight: 700;
+    color: {green if trade_ready else red};
+}}
+.checklist-score {{
+    font-family: 'JetBrains Mono';
+    font-size: 14px;
+    font-weight: 700;
+    color: {green if trade_ready else red};
+}}
+.checklist-items {{ padding: 8px 0; }}
+.checklist-item {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-light);
+}}
+.checklist-item:last-child {{ border-bottom: none; }}
+.check-icon {{
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+}}
+.check-icon.pass {{ background: {green_light}; color: {green}; }}
+.check-icon.fail {{ background: {red_light}; color: {red}; }}
+.check-text {{ flex: 1; }}
+.check-label {{ font-size: 13px; font-weight: 600; color: var(--text-primary); }}
+.check-detail {{ font-size: 11px; color: var(--text-muted); }}
+
+/* Collapsible Setup Sections */
+.setup-section {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 16px;
+    margin-bottom: 16px;
+    overflow: hidden;
+}}
+.setup-section-header {{
+    padding: 18px 22px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}}
+.setup-section-header:hover {{ background: var(--bg-elevated); }}
+.setup-section-title {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 15px;
+    font-weight: 700;
+}}
+.setup-section-title.calls {{ color: {green}; }}
+.setup-section-title.puts {{ color: {red}; }}
+.setup-count {{
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+}}
+.setup-count.calls {{ background: {green_light}; color: {green}; }}
+.setup-count.puts {{ background: {red_light}; color: {red}; }}
+.setup-section-chevron {{
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}}
+.setup-section.collapsed .setup-section-content {{ display: none; }}
+.setup-section.collapsed .setup-section-chevron {{ transform: rotate(-90deg); }}
+.setup-section-content {{
+    padding: 20px;
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-elevated);
+}}
+.setup-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+}}
+
+/* Setup Card */
+.setup-card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 14px;
+    padding: 20px;
+    position: relative;
+    transition: all 0.2s;
+}}
+.setup-card::before {{
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    border-radius: 14px 14px 0 0;
+}}
+.setup-card.calls::before {{ background: {green}; }}
+.setup-card.puts::before {{ background: {red}; }}
+.setup-card.active {{
+    border-color: {green};
+    box-shadow: 0 0 0 3px {green}20;
+}}
+.setup-card.active.puts {{
+    border-color: {red};
+    box-shadow: 0 0 0 3px {red}20;
+}}
+.setup-card.grey {{ opacity: 0.5; }}
+
+.setup-card-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}}
+.setup-cone-name {{ font-size: 16px; font-weight: 700; }}
+.setup-status {{
+    font-size: 10px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+.setup-status.active {{ background: {green_light}; color: {green}; }}
+.setup-status.wait {{ background: {amber_light}; color: {"#92400e" if theme == "light" else amber}; }}
+.setup-status.grey {{ background: var(--bg-elevated); color: var(--text-muted); }}
+
+.entry-display {{
+    background: var(--bg-elevated);
+    border-radius: 12px;
+    padding: 18px;
+    text-align: center;
+    margin-bottom: 16px;
+}}
+.entry-label {{
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}}
+.entry-price {{
+    font-family: 'JetBrains Mono';
+    font-size: 32px;
+    font-weight: 700;
+}}
+.entry-price.calls {{ color: {green}; }}
+.entry-price.puts {{ color: {red}; }}
+.entry-distance {{
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+}}
+
+.contract-info {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+}}
+.contract-box {{
+    background: var(--bg-elevated);
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+}}
+.contract-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }}
+.contract-value {{ font-family: 'JetBrains Mono'; font-size: 18px; font-weight: 700; margin-top: 4px; }}
+.contract-value.calls {{ color: {green}; }}
+.contract-value.puts {{ color: {red}; }}
+.contract-sub {{ font-size: 11px; color: var(--text-secondary); margin-top: 2px; }}
+.sweet-badge {{
+    display: inline-block;
+    background: {amber_light};
+    color: {"#92400e" if theme == "light" else amber};
+    font-size: 9px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-weight: 700;
+    margin-top: 6px;
+}}
+
+.targets-section {{ margin-bottom: 14px; }}
+.targets-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }}
+.targets-grid {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+}}
+.target-box {{
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    padding: 10px 6px;
+    text-align: center;
+}}
+.target-pct {{ font-size: 10px; color: var(--text-muted); font-weight: 600; }}
+.target-price {{ font-family: 'JetBrains Mono'; font-size: 11px; color: var(--text-secondary); margin-top: 2px; }}
+.target-profit {{ font-family: 'JetBrains Mono'; font-size: 13px; font-weight: 700; color: {green}; margin-top: 2px; }}
+
+.risk-display {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: {red_light};
+    border-radius: 10px;
+    padding: 12px 16px;
+}}
+.risk-label {{ font-size: 12px; color: {red}; font-weight: 600; }}
+.risk-values {{ text-align: right; }}
+.risk-stop {{ font-family: 'JetBrains Mono'; font-size: 12px; color: {red}; }}
+.risk-amount {{ font-family: 'JetBrains Mono'; font-size: 16px; font-weight: 700; color: {red}; }}
+
+/* Stats Grid */
+.stats-row {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}}
+@media (max-width: 700px) {{ .stats-row {{ grid-template-columns: repeat(2, 1fr); }} }}
+.stat-card {{
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    padding: 18px;
+    text-align: center;
+}}
+.stat-value {{ font-family: 'JetBrains Mono'; font-size: 22px; font-weight: 700; }}
+.stat-label {{ font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; }}
+
+/* Table */
+.data-table {{ width: 100%; border-collapse: collapse; }}
+.data-table th {{
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 14px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-medium);
+    background: var(--bg-elevated);
+}}
+.data-table td {{
+    padding: 14px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-light);
+}}
+.data-table tr:hover {{ background: var(--bg-elevated); }}
+.mono {{ font-family: 'JetBrains Mono'; }}
+.text-green {{ color: {green}; }}
+.text-red {{ color: {red}; }}
+.text-amber {{ color: {amber}; }}
+.text-blue {{ color: {blue}; }}
+.badge {{
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+}}
+.badge-green {{ background: {green_light}; color: {green}; }}
+.badge-red {{ background: {red_light}; color: {red}; }}
+
+/* Footer */
+.footer {{
+    text-align: center;
+    padding: 28px;
+    color: var(--text-muted);
+    font-size: 12px;
+    border-top: 1px solid var(--border-light);
+    margin-top: 28px;
+}}
+.footer-brand {{ font-weight: 700; color: var(--text-secondary); margin-bottom: 6px; }}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- HEADER -->
 <header class="header">
-<div class="logo"><div class="logo-mark">SP</div><div><h1>SPX Prophet</h1><div class="tagline">Institutional Edition v7.0</div></div></div>
-<div style="display:flex;align-items:center;gap:28px">
-<div class="countdown"><div class="countdown-label">Entry Window</div><div class="countdown-value">{format_countdown(get_time_until(ENTRY_TARGET))}</div></div>
-<div class="countdown"><div class="countdown-label">Cutoff</div><div class="countdown-value">{format_countdown(get_time_until(CUTOFF_TIME))}</div></div>
-<div class="time-display">{now.strftime("%H:%M")} CT</div>
-</div></header>'''
+    <div class="brand">
+        <div class="brand-icon">SPX</div>
+        <div class="brand-text">
+            <h1>SPX Prophet</h1>
+            <span>Institutional Edition v7.1</span>
+        </div>
+    </div>
+    <div class="header-right">
+        <div class="countdown-group">
+            <div class="countdown-item">
+                <div class="countdown-label">Entry Window</div>
+                <div class="countdown-value">{format_countdown(get_time_until(ENTRY_TARGET))}</div>
+            </div>
+            <div class="countdown-item">
+                <div class="countdown-label">Cutoff</div>
+                <div class="countdown-value">{format_countdown(get_time_until(CUTOFF_TIME))}</div>
+            </div>
+        </div>
+        <div class="clock">{now.strftime("%H:%M")} CT</div>
+    </div>
+</header>
+
+<!-- BANNERS -->
+'''
     
     if session_note:
-        html += f'<div class="banner banner-session"><span style="font-size:24px">⏰</span><span style="color:{cyan};font-weight:600">Prior Session ({pivot_date.strftime("%b %d")}): {session_note}</span></div>'
+        html += f'<div class="alert-banner info">⏰ Prior Session ({pivot_date.strftime("%b %d")}): {session_note}</div>'
     if is_historical:
-        html += f'<div class="banner banner-hist"><span style="font-size:24px">📅</span><span style="color:{purple};font-weight:600">Historical Analysis: {trading_date.strftime("%B %d, %Y")}</span></div>'
+        html += f'<div class="alert-banner historical">📅 Historical Analysis Mode: {trading_date.strftime("%A, %B %d, %Y")}</div>'
     if INST_WINDOW_START <= now.time() <= INST_WINDOW_END and not is_historical:
-        html += f'<div class="banner banner-inst"><span style="font-size:24px">🏛️</span><span style="color:{amber};font-weight:600">INSTITUTIONAL WINDOW ACTIVE</span></div>'
+        html += f'<div class="alert-banner warning">🏛️ INSTITUTIONAL WINDOW ACTIVE — Prime Entry Zone</div>'
     
-    if alerts:
-        html += '<div style="margin-bottom:20px">'
-        for a in alerts[:5]:
-            html += f'<div class="alert alert-{a["priority"]}">{a["message"]}</div>'
-        html += '</div>'
+    # Main grid with VIX and Checklist
+    zones_color = "text-green" if vix_zone.zones_away < 0 else "text-red" if vix_zone.zones_away > 0 else ""
+    html += f'''
+<!-- MAIN GRID -->
+<div class="main-grid">
+    <div class="vix-section">
+        <div class="vix-meter">
+            <div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;">VIX Zone Analysis</div>
+            <div class="vix-bar">
+                <div class="vix-marker" style="left:{marker_pos}%"></div>
+            </div>
+            <div class="vix-labels">
+                <span>{vix_zone.bottom:.2f}</span>
+                <span>Zone: {vix_zone.zone_size:.2f}</span>
+                <span>{vix_zone.top:.2f}</span>
+            </div>
+            <div class="vix-stats">
+                <div class="vix-stat">
+                    <div class="vix-stat-value">{vix_zone.current:.2f}</div>
+                    <div class="vix-stat-label">Current</div>
+                </div>
+                <div class="vix-stat">
+                    <div class="vix-stat-value">{vix_zone.position_pct:.0f}%</div>
+                    <div class="vix-stat-label">Position</div>
+                </div>
+                <div class="vix-stat">
+                    <div class="vix-stat-value text-blue">±{vix_zone.expected_spx_move:.0f}</div>
+                    <div class="vix-stat-label">Exp. Move</div>
+                </div>
+                <div class="vix-stat">
+                    <div class="vix-stat-value {zones_color}">{vix_zone.zones_away:+d}</div>
+                    <div class="vix-stat-label">Zones Away</div>
+                </div>
+            </div>
+        </div>
+        <div class="bias-card">
+            <div class="bias-icon">{bias_icon}</div>
+            <div class="bias-label">{vix_zone.bias}</div>
+            <div class="bias-reason">{vix_zone.bias_reason}</div>
+        </div>
+    </div>
     
-    zones_cls = "green" if vix_zone.zones_away < 0 else "red" if vix_zone.zones_away > 0 else ""
-    html += f'''<div class="card"><div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')"><div class="card-title"><span>📊</span>VIX Zone Analysis</div><span style="color:{text2}">▼</span></div><div class="card-content"><div class="grid-2">
-<div><div class="vix-ladder"><div class="vix-track"></div><div class="vix-marker" style="left:{marker_pos}%"></div><div class="vix-labels"><span>{vix_zone.bottom:.2f}</span><span>Zone: {vix_zone.zone_size:.2f}</span><span>{vix_zone.top:.2f}</span></div></div>
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px">
-<div class="stat-box"><div class="stat-value">{vix_zone.current:.2f}</div><div class="stat-label">Current VIX</div></div>
-<div class="stat-box"><div class="stat-value">{vix_zone.position_pct:.0f}%</div><div class="stat-label">Position</div></div>
-<div class="stat-box"><div class="stat-value blue">±{vix_zone.expected_spx_move:.0f}</div><div class="stat-label">Expected Move</div></div>
-<div class="stat-box"><div class="stat-value {zones_cls}">{vix_zone.zones_away:+d}</div><div class="stat-label">Zones Away</div></div>
-</div></div>
-<div class="bias-display"><div class="bias-icon">{bias_icon}</div><div class="bias-label">{vix_zone.bias}</div><div class="bias-reason">{vix_zone.bias_reason}</div>{"<div class='bias-match'>🎯 Target: " + vix_zone.matched_cone + " @ " + f"{vix_zone.matched_rail:,.2f}" + "</div>" if vix_zone.matched_rail > 0 else ""}</div>
-</div></div></div>'''
+    <div class="checklist-card">
+        <div class="checklist-header">
+            <div class="checklist-title">{"✅ READY TO TRADE" if trade_ready else "⏸️ CONDITIONS NOT MET"}</div>
+            <div class="checklist-score">{checks_passed}/5</div>
+        </div>
+        <div class="checklist-items">
+'''
+    for item in checklist:
+        icon = "✓" if item["check"] else "✗"
+        icon_class = "pass" if item["check"] else "fail"
+        html += f'''
+            <div class="checklist-item">
+                <div class="check-icon {icon_class}">{icon}</div>
+                <div class="check-text">
+                    <div class="check-label">{item["label"]}</div>
+                    <div class="check-detail">{item["detail"]}</div>
+                </div>
+            </div>
+'''
+    html += '''
+        </div>
+    </div>
+</div>
+'''
     
-    def render_setups(direction):
-        filtered = [s for s in setups if s.direction == direction]
-        icon = "▲" if direction == "CALLS" else "▼"
-        h = f'<div style="margin-bottom:24px"><div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><span style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:{green if direction=="CALLS" else red}">{icon} {direction} SETUPS</span><span style="font-size:10px;padding:4px 12px;border-radius:100px;font-weight:600;background:{green if direction=="CALLS" else red}20;color:{green if direction=="CALLS" else red}">{len(filtered)} Available</span></div><div class="setup-grid">'
-        for s in filtered:
-            opt = s.option
-            status_class = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
-            status_text = "🎯 ACTIVE — READY" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else f"{s.distance:.0f} pts away"
-            status_cls = "active" if s.status == "ACTIVE" else ""
-            spx_strike = f"{opt.spx_strike}{'C' if direction == 'CALLS' else 'P'}" if opt else "—"
-            spx_price = f"${opt.spx_price_est:.0f}" if opt else "—"
-            spy_strike = f"SPY {int(opt.spy_strike)}{'C' if direction == 'CALLS' else 'P'}" if opt else "—"
-            spy_price = f"${opt.spy_price:.2f}" if opt else "—"
-            otm = f"{opt.otm_distance:.0f} pts OTM" if opt else "—"
-            sweet = opt.in_sweet_spot if opt else False
-            h += f'''<div class="setup-card {direction.lower()} {status_class}">
-<div class="setup-header"><div class="setup-cone">{s.cone_name}</div><div class="setup-badge {direction.lower()}">{direction[:-1]}</div></div>
-<div class="entry-block"><div class="entry-label">Entry Level</div><div class="entry-price {direction.lower()}">{s.entry:,.2f}</div><div class="entry-status {status_cls}">{status_text}</div></div>
-<div class="contract-grid"><div class="contract-box"><div class="contract-label">SPX Contract</div><div class="contract-strike {direction.lower()}">{spx_strike}</div><div class="contract-premium">Est. {spx_price}</div><div class="contract-otm">{otm}</div></div>
-<div class="contract-box"><div class="contract-label">SPY Ref</div><div class="contract-strike">{spy_strike}</div><div class="contract-premium">{spy_price}</div>{"<div class='sweet-spot'>★ SWEET SPOT</div>" if sweet else ""}</div></div>
-<div class="targets-title">Profit Targets</div>
-<div class="target-row"><div class="target-label">25%</div><div class="target-price">{s.target_25:,.2f}</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
-<div class="target-row"><div class="target-label">50%</div><div class="target-price">{s.target_50:,.2f}</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
-<div class="target-row"><div class="target-label">75%</div><div class="target-price">{s.target_75:,.2f}</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
-<div class="target-row"><div class="target-label">100%</div><div class="target-price">{s.target_100:,.2f}</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
-<div class="risk-section"><div class="risk-label">Stop</div><div class="risk-stop">{s.stop:,.2f}</div><div class="risk-amount">-${s.risk_dollars:,.0f}</div></div>
-</div>'''
-        h += '</div></div>'
-        return h
+    # Collapsible CALLS Section
+    html += f'''
+<!-- CALLS SETUPS (Collapsible) -->
+<div class="setup-section" id="calls-section">
+    <div class="setup-section-header" onclick="document.getElementById('calls-section').classList.toggle('collapsed')">
+        <div class="setup-section-title calls">
+            <span>▲</span>
+            <span>CALLS SETUPS</span>
+            <span class="setup-count calls">{len(calls_setups)} Available</span>
+        </div>
+        <span class="setup-section-chevron">▼</span>
+    </div>
+    <div class="setup-section-content">
+        <div class="setup-grid">
+'''
+    for s in calls_setups:
+        opt = s.option
+        status_class = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
+        status_text = "ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT"
+        status_style = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait"
+        html += f'''
+            <div class="setup-card calls {status_class}">
+                <div class="setup-card-header">
+                    <div class="setup-cone-name">{s.cone_name}</div>
+                    <div class="setup-status {status_style}">{status_text}</div>
+                </div>
+                <div class="entry-display">
+                    <div class="entry-label">Entry Rail</div>
+                    <div class="entry-price calls">{s.entry:,.2f}</div>
+                    <div class="entry-distance">{s.distance:.0f} pts from current</div>
+                </div>
+                <div class="contract-info">
+                    <div class="contract-box">
+                        <div class="contract-label">SPX Strike</div>
+                        <div class="contract-value calls">{opt.spx_strike}C</div>
+                        <div class="contract-sub">{opt.otm_distance:.0f} pts OTM</div>
+                    </div>
+                    <div class="contract-box">
+                        <div class="contract-label">Est. Premium</div>
+                        <div class="contract-value">${opt.spx_price_est:.2f}</div>
+                        <div class="contract-sub">${opt.spx_price_est * 100:,.0f}/contract</div>
+                        {"<div class='sweet-badge'>★ SWEET SPOT</div>" if opt.in_sweet_spot else ""}
+                    </div>
+                </div>
+                <div class="targets-section">
+                    <div class="targets-label">Profit Targets</div>
+                    <div class="targets-grid">
+                        <div class="target-box"><div class="target-pct">25%</div><div class="target-price">{s.target_25:,.0f}</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
+                        <div class="target-box"><div class="target-pct">50%</div><div class="target-price">{s.target_50:,.0f}</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
+                        <div class="target-box"><div class="target-pct">75%</div><div class="target-price">{s.target_75:,.0f}</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
+                        <div class="target-box"><div class="target-pct">100%</div><div class="target-price">{s.target_100:,.0f}</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
+                    </div>
+                </div>
+                <div class="risk-display">
+                    <div class="risk-label">Stop Loss</div>
+                    <div class="risk-values">
+                        <div class="risk-stop">{s.stop:,.2f}</div>
+                        <div class="risk-amount">-${s.risk_dollars:,.0f}</div>
+                    </div>
+                </div>
+            </div>
+'''
+    html += '</div></div></div>'
     
-    html += render_setups("CALLS") + render_setups("PUTS")
+    # Collapsible PUTS Section
+    html += f'''
+<!-- PUTS SETUPS (Collapsible) -->
+<div class="setup-section collapsed" id="puts-section">
+    <div class="setup-section-header" onclick="document.getElementById('puts-section').classList.toggle('collapsed')">
+        <div class="setup-section-title puts">
+            <span>▼</span>
+            <span>PUTS SETUPS</span>
+            <span class="setup-count puts">{len(puts_setups)} Available</span>
+        </div>
+        <span class="setup-section-chevron">▼</span>
+    </div>
+    <div class="setup-section-content">
+        <div class="setup-grid">
+'''
+    for s in puts_setups:
+        opt = s.option
+        status_class = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
+        status_text = "ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT"
+        status_style = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait"
+        html += f'''
+            <div class="setup-card puts {status_class}">
+                <div class="setup-card-header">
+                    <div class="setup-cone-name">{s.cone_name}</div>
+                    <div class="setup-status {status_style}">{status_text}</div>
+                </div>
+                <div class="entry-display">
+                    <div class="entry-label">Entry Rail</div>
+                    <div class="entry-price puts">{s.entry:,.2f}</div>
+                    <div class="entry-distance">{s.distance:.0f} pts from current</div>
+                </div>
+                <div class="contract-info">
+                    <div class="contract-box">
+                        <div class="contract-label">SPX Strike</div>
+                        <div class="contract-value puts">{opt.spx_strike}P</div>
+                        <div class="contract-sub">{opt.otm_distance:.0f} pts OTM</div>
+                    </div>
+                    <div class="contract-box">
+                        <div class="contract-label">Est. Premium</div>
+                        <div class="contract-value">${opt.spx_price_est:.2f}</div>
+                        <div class="contract-sub">${opt.spx_price_est * 100:,.0f}/contract</div>
+                        {"<div class='sweet-badge'>★ SWEET SPOT</div>" if opt.in_sweet_spot else ""}
+                    </div>
+                </div>
+                <div class="targets-section">
+                    <div class="targets-label">Profit Targets</div>
+                    <div class="targets-grid">
+                        <div class="target-box"><div class="target-pct">25%</div><div class="target-price">{s.target_25:,.0f}</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
+                        <div class="target-box"><div class="target-pct">50%</div><div class="target-price">{s.target_50:,.0f}</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
+                        <div class="target-box"><div class="target-pct">75%</div><div class="target-price">{s.target_75:,.0f}</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
+                        <div class="target-box"><div class="target-pct">100%</div><div class="target-price">{s.target_100:,.0f}</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
+                    </div>
+                </div>
+                <div class="risk-display">
+                    <div class="risk-label">Stop Loss</div>
+                    <div class="risk-values">
+                        <div class="risk-stop">{s.stop:,.2f}</div>
+                        <div class="risk-amount">-${s.risk_dollars:,.0f}</div>
+                    </div>
+                </div>
+            </div>
+'''
+    html += '</div></div></div>'
     
-    score_desc = "🟢 Excellent" if day_score.total >= 80 else "🔵 Good" if day_score.total >= 60 else "🟠 Marginal" if day_score.total >= 40 else "🔴 Skip"
-    html += f'''<div class="grid-2">
-<div class="card"><div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')"><div class="card-title"><span>📈</span>Prior Session ({pivot_date.strftime("%b %d")})</div><span style="color:{text2}">▼</span></div><div class="card-content">
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
-<div class="stat-box"><div class="stat-value green">{prior_session.get("high",0):,.2f}</div><div class="stat-label">High</div></div>
-<div class="stat-box"><div class="stat-value red">{prior_session.get("low",0):,.2f}</div><div class="stat-label">Low</div></div>
-<div class="stat-box"><div class="stat-value">{prior_session.get("close",0):,.2f}</div><div class="stat-label">Close</div></div>
-<div class="stat-box"><div class="stat-value blue">{prior_session.get("high",0)-prior_session.get("low",0):,.0f}</div><div class="stat-label">Range</div></div>
-</div></div></div>
-<div class="card"><div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')"><div class="card-title"><span>🎯</span>Day Score</div><span style="color:{text2}">▼</span></div><div class="card-content" style="text-align:center">
-<div class="score-circle" style="border-color:{day_score.color};color:{day_score.color}"><div class="score-value">{day_score.total}</div><div class="score-grade">{day_score.grade}</div></div>
-<div style="font-size:13px;color:{text2}">{score_desc}</div>
-</div></div></div>'''
+    # Prior Session Stats
+    html += f'''
+<!-- PRIOR SESSION -->
+<div class="card">
+    <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="card-title">
+            <span class="card-title-icon">📈</span>
+            Prior Session ({pivot_date.strftime("%b %d")})
+        </div>
+        <span class="card-chevron">▼</span>
+    </div>
+    <div class="card-content">
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-value text-green">{prior_session.get("high",0):,.2f}</div>
+                <div class="stat-label">High</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value text-red">{prior_session.get("low",0):,.2f}</div>
+                <div class="stat-label">Low</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{prior_session.get("close",0):,.2f}</div>
+                <div class="stat-label">Close</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value text-blue">{prior_session.get("high",0) - prior_session.get("low",0):,.0f}</div>
+                <div class="stat-label">Range</div>
+            </div>
+        </div>
+    </div>
+</div>
+'''
     
-    html += f'''<div class="card"><div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')"><div class="card-title"><span>📐</span>Structural Cones</div><span style="color:{text2}">▼</span></div><div class="card-content">
-<table><thead><tr><th>Pivot</th><th>Ascending (Puts)</th><th>Descending (Calls)</th><th>Width</th><th>Tradeable</th></tr></thead><tbody>'''
+    # Structural Cones
+    html += f'''
+<!-- STRUCTURAL CONES -->
+<div class="card">
+    <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="card-title">
+            <span class="card-title-icon">📐</span>
+            Structural Cones
+        </div>
+        <span class="card-chevron">▼</span>
+    </div>
+    <div class="card-content">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Pivot</th>
+                    <th>Ascending (Puts)</th>
+                    <th>Descending (Calls)</th>
+                    <th>Width</th>
+                    <th>Tradeable</th>
+                </tr>
+            </thead>
+            <tbody>
+'''
     for c in cones:
-        w_cls = "green" if c.width >= 25 else "amber" if c.width >= MIN_CONE_WIDTH else "red"
-        pill = '<span class="pill pill-yes">YES</span>' if c.is_tradeable else '<span class="pill pill-no">NO</span>'
-        html += f'<tr><td><strong>{c.name}</strong></td><td class="mono red">{c.ascending_rail:,.2f}</td><td class="mono green">{c.descending_rail:,.2f}</td><td class="mono {w_cls}">{c.width:.0f}</td><td>{pill}</td></tr>'
-    html += '</tbody></table></div></div>'
+        width_color = "text-green" if c.width >= 25 else "text-amber" if c.width >= MIN_CONE_WIDTH else "text-red"
+        badge = '<span class="badge badge-green">YES</span>' if c.is_tradeable else '<span class="badge badge-red">NO</span>'
+        html += f'''
+                <tr>
+                    <td><strong>{c.name}</strong></td>
+                    <td class="mono text-red">{c.ascending_rail:,.2f}</td>
+                    <td class="mono text-green">{c.descending_rail:,.2f}</td>
+                    <td class="mono {width_color}">{c.width:.0f} pts</td>
+                    <td>{badge}</td>
+                </tr>
+'''
+    html += '''
+            </tbody>
+        </table>
+    </div>
+</div>
+'''
     
-    html += f'''<div class="card collapsed"><div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')"><div class="card-title"><span>📋</span>Pivot Table</div><span style="color:{text2}">▼</span></div><div class="card-content">
-<table><thead><tr><th>Time CT</th><th>High ▲</th><th>High ▼</th><th>Low ▲</th><th>Low ▼</th><th>Close ▲</th><th>Close ▼</th></tr></thead><tbody>'''
+    # Pivot Table (collapsed by default)
+    html += f'''
+<!-- PIVOT TABLE -->
+<div class="card collapsed">
+    <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        <div class="card-title">
+            <span class="card-title-icon">📋</span>
+            Pivot Time Table
+        </div>
+        <span class="card-chevron">▼</span>
+    </div>
+    <div class="card-content">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Time CT</th>
+                    <th>High ▲</th>
+                    <th>High ▼</th>
+                    <th>Low ▲</th>
+                    <th>Low ▼</th>
+                    <th>Close ▲</th>
+                    <th>Close ▼</th>
+                </tr>
+            </thead>
+            <tbody>
+'''
     for row in pivot_table:
-        inst = "🏛️" if INST_WINDOW_START <= row.time_ct <= INST_WINDOW_END else ""
-        bg_style = f"background:{amber}08" if inst else ""
-        html += f'<tr style="{bg_style}"><td><strong>{row.time_block}{inst}</strong></td><td class="mono red">{row.prior_high_asc:,.2f}</td><td class="mono green">{row.prior_high_desc:,.2f}</td><td class="mono red">{row.prior_low_asc:,.2f}</td><td class="mono green">{row.prior_low_desc:,.2f}</td><td class="mono red">{row.prior_close_asc:,.2f}</td><td class="mono green">{row.prior_close_desc:,.2f}</td></tr>'
-    html += '</tbody></table></div></div>'
+        is_inst = INST_WINDOW_START <= row.time_ct <= INST_WINDOW_END
+        inst_marker = " 🏛️" if is_inst else ""
+        row_style = f'style="background:{amber_light}"' if is_inst else ""
+        html += f'''
+                <tr {row_style}>
+                    <td><strong>{row.time_block}{inst_marker}</strong></td>
+                    <td class="mono text-red">{row.prior_high_asc:,.2f}</td>
+                    <td class="mono text-green">{row.prior_high_desc:,.2f}</td>
+                    <td class="mono text-red">{row.prior_low_asc:,.2f}</td>
+                    <td class="mono text-green">{row.prior_low_desc:,.2f}</td>
+                    <td class="mono text-red">{row.prior_close_asc:,.2f}</td>
+                    <td class="mono text-green">{row.prior_close_desc:,.2f}</td>
+                </tr>
+'''
+    html += '''
+            </tbody>
+        </table>
+    </div>
+</div>
+'''
     
-    html += f'''<footer class="footer"><div style="font-weight:700;margin-bottom:8px">SPX Prophet v7.0 — Institutional Edition</div>
-<div>Trading: {trading_date.strftime("%B %d, %Y")} • Pivot Anchor: {pivot_date.strftime("%B %d, %Y")} {f"({session_note})" if session_note else ""}</div></footer>
-</div></body></html>'''
+    # Footer
+    html += f'''
+<!-- FOOTER -->
+<footer class="footer">
+    <div class="footer-brand">SPX Prophet v7.1 — Institutional Edition</div>
+    <div>Trading: {trading_date.strftime("%B %d, %Y")} • Pivot Anchor: {pivot_date.strftime("%B %d, %Y")}</div>
+    <div style="margin-top:4px;">Contracts ~15pts OTM • Sweet Spot: $4-$8 ($400-$800/contract)</div>
+</footer>
+
+</div>
+</body>
+</html>
+'''
     return html
 
 def main():
     st.set_page_config(page_title="SPX Prophet v7.0", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
-    defaults = {'theme': 'dark', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None}
+    defaults = {'theme': 'light', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None}
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -764,7 +1646,7 @@ def main():
         st.markdown("## 📈 SPX Prophet v7.0")
         st.caption("Institutional Edition")
         st.divider()
-        theme = st.radio("🎨 Theme", ["Dark", "Light"], horizontal=True, index=0 if st.session_state.theme == "dark" else 1)
+        theme = st.radio("🎨 Theme", ["Light", "Dark"], horizontal=True, index=0 if st.session_state.theme == "light" else 1)
         st.session_state.theme = theme.lower()
         st.divider()
         st.markdown("### 📅 Trading Date")
