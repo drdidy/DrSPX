@@ -692,60 +692,186 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     calls_setups = [s for s in setups if s.direction == "CALLS"]
     puts_setups = [s for s in setups if s.direction == "PUTS"]
     
-    # Build trading checklist
+    # Build trading checklist with CORRECT scoring
     checklist = []
-    # 1. VIX Direction
-    if vix_zone.bias in ["CALLS", "PUTS"]:
-        if vix_zone.zones_away != 0:
-            checklist.append({"check": True, "label": "VIX Direction", "detail": f"{abs(vix_zone.zones_away)} zone(s) {'below' if vix_zone.zones_away < 0 else 'above'} – Strong signal"})
-        elif vix_zone.position_pct >= 70 or vix_zone.position_pct <= 30:
-            checklist.append({"check": True, "label": "VIX Direction", "detail": f"At {vix_zone.position_pct:.0f}% – Good edge"})
-        else:
-            checklist.append({"check": False, "label": "VIX Direction", "detail": f"At {vix_zone.position_pct:.0f}% – Weak signal"})
-    else:
-        checklist.append({"check": False, "label": "VIX Direction", "detail": "Mid-zone – No clear bias"})
+    total_score = 0
     
-    # 2. Cone Width
+    # 1. VIX-CONE ALIGNMENT (25 pts)
+    # VIX bias direction has a cone rail within 10 pts = 25
+    alignment_pts = 0
+    alignment_detail = ""
+    if vix_zone.bias in ["CALLS", "PUTS"]:
+        # Get rails matching the bias direction
+        if vix_zone.bias == "CALLS":
+            aligned_rails = [(s.entry, s.cone_name) for s in calls_setups if s.distance <= 10]
+        else:
+            aligned_rails = [(s.entry, s.cone_name) for s in puts_setups if s.distance <= 10]
+        
+        if aligned_rails:
+            closest = min(s.distance for s in (calls_setups if vix_zone.bias == "CALLS" else puts_setups) if s.distance <= 10)
+            alignment_pts = 25
+            alignment_detail = f"{vix_zone.bias} rail {closest:.0f} pts away"
+        else:
+            alignment_detail = f"No {vix_zone.bias} rail within 10 pts"
+    else:
+        alignment_detail = "No VIX bias to align"
+    
+    checklist.append({
+        "pts": alignment_pts, 
+        "max": 25, 
+        "label": "VIX-Cone Alignment", 
+        "detail": alignment_detail
+    })
+    total_score += alignment_pts
+    
+    # 2. VIX ZONE CLARITY (25 pts)
+    # Clear bias (top/bottom 25%) = 25, 25-40% = 15, Middle = 0
+    clarity_pts = 0
+    clarity_detail = ""
+    if vix_zone.zones_away != 0:
+        # Outside zone entirely = strongest signal
+        clarity_pts = 25
+        clarity_detail = f"{abs(vix_zone.zones_away)} zone(s) {'below' if vix_zone.zones_away < 0 else 'above'} – Maximum clarity"
+    elif vix_zone.position_pct <= 25 or vix_zone.position_pct >= 75:
+        # Top/bottom 25%
+        clarity_pts = 25
+        clarity_detail = f"At {vix_zone.position_pct:.0f}% – Clear bias zone"
+    elif vix_zone.position_pct <= 40 or vix_zone.position_pct >= 60:
+        # 25-40% or 60-75%
+        clarity_pts = 15
+        clarity_detail = f"At {vix_zone.position_pct:.0f}% – Moderate clarity"
+    else:
+        # Middle 40-60%
+        clarity_pts = 0
+        clarity_detail = f"At {vix_zone.position_pct:.0f}% – Mid-zone, no clarity"
+    
+    checklist.append({
+        "pts": clarity_pts, 
+        "max": 25, 
+        "label": "VIX Zone Clarity", 
+        "detail": clarity_detail
+    })
+    total_score += clarity_pts
+    
+    # 3. CONE WIDTH QUALITY (20 pts)
+    # Best cone >30 = 20, >25 = 15, >20 = 10, <18 = 0
+    width_pts = 0
+    width_detail = ""
     tradeable_cones = [c for c in cones if c.is_tradeable]
     if tradeable_cones:
         best_width = max(c.width for c in tradeable_cones)
-        if best_width >= 25:
-            checklist.append({"check": True, "label": "Cone Width", "detail": f"Best: {best_width:.0f} pts – Excellent range"})
+        if best_width >= 30:
+            width_pts = 20
+            width_detail = f"Best: {best_width:.0f} pts – Excellent range"
+        elif best_width >= 25:
+            width_pts = 15
+            width_detail = f"Best: {best_width:.0f} pts – Good range"
+        elif best_width >= 20:
+            width_pts = 10
+            width_detail = f"Best: {best_width:.0f} pts – Acceptable"
+        elif best_width >= 18:
+            width_pts = 5
+            width_detail = f"Best: {best_width:.0f} pts – Minimum"
         else:
-            checklist.append({"check": False, "label": "Cone Width", "detail": f"Best: {best_width:.0f} pts – Narrow"})
+            width_pts = 0
+            width_detail = f"Best: {best_width:.0f} pts – Too narrow"
     else:
-        checklist.append({"check": False, "label": "Cone Width", "detail": "No tradeable cones"})
+        width_detail = "No tradeable cones"
     
-    # 3. Premium Sweet Spot
-    sweet_count = sum(1 for s in setups if s.option and s.option.in_sweet_spot)
-    if sweet_count >= 2:
-        checklist.append({"check": True, "label": "Premium Quality", "detail": f"{sweet_count} setups in $4-$8 sweet spot"})
+    checklist.append({
+        "pts": width_pts, 
+        "max": 20, 
+        "label": "Cone Width Quality", 
+        "detail": width_detail
+    })
+    total_score += width_pts
+    
+    # 4. PREMIUM SWEET SPOT (15 pts)
+    # Options $4-7 = 15, $3.50-8 = 10, outside = 5
+    premium_pts = 0
+    premium_detail = ""
+    # Check if any setup has premium in sweet spot
+    perfect_sweet = [s for s in setups if s.option and 4.0 <= s.option.spx_price_est <= 7.0]
+    good_sweet = [s for s in setups if s.option and 3.5 <= s.option.spx_price_est <= 8.0]
+    
+    if perfect_sweet:
+        premium_pts = 15
+        premium_detail = f"{len(perfect_sweet)} setups in $4-$7 perfect zone"
+    elif good_sweet:
+        premium_pts = 10
+        premium_detail = f"{len(good_sweet)} setups in $3.50-$8 range"
     else:
-        checklist.append({"check": False, "label": "Premium Quality", "detail": f"Only {sweet_count} in sweet spot"})
+        premium_pts = 5
+        premium_detail = "Premiums outside sweet spot"
     
-    # 4. Time Window
-    current_t = now.time()
-    if INST_WINDOW_START <= current_t <= INST_WINDOW_END:
-        checklist.append({"check": True, "label": "Time Window", "detail": "Inside 9:00-9:30 institutional window"})
-    elif current_t < INST_WINDOW_START:
-        checklist.append({"check": False, "label": "Time Window", "detail": "Waiting for 9:00 AM entry window"})
-    elif current_t <= CUTOFF_TIME:
-        checklist.append({"check": False, "label": "Time Window", "detail": "Past optimal window, before 11:30 cutoff"})
-    else:
-        checklist.append({"check": False, "label": "Time Window", "detail": "Past 11:30 cutoff – No new trades"})
+    checklist.append({
+        "pts": premium_pts, 
+        "max": 15, 
+        "label": "Premium Sweet Spot", 
+        "detail": premium_detail
+    })
+    total_score += premium_pts
     
-    # 5. Setup Alignment
-    if vix_zone.bias in ["CALLS", "PUTS"]:
-        aligned = [s for s in setups if s.direction == vix_zone.bias and s.distance <= 10]
-        if aligned:
-            checklist.append({"check": True, "label": "Setup Alignment", "detail": f"{vix_zone.bias} setup within 10 pts"})
+    # 5. MULTIPLE CONE CONFLUENCE (15 pts)
+    # 2+ rails within 5 pts of each other = 15 (institutional level)
+    confluence_pts = 0
+    confluence_detail = ""
+    
+    # Get all entry rails
+    all_call_entries = sorted([s.entry for s in calls_setups])
+    all_put_entries = sorted([s.entry for s in puts_setups])
+    
+    # Check for confluence (rails within 5 pts of each other)
+    def check_confluence(entries):
+        if len(entries) < 2:
+            return 0
+        confluent_count = 0
+        for i in range(len(entries)):
+            for j in range(i + 1, len(entries)):
+                if abs(entries[i] - entries[j]) <= 5:
+                    confluent_count += 1
+        return confluent_count
+    
+    call_confluence = check_confluence(all_call_entries)
+    put_confluence = check_confluence(all_put_entries)
+    
+    if call_confluence >= 1 or put_confluence >= 1:
+        confluence_pts = 15
+        if call_confluence and put_confluence:
+            confluence_detail = "Confluence on both CALLS & PUTS rails"
+        elif call_confluence:
+            confluence_detail = f"{call_confluence + 1} CALLS rails within 5 pts"
         else:
-            checklist.append({"check": False, "label": "Setup Alignment", "detail": f"No {vix_zone.bias} setup nearby"})
+            confluence_detail = f"{put_confluence + 1} PUTS rails within 5 pts"
     else:
-        checklist.append({"check": False, "label": "Setup Alignment", "detail": "No VIX bias to align"})
+        confluence_pts = 0
+        confluence_detail = "No rail confluence detected"
     
-    checks_passed = sum(1 for c in checklist if c["check"])
-    trade_ready = checks_passed >= 4
+    checklist.append({
+        "pts": confluence_pts, 
+        "max": 15, 
+        "label": "Multiple Cone Confluence", 
+        "detail": confluence_detail
+    })
+    total_score += confluence_pts
+    
+    # Determine grade based on total (out of 100)
+    if total_score >= 80:
+        grade = "A"
+        grade_color = green
+        trade_ready = True
+    elif total_score >= 60:
+        grade = "B"
+        grade_color = blue
+        trade_ready = True
+    elif total_score >= 40:
+        grade = "C"
+        grade_color = amber
+        trade_ready = False
+    else:
+        grade = "D"
+        grade_color = red
+        trade_ready = False
     
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -1343,19 +1469,21 @@ body {{
     </div>
     
     <div class="checklist-card">
-        <div class="checklist-header">
-            <div class="checklist-title">{"✅ READY TO TRADE" if trade_ready else "⏸️ CONDITIONS NOT MET"}</div>
-            <div class="checklist-score">{checks_passed}/5</div>
+        <div class="checklist-header" style="background:{'#f0fdf4' if trade_ready else '#fef2f2' if theme == 'light' else '#064e3b' if trade_ready else '#7f1d1d'}">
+            <div class="checklist-title" style="color:{green if trade_ready else red}">{"✅ READY TO TRADE" if trade_ready else "⏸️ NOT OPTIMAL"}</div>
+            <div class="checklist-score" style="color:{grade_color}">{total_score}/100 ({grade})</div>
         </div>
         <div class="checklist-items">
 '''
     for item in checklist:
-        icon = "✓" if item["check"] else "✗"
-        icon_class = "pass" if item["check"] else "fail"
+        pts = item["pts"]
+        max_pts = item["max"]
+        pct = (pts / max_pts * 100) if max_pts > 0 else 0
+        pts_color = green if pct >= 75 else amber if pct >= 50 else red
         html += f'''
             <div class="checklist-item">
-                <div class="check-icon {icon_class}">{icon}</div>
-                <div class="check-text">
+                <div class="check-pts" style="background:{pts_color}20;color:{pts_color};min-width:60px;text-align:center;padding:6px 10px;border-radius:8px;font-family:'JetBrains Mono';font-size:13px;font-weight:700;">{pts}/{max_pts}</div>
+                <div class="check-text" style="flex:1;margin-left:12px;">
                     <div class="check-label">{item["label"]}</div>
                     <div class="check-detail">{item["detail"]}</div>
                 </div>
