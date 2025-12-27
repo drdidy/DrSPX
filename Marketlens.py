@@ -277,23 +277,25 @@ def polygon_get_index_price(ticker):
         return data["results"][-1].get("c", 0)
     return 0.0
 
-def estimate_0dte_price(vix, otm_distance, hours_left, is_put=False):
+def estimate_0dte_price(vix, otm_distance, hours_left, is_put=False, mins_after_open=30):
     """
     Estimate SPX 0DTE option price.
-    Calibrated to real trade data. MAE: ~$0.62
+    Calibrated to real trade data.
     
     Args:
         vix: Current VIX level (use 16 as default if not set)
         otm_distance: Points OTM
         hours_left: Hours until 3pm CT (6.5 at 8:30 AM, 6 at 9:00 AM)
         is_put: True for puts
+        mins_after_open: Minutes after 8:30 AM open (0=8:30, 30=9:00, 60=9:30, 90=10:00)
     
     Returns: Estimated premium per contract
     """
     if vix <= 0:
         vix = 16  # Default assumption
     
-    base = 7.50
+    # BASE PRICE at 8:30 AM (market open)
+    base_830 = 7.50
     
     # VIX adjustment (steeper above 18)
     if vix <= 15:
@@ -313,20 +315,48 @@ def estimate_0dte_price(vix, otm_distance, hours_left, is_put=False):
     else:
         skew = 1.0
     
-    # Time decay (severe for 0DTE)
-    if hours_left >= 6:
-        time_factor = 1.0
-    elif hours_left >= 5:
-        time_factor = 0.30 + 0.70 * (hours_left - 5)
-    elif hours_left >= 4:
-        time_factor = 0.15 + 0.15 * (hours_left - 4)
-    else:
-        time_factor = max(0.05, 0.15 * hours_left / 4)
+    # Calculate 8:30 AM price first
+    price_830 = (base_830 + vix_adj + otm_adj) * skew
     
-    price = (base + vix_adj + otm_adj) * time_factor * skew
+    # ENTRY TIME DECAY - Based on real data:
+    # 8:30 AM → 9:00-9:10 AM: ~43% drop (ratio 0.57)
+    # This captures both theta decay AND the spike/retrace pattern
+    #
+    # Data points:
+    # VIX 15.11: $7.40 → $3.90 (ratio 0.53)
+    # VIX 17.53: $5.80 → $3.60 (ratio 0.62)
+    #
+    # Pattern: Higher VIX = smaller drop (more premium retention)
+    
+    if mins_after_open <= 0:
+        # 8:30 AM - full price
+        entry_factor = 1.0
+    elif mins_after_open <= 30:
+        # 8:30-9:00 AM - transitioning through spike/retrace
+        # Linear interpolation from 1.0 to ~0.60
+        entry_factor = 1.0 - (mins_after_open / 30) * 0.40
+    elif mins_after_open <= 60:
+        # 9:00-9:30 AM - post-retrace sweet spot
+        # Continues decay from 0.60 to ~0.45
+        entry_factor = 0.60 - ((mins_after_open - 30) / 30) * 0.15
+    elif mins_after_open <= 90:
+        # 9:30-10:00 AM - theta accelerating
+        # From 0.45 to ~0.35
+        entry_factor = 0.45 - ((mins_after_open - 60) / 30) * 0.10
+    else:
+        # 10:00+ AM - heavy decay
+        # From 0.35 declining further
+        entry_factor = max(0.15, 0.35 - ((mins_after_open - 90) / 60) * 0.15)
+    
+    # Higher VIX retains more premium (less decay)
+    if vix > 15:
+        vix_retention = 1 + (vix - 15) * 0.015  # ~1.5% less decay per VIX point
+        entry_factor = min(1.0, entry_factor * vix_retention)
+    
+    price = price_830 * entry_factor
     return max(0.50, round(price, 2))
 
-def get_option_data_for_entry(entry_rail, opt_type, vix_current=16, eval_time=None):
+def get_option_data_for_entry(entry_rail, opt_type, vix_current=16, mins_after_open=30):
     """Get option data for SPX contracts ~15 pts OTM from entry rail"""
     is_put = opt_type.upper() in ["P", "PUT", "PUTS"]
     
@@ -337,16 +367,13 @@ def get_option_data_for_entry(entry_rail, opt_type, vix_current=16, eval_time=No
     
     otm_distance = abs(spx_strike - entry_rail)
     
-    # Calculate hours left (default to 6 hours = 9:00 AM entry)
-    if eval_time:
-        hours_left = 15 - (eval_time.hour + eval_time.minute / 60)
-    else:
-        hours_left = 6.0  # Default to 9:00 AM
-    
+    # Calculate hours left based on entry time
+    # 8:30 AM = 6.5 hrs, 9:00 AM = 6 hrs, 9:30 AM = 5.5 hrs, 10:00 AM = 5 hrs
+    hours_left = 6.5 - (mins_after_open / 60)
     hours_left = max(0.5, hours_left)
     
-    # Use calibrated pricing model
-    spx_price = estimate_0dte_price(vix_current, otm_distance, hours_left, is_put)
+    # Use calibrated pricing model with entry time
+    spx_price = estimate_0dte_price(vix_current, otm_distance, hours_left, is_put, mins_after_open)
     spx_cost = spx_price * 100  # Total cost per contract
     
     # Sweet spot: $4-$7 is perfect, $3.50-$8 is acceptable
@@ -644,7 +671,7 @@ def analyze_vix_zone(vix_bottom, vix_top, vix_current, cones=None):
             zone.matched_rail, zone.matched_cone = rails[len(rails)//2]
     return zone
 
-def generate_setups(cones, current_price, vix_current=16, eval_time=None, is_after_cutoff=False):
+def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False):
     """Generate trade setups with calibrated option pricing"""
     setups = []
     for cone in cones:
@@ -653,7 +680,7 @@ def generate_setups(cones, current_price, vix_current=16, eval_time=None, is_aft
         # CALLS - enter at descending rail
         entry_c = cone.descending_rail
         dist_c = abs(current_price - entry_c)
-        opt_c = get_option_data_for_entry(entry_c, "C", vix_current, eval_time)
+        opt_c = get_option_data_for_entry(entry_c, "C", vix_current, mins_after_open)
         delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
         setups.append(TradeSetup(
             direction="CALLS", cone_name=cone.name, cone_width=cone.width, entry=entry_c,
@@ -669,7 +696,7 @@ def generate_setups(cones, current_price, vix_current=16, eval_time=None, is_aft
         # PUTS - enter at ascending rail
         entry_p = cone.ascending_rail
         dist_p = abs(current_price - entry_p)
-        opt_p = get_option_data_for_entry(entry_p, "P", vix_current, eval_time)
+        opt_p = get_option_data_for_entry(entry_p, "P", vix_current, mins_after_open)
         delta_p = abs(opt_p.spy_delta) if opt_p else DELTA_IDEAL
         setups.append(TradeSetup(
             direction="PUTS", cone_name=cone.name, cone_width=cone.width, entry=entry_p,
@@ -1837,7 +1864,7 @@ body {{
 
 def main():
     st.set_page_config(page_title="SPX Prophet v7.0", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
-    defaults = {'theme': 'light', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None}
+    defaults = {'theme': 'light', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'entry_time_mins': 30, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None}
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -1879,6 +1906,111 @@ def main():
         with col2:
             st.session_state.vix_top = st.number_input("Top", value=st.session_state.vix_top, step=0.01, format="%.2f")
         st.session_state.vix_current = st.number_input("Current VIX", value=st.session_state.vix_current, step=0.01, format="%.2f")
+        st.divider()
+        st.markdown("### ⏰ Entry Time")
+        st.caption("Slide to estimate contract prices at your entry time")
+        st.session_state.entry_time_mins = st.slider(
+            "Entry Time (CT)", 
+            min_value=0, 
+            max_value=120, 
+            value=st.session_state.entry_time_mins,
+            step=10,
+            format="%d mins after 8:30"
+        )
+        entry_hour = 8 + (30 + st.session_state.entry_time_mins) // 60
+        entry_min = (30 + st.session_state.entry_time_mins) % 60
+        st.caption(f"📍 Pricing at **{entry_hour}:{entry_min:02d} AM CT**")
+        st.divider()
+        
+        # CONTRACT SLOPE CALCULATOR
+        st.markdown("### 📈 Contract Slope")
+        st.caption("Input 2 price points to project future prices")
+        with st.expander("Open Calculator", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                slope_time1 = st.text_input("Time 1", value="7:30 PM", key="slope_t1", help="e.g., 7:30 PM, 8:30 AM")
+                slope_price1 = st.number_input("Price 1", value=0.0, step=0.10, format="%.2f", key="slope_p1")
+            with col2:
+                slope_time2 = st.text_input("Time 2", value="7:30 AM", key="slope_t2")
+                slope_price2 = st.number_input("Price 2", value=0.0, step=0.10, format="%.2f", key="slope_p2")
+            
+            if slope_price1 > 0 and slope_price2 > 0 and slope_price1 != slope_price2:
+                # Parse times and calculate slope
+                def parse_time_to_mins(t_str):
+                    """Convert time string to minutes from midnight, handling PM/AM"""
+                    t_str = t_str.strip().upper()
+                    is_pm = "PM" in t_str or "P" in t_str
+                    is_am = "AM" in t_str or "A" in t_str
+                    t_str = t_str.replace("PM", "").replace("AM", "").replace("P", "").replace("A", "").strip()
+                    parts = t_str.replace(":", " ").split()
+                    hour = int(parts[0])
+                    mins = int(parts[1]) if len(parts) > 1 else 0
+                    if is_pm and hour != 12:
+                        hour += 12
+                    elif is_am and hour == 12:
+                        hour = 0
+                    return hour * 60 + mins
+                
+                try:
+                    mins1 = parse_time_to_mins(slope_time1)
+                    mins2 = parse_time_to_mins(slope_time2)
+                    
+                    # Handle overnight (if time2 < time1, add 24 hours)
+                    if mins2 < mins1:
+                        mins2 += 24 * 60
+                    
+                    time_diff = mins2 - mins1
+                    price_diff = slope_price2 - slope_price1
+                    slope_per_min = price_diff / time_diff if time_diff > 0 else 0
+                    slope_per_30min = slope_per_min * 30
+                    
+                    st.success(f"**Slope:** ${slope_per_30min:+.3f}/30 mins")
+                    
+                    # Project prices at key times
+                    st.markdown("**Projected Prices:**")
+                    target_times = [
+                        ("8:30 AM", 8 * 60 + 30),
+                        ("9:00 AM", 9 * 60),
+                        ("9:30 AM", 9 * 60 + 30),
+                        ("10:00 AM", 10 * 60),
+                    ]
+                    
+                    for label, target_mins in target_times:
+                        # Handle overnight projection
+                        if target_mins < mins1:
+                            target_mins += 24 * 60
+                        mins_from_p1 = target_mins - mins1
+                        projected = slope_price1 + (slope_per_min * mins_from_p1)
+                        st.write(f"  {label}: **${projected:.2f}**")
+                        
+                except Exception as e:
+                    st.error(f"Invalid time format. Use: 7:30 PM or 8:30 AM")
+        
+        st.divider()
+        
+        # FIBONACCI RETRACE CALCULATOR
+        st.markdown("### 📉 Retrace Calculator")
+        st.caption("Calculate fib levels after morning spike")
+        with st.expander("Open Calculator", expanded=False):
+            fib_low = st.number_input("Spike Low $", value=0.0, step=0.10, format="%.2f", key="fib_low", help="Starting price before spike")
+            fib_high = st.number_input("Spike High $", value=0.0, step=0.10, format="%.2f", key="fib_high", help="Top of spike (usually before 9 AM)")
+            
+            if fib_low > 0 and fib_high > fib_low:
+                range_size = fib_high - fib_low
+                
+                fib_786 = fib_high - (range_size * 0.786)
+                fib_618 = fib_high - (range_size * 0.618)
+                fib_500 = fib_high - (range_size * 0.500)
+                fib_382 = fib_high - (range_size * 0.382)
+                
+                st.markdown("**Retrace Levels:**")
+                st.write(f"  0.786 (Deep): **${fib_786:.2f}** ← Optimal Entry")
+                st.write(f"  0.618 (Golden): **${fib_618:.2f}**")
+                st.write(f"  0.500 (Half): **${fib_500:.2f}**")
+                st.write(f"  0.382 (Shallow): **${fib_382:.2f}**")
+                
+                st.info(f"Range: ${range_size:.2f} | Entry Zone: ${fib_786:.2f} - ${fib_618:.2f}")
+        
         st.divider()
         st.markdown("### 📍 Manual Pivots")
         st.session_state.use_manual_pivots = st.checkbox("Override Auto", st.session_state.use_manual_pivots)
@@ -1928,9 +2060,10 @@ def main():
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     
-    # Pass VIX for accurate option pricing
+    # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
-    setups = generate_setups(cones, spx_price, vix_for_pricing, eval_time, is_after_cutoff)
+    mins_after_open = st.session_state.entry_time_mins
+    setups = generate_setups(cones, spx_price, vix_for_pricing, mins_after_open, is_after_cutoff)
     
     day_score = calculate_day_score(vix_zone, cones, setups)
     pivot_table = build_pivot_table(pivots, trading_date)
