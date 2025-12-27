@@ -2041,18 +2041,43 @@ def main():
     pivot_session_info = get_session_info(pivot_date)
     pivot_close_time = pivot_session_info.get("close_ct", REGULAR_CLOSE)
     is_historical = trading_date < now.date() or (trading_date == now.date() and now.time() > CUTOFF_TIME)
+    
+    # Debug: Show what dates we're using in sidebar
+    with st.sidebar:
+        st.caption(f"📊 Trading: {trading_date} | Pivot: {pivot_date}")
+    
     prior_bars = polygon_get_daily_bars("I:SPX", pivot_date, pivot_date)
     prior_session = {"high": prior_bars[0].get("h", 0), "low": prior_bars[0].get("l", 0), "close": prior_bars[0].get("c", 0), "open": prior_bars[0].get("o", 0)} if prior_bars else {}
+    
+    # Debug: Show data status
+    with st.sidebar:
+        if prior_session:
+            st.caption(f"✅ Daily data: H={prior_session.get('high',0):.0f} L={prior_session.get('low',0):.0f}")
+        else:
+            st.warning(f"⚠️ No daily data for {pivot_date}")
     
     if st.session_state.use_manual_pivots and st.session_state.high_price > 0:
         pivots = create_manual_pivots(st.session_state.high_price, st.session_state.high_time, st.session_state.low_price, st.session_state.low_time, st.session_state.close_price, pivot_date, pivot_close_time)
     else:
         bars_30m = polygon_get_intraday_bars("I:SPX", pivot_date, pivot_date, 30)
         pivots = detect_pivots_auto(bars_30m, pivot_date, pivot_close_time) if bars_30m else []
-        if not pivots and prior_session:
+        
+        # Debug: Show intraday data status
+        with st.sidebar:
+            if bars_30m:
+                st.caption(f"✅ Intraday bars: {len(bars_30m)}")
+            else:
+                st.caption(f"⚠️ No intraday data - using daily")
+        
+        # Fallback to daily data if no intraday pivots detected
+        if not pivots and prior_session and prior_session.get("high", 0) > 0:
             pivots = [Pivot(name="Prior High", price=prior_session.get("high", 0), pivot_time=CT_TZ.localize(datetime.combine(pivot_date, time(10, 30))), pivot_type="HIGH", candle_high=prior_session.get("high", 0)),
                       Pivot(name="Prior Low", price=prior_session.get("low", 0), pivot_time=CT_TZ.localize(datetime.combine(pivot_date, time(14, 0))), pivot_type="LOW", candle_open=prior_session.get("low", 0)),
                       Pivot(name="Prior Close", price=prior_session.get("close", 0), pivot_time=CT_TZ.localize(datetime.combine(pivot_date, pivot_close_time)), pivot_type="CLOSE")]
+    
+    # Final debug: Show pivot count
+    with st.sidebar:
+        st.caption(f"📍 Pivots found: {len(pivots)}")
     
     eval_time = CT_TZ.localize(datetime.combine(trading_date, time(9, 0)))
     cones = build_cones(pivots, eval_time)
