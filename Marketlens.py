@@ -2216,8 +2216,8 @@ def main():
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     
-    # Calculate MA Bias (need ~200 30-min bars = 5 trading days)
-    ma_start_date = pivot_date - timedelta(days=10)  # Fetch extra to ensure 200 bars
+    # Calculate MA Bias (need ~200 30-min bars = ~15-20 trading days at 13 bars/day)
+    ma_start_date = pivot_date - timedelta(days=30)  # Fetch 30 calendar days to ensure 200+ bars
     ma_bars = polygon_get_intraday_bars("I:SPX", ma_start_date, pivot_date, 30)
     ma_bias = calculate_ma_bias(ma_bars)
     
