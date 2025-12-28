@@ -1852,7 +1852,7 @@ body {{
     html += f'''
 <!-- CALLS SETUPS (Collapsible) -->
 <div class="setup-section" id="calls-section">
-    <div class="setup-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+    <div class="setup-section-header">
         <div class="setup-section-title calls">
             <span>▲</span>
             <span>CALLS SETUPS</span>
@@ -1916,7 +1916,7 @@ body {{
     html += f'''
 <!-- PUTS SETUPS (Collapsible) -->
 <div class="setup-section collapsed" id="puts-section">
-    <div class="setup-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+    <div class="setup-section-header">
         <div class="setup-section-title puts">
             <span>▼</span>
             <span>PUTS SETUPS</span>
@@ -1980,7 +1980,7 @@ body {{
     html += f'''
 <!-- PRIOR SESSION -->
 <div class="card">
-    <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+    <div class="card-header">
         <div class="card-title">
             <span class="card-title-icon">📈</span>
             Prior Session ({pivot_date.strftime("%b %d")})
@@ -2014,7 +2014,7 @@ body {{
     html += f'''
 <!-- STRUCTURAL CONES -->
 <div class="card">
-    <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+    <div class="card-header">
         <div class="card-title">
             <span class="card-title-icon">📐</span>
             Structural Cones
@@ -2057,7 +2057,7 @@ body {{
     html += f'''
 <!-- PIVOT TABLE -->
 <div class="card collapsed">
-    <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+    <div class="card-header">
         <div class="card-title">
             <span class="card-title-icon">📋</span>
             Pivot Time Table
@@ -2109,6 +2109,35 @@ body {{
     <div>Trading: {trading_date.strftime("%B %d, %Y")} • Pivot Anchor: {pivot_date.strftime("%B %d, %Y")}</div>
     <div style="margin-top:4px;">Contracts ~15pts OTM • Sweet Spot: $4-$8 ($400-$800/contract)</div>
 </footer>
+
+<script>
+// Handle all collapsible sections
+document.addEventListener('DOMContentLoaded', function() {{
+    // Setup section headers (Calls/Puts)
+    document.querySelectorAll('.setup-section-header').forEach(function(header) {{
+        header.addEventListener('click', function(e) {{
+            e.preventDefault();
+            e.stopPropagation();
+            var section = this.parentElement;
+            if (section) {{
+                section.classList.toggle('collapsed');
+            }}
+        }});
+    }});
+    
+    // Card headers (other collapsible cards)
+    document.querySelectorAll('.card-header').forEach(function(header) {{
+        header.addEventListener('click', function(e) {{
+            e.preventDefault();
+            e.stopPropagation();
+            var card = this.parentElement;
+            if (card) {{
+                card.classList.toggle('collapsed');
+            }}
+        }});
+    }});
+}});
+</script>
 
 </div>
 </body>
