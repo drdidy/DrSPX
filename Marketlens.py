@@ -270,6 +270,118 @@ def polygon_get_intraday_bars(ticker, from_date, to_date, multiplier=30):
     data = polygon_get(f"/v2/aggs/ticker/{ticker}/range/{multiplier}/minute/{from_date.strftime('%Y-%m-%d')}/{to_date.strftime('%Y-%m-%d')}", {"adjusted": "true", "sort": "asc", "limit": 5000})
     return data.get("results", []) if data else []
 
+def fetch_es_ma_bias():
+    """
+    Fetch ES futures 30-min data from Yahoo Finance and calculate MA bias.
+    ES runs ~23 hours/day so we get plenty of bars for 200 SMA.
+    """
+    ma_bias = MABias()
+    
+    try:
+        # Yahoo Finance URL for ES futures (continuous contract)
+        # Get 30-min bars for last 10 days (should give ~400+ bars)
+        end_ts = int(datetime.now().timestamp())
+        start_ts = end_ts - (10 * 24 * 60 * 60)  # 10 days back
+        
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/ES=F?period1={start_ts}&period2={end_ts}&interval=30m"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            ma_bias.bias = "NEUTRAL"
+            ma_bias.bias_reason = f"Yahoo API error: {resp.status_code}"
+            return ma_bias
+        
+        data = resp.json()
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            ma_bias.bias = "NEUTRAL"
+            ma_bias.bias_reason = "No ES data from Yahoo"
+            return ma_bias
+        
+        quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
+        closes = quotes.get("close", [])
+        
+        # Filter out None values
+        closes = [c for c in closes if c is not None]
+        
+        if len(closes) < 200:
+            ma_bias.bias = "NEUTRAL"
+            ma_bias.bias_reason = f"Insufficient ES data ({len(closes)}/200 bars)"
+            return ma_bias
+        
+        current_close = closes[-1]
+        ma_bias.current_close = current_close
+        
+        # Calculate SMA200
+        sma200_closes = closes[-200:]
+        ma_bias.sma200 = sum(sma200_closes) / 200
+        
+        # Calculate EMA50
+        ema50_closes = closes[-50:]
+        multiplier = 2 / (50 + 1)
+        ema = ema50_closes[0]
+        for price in ema50_closes[1:]:
+            ema = (price - ema) * multiplier + ema
+        ma_bias.ema50 = ema
+        
+        # Determine price vs SMA200 (directional permission)
+        sma_buffer = ma_bias.sma200 * 0.001  # 0.1% buffer
+        if current_close > ma_bias.sma200 + sma_buffer:
+            ma_bias.price_vs_sma200 = "ABOVE"
+        elif current_close < ma_bias.sma200 - sma_buffer:
+            ma_bias.price_vs_sma200 = "BELOW"
+        else:
+            ma_bias.price_vs_sma200 = "NEUTRAL"
+        
+        # Determine EMA50 vs SMA200 (trend health)
+        if ma_bias.ema50 > ma_bias.sma200:
+            ma_bias.ema_vs_sma = "BULLISH"
+        elif ma_bias.ema50 < ma_bias.sma200:
+            ma_bias.ema_vs_sma = "BEARISH"
+        else:
+            ma_bias.ema_vs_sma = "NEUTRAL"
+        
+        # Determine final bias
+        if ma_bias.price_vs_sma200 == "ABOVE" and ma_bias.ema_vs_sma == "BULLISH":
+            ma_bias.bias = "LONG"
+            ma_bias.bias_reason = "ES > SMA200 & EMA50 > SMA200 → LONG ONLY"
+        elif ma_bias.price_vs_sma200 == "BELOW" and ma_bias.ema_vs_sma == "BEARISH":
+            ma_bias.bias = "SHORT"
+            ma_bias.bias_reason = "ES < SMA200 & EMA50 < SMA200 → SHORT ONLY"
+        elif ma_bias.price_vs_sma200 == "ABOVE" and ma_bias.ema_vs_sma == "BEARISH":
+            ma_bias.bias = "NEUTRAL"
+            ma_bias.bias_reason = "ES > SMA200 but EMA50 < SMA200 → Mixed"
+            ma_bias.regime_warning = "⚠️ Potential trend reversal brewing"
+        elif ma_bias.price_vs_sma200 == "BELOW" and ma_bias.ema_vs_sma == "BULLISH":
+            ma_bias.bias = "NEUTRAL"
+            ma_bias.bias_reason = "ES < SMA200 but EMA50 > SMA200 → Mixed"
+            ma_bias.regime_warning = "⚠️ Potential trend reversal brewing"
+        else:
+            ma_bias.bias = "NEUTRAL"
+            ma_bias.bias_reason = "ES near SMA200 → Ranging/Choppy"
+        
+        # Check for recent crosses (regime shift warning)
+        if len(closes) >= 10:
+            recent_closes = closes[-10:]
+            crosses = 0
+            for i in range(1, len(recent_closes)):
+                prev_above = recent_closes[i-1] > ma_bias.sma200
+                curr_above = recent_closes[i] > ma_bias.sma200
+                if prev_above != curr_above:
+                    crosses += 1
+            if crosses >= 3:
+                ma_bias.regime_warning = f"⚠️ {crosses} SMA200 crosses in last 10 bars → CHOPPY"
+                ma_bias.bias = "NEUTRAL"
+                ma_bias.bias_reason = "Multiple MA crosses → Avoid trading"
+        
+        return ma_bias
+        
+    except Exception as e:
+        ma_bias.bias = "NEUTRAL"
+        ma_bias.bias_reason = f"Error: {str(e)[:50]}"
+        return ma_bias
+
 def filter_bars_to_session(bars, session_date, close_time_ct):
     """CRITICAL FIX: Filter bars to session close time (handles half days)"""
     if not bars:
@@ -2216,17 +2328,15 @@ def main():
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     
-    # Calculate MA Bias (need ~200 30-min bars = ~15-20 trading days at 13 bars/day)
-    ma_start_date = pivot_date - timedelta(days=45)  # Fetch 45 calendar days to ensure 200+ bars
-    ma_bars = polygon_get_intraday_bars("I:SPX", ma_start_date, pivot_date, 30)
-    ma_bias = calculate_ma_bias(ma_bars)
+    # Calculate MA Bias using ES futures from Yahoo Finance (23 hrs/day = more bars)
+    ma_bias = fetch_es_ma_bias()
     
     # Debug: Show MA bias in sidebar
     with st.sidebar:
         if ma_bias.sma200 > 0:
             st.caption(f"📊 MA Bias: {ma_bias.bias} | SMA200: {ma_bias.sma200:.0f}")
         else:
-            st.caption(f"⚠️ MA Bias: No data")
+            st.caption(f"⚠️ MA Bias: {ma_bias.bias_reason}")
     
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
