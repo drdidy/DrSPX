@@ -145,6 +145,26 @@ class TradeSetup:
     status: str = "WAIT"
 
 @dataclass
+class MABias:
+    """Moving Average Bias Filter - 30min timeframe"""
+    sma200: float = 0.0           # 200-period SMA
+    ema50: float = 0.0            # 50-period EMA
+    current_close: float = 0.0    # Latest 30-min close
+    
+    # Directional permission
+    price_vs_sma200: str = "NEUTRAL"  # "ABOVE" = long-only, "BELOW" = short-only, "NEUTRAL" = ranging
+    
+    # Trend health
+    ema_vs_sma: str = "NEUTRAL"   # "BULLISH" (EMA50 > SMA200), "BEARISH" (EMA50 < SMA200)
+    
+    # Final bias
+    bias: str = "NEUTRAL"         # "LONG", "SHORT", "NEUTRAL"
+    bias_reason: str = ""
+    
+    # Regime warning
+    regime_warning: str = ""      # Warning about recent MA crosses
+
+@dataclass
 class DayScore:
     total: int = 0
     grade: str = ""
@@ -671,6 +691,101 @@ def analyze_vix_zone(vix_bottom, vix_top, vix_current, cones=None):
             zone.matched_rail, zone.matched_cone = rails[len(rails)//2]
     return zone
 
+def calculate_ma_bias(bars_30m):
+    """
+    Calculate 30-minute MA Bias Filter.
+    
+    Uses:
+    - SMA200: 200-period Simple Moving Average for directional permission
+    - EMA50: 50-period Exponential Moving Average for trend health
+    
+    Logic:
+    - Price > SMA200 → Long-only permission
+    - Price < SMA200 → Short-only permission
+    - EMA50 > SMA200 → Bullish trend (validates longs)
+    - EMA50 < SMA200 → Bearish trend (validates shorts)
+    """
+    ma_bias = MABias()
+    
+    if not bars_30m or len(bars_30m) < 200:
+        ma_bias.bias = "NEUTRAL"
+        ma_bias.bias_reason = f"Insufficient data ({len(bars_30m) if bars_30m else 0}/200 bars)"
+        return ma_bias
+    
+    # Extract closing prices
+    closes = [bar.get("c", 0) for bar in bars_30m]
+    if not all(closes):
+        ma_bias.bias = "NEUTRAL"
+        ma_bias.bias_reason = "Invalid price data"
+        return ma_bias
+    
+    current_close = closes[-1]
+    ma_bias.current_close = current_close
+    
+    # Calculate SMA200
+    sma200_closes = closes[-200:]
+    ma_bias.sma200 = sum(sma200_closes) / 200
+    
+    # Calculate EMA50
+    ema50_closes = closes[-50:]
+    multiplier = 2 / (50 + 1)
+    ema = ema50_closes[0]
+    for price in ema50_closes[1:]:
+        ema = (price - ema) * multiplier + ema
+    ma_bias.ema50 = ema
+    
+    # Determine price vs SMA200 (directional permission)
+    sma_buffer = ma_bias.sma200 * 0.001  # 0.1% buffer to avoid whipsaws
+    if current_close > ma_bias.sma200 + sma_buffer:
+        ma_bias.price_vs_sma200 = "ABOVE"
+    elif current_close < ma_bias.sma200 - sma_buffer:
+        ma_bias.price_vs_sma200 = "BELOW"
+    else:
+        ma_bias.price_vs_sma200 = "NEUTRAL"
+    
+    # Determine EMA50 vs SMA200 (trend health)
+    if ma_bias.ema50 > ma_bias.sma200:
+        ma_bias.ema_vs_sma = "BULLISH"
+    elif ma_bias.ema50 < ma_bias.sma200:
+        ma_bias.ema_vs_sma = "BEARISH"
+    else:
+        ma_bias.ema_vs_sma = "NEUTRAL"
+    
+    # Determine final bias
+    if ma_bias.price_vs_sma200 == "ABOVE" and ma_bias.ema_vs_sma == "BULLISH":
+        ma_bias.bias = "LONG"
+        ma_bias.bias_reason = "Price > SMA200 & EMA50 > SMA200 → LONG ONLY"
+    elif ma_bias.price_vs_sma200 == "BELOW" and ma_bias.ema_vs_sma == "BEARISH":
+        ma_bias.bias = "SHORT"
+        ma_bias.bias_reason = "Price < SMA200 & EMA50 < SMA200 → SHORT ONLY"
+    elif ma_bias.price_vs_sma200 == "ABOVE" and ma_bias.ema_vs_sma == "BEARISH":
+        ma_bias.bias = "NEUTRAL"
+        ma_bias.bias_reason = "Price > SMA200 but EMA50 < SMA200 → Mixed signals"
+        ma_bias.regime_warning = "⚠️ Potential trend reversal brewing"
+    elif ma_bias.price_vs_sma200 == "BELOW" and ma_bias.ema_vs_sma == "BULLISH":
+        ma_bias.bias = "NEUTRAL"
+        ma_bias.bias_reason = "Price < SMA200 but EMA50 > SMA200 → Mixed signals"
+        ma_bias.regime_warning = "⚠️ Potential trend reversal brewing"
+    else:
+        ma_bias.bias = "NEUTRAL"
+        ma_bias.bias_reason = "Price near SMA200 → Ranging/Choppy"
+    
+    # Check for recent crosses (regime shift warning)
+    if len(closes) >= 10:
+        recent_closes = closes[-10:]
+        crosses = 0
+        for i in range(1, len(recent_closes)):
+            prev_above = recent_closes[i-1] > ma_bias.sma200
+            curr_above = recent_closes[i] > ma_bias.sma200
+            if prev_above != curr_above:
+                crosses += 1
+        if crosses >= 3:
+            ma_bias.regime_warning = f"⚠️ {crosses} SMA200 crosses in last 10 bars → CHOPPY"
+            ma_bias.bias = "NEUTRAL"
+            ma_bias.bias_reason = "Multiple MA crosses → Avoid trading"
+    
+    return ma_bias
+
 def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False):
     """Generate trade setups with calibrated option pricing"""
     setups = []
@@ -741,7 +856,7 @@ def check_alerts(setups, vix_zone, current_time):
         alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window (9:00-9:30 CT)"})
     return alerts
 
-def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme):
+def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None):
     # Color system
     if theme == "light":
         bg_main = "#f1f5f9"
@@ -783,6 +898,14 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     bias_color = green if vix_zone.bias == "CALLS" else red if vix_zone.bias == "PUTS" else amber
     bias_bg = green_light if vix_zone.bias == "CALLS" else red_light if vix_zone.bias == "PUTS" else amber_light
     bias_icon = "↑" if vix_zone.bias == "CALLS" else "↓" if vix_zone.bias == "PUTS" else "•"
+    
+    # MA Bias colors
+    if ma_bias:
+        ma_color = green if ma_bias.bias == "LONG" else red if ma_bias.bias == "SHORT" else amber
+        ma_bg = green_light if ma_bias.bias == "LONG" else red_light if ma_bias.bias == "SHORT" else amber_light
+        ma_icon = "▲" if ma_bias.bias == "LONG" else "▼" if ma_bias.bias == "SHORT" else "●"
+    else:
+        ma_color, ma_bg, ma_icon = amber, amber_light, "●"
     
     now = get_ct_now()
     marker_pos = min(max(vix_zone.position_pct, 3), 97) if vix_zone.zone_size > 0 else 50
@@ -1565,6 +1688,14 @@ body {{
             <div class="bias-label">{vix_zone.bias}</div>
             <div class="bias-reason">{vix_zone.bias_reason}</div>
         </div>
+        <div class="bias-card" style="background:{ma_bg};border-color:{ma_color}50;margin-top:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:{ma_color};margin-bottom:8px;">30-Min MA Bias</div>
+            <div class="bias-icon" style="font-size:36px;color:{ma_color}">{ma_icon}</div>
+            <div class="bias-label" style="font-size:22px;color:{ma_color}">{ma_bias.bias if ma_bias else 'N/A'}</div>
+            <div class="bias-reason">{ma_bias.bias_reason if ma_bias else 'No data'}</div>
+            {f'<div style="margin-top:8px;padding:8px;background:{amber}20;border-radius:8px;font-size:11px;color:{amber}">{ma_bias.regime_warning}</div>' if ma_bias and ma_bias.regime_warning else ''}
+            {f'<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">SMA200: {ma_bias.sma200:,.0f} | EMA50: {ma_bias.ema50:,.0f}</div>' if ma_bias and ma_bias.sma200 > 0 else ''}
+        </div>
     </div>
     
     <div class="checklist-card">
@@ -2085,6 +2216,18 @@ def main():
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     
+    # Calculate MA Bias (need ~200 30-min bars = 5 trading days)
+    ma_start_date = pivot_date - timedelta(days=10)  # Fetch extra to ensure 200 bars
+    ma_bars = polygon_get_intraday_bars("I:SPX", ma_start_date, pivot_date, 30)
+    ma_bias = calculate_ma_bias(ma_bars)
+    
+    # Debug: Show MA bias in sidebar
+    with st.sidebar:
+        if ma_bias.sma200 > 0:
+            st.caption(f"📊 MA Bias: {ma_bias.bias} | SMA200: {ma_bias.sma200:.0f}")
+        else:
+            st.caption(f"⚠️ MA Bias: No data")
+    
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
     mins_after_open = st.session_state.entry_time_mins
@@ -2093,7 +2236,7 @@ def main():
     day_score = calculate_day_score(vix_zone, cones, setups)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias)
     components.html(html, height=4000, scrolling=True)
 
 if __name__ == "__main__":
