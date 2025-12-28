@@ -1237,13 +1237,26 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 
 body {{
-    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: var(--bg-main);
     color: var(--text-primary);
-    line-height: 1.6;
+    line-height: 1.5;
     padding: 24px;
     min-height: 100vh;
+    font-size: 14px;
 }}
+
+/* Typography Scale */
+.text-xs {{ font-size: 11px; }}
+.text-sm {{ font-size: 12px; }}
+.text-base {{ font-size: 14px; }}
+.text-lg {{ font-size: 16px; }}
+.text-xl {{ font-size: 18px; }}
+.text-2xl {{ font-size: 22px; }}
+.text-3xl {{ font-size: 28px; }}
+
+/* Mono font for numbers/data */
+.mono {{ font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }}
 
 .container {{ max-width: 1400px; margin: 0 auto; }}
 
@@ -1258,26 +1271,26 @@ body {{
 }}
 .brand {{ display: flex; align-items: center; gap: 14px; }}
 .brand-icon {{
-    width: 52px; height: 52px;
+    width: 48px; height: 48px;
     background: linear-gradient(135deg, {blue}, {purple});
-    border-radius: 14px;
+    border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
-    font-family: 'JetBrains Mono'; font-weight: 700; font-size: 16px; color: white;
+    font-family: 'SF Mono', monospace; font-weight: 700; font-size: 14px; color: white;
     box-shadow: {shadow_md};
 }}
-.brand-text h1 {{ font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }}
+.brand-text h1 {{ font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }}
 .brand-text span {{ font-size: 12px; color: var(--text-muted); font-weight: 500; }}
 .header-right {{ display: flex; align-items: center; gap: 24px; }}
 .clock {{
-    font-family: 'JetBrains Mono';
-    font-size: 28px;
+    font-family: 'SF Mono', monospace;
+    font-size: 24px;
     font-weight: 600;
     color: var(--text-primary);
 }}
 .countdown-group {{ display: flex; gap: 16px; }}
 .countdown-item {{ text-align: center; }}
 .countdown-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }}
-.countdown-value {{ font-family: 'JetBrains Mono'; font-size: 16px; font-weight: 600; color: {amber}; }}
+.countdown-value {{ font-family: 'SF Mono', monospace; font-size: 14px; font-weight: 600; color: {amber}; }}
 
 /* Alert Banner */
 .alert-banner {{
@@ -1368,7 +1381,7 @@ body {{
 .vix-labels {{
     display: flex;
     justify-content: space-between;
-    font-family: 'JetBrains Mono';
+    font-family: 'SF Mono', monospace;
     font-size: 12px;
     color: var(--text-muted);
 }}
@@ -1386,12 +1399,12 @@ body {{
     text-align: center;
 }}
 .vix-stat-value {{
-    font-family: 'JetBrains Mono';
-    font-size: 20px;
+    font-family: 'SF Mono', monospace;
+    font-size: 16px;
     font-weight: 700;
 }}
 .vix-stat-label {{
-    font-size: 10px;
+    font-size: 9px;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -1403,26 +1416,26 @@ body {{
     background: {bias_bg};
     border: 2px solid {bias_color}50;
     border-radius: 16px;
-    padding: 28px;
+    padding: 24px;
     text-align: center;
 }}
 .bias-icon {{
-    font-size: 48px;
-    font-weight: 800;
+    font-size: 36px;
+    font-weight: 700;
     color: {bias_color};
     line-height: 1;
 }}
 .bias-label {{
-    font-size: 28px;
-    font-weight: 800;
+    font-size: 24px;
+    font-weight: 700;
     color: {bias_color};
     margin-top: 8px;
-    letter-spacing: 2px;
+    letter-spacing: 1px;
 }}
 .bias-reason {{
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
-    margin-top: 10px;
+    margin-top: 8px;
 }}
 
 /* Trading Checklist */
@@ -1446,7 +1459,7 @@ body {{
     color: {green if trade_ready else red};
 }}
 .checklist-score {{
-    font-family: 'JetBrains Mono';
+    font-family: 'SF Mono', monospace;
     font-size: 14px;
     font-weight: 700;
     color: {green if trade_ready else red};
@@ -1562,12 +1575,12 @@ body {{
     align-items: center;
     margin-bottom: 16px;
 }}
-.setup-cone-name {{ font-size: 16px; font-weight: 700; }}
+.setup-cone-name {{ font-size: 14px; font-weight: 700; }}
 .setup-status {{
     font-size: 10px;
-    padding: 5px 12px;
+    padding: 4px 10px;
     border-radius: 20px;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }}
@@ -1578,47 +1591,47 @@ body {{
 .entry-display {{
     background: var(--bg-elevated);
     border-radius: 12px;
-    padding: 18px;
+    padding: 16px;
     text-align: center;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
 }}
 .entry-label {{
     font-size: 10px;
     color: var(--text-muted);
     text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
 }}
 .entry-price {{
-    font-family: 'JetBrains Mono';
-    font-size: 32px;
+    font-family: 'SF Mono', monospace;
+    font-size: 26px;
     font-weight: 700;
 }}
 .entry-price.calls {{ color: {green}; }}
 .entry-price.puts {{ color: {red}; }}
 .entry-distance {{
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-muted);
-    margin-top: 6px;
+    margin-top: 4px;
 }}
 
 .contract-info {{
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
 }}
 .contract-box {{
     background: var(--bg-elevated);
     border-radius: 10px;
-    padding: 14px;
+    padding: 12px;
     text-align: center;
 }}
 .contract-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }}
-.contract-value {{ font-family: 'JetBrains Mono'; font-size: 18px; font-weight: 700; margin-top: 4px; }}
+.contract-value {{ font-family: 'SF Mono', monospace; font-size: 16px; font-weight: 700; margin-top: 4px; }}
 .contract-value.calls {{ color: {green}; }}
 .contract-value.puts {{ color: {red}; }}
-.contract-sub {{ font-size: 11px; color: var(--text-secondary); margin-top: 2px; }}
+.contract-sub {{ font-size: 10px; color: var(--text-secondary); margin-top: 2px; }}
 .sweet-badge {{
     display: inline-block;
     background: {amber_light};
@@ -1626,26 +1639,26 @@ body {{
     font-size: 9px;
     padding: 3px 8px;
     border-radius: 10px;
-    font-weight: 700;
-    margin-top: 6px;
+    font-weight: 600;
+    margin-top: 4px;
 }}
 
 .targets-section {{ margin-bottom: 14px; }}
-.targets-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }}
+.targets-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }}
 .targets-grid {{
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
+    gap: 6px;
 }}
 .target-box {{
     background: var(--bg-elevated);
     border-radius: 8px;
-    padding: 10px 6px;
+    padding: 8px 4px;
     text-align: center;
 }}
 .target-pct {{ font-size: 10px; color: var(--text-muted); font-weight: 600; }}
-.target-price {{ font-family: 'JetBrains Mono'; font-size: 11px; color: var(--text-secondary); margin-top: 2px; }}
-.target-profit {{ font-family: 'JetBrains Mono'; font-size: 13px; font-weight: 700; color: {green}; margin-top: 2px; }}
+.target-price {{ font-family: 'SF Mono', monospace; font-size: 10px; color: var(--text-secondary); margin-top: 2px; }}
+.target-profit {{ font-family: 'SF Mono', monospace; font-size: 12px; font-weight: 700; color: {green}; margin-top: 2px; }}
 
 .risk-display {{
     display: flex;
@@ -1653,12 +1666,12 @@ body {{
     align-items: center;
     background: {red_light};
     border-radius: 10px;
-    padding: 12px 16px;
+    padding: 10px 14px;
 }}
-.risk-label {{ font-size: 12px; color: {red}; font-weight: 600; }}
+.risk-label {{ font-size: 11px; color: {red}; font-weight: 600; }}
 .risk-values {{ text-align: right; }}
-.risk-stop {{ font-family: 'JetBrains Mono'; font-size: 12px; color: {red}; }}
-.risk-amount {{ font-family: 'JetBrains Mono'; font-size: 16px; font-weight: 700; color: {red}; }}
+.risk-stop {{ font-family: 'SF Mono', monospace; font-size: 11px; color: {red}; }}
+.risk-amount {{ font-family: 'SF Mono', monospace; font-size: 14px; font-weight: 700; color: {red}; }}
 
 /* Stats Grid */
 .stats-row {{
@@ -1671,32 +1684,32 @@ body {{
     background: var(--bg-elevated);
     border: 1px solid var(--border-light);
     border-radius: 12px;
-    padding: 18px;
+    padding: 16px;
     text-align: center;
 }}
-.stat-value {{ font-family: 'JetBrains Mono'; font-size: 22px; font-weight: 700; }}
-.stat-label {{ font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; }}
+.stat-value {{ font-family: 'SF Mono', monospace; font-size: 18px; font-weight: 700; }}
+.stat-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }}
 
 /* Table */
 .data-table {{ width: 100%; border-collapse: collapse; }}
 .data-table th {{
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--text-muted);
-    padding: 14px 12px;
+    padding: 12px 10px;
     text-align: left;
     border-bottom: 1px solid var(--border-medium);
     background: var(--bg-elevated);
 }}
 .data-table td {{
-    padding: 14px 12px;
-    font-size: 13px;
+    padding: 12px 10px;
+    font-size: 12px;
     border-bottom: 1px solid var(--border-light);
 }}
 .data-table tr:hover {{ background: var(--bg-elevated); }}
-.mono {{ font-family: 'JetBrains Mono'; }}
+.mono {{ font-family: 'SF Mono', monospace; }}
 .text-green {{ color: {green}; }}
 .text-red {{ color: {red}; }}
 .text-amber {{ color: {amber}; }}
@@ -1801,10 +1814,10 @@ body {{
             <div class="bias-reason">{vix_zone.bias_reason}</div>
         </div>
         <div class="bias-card" style="background:{ma_bg};border-color:{ma_color}50;margin-top:12px;">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:{ma_color};margin-bottom:8px;">30-Min MA Bias</div>
-            <div class="bias-icon" style="font-size:36px;color:{ma_color}">{ma_icon}</div>
-            <div class="bias-label" style="font-size:22px;color:{ma_color}">Bias: {ma_bias.bias if ma_bias else 'N/A'}</div>
-            {f'<div style="margin-top:8px;padding:8px;background:{amber}20;border-radius:8px;font-size:11px;color:{amber}">{ma_bias.regime_warning}</div>' if ma_bias and ma_bias.regime_warning else ''}
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:{ma_color};margin-bottom:6px;">30-Min MA Bias</div>
+            <div style="font-size:28px;color:{ma_color};line-height:1;">{ma_icon}</div>
+            <div style="font-size:20px;font-weight:700;color:{ma_color};margin-top:6px;">Bias: {ma_bias.bias if ma_bias else 'N/A'}</div>
+            {f'<div style="margin-top:8px;padding:6px 10px;background:{amber}20;border-radius:6px;font-size:10px;color:{amber}">{ma_bias.regime_warning}</div>' if ma_bias and ma_bias.regime_warning else ''}
         </div>
     </div>
     
