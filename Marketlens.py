@@ -1803,10 +1803,8 @@ body {{
         <div class="bias-card" style="background:{ma_bg};border-color:{ma_color}50;margin-top:12px;">
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:{ma_color};margin-bottom:8px;">30-Min MA Bias</div>
             <div class="bias-icon" style="font-size:36px;color:{ma_color}">{ma_icon}</div>
-            <div class="bias-label" style="font-size:22px;color:{ma_color}">{ma_bias.bias if ma_bias else 'N/A'}</div>
-            <div class="bias-reason">{ma_bias.bias_reason if ma_bias else 'No data'}</div>
+            <div class="bias-label" style="font-size:22px;color:{ma_color}">Bias: {ma_bias.bias if ma_bias else 'N/A'}</div>
             {f'<div style="margin-top:8px;padding:8px;background:{amber}20;border-radius:8px;font-size:11px;color:{amber}">{ma_bias.regime_warning}</div>' if ma_bias and ma_bias.regime_warning else ''}
-            {f'<div style="margin-top:10px;font-size:11px;color:var(--text-muted)">SMA200: {ma_bias.sma200:,.0f} | EMA50: {ma_bias.ema50:,.0f}</div>' if ma_bias and ma_bias.sma200 > 0 else ''}
         </div>
     </div>
     
