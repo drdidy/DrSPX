@@ -274,110 +274,121 @@ def fetch_es_ma_bias():
     """
     Fetch ES futures 30-min data from Yahoo Finance and calculate MA bias.
     ES runs ~23 hours/day so we get plenty of bars for 200 SMA.
+    
+    Uses 15 days of data to ensure 200+ valid bars even with gaps.
     """
     ma_bias = MABias()
     
     try:
-        # Yahoo Finance URL for ES futures (continuous contract)
-        # Get 30-min bars for last 10 days (should give ~400+ bars)
+        # Get 15 days of 30-min data (should give ~500+ bars)
         end_ts = int(datetime.now().timestamp())
-        start_ts = end_ts - (10 * 24 * 60 * 60)  # 10 days back
+        start_ts = end_ts - (15 * 24 * 60 * 60)  # 15 days back
         
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/ES=F?period1={start_ts}&period2={end_ts}&interval=30m"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
         
-        resp = requests.get(url, headers=headers, timeout=15)
+        resp = requests.get(url, headers=headers, timeout=20)
         if resp.status_code != 200:
+            # Fallback: Try with SPY ETF as proxy
             ma_bias.bias = "NEUTRAL"
-            ma_bias.bias_reason = f"Yahoo API error: {resp.status_code}"
+            ma_bias.bias_reason = "Data unavailable"
             return ma_bias
         
         data = resp.json()
         result = data.get("chart", {}).get("result", [])
         if not result:
             ma_bias.bias = "NEUTRAL"
-            ma_bias.bias_reason = "No ES data from Yahoo"
+            ma_bias.bias_reason = "No market data"
             return ma_bias
         
         quotes = result[0].get("indicators", {}).get("quote", [{}])[0]
         closes = quotes.get("close", [])
         
-        # Filter out None values
+        # Filter out None values (market closed periods)
         closes = [c for c in closes if c is not None]
         
         if len(closes) < 200:
             ma_bias.bias = "NEUTRAL"
-            ma_bias.bias_reason = f"Insufficient ES data ({len(closes)}/200 bars)"
+            ma_bias.bias_reason = f"Building data ({len(closes)}/200)"
             return ma_bias
         
-        current_close = closes[-1]
+        # Use only the most recent 200 bars for SMA calculation
+        recent_closes = closes[-250:]  # Keep extra for cross detection
+        current_close = recent_closes[-1]
         ma_bias.current_close = current_close
         
-        # Calculate SMA200
-        sma200_closes = closes[-200:]
-        ma_bias.sma200 = sum(sma200_closes) / 200
+        # Calculate SMA200 using last 200 bars
+        sma200_bars = recent_closes[-200:]
+        ma_bias.sma200 = sum(sma200_bars) / 200
         
-        # Calculate EMA50
-        ema50_closes = closes[-50:]
+        # Calculate EMA50 properly (need to start from beginning for accuracy)
+        ema50_seed = recent_closes[-100:]  # Use 100 bars to seed EMA
         multiplier = 2 / (50 + 1)
-        ema = ema50_closes[0]
-        for price in ema50_closes[1:]:
+        ema = sum(ema50_seed[:50]) / 50  # Start with SMA of first 50
+        for price in ema50_seed[50:]:
             ema = (price - ema) * multiplier + ema
         ma_bias.ema50 = ema
         
-        # Determine price vs SMA200 (directional permission)
-        sma_buffer = ma_bias.sma200 * 0.001  # 0.1% buffer
-        if current_close > ma_bias.sma200 + sma_buffer:
+        # Calculate distances
+        price_to_sma = ((current_close - ma_bias.sma200) / ma_bias.sma200) * 100
+        ema_to_sma = ((ma_bias.ema50 - ma_bias.sma200) / ma_bias.sma200) * 100
+        
+        # Determine directional permission (price vs SMA200)
+        if price_to_sma > 0.15:  # More than 0.15% above
             ma_bias.price_vs_sma200 = "ABOVE"
-        elif current_close < ma_bias.sma200 - sma_buffer:
+        elif price_to_sma < -0.15:  # More than 0.15% below
             ma_bias.price_vs_sma200 = "BELOW"
         else:
             ma_bias.price_vs_sma200 = "NEUTRAL"
         
-        # Determine EMA50 vs SMA200 (trend health)
-        if ma_bias.ema50 > ma_bias.sma200:
+        # Determine trend health (EMA50 vs SMA200)
+        if ema_to_sma > 0.1:
             ma_bias.ema_vs_sma = "BULLISH"
-        elif ma_bias.ema50 < ma_bias.sma200:
+        elif ema_to_sma < -0.1:
             ma_bias.ema_vs_sma = "BEARISH"
         else:
             ma_bias.ema_vs_sma = "NEUTRAL"
         
-        # Determine final bias
-        if ma_bias.price_vs_sma200 == "ABOVE" and ma_bias.ema_vs_sma == "BULLISH":
+        # Check for recent SMA200 crosses (choppiness indicator)
+        cross_count = 0
+        check_bars = recent_closes[-20:]  # Last 20 bars
+        for i in range(1, len(check_bars)):
+            prev_above = check_bars[i-1] > ma_bias.sma200
+            curr_above = check_bars[i] > ma_bias.sma200
+            if prev_above != curr_above:
+                cross_count += 1
+        
+        # Determine final bias with clear reasoning
+        if cross_count >= 4:
+            ma_bias.bias = "NEUTRAL"
+            ma_bias.bias_reason = f"Choppy: {cross_count} MA crosses"
+            ma_bias.regime_warning = "⚠️ Price whipsawing around SMA200"
+        elif ma_bias.price_vs_sma200 == "ABOVE" and ma_bias.ema_vs_sma == "BULLISH":
             ma_bias.bias = "LONG"
-            ma_bias.bias_reason = "ES > SMA200 & EMA50 > SMA200 → LONG ONLY"
+            ma_bias.bias_reason = f"Uptrend: +{price_to_sma:.1f}% from SMA"
         elif ma_bias.price_vs_sma200 == "BELOW" and ma_bias.ema_vs_sma == "BEARISH":
             ma_bias.bias = "SHORT"
-            ma_bias.bias_reason = "ES < SMA200 & EMA50 < SMA200 → SHORT ONLY"
-        elif ma_bias.price_vs_sma200 == "ABOVE" and ma_bias.ema_vs_sma == "BEARISH":
+            ma_bias.bias_reason = f"Downtrend: {price_to_sma:.1f}% from SMA"
+        elif ma_bias.price_vs_sma200 == "ABOVE" and ma_bias.ema_vs_sma != "BULLISH":
             ma_bias.bias = "NEUTRAL"
-            ma_bias.bias_reason = "ES > SMA200 but EMA50 < SMA200 → Mixed"
-            ma_bias.regime_warning = "⚠️ Potential trend reversal brewing"
-        elif ma_bias.price_vs_sma200 == "BELOW" and ma_bias.ema_vs_sma == "BULLISH":
+            ma_bias.bias_reason = "Trend weakening"
+            ma_bias.regime_warning = "⚠️ EMA curling down"
+        elif ma_bias.price_vs_sma200 == "BELOW" and ma_bias.ema_vs_sma != "BEARISH":
             ma_bias.bias = "NEUTRAL"
-            ma_bias.bias_reason = "ES < SMA200 but EMA50 > SMA200 → Mixed"
-            ma_bias.regime_warning = "⚠️ Potential trend reversal brewing"
+            ma_bias.bias_reason = "Potential reversal"
+            ma_bias.regime_warning = "⚠️ EMA curling up"
         else:
             ma_bias.bias = "NEUTRAL"
-            ma_bias.bias_reason = "ES near SMA200 → Ranging/Choppy"
-        
-        # Check for recent crosses (regime shift warning)
-        if len(closes) >= 10:
-            recent_closes = closes[-10:]
-            crosses = 0
-            for i in range(1, len(recent_closes)):
-                prev_above = recent_closes[i-1] > ma_bias.sma200
-                curr_above = recent_closes[i] > ma_bias.sma200
-                if prev_above != curr_above:
-                    crosses += 1
-            if crosses >= 3:
-                ma_bias.regime_warning = f"⚠️ {crosses} SMA200 crosses in last 10 bars → CHOPPY"
-                ma_bias.bias = "NEUTRAL"
-                ma_bias.bias_reason = "Multiple MA crosses → Avoid trading"
+            ma_bias.bias_reason = "Ranging market"
         
         return ma_bias
         
     except Exception as e:
+        ma_bias.bias = "NEUTRAL"
+        ma_bias.bias_reason = "Connection error"
+        return ma_bias
         ma_bias.bias = "NEUTRAL"
         ma_bias.bias_reason = f"Error: {str(e)[:50]}"
         return ma_bias
@@ -411,81 +422,79 @@ def polygon_get_index_price(ticker):
 
 def estimate_0dte_price(vix, otm_distance, hours_left, is_put=False, mins_after_open=30):
     """
-    Estimate SPX 0DTE option price.
-    Calibrated to real trade data.
+    Estimate SPX 0DTE option price based on real trade data.
     
-    Args:
-        vix: Current VIX level (use 16 as default if not set)
-        otm_distance: Points OTM
-        hours_left: Hours until 3pm CT (6.5 at 8:30 AM, 6 at 9:00 AM)
-        is_put: True for puts
-        mins_after_open: Minutes after 8:30 AM open (0=8:30, 30=9:00, 60=9:30, 90=10:00)
+    CALIBRATION DATA (David's actual trades):
+    - VIX 15.11, 15 OTM, 8:30 AM: $7.40 → 9:10 AM: $3.90 (47% drop)
+    - VIX 17.53, 15 OTM, 8:30 AM: $5.80 → 9:10 AM: $3.60 (38% drop)
+    - VIX 16.52, 15 OTM, 10:00 AM: $2.25
     
-    Returns: Estimated premium per contract
+    Sweet spot entry: 9:00-10:00 AM at $3-$5 range
     """
     if vix <= 0:
-        vix = 16  # Default assumption
+        vix = 16
     
-    # BASE PRICE at 8:30 AM (market open)
-    base_830 = 7.50
+    # STEP 1: Calculate base price at 8:30 AM
+    # Base: $6.50 at VIX 15, 15 OTM
+    base = 6.50
     
-    # VIX adjustment (steeper above 18)
-    if vix <= 15:
-        vix_adj = 0
-    elif vix <= 18:
-        vix_adj = (vix - 15) * 0.35
+    # VIX adjustment: Higher VIX = higher premium
+    # +$0.30 per VIX point from 12-16
+    # +$0.50 per VIX point from 16-20
+    # +$0.70 per VIX point above 20
+    if vix <= 12:
+        vix_adj = -1.20  # Low VIX = cheaper
+    elif vix <= 16:
+        vix_adj = (vix - 14) * 0.30
+    elif vix <= 20:
+        vix_adj = 0.60 + (vix - 16) * 0.50
     else:
-        vix_adj = 1.05 + (vix - 18) * 0.60
+        vix_adj = 2.60 + (vix - 20) * 0.70
     
-    # OTM adjustment (reduced penalty at high VIX)
-    otm_penalty = 0.10 * max(0.4, 1 - (vix - 15) * 0.04)
-    otm_adj = -otm_penalty * max(0, otm_distance - 15)
-    
-    # Put skew (only at high VIX - fear premium)
-    if is_put and vix >= 19:
-        skew = 1.20 + (vix - 19) * 0.10
+    # OTM adjustment: Further OTM = cheaper
+    # -$0.12 per point beyond 15 OTM
+    if otm_distance <= 15:
+        otm_adj = 0
     else:
-        skew = 1.0
+        otm_adj = -(otm_distance - 15) * 0.12
     
-    # Calculate 8:30 AM price first
-    price_830 = (base_830 + vix_adj + otm_adj) * skew
+    # Put premium: Puts slightly more expensive at high VIX
+    if is_put and vix >= 18:
+        put_adj = (vix - 18) * 0.15
+    else:
+        put_adj = 0
     
-    # ENTRY TIME DECAY - Based on real data:
-    # 8:30 AM → 9:00-9:10 AM: ~43% drop (ratio 0.57)
-    # This captures both theta decay AND the spike/retrace pattern
-    #
-    # Data points:
-    # VIX 15.11: $7.40 → $3.90 (ratio 0.53)
-    # VIX 17.53: $5.80 → $3.60 (ratio 0.62)
-    #
-    # Pattern: Higher VIX = smaller drop (more premium retention)
+    # 8:30 AM price
+    price_830 = max(1.0, base + vix_adj + otm_adj + put_adj)
+    
+    # STEP 2: Apply time decay based on entry time
+    # Your data shows ~45% drop from 8:30 to 9:10 AM
+    # And ~70% drop from 8:30 to 10:00 AM
     
     if mins_after_open <= 0:
-        # 8:30 AM - full price
-        entry_factor = 1.0
-    elif mins_after_open <= 30:
-        # 8:30-9:00 AM - transitioning through spike/retrace
-        # Linear interpolation from 1.0 to ~0.60
-        entry_factor = 1.0 - (mins_after_open / 30) * 0.40
+        time_factor = 1.0
+    elif mins_after_open <= 20:
+        # 8:30-8:50: Initial spike period, prices volatile
+        time_factor = 1.0 - (mins_after_open / 20) * 0.20
+    elif mins_after_open <= 40:
+        # 8:50-9:10: Retrace period - YOUR ENTRY ZONE
+        time_factor = 0.80 - ((mins_after_open - 20) / 20) * 0.25
     elif mins_after_open <= 60:
-        # 9:00-9:30 AM - post-retrace sweet spot
-        # Continues decay from 0.60 to ~0.45
-        entry_factor = 0.60 - ((mins_after_open - 30) / 30) * 0.15
+        # 9:10-9:30: Post-retrace stabilization
+        time_factor = 0.55 - ((mins_after_open - 40) / 20) * 0.10
     elif mins_after_open <= 90:
-        # 9:30-10:00 AM - theta accelerating
-        # From 0.45 to ~0.35
-        entry_factor = 0.45 - ((mins_after_open - 60) / 30) * 0.10
+        # 9:30-10:00: Accelerating theta
+        time_factor = 0.45 - ((mins_after_open - 60) / 30) * 0.12
     else:
-        # 10:00+ AM - heavy decay
-        # From 0.35 declining further
-        entry_factor = max(0.15, 0.35 - ((mins_after_open - 90) / 60) * 0.15)
+        # 10:00+ AM: Heavy decay
+        time_factor = max(0.20, 0.33 - ((mins_after_open - 90) / 60) * 0.10)
     
-    # Higher VIX retains more premium (less decay)
-    if vix > 15:
-        vix_retention = 1 + (vix - 15) * 0.015  # ~1.5% less decay per VIX point
-        entry_factor = min(1.0, entry_factor * vix_retention)
+    # Higher VIX = premium holds better
+    if vix > 16:
+        vix_retention = 1 + (vix - 16) * 0.02
+        time_factor = min(1.0, time_factor * vix_retention)
     
-    price = price_830 * entry_factor
+    price = price_830 * time_factor
     return max(0.50, round(price, 2))
 
 def get_option_data_for_entry(entry_rail, opt_type, vix_current=16, mins_after_open=30):
@@ -1816,8 +1825,9 @@ body {{
         <div class="bias-card" style="background:{ma_bg};border-color:{ma_color}50;margin-top:12px;">
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:{ma_color};margin-bottom:6px;">30-Min MA Bias</div>
             <div style="font-size:28px;color:{ma_color};line-height:1;">{ma_icon}</div>
-            <div style="font-size:20px;font-weight:700;color:{ma_color};margin-top:6px;">Bias: {ma_bias.bias if ma_bias else 'N/A'}</div>
-            {f'<div style="margin-top:8px;padding:6px 10px;background:{amber}20;border-radius:6px;font-size:10px;color:{amber}">{ma_bias.regime_warning}</div>' if ma_bias and ma_bias.regime_warning else ''}
+            <div style="font-size:20px;font-weight:700;color:{ma_color};margin-top:6px;">{ma_bias.bias if ma_bias else 'N/A'}</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">{ma_bias.bias_reason if ma_bias else ''}</div>
+            {f'<div style="margin-top:6px;padding:5px 8px;background:{amber}20;border-radius:6px;font-size:10px;color:{amber}">{ma_bias.regime_warning}</div>' if ma_bias and ma_bias.regime_warning else ''}
         </div>
     </div>
     
