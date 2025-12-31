@@ -222,6 +222,33 @@ class PivotTableRow:
     prior_close_asc: float = 0.0
     prior_close_desc: float = 0.0
 
+@dataclass
+class PriceProximity:
+    """Analyzes current price position relative to structural cones"""
+    current_price: float = 0.0
+    
+    # Position relative to all cones
+    position: str = "UNKNOWN"  # "ABOVE_ALL", "BELOW_ALL", "INSIDE_CONE", "NEAR_RAIL", "BETWEEN_CONES"
+    position_detail: str = ""  # Human-readable description
+    
+    # Nearest rail info
+    nearest_rail: float = 0.0
+    nearest_rail_name: str = ""  # e.g., "Prior High ascending"
+    nearest_rail_type: str = ""  # "ascending" or "descending"
+    nearest_rail_distance: float = 0.0  # Positive = above, Negative = below
+    nearest_cone_name: str = ""
+    
+    # If inside a cone
+    inside_cone: bool = False
+    inside_cone_name: str = ""
+    
+    # Action guidance
+    action: str = ""  # What to do: "WAIT_FOR_PULLBACK", "WAIT_FOR_RALLY", "WATCH_FOR_ENTRY", "INSIDE_WAIT"
+    action_detail: str = ""  # Specific instruction
+    
+    # All rail distances for table display
+    rail_distances: Dict = None  # {cone_name: {"asc": dist, "desc": dist}}
+
 def get_ct_now():
     return datetime.now(CT_TZ)
 
@@ -1050,6 +1077,127 @@ def build_cones(pivots, eval_time):
         cones.append(Cone(name=pivot.name, pivot=pivot, ascending_rail=round(ascending, 2), descending_rail=round(descending, 2), width=round(width, 2), blocks=blocks, is_tradeable=(width >= MIN_CONE_WIDTH)))
     return cones
 
+def analyze_price_proximity(current_price: float, cones: List[Cone], vix_zone=None) -> PriceProximity:
+    """
+    Analyze current SPX price position relative to structural cones.
+    
+    Returns actionable guidance based on where price sits:
+    - Above all cones: Wait for pullback
+    - Below all cones: Wait for rally  
+    - Inside a cone: Wait for rail touch
+    - Near a rail: Setup active
+    """
+    proximity = PriceProximity(current_price=current_price, rail_distances={})
+    
+    if not cones or current_price <= 0:
+        proximity.position = "UNKNOWN"
+        proximity.position_detail = "No price data"
+        return proximity
+    
+    tradeable_cones = [c for c in cones if c.is_tradeable]
+    if not tradeable_cones:
+        proximity.position = "UNKNOWN"
+        proximity.position_detail = "No tradeable cones"
+        return proximity
+    
+    # Get all rails and their distances
+    all_rails = []
+    for cone in tradeable_cones:
+        asc_dist = current_price - cone.ascending_rail
+        desc_dist = current_price - cone.descending_rail
+        proximity.rail_distances[cone.name] = {
+            "ascending": round(asc_dist, 1),
+            "descending": round(desc_dist, 1),
+            "asc_rail": cone.ascending_rail,
+            "desc_rail": cone.descending_rail
+        }
+        all_rails.append({
+            "rail": cone.ascending_rail,
+            "type": "ascending",
+            "cone": cone.name,
+            "distance": asc_dist
+        })
+        all_rails.append({
+            "rail": cone.descending_rail,
+            "type": "descending",
+            "cone": cone.name,
+            "distance": desc_dist
+        })
+    
+    # Find highest ascending and lowest descending across all cones
+    highest_asc = max(c.ascending_rail for c in tradeable_cones)
+    lowest_desc = min(c.descending_rail for c in tradeable_cones)
+    
+    # Find nearest rail
+    nearest = min(all_rails, key=lambda x: abs(x["distance"]))
+    proximity.nearest_rail = nearest["rail"]
+    proximity.nearest_rail_name = f"{nearest['cone']} {nearest['type']}"
+    proximity.nearest_rail_type = nearest["type"]
+    proximity.nearest_rail_distance = round(nearest["distance"], 1)
+    proximity.nearest_cone_name = nearest["cone"]
+    
+    # Determine position
+    NEAR_THRESHOLD = 8  # Within 8 points = "near"
+    
+    if current_price > highest_asc:
+        # Price is ABOVE all cones
+        proximity.position = "ABOVE_ALL"
+        dist_to_highest = round(current_price - highest_asc, 1)
+        proximity.position_detail = f"Extended {dist_to_highest} pts above structure"
+        proximity.action = "WAIT_FOR_PULLBACK"
+        proximity.action_detail = f"Wait for pullback to {nearest['cone']} ascending @ {nearest['rail']:,.0f}"
+        
+    elif current_price < lowest_desc:
+        # Price is BELOW all cones
+        proximity.position = "BELOW_ALL"
+        dist_to_lowest = round(lowest_desc - current_price, 1)
+        proximity.position_detail = f"Extended {dist_to_lowest} pts below structure"
+        proximity.action = "WAIT_FOR_RALLY"
+        proximity.action_detail = f"Wait for rally to {nearest['cone']} descending @ {nearest['rail']:,.0f}"
+        
+    else:
+        # Price is within the cone zone - check if inside a specific cone
+        inside_cones = [c for c in tradeable_cones 
+                       if c.descending_rail <= current_price <= c.ascending_rail]
+        
+        if inside_cones:
+            # Inside one or more cones
+            proximity.inside_cone = True
+            proximity.inside_cone_name = inside_cones[0].name
+            proximity.position = "INSIDE_CONE"
+            proximity.position_detail = f"Inside {inside_cones[0].name} cone"
+            proximity.action = "INSIDE_WAIT"
+            
+            # Find nearest rail of the cone we're inside
+            cone = inside_cones[0]
+            dist_to_asc = cone.ascending_rail - current_price
+            dist_to_desc = current_price - cone.descending_rail
+            
+            if dist_to_asc < dist_to_desc:
+                proximity.action_detail = f"Approaching ascending rail @ {cone.ascending_rail:,.0f} ({dist_to_asc:.0f} pts) — watch for PUTS entry"
+            else:
+                proximity.action_detail = f"Approaching descending rail @ {cone.descending_rail:,.0f} ({dist_to_desc:.0f} pts) — watch for CALLS entry"
+        
+        elif abs(nearest["distance"]) <= NEAR_THRESHOLD:
+            # Near a rail
+            proximity.position = "NEAR_RAIL"
+            proximity.position_detail = f"{abs(nearest['distance']):.0f} pts from {nearest['cone']} {nearest['type']}"
+            proximity.action = "WATCH_FOR_ENTRY"
+            
+            if nearest["type"] == "ascending":
+                proximity.action_detail = f"Approaching {nearest['cone']} ascending @ {nearest['rail']:,.0f} — PUTS entry zone"
+            else:
+                proximity.action_detail = f"Approaching {nearest['cone']} descending @ {nearest['rail']:,.0f} — CALLS entry zone"
+        
+        else:
+            # Between cones but not inside any
+            proximity.position = "BETWEEN_CONES"
+            proximity.position_detail = f"Between structures, {abs(nearest['distance']):.0f} pts to nearest rail"
+            proximity.action = "WAIT_FOR_APPROACH"
+            proximity.action_detail = f"Wait for price to approach {nearest['cone']} {nearest['type']} @ {nearest['rail']:,.0f}"
+    
+    return proximity
+
 def build_pivot_table(pivots, trading_date):
     rows = []
     time_blocks = [("8:30", time(8, 30)), ("9:00", time(9, 0)), ("9:30", time(9, 30)), ("10:00", time(10, 0)), ("10:30", time(10, 30)), ("11:00", time(11, 0)), ("11:30", time(11, 30)), ("12:00", time(12, 0))]
@@ -1374,7 +1522,7 @@ def check_alerts(setups, vix_zone, current_time):
         alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window (9:00-9:30 CT)"})
     return alerts
 
-def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, gap_analysis=None, market_ctx=None):
+def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, gap_analysis=None, market_ctx=None, price_proximity=None):
     # PREMIUM DESIGN SYSTEM - Institutional Grade
     if theme == "light":
         # Clean, minimal light theme inspired by Linear/Stripe
@@ -2547,7 +2695,7 @@ body {{
     stroke_offset = circumference * (1 - score_pct)
     score_class = "a" if total_score >= 80 else "b" if total_score >= 65 else "c" if total_score >= 50 else "d"
     
-    # Find BEST setup (matches direction + closest + widest cone)
+    # Find BEST setup (matches direction + closest to price + widest cone)
     best_setup = None
     search_direction = show_direction if show_direction in ["CALLS", "PUTS"] else None
     if search_direction and not has_conflict:
@@ -2555,7 +2703,12 @@ body {{
         if matching:
             # Score each setup: closer is better, wider cone is better
             def setup_score(s):
-                distance_score = max(0, 30 - s.distance)  # Closer = higher score
+                # If overnight price provided, use distance from price to entry
+                if price_proximity and price_proximity.current_price > 0:
+                    price_to_entry = abs(s.entry - price_proximity.current_price)
+                    distance_score = max(0, 50 - price_to_entry)  # Closer to current price = higher score
+                else:
+                    distance_score = max(0, 30 - s.distance)  # Closer = higher score
                 width_score = s.cone_width  # Wider = higher score
                 return distance_score + width_score
             best_setup = max(matching, key=setup_score)
@@ -2636,6 +2789,77 @@ body {{
 </div>
 '''
 
+    # Price Proximity Alert Box (only show if overnight price provided)
+    if price_proximity and price_proximity.current_price > 0:
+        # Determine alert styling based on position
+        if price_proximity.position == "NEAR_RAIL":
+            prox_bg = "linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(34,197,94,0.05) 100%)"
+            prox_border = "var(--success)"
+            prox_icon = "🎯"
+            prox_title = "SETUP ACTIVE"
+        elif price_proximity.position == "ABOVE_ALL":
+            prox_bg = "linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(239,68,68,0.05) 100%)"
+            prox_border = "var(--danger)"
+            prox_icon = "⚡"
+            prox_title = "EXTENDED ABOVE"
+        elif price_proximity.position == "BELOW_ALL":
+            prox_bg = "linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(239,68,68,0.05) 100%)"
+            prox_border = "var(--danger)"
+            prox_icon = "⚡"
+            prox_title = "EXTENDED BELOW"
+        elif price_proximity.position == "INSIDE_CONE":
+            prox_bg = "linear-gradient(135deg, rgba(234,179,8,0.15) 0%, rgba(234,179,8,0.05) 100%)"
+            prox_border = "var(--warning)"
+            prox_icon = "📍"
+            prox_title = "INSIDE STRUCTURE"
+        else:
+            prox_bg = "var(--bg-surface)"
+            prox_border = "var(--border)"
+            prox_icon = "📍"
+            prox_title = "PRICE POSITION"
+        
+        # Build rail distances display for each cone
+        rail_dist_html = ""
+        if price_proximity.rail_distances:
+            rail_dist_html = '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:var(--space-3);margin-top:var(--space-3);">'
+            for cone_name, dists in price_proximity.rail_distances.items():
+                asc_dist = dists["ascending"]
+                desc_dist = dists["descending"]
+                asc_color = "var(--success)" if abs(asc_dist) <= 8 else "var(--text-secondary)"
+                desc_color = "var(--success)" if abs(desc_dist) <= 8 else "var(--text-secondary)"
+                rail_dist_html += f'''
+                <div style="background:var(--bg-elevated);padding:var(--space-2);border-radius:var(--radius-sm);font-size:11px;">
+                    <div style="font-weight:600;color:var(--text-primary);margin-bottom:4px;">{cone_name}</div>
+                    <div style="display:flex;justify-content:space-between;">
+                        <span style="color:{asc_color};">↑ {asc_dist:+.0f}</span>
+                        <span style="color:{desc_color};">↓ {desc_dist:+.0f}</span>
+                    </div>
+                </div>'''
+            rail_dist_html += '</div>'
+        
+        html += f'''
+<!-- PRICE PROXIMITY ALERT -->
+<div style="background:{prox_bg};border:1px solid {prox_border};border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:flex-start;gap:var(--space-3);">
+        <div style="font-size:28px;">{prox_icon}</div>
+        <div style="flex:1;">
+            <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-1);">
+                <span style="font-size:12px;font-weight:700;color:var(--text-primary);letter-spacing:0.5px;">{prox_title}</span>
+                <span style="font-size:18px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">SPX @ {price_proximity.current_price:,.2f}</span>
+            </div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:var(--space-2);">{price_proximity.position_detail}</div>
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary);">{price_proximity.action_detail}</div>
+            {rail_dist_html}
+        </div>
+        <div style="text-align:right;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Nearest Rail</div>
+            <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">{price_proximity.nearest_rail:,.0f}</div>
+            <div style="font-size:12px;color:var(--text-secondary);">{price_proximity.nearest_rail_distance:+.0f} pts</div>
+        </div>
+    </div>
+</div>
+'''
+
     # VIX Section
     html += f'''
 <!-- VIX METER -->
@@ -2707,6 +2931,21 @@ body {{
     </div>
 '''
     
+    # Price Proximity Card (only show if overnight price provided)
+    if price_proximity and price_proximity.current_price > 0:
+        prox_class = "long" if price_proximity.position == "NEAR_RAIL" else "short" if price_proximity.position in ["ABOVE_ALL", "BELOW_ALL"] else "neutral"
+        prox_icon = "🎯" if price_proximity.position == "NEAR_RAIL" else "⚡" if price_proximity.position in ["ABOVE_ALL", "BELOW_ALL"] else "📍"
+        html += f'''
+    <div class="indicator-card">
+        <div class="indicator-header">
+            <div class="indicator-title">Price Proximity</div>
+            <div class="indicator-status {prox_class}"></div>
+        </div>
+        <div class="indicator-value {prox_class}">{prox_icon} {price_proximity.position.replace("_", " ")}</div>
+        <div class="indicator-detail">{price_proximity.position_detail}</div>
+    </div>
+'''
+    
     html += '</div>'
     
     # CALLS Setups Section
@@ -2731,6 +2970,16 @@ body {{
         status_text = "★ BEST" if is_best else ("ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT")
         status_style = "best" if is_best else ("active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait")
         best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best else ""
+        
+        # Calculate distance from overnight price if available
+        if price_proximity and price_proximity.current_price > 0:
+            price_to_entry = s.entry - price_proximity.current_price
+            distance_display = f"{price_to_entry:+.0f} pts from price"
+            distance_color = "var(--success)" if abs(price_to_entry) <= 8 else "var(--text-secondary)"
+        else:
+            distance_display = f"{s.distance:.0f} pts away"
+            distance_color = "var(--text-secondary)"
+        
         html += f'''
             <div class="setup-card calls {status_class}" style="{best_style}">
                 <div class="setup-header">
@@ -2740,7 +2989,7 @@ body {{
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
                     <div class="setup-entry-price calls">{s.entry:,.2f}</div>
-                    <div class="setup-entry-distance">{s.distance:.0f} pts away</div>
+                    <div class="setup-entry-distance" style="color:{distance_color};">{distance_display}</div>
                 </div>
                 <div class="setup-contract">
                     <div class="contract-item">
@@ -2790,6 +3039,16 @@ body {{
         status_text = "★ BEST" if is_best else ("ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT")
         status_style = "best" if is_best else ("active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait")
         best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best else ""
+        
+        # Calculate distance from overnight price if available
+        if price_proximity and price_proximity.current_price > 0:
+            price_to_entry = s.entry - price_proximity.current_price
+            distance_display = f"{price_to_entry:+.0f} pts from price"
+            distance_color = "var(--success)" if abs(price_to_entry) <= 8 else "var(--text-secondary)"
+        else:
+            distance_display = f"{s.distance:.0f} pts away"
+            distance_color = "var(--text-secondary)"
+        
         html += f'''
             <div class="setup-card puts {status_class}" style="{best_style}">
                 <div class="setup-header">
@@ -2799,7 +3058,7 @@ body {{
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
                     <div class="setup-entry-price puts">{s.entry:,.2f}</div>
-                    <div class="setup-entry-distance">{s.distance:.0f} pts away</div>
+                    <div class="setup-entry-distance" style="color:{distance_color};">{distance_display}</div>
                 </div>
                 <div class="setup-contract">
                     <div class="contract-item">
@@ -3057,6 +3316,29 @@ def main():
             st.session_state.vix_top = st.number_input("Top", value=st.session_state.vix_top, step=0.01, format="%.2f")
         st.session_state.vix_current = st.number_input("Current VIX", value=st.session_state.vix_current, step=0.01, format="%.2f")
         st.divider()
+        
+        # OVERNIGHT SPX PRICE INPUT
+        st.markdown("### 📍 Overnight SPX Price")
+        st.caption("Enter current SPX/ES price for proximity analysis")
+        
+        # Initialize session state for overnight price
+        if "overnight_spx" not in st.session_state:
+            st.session_state.overnight_spx = 0.0
+        
+        st.session_state.overnight_spx = st.number_input(
+            "Current SPX Price", 
+            value=st.session_state.overnight_spx, 
+            step=1.0, 
+            format="%.2f",
+            help="Enter the current overnight SPX futures price to see distance to entries"
+        )
+        
+        if st.session_state.overnight_spx > 0:
+            st.success(f"📊 Price tracking: {st.session_state.overnight_spx:,.2f}")
+        else:
+            st.caption("💡 Optional: Shows distance to entry rails")
+        
+        st.divider()
         st.markdown("### ⏰ Entry Time")
         st.caption("Slide to estimate contract prices at your entry time")
         st.session_state.entry_time_mins = st.slider(
@@ -3235,6 +3517,12 @@ def main():
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     
+    # Analyze price proximity if overnight SPX price provided
+    overnight_price = st.session_state.get("overnight_spx", 0.0)
+    price_proximity = None
+    if overnight_price > 0 and cones:
+        price_proximity = analyze_price_proximity(overnight_price, cones, vix_zone)
+    
     # Calculate MA Bias using ES futures from Yahoo Finance (23 hrs/day = more bars)
     ma_bias = fetch_es_ma_bias()
     
@@ -3257,6 +3545,8 @@ def main():
             st.caption(f"{conf_emoji} Confluence: {confluence.signal_strength}")
         if gap_analysis and gap_analysis.gap_direction != "FLAT":
             st.caption(f"📊 Gap: {gap_analysis.gap_pct:+.2f}%")
+        if price_proximity and price_proximity.position != "UNKNOWN":
+            st.caption(f"📍 {price_proximity.position_detail}")
     
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
@@ -3267,7 +3557,7 @@ def main():
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, gap_analysis, market_ctx)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, gap_analysis, market_ctx, price_proximity)
     components.html(html, height=4500, scrolling=True)
 
 if __name__ == "__main__":
