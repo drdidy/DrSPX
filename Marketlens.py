@@ -1718,40 +1718,44 @@ body {{
 .logo {{
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: var(--space-4);
 }}
 
 .logo-mark {{
-    width: 36px;
-    height: 36px;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    border-radius: var(--radius-md);
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+    border-radius: var(--radius-lg);
     display: grid;
     place-items: center;
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
     color: white;
     letter-spacing: -0.5px;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }}
 
 .logo-text {{
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
 }}
 
 .logo-title {{
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 22px;
+    font-weight: 700;
     color: var(--text-primary);
-    letter-spacing: -0.3px;
+    letter-spacing: -0.5px;
+    line-height: 1.1;
 }}
 
 .logo-subtitle {{
-    font-size: 11px;
-    color: var(--text-tertiary);
+    font-size: 13px;
+    color: var(--text-secondary);
     font-weight: 500;
+    letter-spacing: 0.3px;
+    opacity: 0.9;
 }}
 
 .header-meta {{
