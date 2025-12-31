@@ -2696,22 +2696,30 @@ body {{
     score_class = "a" if total_score >= 80 else "b" if total_score >= 65 else "c" if total_score >= 50 else "d"
     
     # Find BEST setup (matches direction + closest to price + widest cone)
+    # PRIORITY: If inside a cone, that cone's setup is best (when direction matches)
     best_setup = None
     search_direction = show_direction if show_direction in ["CALLS", "PUTS"] else None
     if search_direction and not has_conflict:
         matching = [s for s in setups if s.direction == search_direction and s.status != "GREY"]
         if matching:
-            # Score each setup: closer is better, wider cone is better
-            def setup_score(s):
-                # If overnight price provided, use distance from price to entry
-                if price_proximity and price_proximity.current_price > 0:
-                    price_to_entry = abs(s.entry - price_proximity.current_price)
-                    distance_score = max(0, 50 - price_to_entry)  # Closer to current price = higher score
-                else:
-                    distance_score = max(0, 30 - s.distance)  # Closer = higher score
-                width_score = s.cone_width  # Wider = higher score
-                return distance_score + width_score
-            best_setup = max(matching, key=setup_score)
+            # PRIORITY 1: If inside a cone and that cone has a matching setup, use it
+            if price_proximity and price_proximity.inside_cone and price_proximity.inside_cone_name:
+                inside_match = [s for s in matching if s.cone_name == price_proximity.inside_cone_name]
+                if inside_match:
+                    best_setup = inside_match[0]  # The setup from the cone we're inside
+            
+            # PRIORITY 2: Otherwise, score by proximity to current price
+            if not best_setup:
+                def setup_score(s):
+                    # If overnight price provided, use distance from price to entry
+                    if price_proximity and price_proximity.current_price > 0:
+                        price_to_entry = abs(s.entry - price_proximity.current_price)
+                        distance_score = max(0, 50 - price_to_entry)  # Closer to current price = higher score
+                    else:
+                        distance_score = max(0, 30 - s.distance)  # Closer = higher score
+                    width_score = s.cone_width  # Wider = higher score
+                    return distance_score + width_score
+                best_setup = max(matching, key=setup_score)
     
     # Breakout indicator
     breakout_html = ""
@@ -2818,21 +2826,32 @@ body {{
             prox_icon = "📍"
             prox_title = "PRICE POSITION"
         
-        # Build rail distances display for each cone
+        # Build rail distances display for each cone - show actual prices and distances
         rail_dist_html = ""
         if price_proximity.rail_distances:
-            rail_dist_html = '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:var(--space-3);margin-top:var(--space-3);">'
+            rail_dist_html = '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:var(--space-3);margin-top:var(--space-3);">'
             for cone_name, dists in price_proximity.rail_distances.items():
                 asc_dist = dists["ascending"]
                 desc_dist = dists["descending"]
+                asc_rail = dists["asc_rail"]
+                desc_rail = dists["desc_rail"]
                 asc_color = "var(--success)" if abs(asc_dist) <= 8 else "var(--text-secondary)"
                 desc_color = "var(--success)" if abs(desc_dist) <= 8 else "var(--text-secondary)"
+                # Highlight the cone we're inside
+                is_inside = price_proximity.inside_cone and price_proximity.inside_cone_name == cone_name
+                box_border = "border:1px solid var(--warning);" if is_inside else ""
                 rail_dist_html += f'''
-                <div style="background:var(--bg-elevated);padding:var(--space-2);border-radius:var(--radius-sm);font-size:11px;">
-                    <div style="font-weight:600;color:var(--text-primary);margin-bottom:4px;">{cone_name}</div>
-                    <div style="display:flex;justify-content:space-between;">
-                        <span style="color:{asc_color};">↑ {asc_dist:+.0f}</span>
-                        <span style="color:{desc_color};">↓ {desc_dist:+.0f}</span>
+                <div style="background:var(--bg-elevated);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);font-size:11px;{box_border}">
+                    <div style="font-weight:600;color:var(--text-primary);margin-bottom:6px;">{cone_name}{"  ◀ YOU ARE HERE" if is_inside else ""}</div>
+                    <div style="display:flex;justify-content:space-between;gap:var(--space-3);">
+                        <div>
+                            <div style="color:var(--text-muted);font-size:9px;margin-bottom:2px;">PUTS Entry ↑</div>
+                            <div style="color:{asc_color};font-weight:600;">{asc_rail:,.0f} <span style="font-weight:400;">({asc_dist:+.0f})</span></div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="color:var(--text-muted);font-size:9px;margin-bottom:2px;">CALLS Entry ↓</div>
+                            <div style="color:{desc_color};font-weight:600;">{desc_rail:,.0f} <span style="font-weight:400;">({desc_dist:+.0f})</span></div>
+                        </div>
                     </div>
                 </div>'''
             rail_dist_html += '</div>'
