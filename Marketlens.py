@@ -249,6 +249,38 @@ class PriceProximity:
     # All rail distances for table display
     rail_distances: Dict = None  # {cone_name: {"asc": dist, "desc": dist}}
 
+@dataclass
+class DayStructure:
+    """Trendlines from Asian session to London session projected into RTH"""
+    
+    # High trendline (Asia High → London High)
+    high_line_valid: bool = False
+    high_line_slope: float = 0.0  # $/minute
+    high_line_at_entry: float = 0.0  # Projected price at entry time
+    high_line_direction: str = ""  # "ASCENDING", "DESCENDING", "FLAT"
+    
+    # Low trendline (Asia Low → London Low)
+    low_line_valid: bool = False
+    low_line_slope: float = 0.0  # $/minute
+    low_line_at_entry: float = 0.0  # Projected price at entry time
+    low_line_direction: str = ""  # "ASCENDING", "DESCENDING", "FLAT"
+    
+    # Overall structure shape
+    structure_shape: str = ""  # "EXPANDING", "CONTRACTING", "PARALLEL_UP", "PARALLEL_DOWN", "MIXED"
+    
+    # Confluence with cones
+    high_confluence_cone: str = ""  # Cone name where high line aligns
+    high_confluence_rail: str = ""  # "ascending" or "descending"
+    high_confluence_dist: float = 0.0  # Distance in points
+    
+    low_confluence_cone: str = ""
+    low_confluence_rail: str = ""
+    low_confluence_dist: float = 0.0
+    
+    # Best confluence
+    has_confluence: bool = False
+    best_confluence_detail: str = ""
+
 def get_ct_now():
     return datetime.now(CT_TZ)
 
@@ -699,6 +731,149 @@ def analyze_market_context(prior_session, vix_current, current_time_ct):
         ctx.time_warning = "Very late"
     
     return ctx
+
+def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
+                            london_high, london_high_time, london_low, london_low_time,
+                            entry_time_mins, cones, trading_date):
+    """
+    Calculate day structure trendlines from Asian to London session pivots.
+    Project them into RTH and find confluence with cone rails.
+    
+    Times are in CT (Central Time).
+    """
+    ds = DayStructure()
+    
+    def parse_time_to_mins_from_midnight(t_str):
+        """Parse time string to minutes from midnight"""
+        try:
+            t_str = t_str.strip().replace(" ", "")
+            parts = t_str.split(":")
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            return h * 60 + m
+        except:
+            return 0
+    
+    # Entry time in minutes from midnight (8:30 AM + entry_time_mins)
+    entry_mins = 8 * 60 + 30 + entry_time_mins
+    
+    # HIGH TRENDLINE: Asia High → London High
+    if asia_high > 0 and london_high > 0:
+        asia_h_mins = parse_time_to_mins_from_midnight(asia_high_time)
+        london_h_mins = parse_time_to_mins_from_midnight(london_high_time)
+        
+        # Handle overnight (London time is next day if < Asia time)
+        if london_h_mins < asia_h_mins:
+            london_h_mins += 24 * 60
+        
+        time_diff = london_h_mins - asia_h_mins
+        if time_diff > 0:
+            ds.high_line_valid = True
+            ds.high_line_slope = (london_high - asia_high) / time_diff  # $/minute
+            
+            # Project to entry time
+            # Entry time relative to Asia high time
+            entry_mins_adj = entry_mins
+            if entry_mins < asia_h_mins:
+                entry_mins_adj += 24 * 60  # Next day
+            
+            mins_from_asia = entry_mins_adj - asia_h_mins
+            ds.high_line_at_entry = asia_high + (ds.high_line_slope * mins_from_asia)
+            
+            # Determine direction
+            if ds.high_line_slope > 0.001:
+                ds.high_line_direction = "ASCENDING"
+            elif ds.high_line_slope < -0.001:
+                ds.high_line_direction = "DESCENDING"
+            else:
+                ds.high_line_direction = "FLAT"
+    
+    # LOW TRENDLINE: Asia Low → London Low
+    if asia_low > 0 and london_low > 0:
+        asia_l_mins = parse_time_to_mins_from_midnight(asia_low_time)
+        london_l_mins = parse_time_to_mins_from_midnight(london_low_time)
+        
+        # Handle overnight
+        if london_l_mins < asia_l_mins:
+            london_l_mins += 24 * 60
+        
+        time_diff = london_l_mins - asia_l_mins
+        if time_diff > 0:
+            ds.low_line_valid = True
+            ds.low_line_slope = (london_low - asia_low) / time_diff  # $/minute
+            
+            # Project to entry time
+            entry_mins_adj = entry_mins
+            if entry_mins < asia_l_mins:
+                entry_mins_adj += 24 * 60
+            
+            mins_from_asia = entry_mins_adj - asia_l_mins
+            ds.low_line_at_entry = asia_low + (ds.low_line_slope * mins_from_asia)
+            
+            # Determine direction
+            if ds.low_line_slope > 0.001:
+                ds.low_line_direction = "ASCENDING"
+            elif ds.low_line_slope < -0.001:
+                ds.low_line_direction = "DESCENDING"
+            else:
+                ds.low_line_direction = "FLAT"
+    
+    # STRUCTURE SHAPE
+    if ds.high_line_valid and ds.low_line_valid:
+        if ds.high_line_slope > 0 and ds.low_line_slope > 0:
+            ds.structure_shape = "PARALLEL_UP"
+        elif ds.high_line_slope < 0 and ds.low_line_slope < 0:
+            ds.structure_shape = "PARALLEL_DOWN"
+        elif ds.high_line_slope > ds.low_line_slope:
+            ds.structure_shape = "EXPANDING"
+        elif ds.high_line_slope < ds.low_line_slope:
+            ds.structure_shape = "CONTRACTING"
+        else:
+            ds.structure_shape = "PARALLEL"
+    elif ds.high_line_valid:
+        ds.structure_shape = "HIGH_ONLY"
+    elif ds.low_line_valid:
+        ds.structure_shape = "LOW_ONLY"
+    
+    # FIND CONFLUENCE WITH CONE RAILS
+    if cones:
+        tradeable = [c for c in cones if c.is_tradeable]
+        
+        # Check high line confluence (looking for resistance alignment)
+        if ds.high_line_valid and ds.high_line_at_entry > 0:
+            best_dist = float('inf')
+            for cone in tradeable:
+                # Check against ascending rails (resistance/PUTS entry)
+                dist = abs(ds.high_line_at_entry - cone.ascending_rail)
+                if dist < best_dist and dist <= 10:  # Within 10 pts = confluence
+                    best_dist = dist
+                    ds.high_confluence_cone = cone.name
+                    ds.high_confluence_rail = "ascending"
+                    ds.high_confluence_dist = dist
+        
+        # Check low line confluence (looking for support alignment)
+        if ds.low_line_valid and ds.low_line_at_entry > 0:
+            best_dist = float('inf')
+            for cone in tradeable:
+                # Check against descending rails (support/CALLS entry)
+                dist = abs(ds.low_line_at_entry - cone.descending_rail)
+                if dist < best_dist and dist <= 10:  # Within 10 pts = confluence
+                    best_dist = dist
+                    ds.low_confluence_cone = cone.name
+                    ds.low_confluence_rail = "descending"
+                    ds.low_confluence_dist = dist
+    
+    # DETERMINE BEST CONFLUENCE
+    if ds.high_confluence_cone or ds.low_confluence_cone:
+        ds.has_confluence = True
+        details = []
+        if ds.low_confluence_cone:
+            details.append(f"Low line → {ds.low_confluence_cone} desc ({ds.low_confluence_dist:.0f} pts) = CALLS")
+        if ds.high_confluence_cone:
+            details.append(f"High line → {ds.high_confluence_cone} asc ({ds.high_confluence_dist:.0f} pts) = PUTS")
+        ds.best_confluence_detail = " | ".join(details)
+    
+    return ds
 
 def filter_bars_to_session(bars, session_date, close_time_ct):
     """CRITICAL FIX: Filter bars to session close time (handles half days)"""
@@ -1574,7 +1749,7 @@ def check_alerts(setups, vix_zone, current_time):
         alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window (9:00-9:30 CT)"})
     return alerts
 
-def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, gap_analysis=None, market_ctx=None, price_proximity=None):
+def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, gap_analysis=None, market_ctx=None, price_proximity=None, day_structure=None):
     # PREMIUM DESIGN SYSTEM - Institutional Grade
     if theme == "light":
         # Clean, minimal light theme inspired by Linear/Stripe
@@ -2932,6 +3107,67 @@ body {{
 </div>
 '''
 
+    # DAY STRUCTURE SECTION
+    if day_structure and (day_structure.high_line_valid or day_structure.low_line_valid):
+        ds_bg = "linear-gradient(135deg, rgba(139,92,246,0.15) 0%, rgba(139,92,246,0.05) 100%)" if day_structure.has_confluence else "var(--bg-surface)"
+        ds_border = "var(--accent)" if day_structure.has_confluence else "var(--border)"
+        
+        # Build trendline info
+        high_line_html = ""
+        if day_structure.high_line_valid:
+            h_dir_icon = "↗" if day_structure.high_line_direction == "ASCENDING" else "↘" if day_structure.high_line_direction == "DESCENDING" else "→"
+            h_confl = f"<span style='color:var(--success);font-weight:600;'> ✓ {day_structure.high_confluence_cone} ({day_structure.high_confluence_dist:.0f} pts)</span>" if day_structure.high_confluence_cone else ""
+            high_line_html = f'''
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-sm);margin-bottom:var(--space-2);">
+                <div>
+                    <span style="color:var(--danger);font-weight:600;">{h_dir_icon} High Line</span>
+                    <span style="color:var(--text-secondary);font-size:12px;margin-left:8px;">Asia H → London H</span>
+                </div>
+                <div style="text-align:right;">
+                    <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);">{day_structure.high_line_at_entry:,.0f}</span>
+                    <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">@ entry</span>
+                    {h_confl}
+                </div>
+            </div>'''
+        
+        low_line_html = ""
+        if day_structure.low_line_valid:
+            l_dir_icon = "↗" if day_structure.low_line_direction == "ASCENDING" else "↘" if day_structure.low_line_direction == "DESCENDING" else "→"
+            l_confl = f"<span style='color:var(--success);font-weight:600;'> ✓ {day_structure.low_confluence_cone} ({day_structure.low_confluence_dist:.0f} pts)</span>" if day_structure.low_confluence_cone else ""
+            low_line_html = f'''
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-sm);">
+                <div>
+                    <span style="color:var(--success);font-weight:600;">{l_dir_icon} Low Line</span>
+                    <span style="color:var(--text-secondary);font-size:12px;margin-left:8px;">Asia L → London L</span>
+                </div>
+                <div style="text-align:right;">
+                    <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);">{day_structure.low_line_at_entry:,.0f}</span>
+                    <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">@ entry</span>
+                    {l_confl}
+                </div>
+            </div>'''
+        
+        confluence_badge = ""
+        if day_structure.has_confluence:
+            confluence_badge = f'''
+            <div style="background:var(--success-soft);color:var(--success);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);font-size:12px;font-weight:600;margin-top:var(--space-2);">
+                ✨ CONFLUENCE: {day_structure.best_confluence_detail}
+            </div>'''
+        
+        html += f'''
+<!-- DAY STRUCTURE -->
+<div style="background:{ds_bg};border:1px solid {ds_border};border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
+        <span style="font-size:20px;">📐</span>
+        <span style="font-size:14px;font-weight:700;color:var(--text-primary);">Day Structure</span>
+        <span style="font-size:12px;color:var(--text-secondary);margin-left:auto;">{day_structure.structure_shape}</span>
+    </div>
+    {high_line_html}
+    {low_line_html}
+    {confluence_badge}
+</div>
+'''
+
     # VIX Section
     html += f'''
 <!-- VIX METER -->
@@ -3373,7 +3609,16 @@ document.addEventListener('DOMContentLoaded', function() {{
 
 def main():
     st.set_page_config(page_title="SPX Prophet", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
-    defaults = {'theme': 'dark', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'entry_time_mins': 30, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None, 'overnight_high': 0.0, 'overnight_high_time': "02:00", 'overnight_low': 0.0, 'overnight_low_time': "04:00"}
+    defaults = {
+        'theme': 'dark', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 
+        'entry_time_mins': 30, 'use_manual_pivots': False, 
+        'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 
+        'trading_date': None, 'last_refresh': None, 
+        'overnight_high': 0.0, 'overnight_high_time': "02:00", 'overnight_low': 0.0, 'overnight_low_time': "04:00",
+        # Day Structure - Session pivots
+        'asia_high': 0.0, 'asia_high_time': "21:00", 'asia_low': 0.0, 'asia_low_time': "23:00",
+        'london_high': 0.0, 'london_high_time': "03:00", 'london_low': 0.0, 'london_low_time': "05:00"
+    }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -3535,6 +3780,42 @@ def main():
         entry_hour = 8 + (30 + st.session_state.entry_time_mins) // 60
         entry_min = (30 + st.session_state.entry_time_mins) % 60
         st.caption(f"📍 Pricing at **{entry_hour}:{entry_min:02d} AM CT**")
+        st.divider()
+        
+        # DAY STRUCTURE - Session Trendlines
+        st.markdown("### 📐 Day Structure")
+        st.caption("Trendlines: Asia H→London H, Asia L→London L")
+        with st.expander("Session Pivots", expanded=False):
+            st.markdown("**Asian Session** (6pm-12am CT)")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.asia_high = st.number_input("Asia High $", value=st.session_state.asia_high, step=0.01, format="%.2f", key="asia_h")
+            with c2:
+                st.session_state.asia_high_time = st.text_input("Time", value=st.session_state.asia_high_time, key="asia_ht", help="CT time, e.g. 21:00")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.asia_low = st.number_input("Asia Low $", value=st.session_state.asia_low, step=0.01, format="%.2f", key="asia_l")
+            with c2:
+                st.session_state.asia_low_time = st.text_input("Time", value=st.session_state.asia_low_time, key="asia_lt")
+            
+            st.markdown("**London Session** (2am-8am CT)")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.london_high = st.number_input("London High $", value=st.session_state.london_high, step=0.01, format="%.2f", key="london_h")
+            with c2:
+                st.session_state.london_high_time = st.text_input("Time", value=st.session_state.london_high_time, key="london_ht", help="CT time, e.g. 03:00")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.london_low = st.number_input("London Low $", value=st.session_state.london_low, step=0.01, format="%.2f", key="london_l")
+            with c2:
+                st.session_state.london_low_time = st.text_input("Time", value=st.session_state.london_low_time, key="london_lt")
+        
+        # Show day structure status
+        has_day_structure = (st.session_state.asia_high > 0 and st.session_state.london_high > 0) or \
+                           (st.session_state.asia_low > 0 and st.session_state.london_low > 0)
+        if has_day_structure:
+            st.success("📐 Day structure active")
+        
         st.divider()
         
         # CONTRACT SLOPE CALCULATOR
@@ -3883,11 +4164,31 @@ def main():
     
     setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures, tested_structures)
     
+    # Calculate Day Structure (session trendlines)
+    day_structure = calculate_day_structure(
+        st.session_state.get("asia_high", 0.0),
+        st.session_state.get("asia_high_time", "21:00"),
+        st.session_state.get("asia_low", 0.0),
+        st.session_state.get("asia_low_time", "23:00"),
+        st.session_state.get("london_high", 0.0),
+        st.session_state.get("london_high_time", "03:00"),
+        st.session_state.get("london_low", 0.0),
+        st.session_state.get("london_low_time", "05:00"),
+        mins_after_open,
+        cones,
+        trading_date
+    )
+    
+    # Debug: Show day structure confluence in sidebar
+    if day_structure.has_confluence:
+        with st.sidebar:
+            st.success(f"📐 Confluence: {day_structure.best_confluence_detail}")
+    
     # Updated scoring with confluence
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, gap_analysis, market_ctx, price_proximity)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, gap_analysis, market_ctx, price_proximity, day_structure)
     components.html(html, height=4500, scrolling=True)
 
 if __name__ == "__main__":
