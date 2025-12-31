@@ -1722,40 +1722,44 @@ body {{
 }}
 
 .logo-mark {{
-    width: 48px;
-    height: 48px;
+    width: 56px;
+    height: 56px;
     background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
     border-radius: var(--radius-lg);
     display: grid;
     place-items: center;
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 700;
     color: white;
     letter-spacing: -0.5px;
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
 }}
 
 .logo-text {{
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
 }}
 
 .logo-title {{
-    font-size: 22px;
+    font-size: 28px;
     font-weight: 700;
     color: var(--text-primary);
     letter-spacing: -0.5px;
     line-height: 1.1;
+    background: linear-gradient(135deg, var(--text-primary) 0%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }}
 
 .logo-subtitle {{
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-secondary);
     font-weight: 500;
-    letter-spacing: 0.3px;
-    opacity: 0.9;
+    letter-spacing: 0.5px;
+    font-style: italic;
 }}
 
 .header-meta {{
