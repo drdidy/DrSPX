@@ -1383,17 +1383,41 @@ def calculate_ma_bias(bars_30m):
     
     return ma_bias
 
-def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False):
-    """Generate trade setups with calibrated option pricing"""
+def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False, broken_structures=None):
+    """Generate trade setups with calibrated option pricing
+    
+    broken_structures: dict mapping cone names to broken status
+        - If a cone is marked broken, its setups get status "BROKEN"
+        - CALLS broken = 30-min close below descending rail
+        - PUTS broken = 30-min close above ascending rail
+    """
+    if broken_structures is None:
+        broken_structures = {}
+    
     setups = []
     for cone in cones:
         if not cone.is_tradeable:
             continue
+        
+        # Check if this cone's structure is broken
+        is_broken = broken_structures.get(cone.name, False)
+        
         # CALLS - enter at descending rail
         entry_c = cone.descending_rail
         dist_c = abs(current_price - entry_c)
         opt_c = get_option_data_for_entry(entry_c, "C", vix_current, mins_after_open)
         delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
+        
+        # Determine CALLS status: BROKEN if structure broken, else normal logic
+        if is_after_cutoff:
+            calls_status = "GREY"
+        elif is_broken:
+            calls_status = "BROKEN"
+        elif dist_c <= RAIL_PROXIMITY:
+            calls_status = "ACTIVE"
+        else:
+            calls_status = "WAIT"
+        
         setups.append(TradeSetup(
             direction="CALLS", cone_name=cone.name, cone_width=cone.width, entry=entry_c,
             stop=round(entry_c - STOP_LOSS_PTS, 2),
@@ -1403,13 +1427,25 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
             profit_25=round(cone.width * 0.25 * delta_c * 100, 0), profit_50=round(cone.width * 0.50 * delta_c * 100, 0),
             profit_75=round(cone.width * 0.75 * delta_c * 100, 0), profit_100=round(cone.width * delta_c * 100, 0),
             risk_dollars=round(STOP_LOSS_PTS * delta_c * 100, 0),
-            status="GREY" if is_after_cutoff else ("ACTIVE" if dist_c <= RAIL_PROXIMITY else "WAIT")
+            status=calls_status
         ))
+        
         # PUTS - enter at ascending rail
         entry_p = cone.ascending_rail
         dist_p = abs(current_price - entry_p)
         opt_p = get_option_data_for_entry(entry_p, "P", vix_current, mins_after_open)
         delta_p = abs(opt_p.spy_delta) if opt_p else DELTA_IDEAL
+        
+        # Determine PUTS status: BROKEN if structure broken, else normal logic
+        if is_after_cutoff:
+            puts_status = "GREY"
+        elif is_broken:
+            puts_status = "BROKEN"
+        elif dist_p <= RAIL_PROXIMITY:
+            puts_status = "ACTIVE"
+        else:
+            puts_status = "WAIT"
+        
         setups.append(TradeSetup(
             direction="PUTS", cone_name=cone.name, cone_width=cone.width, entry=entry_p,
             stop=round(entry_p + STOP_LOSS_PTS, 2),
@@ -1419,7 +1455,7 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
             profit_25=round(cone.width * 0.25 * delta_p * 100, 0), profit_50=round(cone.width * 0.50 * delta_p * 100, 0),
             profit_75=round(cone.width * 0.75 * delta_p * 100, 0), profit_100=round(cone.width * delta_p * 100, 0),
             risk_dollars=round(STOP_LOSS_PTS * delta_p * 100, 0),
-            status="GREY" if is_after_cutoff else ("ACTIVE" if dist_p <= RAIL_PROXIMITY else "WAIT")
+            status=puts_status
         ))
     return setups
 
@@ -2700,7 +2736,8 @@ body {{
     best_setup = None
     search_direction = show_direction if show_direction in ["CALLS", "PUTS"] else None
     if search_direction and not has_conflict:
-        matching = [s for s in setups if s.direction == search_direction and s.status != "GREY"]
+        # Exclude GREY and BROKEN setups from consideration
+        matching = [s for s in setups if s.direction == search_direction and s.status not in ["GREY", "BROKEN"]]
         if matching:
             # PRIORITY 1: If inside a cone and that cone has a matching setup, use it
             if price_proximity and price_proximity.inside_cone and price_proximity.inside_cone_name:
@@ -2985,10 +3022,28 @@ body {{
     for s in calls_setups:
         opt = s.option
         is_best = best_setup and s.cone_name == best_setup.cone_name and s.direction == best_setup.direction
-        status_class = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
-        status_text = "★ BEST" if is_best else ("ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT")
-        status_style = "best" if is_best else ("active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait")
-        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best else ""
+        is_broken = s.status == "BROKEN"
+        
+        # Status class and text
+        if is_broken:
+            status_class = "broken"
+            status_text = "🚫 BROKEN"
+            status_style = "broken"
+        elif s.status == "ACTIVE":
+            status_class = "active"
+            status_text = "★ BEST" if is_best else "ACTIVE"
+            status_style = "best" if is_best else "active"
+        elif s.status == "GREY":
+            status_class = "grey"
+            status_text = "CLOSED"
+            status_style = "grey"
+        else:
+            status_class = ""
+            status_text = "★ BEST" if is_best else "WAIT"
+            status_style = "best" if is_best else "wait"
+        
+        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best and not is_broken else ""
+        broken_style = "opacity:0.5;border:1px solid var(--danger);" if is_broken else ""
         
         # Calculate distance from overnight price if available
         if price_proximity and price_proximity.current_price > 0:
@@ -3000,10 +3055,10 @@ body {{
             distance_color = "var(--text-secondary)"
         
         html += f'''
-            <div class="setup-card calls {status_class}" style="{best_style}">
+            <div class="setup-card calls {status_class}" style="{best_style}{broken_style}">
                 <div class="setup-header">
-                    <div class="setup-name">{"⭐ " if is_best else ""}{s.cone_name}</div>
-                    <div class="setup-status {status_style}" style="{'background:var(--warning-soft);color:var(--warning);' if is_best else ''}">{status_text}</div>
+                    <div class="setup-name">{"⭐ " if is_best and not is_broken else ""}{s.cone_name}</div>
+                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--warning-soft);color:var(--warning);' if is_best else ''}">{status_text}</div>
                 </div>
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
@@ -3054,10 +3109,28 @@ body {{
     for s in puts_setups:
         opt = s.option
         is_best = best_setup and s.cone_name == best_setup.cone_name and s.direction == best_setup.direction
-        status_class = "active puts" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
-        status_text = "★ BEST" if is_best else ("ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT")
-        status_style = "best" if is_best else ("active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait")
-        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best else ""
+        is_broken = s.status == "BROKEN"
+        
+        # Status class and text
+        if is_broken:
+            status_class = "broken"
+            status_text = "🚫 BROKEN"
+            status_style = "broken"
+        elif s.status == "ACTIVE":
+            status_class = "active puts"
+            status_text = "★ BEST" if is_best else "ACTIVE"
+            status_style = "best" if is_best else "active"
+        elif s.status == "GREY":
+            status_class = "grey"
+            status_text = "CLOSED"
+            status_style = "grey"
+        else:
+            status_class = ""
+            status_text = "★ BEST" if is_best else "WAIT"
+            status_style = "best" if is_best else "wait"
+        
+        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best and not is_broken else ""
+        broken_style = "opacity:0.5;border:1px solid var(--danger);" if is_broken else ""
         
         # Calculate distance from overnight price if available
         if price_proximity and price_proximity.current_price > 0:
@@ -3069,10 +3142,10 @@ body {{
             distance_color = "var(--text-secondary)"
         
         html += f'''
-            <div class="setup-card puts {status_class}" style="{best_style}">
+            <div class="setup-card puts {status_class}" style="{best_style}{broken_style}">
                 <div class="setup-header">
-                    <div class="setup-name">{"⭐ " if is_best else ""}{s.cone_name}</div>
-                    <div class="setup-status {status_style}" style="{'background:var(--warning-soft);color:var(--warning);' if is_best else ''}">{status_text}</div>
+                    <div class="setup-name">{"⭐ " if is_best and not is_broken else ""}{s.cone_name}</div>
+                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--warning-soft);color:var(--warning);' if is_best else ''}">{status_text}</div>
                 </div>
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
@@ -3357,6 +3430,24 @@ def main():
         else:
             st.caption("💡 Optional: Shows distance to entry rails")
         
+        # STRUCTURE BROKEN CHECKBOXES
+        # Initialize session state
+        if "broken_prior_high" not in st.session_state:
+            st.session_state.broken_prior_high = False
+        if "broken_prior_low" not in st.session_state:
+            st.session_state.broken_prior_low = False
+        if "broken_prior_close" not in st.session_state:
+            st.session_state.broken_prior_close = False
+        
+        st.caption("🚫 Mark broken if 30-min candle closed through rail:")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.session_state.broken_prior_high = st.checkbox("High", value=st.session_state.broken_prior_high, key="chk_high")
+        with col2:
+            st.session_state.broken_prior_low = st.checkbox("Low", value=st.session_state.broken_prior_low, key="chk_low")
+        with col3:
+            st.session_state.broken_prior_close = st.checkbox("Close", value=st.session_state.broken_prior_close, key="chk_close")
+        
         st.divider()
         st.markdown("### ⏰ Entry Time")
         st.caption("Slide to estimate contract prices at your entry time")
@@ -3573,7 +3664,15 @@ def main():
     
     # Use overnight price for setup status if provided, otherwise use SPX from Polygon
     price_for_setups = overnight_price if overnight_price > 0 else spx_price
-    setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff)
+    
+    # Get broken structure states
+    broken_structures = {
+        "Prior High": st.session_state.get("broken_prior_high", False),
+        "Prior Low": st.session_state.get("broken_prior_low", False),
+        "Prior Close": st.session_state.get("broken_prior_close", False)
+    }
+    
+    setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures)
     
     # Updated scoring with confluence
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
