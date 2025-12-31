@@ -1383,24 +1383,27 @@ def calculate_ma_bias(bars_30m):
     
     return ma_bias
 
-def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False, broken_structures=None):
+def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False, broken_structures=None, tested_structures=None):
     """Generate trade setups with calibrated option pricing
     
-    broken_structures: dict mapping cone names to broken status
-        - If a cone is marked broken, its setups get status "BROKEN"
-        - CALLS broken = 30-min close below descending rail
-        - PUTS broken = 30-min close above ascending rail
+    broken_structures: dict mapping cone names to True if manually marked broken
+        - BROKEN = 30-min candle closed through rail, structure invalidated
+    tested_structures: dict mapping cone names to "TESTED" if overnight breached
+        - TESTED = overnight price went through rail but came back, weakened structure
     """
     if broken_structures is None:
         broken_structures = {}
+    if tested_structures is None:
+        tested_structures = {}
     
     setups = []
     for cone in cones:
         if not cone.is_tradeable:
             continue
         
-        # Check if this cone's structure is broken
+        # Check structure status
         is_broken = broken_structures.get(cone.name, False)
+        is_tested = tested_structures.get(cone.name) == "TESTED"
         
         # CALLS - enter at descending rail
         entry_c = cone.descending_rail
@@ -1408,11 +1411,13 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
         opt_c = get_option_data_for_entry(entry_c, "C", vix_current, mins_after_open)
         delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
         
-        # Determine CALLS status: BROKEN if structure broken, else normal logic
+        # Determine CALLS status
         if is_after_cutoff:
             calls_status = "GREY"
         elif is_broken:
             calls_status = "BROKEN"
+        elif is_tested:
+            calls_status = "TESTED"
         elif dist_c <= RAIL_PROXIMITY:
             calls_status = "ACTIVE"
         else:
@@ -1436,11 +1441,13 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
         opt_p = get_option_data_for_entry(entry_p, "P", vix_current, mins_after_open)
         delta_p = abs(opt_p.spy_delta) if opt_p else DELTA_IDEAL
         
-        # Determine PUTS status: BROKEN if structure broken, else normal logic
+        # Determine PUTS status
         if is_after_cutoff:
             puts_status = "GREY"
         elif is_broken:
             puts_status = "BROKEN"
+        elif is_tested:
+            puts_status = "TESTED"
         elif dist_p <= RAIL_PROXIMITY:
             puts_status = "ACTIVE"
         else:
@@ -2736,8 +2743,8 @@ body {{
     best_setup = None
     search_direction = show_direction if show_direction in ["CALLS", "PUTS"] else None
     if search_direction and not has_conflict:
-        # Exclude GREY and BROKEN setups from consideration
-        matching = [s for s in setups if s.direction == search_direction and s.status not in ["GREY", "BROKEN"]]
+        # Exclude GREY, BROKEN, and TESTED setups from consideration
+        matching = [s for s in setups if s.direction == search_direction and s.status not in ["GREY", "BROKEN", "TESTED"]]
         if matching:
             # PRIORITY 1: If inside a cone and that cone has a matching setup, use it
             if price_proximity and price_proximity.inside_cone and price_proximity.inside_cone_name:
@@ -3023,12 +3030,17 @@ body {{
         opt = s.option
         is_best = best_setup and s.cone_name == best_setup.cone_name and s.direction == best_setup.direction
         is_broken = s.status == "BROKEN"
+        is_tested = s.status == "TESTED"
         
         # Status class and text
         if is_broken:
             status_class = "broken"
             status_text = "🚫 BROKEN"
             status_style = "broken"
+        elif is_tested:
+            status_class = "tested"
+            status_text = "⚠️ TESTED"
+            status_style = "tested"
         elif s.status == "ACTIVE":
             status_class = "active"
             status_text = "★ BEST" if is_best else "ACTIVE"
@@ -3042,8 +3054,9 @@ body {{
             status_text = "★ BEST" if is_best else "WAIT"
             status_style = "best" if is_best else "wait"
         
-        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best and not is_broken else ""
+        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best and not is_broken and not is_tested else ""
         broken_style = "opacity:0.5;border:1px solid var(--danger);" if is_broken else ""
+        tested_style = "opacity:0.7;border:1px dashed var(--warning);" if is_tested else ""
         
         # Calculate distance from overnight price if available
         if price_proximity and price_proximity.current_price > 0:
@@ -3055,10 +3068,10 @@ body {{
             distance_color = "var(--text-secondary)"
         
         html += f'''
-            <div class="setup-card calls {status_class}" style="{best_style}{broken_style}">
+            <div class="setup-card calls {status_class}" style="{best_style}{broken_style}{tested_style}">
                 <div class="setup-header">
-                    <div class="setup-name">{"⭐ " if is_best and not is_broken else ""}{s.cone_name}</div>
-                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--warning-soft);color:var(--warning);' if is_best else ''}">{status_text}</div>
+                    <div class="setup-name">{"⭐ " if is_best and not is_broken and not is_tested else ""}{s.cone_name}</div>
+                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--warning-soft);color:var(--warning);' if is_tested or is_best else ''}">{status_text}</div>
                 </div>
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
@@ -3110,12 +3123,17 @@ body {{
         opt = s.option
         is_best = best_setup and s.cone_name == best_setup.cone_name and s.direction == best_setup.direction
         is_broken = s.status == "BROKEN"
+        is_tested = s.status == "TESTED"
         
         # Status class and text
         if is_broken:
             status_class = "broken"
             status_text = "🚫 BROKEN"
             status_style = "broken"
+        elif is_tested:
+            status_class = "tested"
+            status_text = "⚠️ TESTED"
+            status_style = "tested"
         elif s.status == "ACTIVE":
             status_class = "active puts"
             status_text = "★ BEST" if is_best else "ACTIVE"
@@ -3129,8 +3147,9 @@ body {{
             status_text = "★ BEST" if is_best else "WAIT"
             status_style = "best" if is_best else "wait"
         
-        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best and not is_broken else ""
+        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best and not is_broken and not is_tested else ""
         broken_style = "opacity:0.5;border:1px solid var(--danger);" if is_broken else ""
+        tested_style = "opacity:0.7;border:1px dashed var(--warning);" if is_tested else ""
         
         # Calculate distance from overnight price if available
         if price_proximity and price_proximity.current_price > 0:
@@ -3142,10 +3161,10 @@ body {{
             distance_color = "var(--text-secondary)"
         
         html += f'''
-            <div class="setup-card puts {status_class}" style="{best_style}{broken_style}">
+            <div class="setup-card puts {status_class}" style="{best_style}{broken_style}{tested_style}">
                 <div class="setup-header">
-                    <div class="setup-name">{"⭐ " if is_best and not is_broken else ""}{s.cone_name}</div>
-                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--warning-soft);color:var(--warning);' if is_best else ''}">{status_text}</div>
+                    <div class="setup-name">{"⭐ " if is_best and not is_broken and not is_tested else ""}{s.cone_name}</div>
+                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--warning-soft);color:var(--warning);' if is_tested or is_best else ''}">{status_text}</div>
                 </div>
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
@@ -3345,7 +3364,7 @@ document.addEventListener('DOMContentLoaded', function() {{
 
 def main():
     st.set_page_config(page_title="SPX Prophet", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
-    defaults = {'theme': 'dark', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'entry_time_mins': 30, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None}
+    defaults = {'theme': 'dark', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'entry_time_mins': 30, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None, 'overnight_high': 0.0, 'overnight_high_time': "02:00", 'overnight_low': 0.0, 'overnight_low_time': "04:00"}
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -3438,15 +3457,24 @@ def main():
             st.session_state.broken_prior_low = False
         if "broken_prior_close" not in st.session_state:
             st.session_state.broken_prior_close = False
+        if "broken_on_high" not in st.session_state:
+            st.session_state.broken_on_high = False
+        if "broken_on_low" not in st.session_state:
+            st.session_state.broken_on_low = False
         
-        st.caption("🚫 Mark broken if 30-min candle closed through rail:")
+        st.caption("🚫 Mark broken if 30-min closed through:")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.session_state.broken_prior_high = st.checkbox("High", value=st.session_state.broken_prior_high, key="chk_high")
+            st.session_state.broken_prior_high = st.checkbox("P.High", value=st.session_state.broken_prior_high, key="chk_high")
         with col2:
-            st.session_state.broken_prior_low = st.checkbox("Low", value=st.session_state.broken_prior_low, key="chk_low")
+            st.session_state.broken_prior_low = st.checkbox("P.Low", value=st.session_state.broken_prior_low, key="chk_low")
         with col3:
-            st.session_state.broken_prior_close = st.checkbox("Close", value=st.session_state.broken_prior_close, key="chk_close")
+            st.session_state.broken_prior_close = st.checkbox("P.Close", value=st.session_state.broken_prior_close, key="chk_close")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.session_state.broken_on_high = st.checkbox("O/N High", value=st.session_state.broken_on_high, key="chk_on_high")
+        with col2:
+            st.session_state.broken_on_low = st.checkbox("O/N Low", value=st.session_state.broken_on_low, key="chk_on_low")
         
         st.divider()
         st.markdown("### ⏰ Entry Time")
@@ -3568,6 +3596,24 @@ def main():
             with c2:
                 st.session_state.low_time = st.text_input("Time", value=st.session_state.low_time, key="lt")
             st.session_state.close_price = st.number_input("Close $", value=st.session_state.close_price, step=0.01, format="%.2f")
+        
+        st.divider()
+        st.markdown("### 🌙 Overnight Pivots")
+        st.caption("Add overnight H/L to track extended session structure")
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.session_state.overnight_high = st.number_input("O/N High $", value=st.session_state.overnight_high, step=0.01, format="%.2f", help="Overnight session high")
+        with c2:
+            st.session_state.overnight_high_time = st.text_input("Time", value=st.session_state.overnight_high_time, key="oht", help="e.g., 02:00")
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.session_state.overnight_low = st.number_input("O/N Low $", value=st.session_state.overnight_low, step=0.01, format="%.2f", help="Overnight session low")
+        with c2:
+            st.session_state.overnight_low_time = st.text_input("Time", value=st.session_state.overnight_low_time, key="olt", help="e.g., 04:00")
+        
+        if st.session_state.overnight_high > 0 or st.session_state.overnight_low > 0:
+            st.success("🌙 Overnight pivots active")
+        
         st.divider()
         if st.button("🔄 REFRESH", use_container_width=True, type="primary"):
             st.session_state.last_refresh = get_ct_now()
@@ -3632,7 +3678,85 @@ def main():
     with st.sidebar:
         st.caption(f"📍 Pivots found: {len(pivots)}")
     
+    # BUILD INITIAL CONES from prior session pivots (without overnight)
     eval_time = CT_TZ.localize(datetime.combine(trading_date, time(9, 0)))
+    prior_cones = build_cones(pivots, eval_time)
+    
+    # GET OVERNIGHT HIGH/LOW
+    overnight_high = st.session_state.get("overnight_high", 0.0)
+    overnight_low = st.session_state.get("overnight_low", 0.0)
+    overnight_high_time = st.session_state.get("overnight_high_time", "02:00")
+    overnight_low_time = st.session_state.get("overnight_low_time", "04:00")
+    
+    def parse_overnight_time(t_str, base_date):
+        """Parse overnight time string to datetime."""
+        try:
+            parts = t_str.replace(" ", "").split(":")
+            h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+            return CT_TZ.localize(datetime.combine(base_date, time(h, m)))
+        except:
+            return CT_TZ.localize(datetime.combine(base_date, time(4, 0)))
+    
+    # DETERMINE STRUCTURE BOUNDARIES from prior session cones
+    tradeable_prior = [c for c in prior_cones if c.is_tradeable]
+    if tradeable_prior:
+        highest_ascending = max(c.ascending_rail for c in tradeable_prior)
+        lowest_descending = min(c.descending_rail for c in tradeable_prior)
+    else:
+        highest_ascending = 0
+        lowest_descending = float('inf')
+    
+    # DETECT TESTED RAILS - if O/N low went below descending rails, they're tested
+    tested_structures = {}
+    on_high_added = False
+    on_low_added = False
+    
+    if overnight_low > 0 and tradeable_prior:
+        # Check which descending rails the overnight low breached
+        for cone in tradeable_prior:
+            if overnight_low < cone.descending_rail:
+                tested_structures[cone.name] = "TESTED"
+        
+        # Only add O/N Low as pivot if it's BELOW all descending rails (new support)
+        if overnight_low < lowest_descending:
+            on_low_dt = parse_overnight_time(overnight_low_time, trading_date)
+            pivots.append(Pivot(
+                name="O/N Low", 
+                price=overnight_low, 
+                pivot_time=on_low_dt, 
+                pivot_type="LOW", 
+                candle_open=overnight_low
+            ))
+            on_low_added = True
+    
+    if overnight_high > 0 and tradeable_prior:
+        # Check which ascending rails the overnight high breached
+        for cone in tradeable_prior:
+            if overnight_high > cone.ascending_rail:
+                tested_structures[cone.name] = "TESTED"
+        
+        # Only add O/N High as pivot if it's ABOVE all ascending rails (new resistance)
+        if overnight_high > highest_ascending:
+            on_high_dt = parse_overnight_time(overnight_high_time, trading_date)
+            pivots.append(Pivot(
+                name="O/N High", 
+                price=overnight_high, 
+                pivot_time=on_high_dt, 
+                pivot_type="HIGH", 
+                candle_high=overnight_high
+            ))
+            on_high_added = True
+    
+    # Debug: Show overnight analysis
+    with st.sidebar:
+        if overnight_high > 0 or overnight_low > 0:
+            added_count = (1 if on_high_added else 0) + (1 if on_low_added else 0)
+            if added_count > 0:
+                st.caption(f"🌙 +{added_count} overnight pivot(s) added")
+            if tested_structures:
+                st.warning(f"⚠️ Tested: {', '.join(tested_structures.keys())}")
+    
+    # REBUILD CONES with overnight pivots included
     cones = build_cones(pivots, eval_time)
     vix_zone = analyze_vix_zone(st.session_state.vix_bottom, st.session_state.vix_top, st.session_state.vix_current, cones)
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
@@ -3676,14 +3800,16 @@ def main():
     # Use overnight price for setup status if provided, otherwise use SPX from Polygon
     price_for_setups = overnight_price if overnight_price > 0 else spx_price
     
-    # Get broken structure states
+    # Get broken structure states (manually marked)
     broken_structures = {
         "Prior High": st.session_state.get("broken_prior_high", False),
         "Prior Low": st.session_state.get("broken_prior_low", False),
-        "Prior Close": st.session_state.get("broken_prior_close", False)
+        "Prior Close": st.session_state.get("broken_prior_close", False),
+        "O/N High": st.session_state.get("broken_on_high", False),
+        "O/N Low": st.session_state.get("broken_on_low", False)
     }
     
-    setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures)
+    setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures, tested_structures)
     
     # Updated scoring with confluence
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
