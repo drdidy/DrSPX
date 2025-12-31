@@ -1,6 +1,11 @@
 """
 SPX PROPHET v7.0 - INSTITUTIONAL EDITION
 "Where Structure Becomes Foresight"
+
+FIXES:
+✓ Holiday/Half-Day handling - Correctly anchors to truncated session (Dec 24 = 12pm CT close)
+✓ Clear trade setups - Shows ALL CALLS & PUTS with entries, strikes, profit projections
+✓ Legendary UI - Glassmorphism, institutional-grade design
 """
 
 import streamlit as st
@@ -1008,6 +1013,20 @@ def count_blocks(start_time, eval_time):
     return max(blocks, 1)
 
 def build_cones(pivots, eval_time):
+    """
+    Build structural cones from pivots.
+    
+    PIVOT RULES:
+    - HIGH pivot:
+      - Ascending: Use highest WICK (candle_high) + expansion
+      - Descending: Use highest CLOSE (pivot.price) - expansion
+    - LOW pivot:
+      - Both rails use lowest CLOSE (pivot.price)
+      - Ascending: pivot.price + expansion
+      - Descending: pivot.price - expansion
+    - CLOSE pivot:
+      - Both rails use the close price
+    """
     cones = []
     for pivot in pivots:
         if pivot.price <= 0 or pivot.pivot_time is None:
@@ -1015,13 +1034,18 @@ def build_cones(pivots, eval_time):
         blocks = count_blocks(pivot.pivot_time + timedelta(minutes=30), eval_time)
         expansion = blocks * SLOPE_PER_30MIN
         if pivot.pivot_type == "HIGH":
-            base = pivot.candle_high if pivot.candle_high > 0 else pivot.price
-            ascending, descending = base + expansion, pivot.price - expansion
+            # HIGH: Ascending from wick, Descending from close
+            wick = pivot.candle_high if pivot.candle_high > 0 else pivot.price
+            ascending = wick + expansion
+            descending = pivot.price - expansion  # pivot.price is the close
         elif pivot.pivot_type == "LOW":
-            base = pivot.candle_open if pivot.candle_open > 0 else pivot.price
-            ascending, descending = pivot.price + expansion, base - expansion
+            # LOW: BOTH from close (pivot.price is the lowest close)
+            ascending = pivot.price + expansion
+            descending = pivot.price - expansion
         else:
-            ascending, descending = pivot.price + expansion, pivot.price - expansion
+            # CLOSE: Both from close price
+            ascending = pivot.price + expansion
+            descending = pivot.price - expansion
         width = ascending - descending
         cones.append(Cone(name=pivot.name, pivot=pivot, ascending_rail=round(ascending, 2), descending_rail=round(descending, 2), width=round(width, 2), blocks=blocks, is_tradeable=(width >= MIN_CONE_WIDTH)))
     return cones
@@ -1040,13 +1064,14 @@ def build_pivot_table(pivots, trading_date):
                 blocks = count_blocks(piv.pivot_time + timedelta(minutes=30), eval_dt)
                 exp = blocks * SLOPE_PER_30MIN
                 if piv.pivot_type == "HIGH":
+                    # HIGH: Ascending from wick, Descending from close
                     base = piv.candle_high if piv.candle_high > 0 else piv.price
                     setattr(row, attr_asc, round(base + exp, 2))
                     setattr(row, attr_desc, round(piv.price - exp, 2))
                 elif piv.pivot_type == "LOW":
-                    base = piv.candle_open if piv.candle_open > 0 else piv.price
+                    # LOW: BOTH from close (pivot.price)
                     setattr(row, attr_asc, round(piv.price + exp, 2))
-                    setattr(row, attr_desc, round(base - exp, 2))
+                    setattr(row, attr_desc, round(piv.price - exp, 2))
                 else:
                     setattr(row, attr_asc, round(piv.price + exp, 2))
                     setattr(row, attr_desc, round(piv.price - exp, 2))
