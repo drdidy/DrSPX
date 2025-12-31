@@ -3591,9 +3591,20 @@ def main():
     prior_bars = polygon_get_daily_bars("I:SPX", pivot_date, pivot_date)
     prior_session = {"high": prior_bars[0].get("h", 0), "low": prior_bars[0].get("l", 0), "close": prior_bars[0].get("c", 0), "open": prior_bars[0].get("o", 0)} if prior_bars else {}
     
+    # Override prior_session with manual values if manual pivots are enabled
+    if st.session_state.use_manual_pivots and st.session_state.high_price > 0:
+        prior_session = {
+            "high": st.session_state.high_price,
+            "low": st.session_state.low_price,
+            "close": st.session_state.close_price,
+            "open": prior_session.get("open", 0)  # Keep open from Polygon if available
+        }
+    
     # Debug: Show data status
     with st.sidebar:
-        if prior_session:
+        if st.session_state.use_manual_pivots and st.session_state.high_price > 0:
+            st.caption(f"✏️ Manual: H={prior_session.get('high',0):.0f} L={prior_session.get('low',0):.0f}")
+        elif prior_session:
             st.caption(f"✅ Daily data: H={prior_session.get('high',0):.0f} L={prior_session.get('low',0):.0f}")
         else:
             st.warning(f"⚠️ No daily data for {pivot_date}")
