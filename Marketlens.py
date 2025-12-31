@@ -1544,1161 +1544,1032 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
+/* ═══════════════════════════════════════════════════════════════
+   SPX PROPHET v7 - PREMIUM INSTITUTIONAL DESIGN SYSTEM
+   Inspired by: Bloomberg Terminal, Stripe Dashboard, Linear App
+   ═══════════════════════════════════════════════════════════════ */
+
 :root {{
-    --bg-main: {bg_main};
-    --bg-card: {bg_card};
-    --bg-elevated: {bg_elevated};
-    --bg-subtle: {bg_subtle};
+    --bg-base: {bg_main};
+    --bg-surface: {bg_card};
+    --bg-surface-2: {bg_elevated};
+    --bg-surface-3: {bg_subtle};
     --text-primary: {text_primary};
     --text-secondary: {text_secondary};
-    --text-muted: {text_muted};
-    --border-light: {border_light};
-    --border-medium: {border_medium};
-    --green: {green};
-    --green-light: {green_light};
-    --red: {red};
-    --red-light: {red_light};
-    --amber: {amber};
-    --blue: {blue};
+    --text-tertiary: {text_muted};
+    --border: {border_light};
+    --border-strong: {border_medium};
+    
+    /* Semantic Colors */
+    --success: {green};
+    --success-soft: {green_light};
+    --danger: {red};
+    --danger-soft: {red_light};
+    --warning: {amber};
+    --warning-soft: {amber_light};
+    --info: {blue};
+    --info-soft: {blue_light};
+    
+    /* Spacing Scale */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    
+    /* Typography */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-mono: 'SF Mono', 'Roboto Mono', 'Fira Code', monospace;
+    
+    /* Radius */
     --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
 }}
 
-* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+*, *::before, *::after {{ 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+}}
 
-body {{
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    background: var(--bg-main);
-    color: var(--text-primary);
-    line-height: 1.5;
-    padding: 32px;
-    min-height: 100vh;
-    font-size: 13px;
+html {{
+    font-size: 14px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }}
 
-.mono {{ font-family: 'SF Mono', 'Roboto Mono', 'Consolas', monospace; font-feature-settings: 'tnum'; }}
-.text-green {{ color: var(--green); }}
-.text-red {{ color: var(--red); }}
-.text-amber {{ color: var(--amber); }}
-.text-blue {{ color: var(--blue); }}
-.text-muted {{ color: var(--text-muted); }}
+body {{
+    font-family: var(--font-sans);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    line-height: 1.5;
+    min-height: 100vh;
+}}
 
-.container {{ max-width: 1320px; margin: 0 auto; }}
+/* ─────────────────────────────────────────────────────────────────
+   LAYOUT
+   ───────────────────────────────────────────────────────────────── */
 
-/* HEADER - Clean, minimal */
+.dashboard {{
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: var(--space-6);
+}}
+
 .header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 32px;
-    padding-bottom: 24px;
-    border-bottom: 1px solid var(--border-light);
+    padding-bottom: var(--space-5);
+    margin-bottom: var(--space-6);
+    border-bottom: 1px solid var(--border);
 }}
-.brand {{ display: flex; align-items: center; gap: 16px; }}
-.brand-icon {{
-    width: 40px; height: 40px;
-    background: linear-gradient(135deg, {blue}, #6366f1);
+
+.logo {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}}
+
+.logo-mark {{
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
     border-radius: var(--radius-md);
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'SF Mono', monospace; font-weight: 600; font-size: 11px; color: white;
-    letter-spacing: -0.5px;
-}}
-.brand-text h1 {{ font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }}
-.brand-text span {{ font-size: 11px; color: var(--text-muted); font-weight: 500; }}
-.header-right {{ display: flex; align-items: center; gap: 32px; }}
-.clock {{
-    font-family: 'SF Mono', monospace;
-    font-size: 20px;
-    font-weight: 500;
-    color: var(--text-primary);
-    letter-spacing: -0.5px;
-}}
-.countdown-group {{ display: flex; gap: 24px; }}
-.countdown-item {{ text-align: center; }}
-.countdown-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500; }}
-.countdown-value {{ font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-top: 2px; }}
-
-/* ALERT BANNERS */
-.alert-banner {{
-    padding: 12px 16px;
-    border-radius: var(--radius-md);
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    font-weight: 500;
-}}
-.alert-banner.info {{ background: {blue_light}; color: {blue}; }}
-.alert-banner.warning {{ background: {amber_light}; color: {"#a16207" if theme == "light" else amber}; }}
-.alert-banner.historical {{ background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border-light); }}
-
-/* CARDS - Clean, minimal elevation */
-.card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    margin-bottom: 16px;
-    overflow: hidden;
-}}
-.card-header {{
-    padding: 14px 18px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    transition: background 0.15s;
-}}
-.card-header:hover {{ background: var(--bg-elevated); }}
-.card-title {{
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}}
-.card-chevron {{
-    width: 16px; height: 16px;
-    color: var(--text-muted);
-    transition: transform 0.2s;
-}}
-.card.collapsed .card-content {{ display: none; }}
-.card.collapsed .card-chevron {{ transform: rotate(-90deg); }}
-.card-content {{ padding: 18px; }}
-
-/* MAIN GRID - Refined layout */
-.main-grid {{
     display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: 20px;
-    margin-bottom: 24px;
-}}
-@media (max-width: 1000px) {{ .main-grid {{ grid-template-columns: 1fr; }} }}
-
-/* VIX SECTION */
-.vix-section {{ display: flex; flex-direction: column; gap: 12px; }}
-.vix-meter {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: 20px;
-}}
-.vix-bar {{
-    height: 8px;
-    background: linear-gradient(90deg, var(--green), var(--amber), var(--red));
-    border-radius: 4px;
-    position: relative;
-    margin: 16px 0 8px;
-}}
-.vix-marker {{
-    position: absolute;
-    width: 16px; height: 16px;
-    background: var(--bg-card);
-    border: 2px solid var(--text-primary);
-    border-radius: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    box-shadow: {shadow_md};
-}}
-.vix-labels {{
-    display: flex;
-    justify-content: space-between;
-    font-family: 'SF Mono', monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-}}
-.vix-stats {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    margin-top: 16px;
-}}
-.vix-stat {{
-    background: var(--bg-elevated);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    text-align: center;
-}}
-.vix-stat-value {{
-    font-family: 'SF Mono', monospace;
-    font-size: 15px;
-    font-weight: 600;
-}}
-.vix-stat-label {{
-    font-size: 9px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 4px;
-}}
-
-/* SIGNAL CARDS - Clean, focused */
-.signal-card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: 20px;
-    text-align: center;
-}}
-.signal-card.highlight {{
-    border-color: currentColor;
-    border-width: 2px;
-}}
-.signal-label {{
+    place-items: center;
+    font-family: var(--font-mono);
     font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-muted);
-    margin-bottom: 8px;
-}}
-.signal-icon {{
-    font-size: 28px;
-    line-height: 1;
-    margin-bottom: 6px;
-}}
-.signal-value {{
-    font-size: 18px;
     font-weight: 700;
+    color: white;
+    letter-spacing: -0.5px;
+}}
+
+.logo-text {{
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}}
+
+.logo-title {{
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
     letter-spacing: -0.3px;
 }}
-.signal-detail {{
+
+.logo-subtitle {{
     font-size: 11px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+}}
+
+.header-meta {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+}}
+
+.meta-group {{
+    display: flex;
+    gap: var(--space-5);
+}}
+
+.meta-item {{
+    text-align: right;
+}}
+
+.meta-label {{
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.meta-value {{
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 500;
     color: var(--text-secondary);
-    margin-top: 6px;
+    margin-top: 2px;
 }}
 
-/* CHECKLIST - Refined */
-.checklist-card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
+.clock {{
+    font-family: var(--font-mono);
+    font-size: 24px;
+    font-weight: 500;
+    color: var(--text-primary);
+    letter-spacing: -1px;
 }}
-.checklist-header {{
-    padding: 16px 18px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}}
-.checklist-title {{ font-size: 14px; font-weight: 600; }}
-.checklist-score {{ font-family: 'SF Mono', monospace; font-size: 14px; font-weight: 600; }}
-.checklist-items {{ padding: 4px 0; }}
-.checklist-item {{
-    display: flex;
-    align-items: center;
-    padding: 10px 18px;
-    gap: 14px;
-    border-bottom: 1px solid var(--border-light);
-}}
-.checklist-item:last-child {{ border-bottom: none; }}
-.check-pts {{
-    font-family: 'SF Mono', monospace;
-    font-size: 12px;
-    font-weight: 600;
-    min-width: 50px;
-    text-align: center;
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-}}
-.check-label {{ font-size: 12px; font-weight: 500; color: var(--text-primary); }}
-.check-detail {{ font-size: 11px; color: var(--text-muted); margin-top: 1px; }}
 
-/* SETUP SECTIONS */
-.setup-section {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    margin-bottom: 16px;
-    overflow: hidden;
+/* ─────────────────────────────────────────────────────────────────
+   SIGNAL HERO - The main decision display
+   ───────────────────────────────────────────────────────────────── */
+
+.signal-hero {{
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
+    margin-bottom: var(--space-5);
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: var(--space-6);
 }}
-.setup-section-header {{
-    padding: 14px 18px;
+
+.signal-main {{
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    transition: background 0.15s;
+    flex-direction: column;
+    gap: var(--space-5);
 }}
-.setup-section-header:hover {{ background: var(--bg-elevated); }}
-.setup-section-title {{
+
+.signal-direction {{
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-4);
+}}
+
+.direction-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
     font-size: 13px;
     font-weight: 600;
 }}
-.setup-section-title.calls {{ color: var(--green); }}
-.setup-section-title.puts {{ color: var(--red); }}
-.setup-count {{
-    font-size: 11px;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-weight: 500;
-}}
-.setup-count.calls {{ background: var(--green-light); color: var(--green); }}
-.setup-count.puts {{ background: var(--red-light); color: var(--red); }}
-.setup-section-chevron {{ font-size: 11px; color: var(--text-muted); transition: transform 0.2s; }}
-.setup-section.collapsed .setup-section-content {{ display: none; }}
-.setup-section.collapsed .setup-section-chevron {{ transform: rotate(-90deg); }}
-.setup-section-content {{
-    padding: 16px;
-    border-top: 1px solid var(--border-light);
-    background: var(--bg-subtle);
-}}
-.setup-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 12px;
+
+.direction-badge.calls {{
+    background: var(--success-soft);
+    color: var(--success);
 }}
 
-/* SETUP CARDS - Clean, data-focused */
-.setup-card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
+.direction-badge.puts {{
+    background: var(--danger-soft);
+    color: var(--danger);
+}}
+
+.direction-badge.wait {{
+    background: var(--bg-surface-2);
+    color: var(--text-tertiary);
+}}
+
+.signal-title {{
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1.1;
+}}
+
+.signal-title.calls {{ color: var(--success); }}
+.signal-title.puts {{ color: var(--danger); }}
+.signal-title.wait {{ color: var(--text-tertiary); }}
+
+.signal-subtitle {{
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-top: var(--space-1);
+}}
+
+.signal-confluence {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-surface-2);
     border-radius: var(--radius-md);
-    padding: 16px;
+    width: fit-content;
+}}
+
+.confluence-dot {{
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}}
+
+.confluence-dot.strong {{ background: var(--success); }}
+.confluence-dot.moderate {{ background: var(--info); }}
+.confluence-dot.weak {{ background: var(--text-tertiary); }}
+.confluence-dot.conflict {{ background: var(--danger); }}
+
+.confluence-text {{
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}}
+
+.signal-metrics {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-3);
+}}
+
+.metric {{
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    text-align: center;
+}}
+
+.metric-value {{
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+}}
+
+.metric-value.success {{ color: var(--success); }}
+.metric-value.danger {{ color: var(--danger); }}
+
+.metric-label {{
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-top: var(--space-1);
+}}
+
+/* Score Ring */
+.signal-score {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+}}
+
+.score-ring {{
+    position: relative;
+    width: 140px;
+    height: 140px;
+}}
+
+.score-ring svg {{
+    transform: rotate(-90deg);
+}}
+
+.score-ring-bg {{
+    fill: none;
+    stroke: var(--bg-surface-2);
+    stroke-width: 8;
+}}
+
+.score-ring-fill {{
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.5s ease;
+}}
+
+.score-ring-fill.a {{ stroke: var(--success); }}
+.score-ring-fill.b {{ stroke: var(--info); }}
+.score-ring-fill.c {{ stroke: var(--warning); }}
+.score-ring-fill.d {{ stroke: var(--danger); }}
+
+.score-center {{
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}}
+
+.score-value {{
+    font-family: var(--font-mono);
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -2px;
+}}
+
+.score-grade {{
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}}
+
+.score-label {{
+    font-size: 12px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+}}
+
+/* ─────────────────────────────────────────────────────────────────
+   VIX METER
+   ───────────────────────────────────────────────────────────────── */
+
+.vix-section {{
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    padding: var(--space-5);
+    margin-bottom: var(--space-5);
+}}
+
+.section-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-4);
+}}
+
+.section-title {{
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.vix-display {{
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: var(--space-5);
+    align-items: center;
+}}
+
+.vix-meter-track {{
+    height: 6px;
+    background: linear-gradient(90deg, var(--success) 0%, var(--warning) 50%, var(--danger) 100%);
+    border-radius: 3px;
     position: relative;
 }}
+
+.vix-meter-thumb {{
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 14px;
+    height: 14px;
+    background: var(--bg-surface);
+    border: 2px solid var(--text-primary);
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}}
+
+.vix-meter-labels {{
+    display: flex;
+    justify-content: space-between;
+    margin-top: var(--space-2);
+}}
+
+.vix-meter-label {{
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+}}
+
+.vix-current {{
+    text-align: right;
+}}
+
+.vix-current-value {{
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -1px;
+}}
+
+.vix-current-label {{
+    font-size: 10px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+/* ─────────────────────────────────────────────────────────────────
+   INDICATOR CARDS - MA Bias, Gap, etc.
+   ───────────────────────────────────────────────────────────────── */
+
+.indicators-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-4);
+    margin-bottom: var(--space-5);
+}}
+
+.indicator-card {{
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+}}
+
+.indicator-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-3);
+}}
+
+.indicator-title {{
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.indicator-status {{
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}}
+
+.indicator-status.long {{ background: var(--success); }}
+.indicator-status.short {{ background: var(--danger); }}
+.indicator-status.neutral {{ background: var(--text-tertiary); }}
+
+.indicator-value {{
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: var(--space-1);
+}}
+
+.indicator-value.long {{ color: var(--success); }}
+.indicator-value.short {{ color: var(--danger); }}
+.indicator-value.neutral {{ color: var(--text-tertiary); }}
+
+.indicator-detail {{
+    font-size: 11px;
+    color: var(--text-secondary);
+}}
+
+/* ─────────────────────────────────────────────────────────────────
+   SETUP CARDS
+   ───────────────────────────────────────────────────────────────── */
+
+.setups-section {{
+    margin-bottom: var(--space-5);
+}}
+
+.setups-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    cursor: pointer;
+    transition: background 0.15s;
+}}
+
+.setups-header:hover {{
+    background: var(--bg-surface-2);
+}}
+
+.setups-title {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 13px;
+    font-weight: 600;
+}}
+
+.setups-title.calls {{ color: var(--success); }}
+.setups-title.puts {{ color: var(--danger); }}
+
+.setups-count {{
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+}}
+
+.setups-count.calls {{ background: var(--success-soft); color: var(--success); }}
+.setups-count.puts {{ background: var(--danger-soft); color: var(--danger); }}
+
+.setups-chevron {{
+    font-size: 10px;
+    color: var(--text-tertiary);
+    transition: transform 0.2s;
+}}
+
+.setups-body {{
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    padding: var(--space-4);
+}}
+
+.setups-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-3);
+}}
+
+.setup-card {{
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    position: relative;
+    overflow: hidden;
+}}
+
 .setup-card::before {{
     content: '';
     position: absolute;
-    top: 0; left: 0; right: 0;
+    top: 0;
+    left: 0;
+    right: 0;
     height: 3px;
-    border-radius: var(--radius-md) var(--radius-md) 0 0;
 }}
-.setup-card.calls::before {{ background: var(--green); }}
-.setup-card.puts::before {{ background: var(--red); }}
-.setup-card.active {{ border-color: var(--green); }}
-.setup-card.active.puts {{ border-color: var(--red); }}
+
+.setup-card.calls::before {{ background: var(--success); }}
+.setup-card.puts::before {{ background: var(--danger); }}
+.setup-card.active {{ border-color: var(--success); }}
+.setup-card.active.puts {{ border-color: var(--danger); }}
 .setup-card.grey {{ opacity: 0.5; }}
 
-.setup-card-header {{
+.setup-header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }}
-.setup-cone-name {{ font-size: 13px; font-weight: 600; }}
+
+.setup-name {{
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}}
+
 .setup-status {{
     font-size: 9px;
-    padding: 3px 8px;
-    border-radius: 10px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-}}
-.setup-status.active {{ background: var(--green-light); color: var(--green); }}
-.setup-status.wait {{ background: {amber_light}; color: {"#a16207" if theme == "light" else amber}; }}
-.setup-status.grey {{ background: var(--bg-elevated); color: var(--text-muted); }}
-
-.entry-display {{
-    background: var(--bg-elevated);
-    border-radius: var(--radius-md);
-    padding: 14px;
-    text-align: center;
-    margin-bottom: 12px;
-}}
-.entry-label {{
-    font-size: 9px;
-    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 4px;
+    padding: 3px 8px;
+    border-radius: 4px;
 }}
-.entry-price {{
-    font-family: 'SF Mono', monospace;
+
+.setup-status.active {{ background: var(--success-soft); color: var(--success); }}
+.setup-status.wait {{ background: var(--warning-soft); color: var(--warning); }}
+.setup-status.grey {{ background: var(--bg-surface-2); color: var(--text-tertiary); }}
+
+.setup-entry {{
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+    text-align: center;
+    margin-bottom: var(--space-3);
+}}
+
+.setup-entry-label {{
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.setup-entry-price {{
+    font-family: var(--font-mono);
     font-size: 22px;
     font-weight: 600;
-}}
-.entry-price.calls {{ color: var(--green); }}
-.entry-price.puts {{ color: var(--red); }}
-.entry-distance {{
-    font-size: 10px;
-    color: var(--text-muted);
-    margin-top: 4px;
+    margin-top: 2px;
 }}
 
-.contract-info {{
+.setup-entry-price.calls {{ color: var(--success); }}
+.setup-entry-price.puts {{ color: var(--danger); }}
+
+.setup-entry-distance {{
+    font-size: 10px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}}
+
+.setup-contract {{
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    margin-bottom: 12px;
-}}
-.contract-box {{
-    background: var(--bg-elevated);
-    border-radius: var(--radius-sm);
-    padding: 10px;
-    text-align: center;
-}}
-.contract-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; }}
-.contract-value {{ font-family: 'SF Mono', monospace; font-size: 14px; font-weight: 600; margin-top: 2px; }}
-.contract-value.calls {{ color: var(--green); }}
-.contract-value.puts {{ color: var(--red); }}
-.contract-sub {{ font-size: 10px; color: var(--text-muted); margin-top: 2px; }}
-.sweet-badge {{
-    display: inline-block;
-    background: {amber_light};
-    color: {"#a16207" if theme == "light" else amber};
-    font-size: 9px;
-    padding: 2px 6px;
-    border-radius: 8px;
-    font-weight: 600;
-    margin-top: 4px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
 }}
 
-.targets-section {{ margin-bottom: 12px; }}
-.targets-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; }}
-.targets-grid {{
+.contract-item {{
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+    text-align: center;
+}}
+
+.contract-label {{
+    font-size: 9px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+}}
+
+.contract-value {{
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 1px;
+}}
+
+.contract-value.calls {{ color: var(--success); }}
+.contract-value.puts {{ color: var(--danger); }}
+
+.setup-targets {{
+    margin-bottom: var(--space-3);
+}}
+
+.targets-row {{
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 4px;
 }}
-.target-box {{
-    background: var(--bg-elevated);
-    border-radius: var(--radius-sm);
+
+.target-item {{
+    background: var(--bg-surface-2);
+    border-radius: 4px;
     padding: 6px 4px;
     text-align: center;
 }}
-.target-pct {{ font-size: 9px; color: var(--text-muted); font-weight: 500; }}
-.target-price {{ font-family: 'SF Mono', monospace; font-size: 10px; color: var(--text-secondary); margin-top: 1px; }}
-.target-profit {{ font-family: 'SF Mono', monospace; font-size: 11px; font-weight: 600; color: var(--green); margin-top: 1px; }}
 
-.risk-display {{
+.target-pct {{
+    font-size: 9px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+}}
+
+.target-profit {{
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--success);
+    margin-top: 1px;
+}}
+
+.setup-risk {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: var(--red-light);
+    background: var(--danger-soft);
     border-radius: var(--radius-sm);
-    padding: 8px 12px;
+    padding: var(--space-2) var(--space-3);
 }}
-.risk-label {{ font-size: 10px; color: var(--red); font-weight: 500; }}
-.risk-values {{ text-align: right; }}
-.risk-stop {{ font-family: 'SF Mono', monospace; font-size: 10px; color: var(--red); }}
-.risk-amount {{ font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 600; color: var(--red); }}
 
-/* STATS ROW */
-.stats-row {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
+.risk-label {{
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--danger);
 }}
-@media (max-width: 700px) {{ .stats-row {{ grid-template-columns: repeat(2, 1fr); }} }}
-.stat-card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
-    padding: 14px;
-    text-align: center;
-}}
-.stat-value {{ font-family: 'SF Mono', monospace; font-size: 16px; font-weight: 600; }}
-.stat-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 4px; }}
 
-/* DATA TABLE */
-.data-table {{ width: 100%; border-collapse: collapse; }}
+.risk-value {{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--danger);
+}}
+
+/* Collapsed state */
+.setups-section.collapsed .setups-body {{ display: none; }}
+.setups-section.collapsed .setups-chevron {{ transform: rotate(-90deg); }}
+
+/* ─────────────────────────────────────────────────────────────────
+   DATA TABLE
+   ───────────────────────────────────────────────────────────────── */
+
+.table-section {{
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-bottom: var(--space-5);
+}}
+
+.table-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+}}
+
+.table-header:hover {{
+    background: var(--bg-surface-2);
+}}
+
+.table-title {{
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}}
+
+.data-table {{
+    width: 100%;
+    border-collapse: collapse;
+}}
+
 .data-table th {{
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.3px;
-    color: var(--text-muted);
-    padding: 10px 8px;
+    color: var(--text-tertiary);
+    padding: var(--space-3);
     text-align: left;
-    border-bottom: 1px solid var(--border-medium);
-    background: var(--bg-elevated);
+    background: var(--bg-surface-2);
+    border-bottom: 1px solid var(--border);
 }}
+
 .data-table td {{
-    padding: 10px 8px;
     font-size: 12px;
-    border-bottom: 1px solid var(--border-light);
+    padding: var(--space-3);
+    border-bottom: 1px solid var(--border);
 }}
-.data-table tr:hover {{ background: var(--bg-elevated); }}
 
-/* FOOTER */
+.data-table tr:last-child td {{
+    border-bottom: none;
+}}
+
+.data-table tr:hover {{
+    background: var(--bg-surface-2);
+}}
+
+.table-section.collapsed .data-table {{ display: none; }}
+.table-section.collapsed .table-header {{ border-bottom: none; }}
+
+/* ─────────────────────────────────────────────────────────────────
+   FOOTER
+   ───────────────────────────────────────────────────────────────── */
+
 .footer {{
-    margin-top: 32px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border-light);
     text-align: center;
-    font-size: 11px;
-    color: var(--text-muted);
+    padding: var(--space-5);
+    border-top: 1px solid var(--border);
+    margin-top: var(--space-6);
 }}
-.footer-brand {{ font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }}
-.brand {{ display: flex; align-items: center; gap: 14px; }}
-.brand-icon {{
-    width: 48px; height: 48px;
-    background: linear-gradient(135deg, {blue}, {purple});
-    border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'SF Mono', monospace; font-weight: 700; font-size: 14px; color: white;
-    box-shadow: {shadow_md};
-}}
-.brand-text h1 {{ font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }}
-.brand-text span {{ font-size: 12px; color: var(--text-muted); font-weight: 500; }}
-.header-right {{ display: flex; align-items: center; gap: 24px; }}
-.clock {{
-    font-family: 'SF Mono', monospace;
-    font-size: 24px;
-    font-weight: 600;
-    color: var(--text-primary);
-}}
-.countdown-group {{ display: flex; gap: 16px; }}
-.countdown-item {{ text-align: center; }}
-.countdown-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }}
-.countdown-value {{ font-family: 'SF Mono', monospace; font-size: 14px; font-weight: 600; color: {amber}; }}
 
-/* Alert Banner */
-.alert-banner {{
-    padding: 14px 20px;
-    border-radius: 12px;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 14px;
-    font-weight: 600;
-}}
-.alert-banner.info {{ background: {blue_light}; color: {blue}; border: 1px solid {blue}30; }}
-.alert-banner.warning {{ background: {amber_light}; color: {"#92400e" if theme == "light" else amber}; border: 1px solid {amber}30; }}
-.alert-banner.historical {{ background: {"#f3e8ff" if theme == "light" else "#3b0764"}; color: {purple}; border: 1px solid {purple}30; }}
-
-/* Card */
-.card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: 16px;
-    margin-bottom: 20px;
-    box-shadow: {shadow_sm};
-    overflow: hidden;
-}}
-.card-header {{
-    padding: 18px 22px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    transition: background 0.15s;
-    border-bottom: 1px solid transparent;
-}}
-.card-header:hover {{ background: var(--bg-elevated); }}
-.card-title {{
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}}
-.card-title-icon {{ font-size: 18px; }}
-.card-chevron {{
-    width: 20px; height: 20px;
-    color: var(--text-muted);
-    transition: transform 0.2s;
-}}
-.card.collapsed .card-content {{ display: none; }}
-.card.collapsed .card-chevron {{ transform: rotate(-90deg); }}
-.card-content {{ padding: 22px; }}
-
-/* Main Grid */
-.main-grid {{
-    display: grid;
-    grid-template-columns: 1fr 340px;
-    gap: 20px;
-    margin-bottom: 20px;
-}}
-@media (max-width: 1100px) {{ .main-grid {{ grid-template-columns: 1fr; }} }}
-
-/* VIX Zone */
-.vix-section {{ display: flex; flex-direction: column; gap: 20px; }}
-.vix-meter {{
-    background: var(--bg-elevated);
-    border-radius: 12px;
-    padding: 20px;
-    border: 1px solid var(--border-light);
-}}
-.vix-bar {{
-    position: relative;
-    height: 12px;
-    background: linear-gradient(90deg, {green}40, var(--bg-main) 35%, var(--bg-main) 65%, {red}40);
-    border-radius: 6px;
-    margin: 12px 0;
-}}
-.vix-marker {{
-    position: absolute;
-    width: 18px; height: 18px;
-    background: {bias_color};
-    border: 3px solid var(--bg-card);
-    border-radius: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    box-shadow: 0 0 0 4px {bias_color}30, {shadow_sm};
-}}
-.vix-labels {{
-    display: flex;
-    justify-content: space-between;
-    font-family: 'SF Mono', monospace;
+.footer-brand {{
     font-size: 12px;
-    color: var(--text-muted);
-}}
-.vix-stats {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    margin-top: 16px;
-}}
-.vix-stat {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: 10px;
-    padding: 14px;
-    text-align: center;
-}}
-.vix-stat-value {{
-    font-family: 'SF Mono', monospace;
-    font-size: 16px;
-    font-weight: 700;
-}}
-.vix-stat-label {{
-    font-size: 9px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 4px;
-}}
-
-/* Bias Display */
-.bias-card {{
-    background: {bias_bg};
-    border: 2px solid {bias_color}50;
-    border-radius: 16px;
-    padding: 24px;
-    text-align: center;
-}}
-.bias-icon {{
-    font-size: 36px;
-    font-weight: 700;
-    color: {bias_color};
-    line-height: 1;
-}}
-.bias-label {{
-    font-size: 24px;
-    font-weight: 700;
-    color: {bias_color};
-    margin-top: 8px;
-    letter-spacing: 1px;
-}}
-.bias-reason {{
-    font-size: 12px;
+    font-weight: 600;
     color: var(--text-secondary);
-    margin-top: 8px;
+    margin-bottom: var(--space-1);
 }}
 
-/* Trading Checklist */
-.checklist-card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: 16px;
-    overflow: hidden;
-}}
-.checklist-header {{
-    padding: 16px 20px;
-    background: {"#f0fdf4" if trade_ready else "#fef2f2"} ;
-    border-bottom: 1px solid var(--border-light);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}}
-.checklist-title {{
-    font-size: 14px;
-    font-weight: 700;
-    color: {green if trade_ready else red};
-}}
-.checklist-score {{
-    font-family: 'SF Mono', monospace;
-    font-size: 14px;
-    font-weight: 700;
-    color: {green if trade_ready else red};
-}}
-.checklist-items {{ padding: 8px 0; }}
-.checklist-item {{
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--border-light);
-}}
-.checklist-item:last-child {{ border-bottom: none; }}
-.check-icon {{
-    width: 22px; height: 22px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 700;
-    flex-shrink: 0;
-}}
-.check-icon.pass {{ background: {green_light}; color: {green}; }}
-.check-icon.fail {{ background: {red_light}; color: {red}; }}
-.check-text {{ flex: 1; }}
-.check-label {{ font-size: 13px; font-weight: 600; color: var(--text-primary); }}
-.check-detail {{ font-size: 11px; color: var(--text-muted); }}
-
-/* Collapsible Setup Sections */
-.setup-section {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: 16px;
-    margin-bottom: 16px;
-    overflow: hidden;
-}}
-.setup-section-header {{
-    padding: 18px 22px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    transition: background 0.15s;
-}}
-.setup-section-header:hover {{ background: var(--bg-elevated); }}
-.setup-section-title {{
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 15px;
-    font-weight: 700;
-}}
-.setup-section-title.calls {{ color: {green}; }}
-.setup-section-title.puts {{ color: {red}; }}
-.setup-count {{
-    font-size: 12px;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-weight: 600;
-}}
-.setup-count.calls {{ background: {green_light}; color: {green}; }}
-.setup-count.puts {{ background: {red_light}; color: {red}; }}
-.setup-section-chevron {{
-    font-size: 12px;
-    color: var(--text-muted);
-    transition: transform 0.2s;
-}}
-.setup-section.collapsed .setup-section-content {{ display: none; }}
-.setup-section.collapsed .setup-section-chevron {{ transform: rotate(-90deg); }}
-.setup-section-content {{
-    padding: 20px;
-    border-top: 1px solid var(--border-light);
-    background: var(--bg-elevated);
-}}
-.setup-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 16px;
-}}
-
-/* Setup Card */
-.setup-card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: 14px;
-    padding: 20px;
-    position: relative;
-    transition: all 0.2s;
-}}
-.setup-card::before {{
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 4px;
-    border-radius: 14px 14px 0 0;
-}}
-.setup-card.calls::before {{ background: {green}; }}
-.setup-card.puts::before {{ background: {red}; }}
-.setup-card.active {{
-    border-color: {green};
-    box-shadow: 0 0 0 3px {green}20;
-}}
-.setup-card.active.puts {{
-    border-color: {red};
-    box-shadow: 0 0 0 3px {red}20;
-}}
-.setup-card.grey {{ opacity: 0.5; }}
-
-.setup-card-header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-}}
-.setup-cone-name {{ font-size: 14px; font-weight: 700; }}
-.setup-status {{
-    font-size: 10px;
-    padding: 4px 10px;
-    border-radius: 20px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}}
-.setup-status.active {{ background: {green_light}; color: {green}; }}
-.setup-status.wait {{ background: {amber_light}; color: {"#92400e" if theme == "light" else amber}; }}
-.setup-status.grey {{ background: var(--bg-elevated); color: var(--text-muted); }}
-
-.entry-display {{
-    background: var(--bg-elevated);
-    border-radius: 12px;
-    padding: 16px;
-    text-align: center;
-    margin-bottom: 14px;
-}}
-.entry-label {{
-    font-size: 10px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-}}
-.entry-price {{
-    font-family: 'SF Mono', monospace;
-    font-size: 26px;
-    font-weight: 700;
-}}
-.entry-price.calls {{ color: {green}; }}
-.entry-price.puts {{ color: {red}; }}
-.entry-distance {{
+.footer-meta {{
     font-size: 11px;
-    color: var(--text-muted);
-    margin-top: 4px;
+    color: var(--text-tertiary);
 }}
 
-.contract-info {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 14px;
-}}
-.contract-box {{
-    background: var(--bg-elevated);
-    border-radius: 10px;
-    padding: 12px;
-    text-align: center;
-}}
-.contract-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }}
-.contract-value {{ font-family: 'SF Mono', monospace; font-size: 16px; font-weight: 700; margin-top: 4px; }}
-.contract-value.calls {{ color: {green}; }}
-.contract-value.puts {{ color: {red}; }}
-.contract-sub {{ font-size: 10px; color: var(--text-secondary); margin-top: 2px; }}
-.sweet-badge {{
-    display: inline-block;
-    background: {amber_light};
-    color: {"#92400e" if theme == "light" else amber};
-    font-size: 9px;
-    padding: 3px 8px;
-    border-radius: 10px;
-    font-weight: 600;
-    margin-top: 4px;
-}}
+/* ─────────────────────────────────────────────────────────────────
+   UTILITIES
+   ───────────────────────────────────────────────────────────────── */
 
-.targets-section {{ margin-bottom: 14px; }}
-.targets-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }}
-.targets-grid {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
-}}
-.target-box {{
-    background: var(--bg-elevated);
-    border-radius: 8px;
-    padding: 8px 4px;
-    text-align: center;
-}}
-.target-pct {{ font-size: 10px; color: var(--text-muted); font-weight: 600; }}
-.target-price {{ font-family: 'SF Mono', monospace; font-size: 10px; color: var(--text-secondary); margin-top: 2px; }}
-.target-profit {{ font-family: 'SF Mono', monospace; font-size: 12px; font-weight: 700; color: {green}; margin-top: 2px; }}
+.mono {{ font-family: var(--font-mono); }}
+.text-success {{ color: var(--success); }}
+.text-danger {{ color: var(--danger); }}
+.text-warning {{ color: var(--warning); }}
+.text-muted {{ color: var(--text-tertiary); }}
 
-.risk-display {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: {red_light};
-    border-radius: 10px;
-    padding: 10px 14px;
-}}
-.risk-label {{ font-size: 11px; color: {red}; font-weight: 600; }}
-.risk-values {{ text-align: right; }}
-.risk-stop {{ font-family: 'SF Mono', monospace; font-size: 11px; color: {red}; }}
-.risk-amount {{ font-family: 'SF Mono', monospace; font-size: 14px; font-weight: 700; color: {red}; }}
-
-/* Stats Grid */
-.stats-row {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-}}
-@media (max-width: 700px) {{ .stats-row {{ grid-template-columns: repeat(2, 1fr); }} }}
-.stat-card {{
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-light);
-    border-radius: 12px;
-    padding: 16px;
-    text-align: center;
-}}
-.stat-value {{ font-family: 'SF Mono', monospace; font-size: 18px; font-weight: 700; }}
-.stat-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }}
-
-/* Table */
-.data-table {{ width: 100%; border-collapse: collapse; }}
-.data-table th {{
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-muted);
-    padding: 12px 10px;
-    text-align: left;
-    border-bottom: 1px solid var(--border-medium);
-    background: var(--bg-elevated);
-}}
-.data-table td {{
-    padding: 12px 10px;
-    font-size: 12px;
-    border-bottom: 1px solid var(--border-light);
-}}
-.data-table tr:hover {{ background: var(--bg-elevated); }}
-.mono {{ font-family: 'SF Mono', monospace; }}
-.text-green {{ color: {green}; }}
-.text-red {{ color: {red}; }}
-.text-amber {{ color: {amber}; }}
-.text-blue {{ color: {blue}; }}
-.badge {{
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 20px;
-    font-size: 10px;
-    font-weight: 700;
-}}
-.badge-green {{ background: {green_light}; color: {green}; }}
-.badge-red {{ background: {red_light}; color: {red}; }}
-
-/* Footer */
-.footer {{
-    text-align: center;
-    padding: 28px;
-    color: var(--text-muted);
-    font-size: 12px;
-    border-top: 1px solid var(--border-light);
-    margin-top: 28px;
-}}
-.footer-brand {{ font-weight: 700; color: var(--text-secondary); margin-bottom: 6px; }}
 </style>
 </head>
 <body>
-<div class="container">
+<div class="dashboard">
 
 <!-- HEADER -->
 <header class="header">
-    <div class="brand">
-        <div class="brand-icon">SPX</div>
-        <div class="brand-text">
-            <h1>SPX Prophet</h1>
-            <span>Institutional Edition v7.1</span>
+    <div class="logo">
+        <div class="logo-mark">SPX</div>
+        <div class="logo-text">
+            <div class="logo-title">SPX Prophet</div>
+            <div class="logo-subtitle">Institutional Edition v7.2</div>
         </div>
     </div>
-    <div class="header-right">
-        <div class="countdown-group">
-            <div class="countdown-item">
-                <div class="countdown-label">Entry Window</div>
-                <div class="countdown-value">{format_countdown(get_time_until(ENTRY_TARGET))}</div>
+    <div class="header-meta">
+        <div class="meta-group">
+            <div class="meta-item">
+                <div class="meta-label">Entry Window</div>
+                <div class="meta-value">{format_countdown(get_time_until(ENTRY_TARGET))}</div>
             </div>
-            <div class="countdown-item">
-                <div class="countdown-label">Cutoff</div>
-                <div class="countdown-value">{format_countdown(get_time_until(CUTOFF_TIME))}</div>
+            <div class="meta-item">
+                <div class="meta-label">Cutoff</div>
+                <div class="meta-value">{format_countdown(get_time_until(CUTOFF_TIME))}</div>
             </div>
         </div>
-        <div class="clock">{now.strftime("%H:%M")} CT</div>
+        <div class="clock">{now.strftime("%H:%M")}</div>
     </div>
 </header>
-
-<!-- BANNERS -->
 '''
     
-    if session_note:
-        html += f'<div class="alert-banner info">⏰ Prior Session ({pivot_date.strftime("%b %d")}): {session_note}</div>'
+    # Alert banners
     if is_historical:
-        html += f'<div class="alert-banner historical">📅 Historical Analysis Mode: {trading_date.strftime("%A, %B %d, %Y")}</div>'
-    if INST_WINDOW_START <= now.time() <= INST_WINDOW_END and not is_historical:
-        html += f'<div class="alert-banner warning">🏛️ INSTITUTIONAL WINDOW ACTIVE — Prime Entry Zone</div>'
+        html += f'<div style="background:var(--bg-surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-4);font-size:12px;color:var(--text-secondary);">📅 Historical Mode: {trading_date.strftime("%A, %B %d, %Y")}</div>'
     
-    # Main grid with VIX and Checklist
-    zones_color = "text-green" if vix_zone.zones_away < 0 else "text-red" if vix_zone.zones_away > 0 else ""
+    # Determine confluence status
+    conf_class = "strong" if confluence and confluence.is_aligned else "conflict" if confluence and confluence.signal_strength == "CONFLICTING" else "moderate" if confluence and confluence.signal_strength == "MODERATE" else "weak"
+    conf_text = confluence.recommendation if confluence else "No data"
+    
+    # Signal Hero Section
+    direction_class = "calls" if vix_zone.bias == "CALLS" else "puts" if vix_zone.bias == "PUTS" else "wait"
+    
+    # Score ring calculation
+    score_pct = total_score / 100
+    circumference = 2 * 3.14159 * 58
+    stroke_offset = circumference * (1 - score_pct)
+    score_class = "a" if total_score >= 80 else "b" if total_score >= 65 else "c" if total_score >= 50 else "d"
+    
     html += f'''
-<!-- MAIN GRID -->
-<div class="main-grid">
-    <div class="vix-section">
-        <div class="vix-meter">
-            <div style="font-size:13px;font-weight:700;color:var(--text-secondary);margin-bottom:8px;">VIX Zone Analysis</div>
-            <div class="vix-bar">
-                <div class="vix-marker" style="left:{marker_pos}%"></div>
+<!-- SIGNAL HERO -->
+<div class="signal-hero">
+    <div class="signal-main">
+        <div class="signal-direction">
+            <div class="direction-badge {direction_class}">
+                {"↑" if vix_zone.bias == "CALLS" else "↓" if vix_zone.bias == "PUTS" else "–"} {vix_zone.bias}
             </div>
-            <div class="vix-labels">
+        </div>
+        <div>
+            <div class="signal-title {direction_class}">
+                {"Go Long" if vix_zone.bias == "CALLS" else "Go Short" if vix_zone.bias == "PUTS" else "Wait for Setup"}
+            </div>
+            <div class="signal-subtitle">{vix_zone.bias_reason}</div>
+        </div>
+        <div class="signal-confluence">
+            <div class="confluence-dot {conf_class}"></div>
+            <div class="confluence-text">{conf_text}</div>
+        </div>
+        <div class="signal-metrics">
+            <div class="metric">
+                <div class="metric-value">{vix_zone.current:.1f}</div>
+                <div class="metric-label">VIX</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{vix_zone.position_pct:.0f}%</div>
+                <div class="metric-label">Zone Position</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value {'' if ma_bias.bias == 'NEUTRAL' else 'success' if ma_bias.bias == 'LONG' else 'danger'}">{ma_bias.bias}</div>
+                <div class="metric-label">MA Bias</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">{spx_price:,.0f}</div>
+                <div class="metric-label">SPX</div>
+            </div>
+        </div>
+    </div>
+    <div class="signal-score">
+        <div class="score-ring">
+            <svg width="140" height="140" viewBox="0 0 140 140">
+                <circle class="score-ring-bg" cx="70" cy="70" r="58"></circle>
+                <circle class="score-ring-fill {score_class}" cx="70" cy="70" r="58" 
+                    stroke-dasharray="{circumference}" 
+                    stroke-dashoffset="{stroke_offset}"></circle>
+            </svg>
+            <div class="score-center">
+                <div class="score-value" style="color:var(--{"success" if total_score >= 80 else "info" if total_score >= 65 else "warning" if total_score >= 50 else "danger"});">{total_score}</div>
+                <div class="score-grade">Grade {grade}</div>
+            </div>
+        </div>
+        <div class="score-label">Trade Readiness</div>
+    </div>
+</div>
+'''
+
+    # VIX Section
+    html += f'''
+<!-- VIX METER -->
+<div class="vix-section">
+    <div class="section-header">
+        <div class="section-title">VIX Zone Analysis</div>
+    </div>
+    <div class="vix-display">
+        <div style="flex:1;">
+            <div class="vix-meter-track">
+                <div class="vix-meter-thumb" style="left:{marker_pos}%"></div>
+            </div>
+            <div class="vix-meter-labels">
                 <span>{vix_zone.bottom:.2f}</span>
-                <span>Zone: {vix_zone.zone_size:.2f}</span>
+                <span>Zone: {vix_zone.zone_size:.2f} ({vix_zone.zones_away:+d} away)</span>
                 <span>{vix_zone.top:.2f}</span>
             </div>
-            <div class="vix-stats">
-                <div class="vix-stat">
-                    <div class="vix-stat-value">{vix_zone.current:.2f}</div>
-                    <div class="vix-stat-label">Current</div>
-                </div>
-                <div class="vix-stat">
-                    <div class="vix-stat-value">{vix_zone.position_pct:.0f}%</div>
-                    <div class="vix-stat-label">Position</div>
-                </div>
-                <div class="vix-stat">
-                    <div class="vix-stat-value text-blue">±{vix_zone.expected_spx_move:.0f}</div>
-                    <div class="vix-stat-label">Exp. Move</div>
-                </div>
-                <div class="vix-stat">
-                    <div class="vix-stat-value {zones_color}">{vix_zone.zones_away:+d}</div>
-                    <div class="vix-stat-label">Zones Away</div>
-                </div>
-            </div>
         </div>
-        <div class="bias-card">
-            <div class="bias-icon">{bias_icon}</div>
-            <div class="bias-label">{vix_zone.bias}</div>
-            <div class="bias-reason">{vix_zone.bias_reason}</div>
-        </div>
-        <div class="bias-card" style="background:{ma_bg};border-color:{ma_color}50;margin-top:12px;">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:{ma_color};margin-bottom:6px;">30-Min MA Bias</div>
-            <div style="font-size:28px;color:{ma_color};line-height:1;">{ma_icon}</div>
-            <div style="font-size:20px;font-weight:700;color:{ma_color};margin-top:6px;">{ma_bias.bias if ma_bias else 'N/A'}</div>
-            <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">{ma_bias.bias_reason if ma_bias else ''}</div>
-            {f'<div style="margin-top:6px;padding:5px 8px;background:{amber}20;border-radius:6px;font-size:10px;color:{amber}">{ma_bias.regime_warning}</div>' if ma_bias and ma_bias.regime_warning else ''}
-        </div>
-'''
-    
-    # Confluence Card
-    if confluence:
-        conf_color = green if confluence.signal_strength == "STRONG" else amber if confluence.signal_strength == "MODERATE" else red if confluence.signal_strength == "CONFLICTING" else text_muted
-        conf_bg = green_light if confluence.signal_strength == "STRONG" else amber_light if confluence.signal_strength == "MODERATE" else red_light if confluence.signal_strength == "CONFLICTING" else bg_elevated
-        conf_icon = "✅" if confluence.is_aligned else "⚠️" if confluence.signal_strength == "CONFLICTING" else "◐"
-        html += f'''
-        <div class="bias-card" style="background:{conf_bg};border-color:{conf_color}50;margin-top:12px;">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:{conf_color};margin-bottom:6px;">Signal Confluence</div>
-            <div style="font-size:28px;line-height:1;">{conf_icon}</div>
-            <div style="font-size:18px;font-weight:700;color:{conf_color};margin-top:6px;">{confluence.signal_strength}</div>
-            <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">{confluence.recommendation}</div>
-            <div style="margin-top:8px;display:flex;justify-content:center;gap:8px;font-size:10px;">
-                <span style="padding:3px 8px;background:var(--bg-card);border-radius:4px;">VIX: {confluence.vix_bias}</span>
-                <span style="padding:3px 8px;background:var(--bg-card);border-radius:4px;">MA: {confluence.ma_bias}</span>
-                <span style="padding:3px 8px;background:var(--bg-card);border-radius:4px;">Gap: {confluence.gap_bias}</span>
-            </div>
-        </div>
-'''
-    
-    # Gap Analysis Card
-    if gap_analysis and gap_analysis.gap_direction != "FLAT":
-        gap_color = green if gap_analysis.trade_bias == "CALLS" else red if gap_analysis.trade_bias == "PUTS" else amber
-        gap_icon = "⬆️" if gap_analysis.gap_direction == "UP" else "⬇️"
-        html += f'''
-        <div class="bias-card" style="background:var(--bg-elevated);border-color:{gap_color}50;margin-top:12px;">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:{gap_color};margin-bottom:6px;">Overnight Gap</div>
-            <div style="font-size:24px;line-height:1;">{gap_icon}</div>
-            <div style="font-size:16px;font-weight:700;color:{gap_color};margin-top:4px;">{gap_analysis.gap_pct:+.2f}% ({gap_analysis.gap_size})</div>
-            <div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">{gap_analysis.trade_reason}</div>
-        </div>
-'''
-    
-    # Market Context / Time Warning
-    if market_ctx:
-        if market_ctx.is_prime_time:
-            time_color = green
-            time_text = "OPTIMAL"
-            time_icon = "●"
-        elif market_ctx.time_warning == "Good":
-            time_color = blue
-            time_text = "GOOD"
-            time_icon = "●"
-        elif market_ctx.time_warning == "Late entry":
-            time_color = amber
-            time_text = "LATE"
-            time_icon = "○"
-        elif market_ctx.time_warning == "Very late":
-            time_color = neutral
-            time_text = "VERY LATE"
-            time_icon = "○"
-        else:
-            time_color = text_muted
-            time_text = "PRE-MARKET"
-            time_icon = "○"
-        
-        html += f'''
-        <div style="margin-top:12px;padding:12px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-md);text-align:center;">
-            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Entry Window</div>
-            <div style="font-size:14px;font-weight:600;color:{time_color};display:flex;align-items:center;justify-content:center;gap:6px;">
-                <span style="font-size:8px;">{time_icon}</span> {time_text}
-            </div>
-            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;display:flex;justify-content:center;gap:12px;">
-                <span>Stop: {market_ctx.recommended_stop:.0f} pts</span>
-                <span>VIX: {market_ctx.vix_level}</span>
-            </div>
-        </div>
-'''
-    
-    # Checklist card with proper variables
-    checklist_bg = '#f0fdf4' if trade_ready else '#fef2f2' if theme == 'light' else '#064e3b' if trade_ready else '#7f1d1d'
-    checklist_title_color = green if trade_ready else red
-    checklist_title_text = "✅ READY TO TRADE" if trade_ready else "⏸️ NOT OPTIMAL"
-    
-    html += f'''
-    </div>
-    
-    <div class="checklist-card">
-        <div class="checklist-header" style="background:{checklist_bg}">
-            <div class="checklist-title" style="color:{checklist_title_color}">{checklist_title_text}</div>
-            <div class="checklist-score" style="color:{grade_color}">{total_score}/100 ({grade})</div>
-        </div>
-        <div class="checklist-items">
-'''
-    for item in checklist:
-        pts = item["pts"]
-        max_pts = item["max"]
-        pct = (pts / max_pts * 100) if max_pts > 0 else 0
-        pts_color = green if pct >= 75 else amber if pct >= 50 else red
-        html += f'''
-            <div class="checklist-item">
-                <div class="check-pts" style="background:{pts_color}20;color:{pts_color};min-width:60px;text-align:center;padding:6px 10px;border-radius:8px;font-family:'JetBrains Mono';font-size:13px;font-weight:700;">{pts}/{max_pts}</div>
-                <div class="check-text" style="flex:1;margin-left:12px;">
-                    <div class="check-label">{item["label"]}</div>
-                    <div class="check-detail">{item["detail"]}</div>
-                </div>
-            </div>
-'''
-    html += '''
+        <div class="vix-current">
+            <div class="vix-current-value">{vix_zone.current:.2f}</div>
+            <div class="vix-current-label">Current VIX</div>
         </div>
     </div>
 </div>
 '''
+
+    # Indicator Cards
+    ma_status_class = "long" if ma_bias.bias == "LONG" else "short" if ma_bias.bias == "SHORT" else "neutral"
     
-    # Collapsible CALLS Section
     html += f'''
-<!-- CALLS SETUPS (Collapsible) -->
-<div class="setup-section" id="calls-section">
-    <div class="setup-section-header">
-        <div class="setup-section-title calls">
-            <span>▲</span>
-            <span>CALLS SETUPS</span>
-            <span class="setup-count calls">{len(calls_setups)} Available</span>
+<!-- INDICATOR CARDS -->
+<div class="indicators-grid">
+    <div class="indicator-card">
+        <div class="indicator-header">
+            <div class="indicator-title">30-Min MA Bias</div>
+            <div class="indicator-status {ma_status_class}"></div>
         </div>
-        <span class="setup-section-chevron">▼</span>
+        <div class="indicator-value {ma_status_class}">{ma_bias.bias}</div>
+        <div class="indicator-detail">{ma_bias.bias_reason}</div>
     </div>
-    <div class="setup-section-content">
-        <div class="setup-grid">
+'''
+    
+    # Entry Window Card
+    if market_ctx:
+        window_class = "long" if market_ctx.is_prime_time else "neutral"
+        window_text = "OPTIMAL" if market_ctx.is_prime_time else market_ctx.time_warning.upper() if market_ctx.time_warning else "PRE-MARKET"
+        html += f'''
+    <div class="indicator-card">
+        <div class="indicator-header">
+            <div class="indicator-title">Entry Window</div>
+            <div class="indicator-status {window_class}"></div>
+        </div>
+        <div class="indicator-value {window_class}">{window_text}</div>
+        <div class="indicator-detail">Stop: {market_ctx.recommended_stop:.0f} pts | VIX Level: {market_ctx.vix_level}</div>
+    </div>
+'''
+    
+    # Gap Card
+    if gap_analysis and gap_analysis.gap_direction != "FLAT":
+        gap_class = "long" if gap_analysis.trade_bias == "CALLS" else "short" if gap_analysis.trade_bias == "PUTS" else "neutral"
+        html += f'''
+    <div class="indicator-card">
+        <div class="indicator-header">
+            <div class="indicator-title">Overnight Gap</div>
+            <div class="indicator-status {gap_class}"></div>
+        </div>
+        <div class="indicator-value {gap_class}">{gap_analysis.gap_pct:+.2f}%</div>
+        <div class="indicator-detail">{gap_analysis.trade_reason}</div>
+    </div>
+'''
+    
+    html += '</div>'
+    
+    # CALLS Setups Section
+    html += f'''
+<!-- CALLS SETUPS -->
+<div class="setups-section" id="calls-section">
+    <div class="setups-header">
+        <div class="setups-title calls">
+            <span>↑</span>
+            <span>Calls Setups</span>
+            <span class="setups-count calls">{len(calls_setups)}</span>
+        </div>
+        <span class="setups-chevron">▾</span>
+    </div>
+    <div class="setups-body">
+        <div class="setups-grid">
 '''
     for s in calls_setups:
         opt = s.option
@@ -2707,107 +2578,93 @@ body {{
         status_style = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait"
         html += f'''
             <div class="setup-card calls {status_class}">
-                <div class="setup-card-header">
-                    <div class="setup-cone-name">{s.cone_name}</div>
+                <div class="setup-header">
+                    <div class="setup-name">{s.cone_name}</div>
                     <div class="setup-status {status_style}">{status_text}</div>
                 </div>
-                <div class="entry-display">
-                    <div class="entry-label">Entry Rail</div>
-                    <div class="entry-price calls">{s.entry:,.2f}</div>
-                    <div class="entry-distance">{s.distance:.0f} pts from current</div>
+                <div class="setup-entry">
+                    <div class="setup-entry-label">Entry Rail</div>
+                    <div class="setup-entry-price calls">{s.entry:,.2f}</div>
+                    <div class="setup-entry-distance">{s.distance:.0f} pts away</div>
                 </div>
-                <div class="contract-info">
-                    <div class="contract-box">
-                        <div class="contract-label">SPX Strike</div>
+                <div class="setup-contract">
+                    <div class="contract-item">
+                        <div class="contract-label">Strike</div>
                         <div class="contract-value calls">{opt.spx_strike}C</div>
-                        <div class="contract-sub">{opt.otm_distance:.0f} pts OTM</div>
                     </div>
-                    <div class="contract-box">
-                        <div class="contract-label">Est. Premium</div>
+                    <div class="contract-item">
+                        <div class="contract-label">Premium</div>
                         <div class="contract-value">${opt.spx_price_est:.2f}</div>
-                        <div class="contract-sub">${opt.spx_price_est * 100:,.0f}/contract</div>
-                        {"<div class='sweet-badge'>★ SWEET SPOT</div>" if opt.in_sweet_spot else ""}
                     </div>
                 </div>
-                <div class="targets-section">
-                    <div class="targets-label">Profit Targets</div>
-                    <div class="targets-grid">
-                        <div class="target-box"><div class="target-pct">25%</div><div class="target-price">{s.target_25:,.0f}</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
-                        <div class="target-box"><div class="target-pct">50%</div><div class="target-price">{s.target_50:,.0f}</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
-                        <div class="target-box"><div class="target-pct">75%</div><div class="target-price">{s.target_75:,.0f}</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
-                        <div class="target-box"><div class="target-pct">100%</div><div class="target-price">{s.target_100:,.0f}</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
+                <div class="setup-targets">
+                    <div class="targets-row">
+                        <div class="target-item"><div class="target-pct">25%</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">50%</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">75%</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">100%</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
                     </div>
                 </div>
-                <div class="risk-display">
-                    <div class="risk-label">Stop Loss</div>
-                    <div class="risk-values">
-                        <div class="risk-stop">{s.stop:,.2f}</div>
-                        <div class="risk-amount">-${s.risk_dollars:,.0f}</div>
-                    </div>
+                <div class="setup-risk">
+                    <div class="risk-label">Stop: {s.stop:,.0f}</div>
+                    <div class="risk-value">-${s.risk_dollars:,.0f}</div>
                 </div>
             </div>
 '''
     html += '</div></div></div>'
     
-    # Collapsible PUTS Section
+    # PUTS Setups Section
     html += f'''
-<!-- PUTS SETUPS (Collapsible) -->
-<div class="setup-section collapsed" id="puts-section">
-    <div class="setup-section-header">
-        <div class="setup-section-title puts">
-            <span>▼</span>
-            <span>PUTS SETUPS</span>
-            <span class="setup-count puts">{len(puts_setups)} Available</span>
+<!-- PUTS SETUPS -->
+<div class="setups-section collapsed" id="puts-section">
+    <div class="setups-header">
+        <div class="setups-title puts">
+            <span>↓</span>
+            <span>Puts Setups</span>
+            <span class="setups-count puts">{len(puts_setups)}</span>
         </div>
-        <span class="setup-section-chevron">▼</span>
+        <span class="setups-chevron">▾</span>
     </div>
-    <div class="setup-section-content">
-        <div class="setup-grid">
+    <div class="setups-body">
+        <div class="setups-grid">
 '''
     for s in puts_setups:
         opt = s.option
-        status_class = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
+        status_class = "active puts" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
         status_text = "ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT"
         status_style = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait"
         html += f'''
             <div class="setup-card puts {status_class}">
-                <div class="setup-card-header">
-                    <div class="setup-cone-name">{s.cone_name}</div>
+                <div class="setup-header">
+                    <div class="setup-name">{s.cone_name}</div>
                     <div class="setup-status {status_style}">{status_text}</div>
                 </div>
-                <div class="entry-display">
-                    <div class="entry-label">Entry Rail</div>
-                    <div class="entry-price puts">{s.entry:,.2f}</div>
-                    <div class="entry-distance">{s.distance:.0f} pts from current</div>
+                <div class="setup-entry">
+                    <div class="setup-entry-label">Entry Rail</div>
+                    <div class="setup-entry-price puts">{s.entry:,.2f}</div>
+                    <div class="setup-entry-distance">{s.distance:.0f} pts away</div>
                 </div>
-                <div class="contract-info">
-                    <div class="contract-box">
-                        <div class="contract-label">SPX Strike</div>
+                <div class="setup-contract">
+                    <div class="contract-item">
+                        <div class="contract-label">Strike</div>
                         <div class="contract-value puts">{opt.spx_strike}P</div>
-                        <div class="contract-sub">{opt.otm_distance:.0f} pts OTM</div>
                     </div>
-                    <div class="contract-box">
-                        <div class="contract-label">Est. Premium</div>
+                    <div class="contract-item">
+                        <div class="contract-label">Premium</div>
                         <div class="contract-value">${opt.spx_price_est:.2f}</div>
-                        <div class="contract-sub">${opt.spx_price_est * 100:,.0f}/contract</div>
-                        {"<div class='sweet-badge'>★ SWEET SPOT</div>" if opt.in_sweet_spot else ""}
                     </div>
                 </div>
-                <div class="targets-section">
-                    <div class="targets-label">Profit Targets</div>
-                    <div class="targets-grid">
-                        <div class="target-box"><div class="target-pct">25%</div><div class="target-price">{s.target_25:,.0f}</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
-                        <div class="target-box"><div class="target-pct">50%</div><div class="target-price">{s.target_50:,.0f}</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
-                        <div class="target-box"><div class="target-pct">75%</div><div class="target-price">{s.target_75:,.0f}</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
-                        <div class="target-box"><div class="target-pct">100%</div><div class="target-price">{s.target_100:,.0f}</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
+                <div class="setup-targets">
+                    <div class="targets-row">
+                        <div class="target-item"><div class="target-pct">25%</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">50%</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">75%</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">100%</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
                     </div>
                 </div>
-                <div class="risk-display">
-                    <div class="risk-label">Stop Loss</div>
-                    <div class="risk-values">
-                        <div class="risk-stop">{s.stop:,.2f}</div>
-                        <div class="risk-amount">-${s.risk_dollars:,.0f}</div>
-                    </div>
+                <div class="setup-risk">
+                    <div class="risk-label">Stop: {s.stop:,.0f}</div>
+                    <div class="risk-value">-${s.risk_dollars:,.0f}</div>
                 </div>
             </div>
 '''
@@ -2942,16 +2799,27 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v7.1 — Institutional Edition</div>
-    <div>Trading: {trading_date.strftime("%B %d, %Y")} • Pivot Anchor: {pivot_date.strftime("%B %d, %Y")}</div>
-    <div style="margin-top:4px;">Contracts ~15pts OTM • Sweet Spot: $4-$8 ($400-$800/contract)</div>
+    <div class="footer-brand">SPX Prophet v7.2 — Institutional Edition</div>
+    <div class="footer-meta">Trading: {trading_date.strftime("%B %d, %Y")} • Pivot: {pivot_date.strftime("%B %d, %Y")}</div>
 </footer>
 
 <script>
 // Handle all collapsible sections
 document.addEventListener('DOMContentLoaded', function() {{
-    // Setup section headers (Calls/Puts)
-    document.querySelectorAll('.setup-section-header').forEach(function(header) {{
+    // Setup sections (Calls/Puts)
+    document.querySelectorAll('.setups-header').forEach(function(header) {{
+        header.addEventListener('click', function(e) {{
+            e.preventDefault();
+            e.stopPropagation();
+            var section = this.parentElement;
+            if (section) {{
+                section.classList.toggle('collapsed');
+            }}
+        }});
+    }});
+    
+    // Table sections
+    document.querySelectorAll('.table-header').forEach(function(header) {{
         header.addEventListener('click', function(e) {{
             e.preventDefault();
             e.stopPropagation();
