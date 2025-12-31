@@ -95,6 +95,40 @@ class VIXZone:
     matched_cone: str = ""
 
 @dataclass
+class GapAnalysis:
+    """Overnight gap analysis for 0DTE edge"""
+    prior_close: float = 0.0
+    open_price: float = 0.0
+    gap_points: float = 0.0
+    gap_pct: float = 0.0
+    gap_direction: str = "FLAT"  # "UP", "DOWN", "FLAT"
+    gap_size: str = "NONE"  # "SMALL" (<0.3%), "MEDIUM" (0.3-0.7%), "LARGE" (>0.7%)
+    trade_bias: str = "NEUTRAL"  # What the gap suggests
+    trade_reason: str = ""
+
+@dataclass
+class Confluence:
+    """VIX + MA Bias confluence scoring"""
+    vix_bias: str = "WAIT"
+    ma_bias: str = "NEUTRAL"
+    gap_bias: str = "NEUTRAL"
+    is_aligned: bool = False
+    alignment_score: int = 0  # -30 to +30
+    signal_strength: str = "WEAK"  # "WEAK", "MODERATE", "STRONG"
+    recommendation: str = ""
+    
+@dataclass
+class MarketContext:
+    """Overall market context for the day"""
+    prior_day_range: float = 0.0
+    avg_daily_range: float = 0.0  # 10-day ATR
+    prior_day_type: str = "NORMAL"  # "TREND", "RANGE", "NORMAL"
+    vix_level: str = "NORMAL"  # "LOW" (<14), "NORMAL" (14-20), "ELEVATED" (20-25), "HIGH" (>25)
+    recommended_stop: float = 6.0  # Dynamic based on VIX
+    is_prime_time: bool = False  # 9:00-10:30 AM
+    time_warning: str = ""
+
+@dataclass
 class Pivot:
     name: str = ""
     price: float = 0.0
@@ -389,9 +423,249 @@ def fetch_es_ma_bias():
         ma_bias.bias = "NEUTRAL"
         ma_bias.bias_reason = "Connection error"
         return ma_bias
-        ma_bias.bias = "NEUTRAL"
-        ma_bias.bias_reason = f"Error: {str(e)[:50]}"
-        return ma_bias
+
+def fetch_vix_current():
+    """
+    Fetch current VIX from Polygon (preferred) or Yahoo Finance (fallback).
+    Returns tuple: (vix_value, source)
+    """
+    # Try Polygon first (more reliable for indices)
+    try:
+        data = polygon_get(f"/v2/aggs/ticker/I:VIX/prev")
+        if data and data.get("results"):
+            vix = data["results"][0].get("c", 0)
+            if vix > 0:
+                return (round(vix, 2), "polygon")
+    except:
+        pass
+    
+    # Fallback to Yahoo Finance
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=1d"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            result = data.get("chart", {}).get("result", [])
+            if result:
+                meta = result[0].get("meta", {})
+                vix = meta.get("regularMarketPrice", 0)
+                if vix > 0:
+                    return (round(vix, 2), "yahoo")
+    except:
+        pass
+    
+    return (0.0, "none")
+
+def fetch_vix_zone_auto():
+    """
+    Fetch VIX zone boundaries (overnight high/low) from Polygon.
+    Returns tuple: (bottom, top, current)
+    """
+    try:
+        # Get last 2 days of VIX data to find overnight range
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
+        data = polygon_get(f"/v2/aggs/ticker/I:VIX/range/1/day/{week_ago}/{today}", {"limit": 5, "sort": "desc"})
+        
+        if data and data.get("results") and len(data["results"]) >= 1:
+            latest = data["results"][0]
+            vix_high = latest.get("h", 0)
+            vix_low = latest.get("l", 0)
+            vix_close = latest.get("c", 0)
+            
+            if vix_high > 0 and vix_low > 0:
+                return (round(vix_low, 2), round(vix_high, 2), round(vix_close, 2))
+    except:
+        pass
+    
+    return (0.0, 0.0, 0.0)
+
+def analyze_gap(prior_close, current_price):
+    """
+    Analyze overnight gap for 0DTE trading edge.
+    
+    Gap Rules:
+    - Gap UP into VIX at top → Fade (PUTS)
+    - Gap DOWN into VIX at bottom → Fade (CALLS)  
+    - Gap in direction of trend → Continuation
+    """
+    gap = GapAnalysis()
+    gap.prior_close = prior_close
+    gap.open_price = current_price
+    
+    if prior_close <= 0 or current_price <= 0:
+        gap.trade_bias = "NEUTRAL"
+        gap.trade_reason = "No gap data"
+        return gap
+    
+    gap.gap_points = round(current_price - prior_close, 2)
+    gap.gap_pct = round((gap.gap_points / prior_close) * 100, 3)
+    
+    # Determine gap direction
+    if gap.gap_pct > 0.05:
+        gap.gap_direction = "UP"
+    elif gap.gap_pct < -0.05:
+        gap.gap_direction = "DOWN"
+    else:
+        gap.gap_direction = "FLAT"
+    
+    # Determine gap size
+    abs_pct = abs(gap.gap_pct)
+    if abs_pct < 0.3:
+        gap.gap_size = "SMALL"
+    elif abs_pct < 0.7:
+        gap.gap_size = "MEDIUM"
+    else:
+        gap.gap_size = "LARGE"
+    
+    # Trading bias based on gap
+    # Large gaps tend to fill (fade them)
+    # Small gaps in trend direction tend to continue
+    if gap.gap_size == "LARGE":
+        if gap.gap_direction == "UP":
+            gap.trade_bias = "PUTS"
+            gap.trade_reason = f"Large gap up (+{gap.gap_pct:.2f}%) → Fade"
+        elif gap.gap_direction == "DOWN":
+            gap.trade_bias = "CALLS"
+            gap.trade_reason = f"Large gap down ({gap.gap_pct:.2f}%) → Fade"
+    elif gap.gap_size == "MEDIUM":
+        if gap.gap_direction == "UP":
+            gap.trade_bias = "NEUTRAL"
+            gap.trade_reason = f"Medium gap up (+{gap.gap_pct:.2f}%) → Wait for direction"
+        elif gap.gap_direction == "DOWN":
+            gap.trade_bias = "NEUTRAL"
+            gap.trade_reason = f"Medium gap down ({gap.gap_pct:.2f}%) → Wait for direction"
+    else:
+        gap.trade_bias = "NEUTRAL"
+        gap.trade_reason = f"Small/no gap ({gap.gap_pct:+.2f}%) → No edge"
+    
+    return gap
+
+def calculate_confluence(vix_zone, ma_bias, gap_analysis):
+    """
+    Calculate confluence between VIX Zone, MA Bias, and Gap Analysis.
+    
+    Scoring:
+    - VIX + MA aligned: +20 points
+    - VIX + MA conflicting: -20 points
+    - Gap supports direction: +10 points
+    - Gap opposes direction: -10 points
+    """
+    conf = Confluence()
+    conf.vix_bias = vix_zone.bias
+    conf.ma_bias = ma_bias.bias if ma_bias else "NEUTRAL"
+    conf.gap_bias = gap_analysis.trade_bias if gap_analysis else "NEUTRAL"
+    
+    score = 0
+    reasons = []
+    
+    # VIX + MA alignment (most important)
+    vix_direction = "LONG" if conf.vix_bias == "CALLS" else "SHORT" if conf.vix_bias == "PUTS" else "NEUTRAL"
+    
+    if vix_direction == conf.ma_bias and vix_direction != "NEUTRAL":
+        score += 20
+        conf.is_aligned = True
+        reasons.append(f"VIX + MA aligned → {vix_direction}")
+    elif vix_direction != "NEUTRAL" and conf.ma_bias != "NEUTRAL" and vix_direction != conf.ma_bias:
+        score -= 20
+        conf.is_aligned = False
+        reasons.append("⚠️ VIX vs MA CONFLICT")
+    else:
+        reasons.append("Mixed signals")
+    
+    # Gap alignment
+    gap_direction = "LONG" if conf.gap_bias == "CALLS" else "SHORT" if conf.gap_bias == "PUTS" else "NEUTRAL"
+    if gap_direction != "NEUTRAL":
+        if gap_direction == vix_direction:
+            score += 10
+            reasons.append("Gap supports")
+        elif vix_direction != "NEUTRAL" and gap_direction != vix_direction:
+            score -= 10
+            reasons.append("Gap opposes")
+    
+    conf.alignment_score = score
+    
+    # Signal strength
+    if score >= 20:
+        conf.signal_strength = "STRONG"
+        conf.recommendation = f"✅ HIGH CONFIDENCE {vix_direction}"
+    elif score >= 10:
+        conf.signal_strength = "MODERATE"
+        conf.recommendation = f"🟡 MODERATE {vix_direction}"
+    elif score <= -10:
+        conf.signal_strength = "CONFLICTING"
+        conf.recommendation = "🔴 AVOID - Conflicting signals"
+    else:
+        conf.signal_strength = "WEAK"
+        conf.recommendation = "⚪ WEAK - Wait for clarity"
+    
+    return conf
+
+def analyze_market_context(prior_session, vix_current, current_time_ct):
+    """
+    Analyze overall market context for the trading day.
+    
+    Includes:
+    - Prior day range analysis (trend vs range day)
+    - VIX level classification
+    - Dynamic stop loss based on VIX
+    - Prime time indicator
+    """
+    ctx = MarketContext()
+    
+    # Prior day range
+    if prior_session:
+        ctx.prior_day_range = prior_session.get("high", 0) - prior_session.get("low", 0)
+    
+    # VIX level classification and dynamic stops
+    if vix_current > 0:
+        if vix_current < 14:
+            ctx.vix_level = "LOW"
+            ctx.recommended_stop = 4.0
+        elif vix_current < 20:
+            ctx.vix_level = "NORMAL"
+            ctx.recommended_stop = 6.0
+        elif vix_current < 25:
+            ctx.vix_level = "ELEVATED"
+            ctx.recommended_stop = 8.0
+        else:
+            ctx.vix_level = "HIGH"
+            ctx.recommended_stop = 10.0
+    
+    # Prior day type (simplified - would need ATR for full analysis)
+    if ctx.prior_day_range > 0:
+        # Rough estimate: trend day if range > 40 points
+        if ctx.prior_day_range > 50:
+            ctx.prior_day_type = "TREND"
+        elif ctx.prior_day_range < 25:
+            ctx.prior_day_type = "RANGE"
+        else:
+            ctx.prior_day_type = "NORMAL"
+    
+    # Prime time check (9:00 - 10:30 AM CT)
+    prime_start = time(9, 0)
+    prime_end = time(10, 30)
+    theta_warning = time(11, 0)
+    danger_zone = time(11, 30)
+    
+    if prime_start <= current_time_ct <= prime_end:
+        ctx.is_prime_time = True
+        ctx.time_warning = ""
+    elif prime_end < current_time_ct <= theta_warning:
+        ctx.is_prime_time = False
+        ctx.time_warning = "⚠️ Past prime time"
+    elif theta_warning < current_time_ct <= danger_zone:
+        ctx.is_prime_time = False
+        ctx.time_warning = "🟡 Theta accelerating"
+    elif current_time_ct > danger_zone:
+        ctx.is_prime_time = False
+        ctx.time_warning = "🔴 DANGER: Heavy theta decay"
+    else:
+        ctx.is_prime_time = False
+        ctx.time_warning = "Pre-market"
+    
+    return ctx
 
 def filter_bars_to_session(bars, session_date, close_time_ct):
     """CRITICAL FIX: Filter bars to session close time (handles half days)"""
@@ -947,21 +1221,79 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
         ))
     return setups
 
-def calculate_day_score(vix_zone, cones, setups):
+def calculate_day_score(vix_zone, cones, setups, confluence=None, market_ctx=None):
+    """
+    Calculate trading day score with confluence weighting.
+    
+    New Scoring (100 points):
+    - VIX-Cone Alignment: 20 pts
+    - VIX Zone Clarity: 15 pts
+    - MA Bias Alignment: 20 pts (via confluence)
+    - Confluence Bonus: 15 pts
+    - Cone Width: 15 pts
+    - Premium Sweet Spot: 10 pts
+    - Prime Time Bonus: 5 pts
+    """
     score = DayScore()
     total = 0
+    
+    # 1. VIX-Cone Alignment (20 pts)
     if vix_zone.bias in ["CALLS", "PUTS"] and any(s.direction == vix_zone.bias and s.distance <= 10 for s in setups):
-        total += 25
-    if vix_zone.bias != "WAIT" and (vix_zone.position_pct >= 75 or vix_zone.position_pct <= 25 or vix_zone.zones_away != 0):
-        total += 25
+        total += 20
+    elif vix_zone.bias in ["CALLS", "PUTS"] and any(s.direction == vix_zone.bias and s.distance <= 20 for s in setups):
+        total += 10
+    
+    # 2. VIX Zone Clarity (15 pts)
+    if vix_zone.bias != "WAIT":
+        if vix_zone.zones_away != 0:
+            total += 15  # Outside zone = strong signal
+        elif vix_zone.position_pct >= 80 or vix_zone.position_pct <= 20:
+            total += 12  # At extremes
+        elif vix_zone.position_pct >= 70 or vix_zone.position_pct <= 30:
+            total += 8
+    
+    # 3. Confluence Score (35 pts - MA alignment + bonus)
+    if confluence:
+        if confluence.is_aligned and confluence.signal_strength == "STRONG":
+            total += 35  # Full points for strong alignment
+        elif confluence.is_aligned:
+            total += 25  # Aligned but not strong
+        elif confluence.signal_strength == "CONFLICTING":
+            total += 0   # No points for conflict
+        else:
+            total += 10  # Neutral
+    else:
+        total += 10  # Default if no confluence data
+    
+    # 4. Cone Width (15 pts)
     tradeable = [c for c in cones if c.is_tradeable]
     if tradeable:
-        total += 20 if max(c.width for c in tradeable) >= 30 else 10
+        best_width = max(c.width for c in tradeable)
+        if best_width >= 35:
+            total += 15
+        elif best_width >= 28:
+            total += 12
+        elif best_width >= 20:
+            total += 8
+        else:
+            total += 5
+    
+    # 5. Premium Sweet Spot (10 pts)
     sweet = sum(1 for s in setups if s.option and s.option.in_sweet_spot)
-    total += 15 if sweet >= 3 else 10 if sweet >= 1 else 5
-    score.total = total
-    score.grade = "A" if total >= 80 else "B" if total >= 60 else "C" if total >= 40 else "D"
-    score.color = "#10b981" if total >= 80 else "#3b82f6" if total >= 60 else "#f59e0b" if total >= 40 else "#ef4444"
+    if sweet >= 3:
+        total += 10
+    elif sweet >= 1:
+        total += 6
+    else:
+        total += 3
+    
+    # 6. Prime Time Bonus (5 pts)
+    if market_ctx and market_ctx.is_prime_time:
+        total += 5
+    
+    score.total = min(100, total)  # Cap at 100
+    score.grade = "A+" if total >= 90 else "A" if total >= 80 else "B" if total >= 65 else "C" if total >= 50 else "D"
+    score.color = "#10b981" if total >= 80 else "#3b82f6" if total >= 65 else "#f59e0b" if total >= 50 else "#ef4444"
     return score
 
 def check_alerts(setups, vix_zone, current_time):
@@ -977,7 +1309,7 @@ def check_alerts(setups, vix_zone, current_time):
         alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window (9:00-9:30 CT)"})
     return alerts
 
-def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None):
+def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, gap_analysis=None, market_ctx=None):
     # Color system
     if theme == "light":
         bg_main = "#f1f5f9"
@@ -1829,11 +2161,62 @@ body {{
             <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">{ma_bias.bias_reason if ma_bias else ''}</div>
             {f'<div style="margin-top:6px;padding:5px 8px;background:{amber}20;border-radius:6px;font-size:10px;color:{amber}">{ma_bias.regime_warning}</div>' if ma_bias and ma_bias.regime_warning else ''}
         </div>
+'''
+    
+    # Confluence Card
+    if confluence:
+        conf_color = green if confluence.signal_strength == "STRONG" else amber if confluence.signal_strength == "MODERATE" else red if confluence.signal_strength == "CONFLICTING" else text_muted
+        conf_bg = green_light if confluence.signal_strength == "STRONG" else amber_light if confluence.signal_strength == "MODERATE" else red_light if confluence.signal_strength == "CONFLICTING" else bg_elevated
+        conf_icon = "✅" if confluence.is_aligned else "⚠️" if confluence.signal_strength == "CONFLICTING" else "◐"
+        html += f'''
+        <div class="bias-card" style="background:{conf_bg};border-color:{conf_color}50;margin-top:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:{conf_color};margin-bottom:6px;">Signal Confluence</div>
+            <div style="font-size:28px;line-height:1;">{conf_icon}</div>
+            <div style="font-size:18px;font-weight:700;color:{conf_color};margin-top:6px;">{confluence.signal_strength}</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">{confluence.recommendation}</div>
+            <div style="margin-top:8px;display:flex;justify-content:center;gap:8px;font-size:10px;">
+                <span style="padding:3px 8px;background:var(--bg-card);border-radius:4px;">VIX: {confluence.vix_bias}</span>
+                <span style="padding:3px 8px;background:var(--bg-card);border-radius:4px;">MA: {confluence.ma_bias}</span>
+                <span style="padding:3px 8px;background:var(--bg-card);border-radius:4px;">Gap: {confluence.gap_bias}</span>
+            </div>
+        </div>
+'''
+    
+    # Gap Analysis Card
+    if gap_analysis and gap_analysis.gap_direction != "FLAT":
+        gap_color = green if gap_analysis.trade_bias == "CALLS" else red if gap_analysis.trade_bias == "PUTS" else amber
+        gap_icon = "⬆️" if gap_analysis.gap_direction == "UP" else "⬇️"
+        html += f'''
+        <div class="bias-card" style="background:var(--bg-elevated);border-color:{gap_color}50;margin-top:12px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:{gap_color};margin-bottom:6px;">Overnight Gap</div>
+            <div style="font-size:24px;line-height:1;">{gap_icon}</div>
+            <div style="font-size:16px;font-weight:700;color:{gap_color};margin-top:4px;">{gap_analysis.gap_pct:+.2f}% ({gap_analysis.gap_size})</div>
+            <div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">{gap_analysis.trade_reason}</div>
+        </div>
+'''
+    
+    # Market Context / Time Warning
+    if market_ctx:
+        time_color = green if market_ctx.is_prime_time else amber if "Past" in market_ctx.time_warning else red if "DANGER" in market_ctx.time_warning else text_muted
+        html += f'''
+        <div style="margin-top:12px;padding:10px;background:var(--bg-elevated);border-radius:10px;text-align:center;">
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Trading Window</div>
+            <div style="font-size:14px;font-weight:600;color:{time_color};">{"🟢 PRIME TIME" if market_ctx.is_prime_time else market_ctx.time_warning or "Pre-market"}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Stop: {market_ctx.recommended_stop:.0f} pts | VIX: {market_ctx.vix_level}</div>
+        </div>
+'''
+    
+    # Checklist card with proper variables
+    checklist_bg = '#f0fdf4' if trade_ready else '#fef2f2' if theme == 'light' else '#064e3b' if trade_ready else '#7f1d1d'
+    checklist_title_color = green if trade_ready else red
+    checklist_title_text = "✅ READY TO TRADE" if trade_ready else "⏸️ NOT OPTIMAL"
+    
+    html += f'''
     </div>
     
     <div class="checklist-card">
-        <div class="checklist-header" style="background:{'#f0fdf4' if trade_ready else '#fef2f2' if theme == 'light' else '#064e3b' if trade_ready else '#7f1d1d'}">
-            <div class="checklist-title" style="color:{green if trade_ready else red}">{"✅ READY TO TRADE" if trade_ready else "⏸️ NOT OPTIMAL"}</div>
+        <div class="checklist-header" style="background:{checklist_bg}">
+            <div class="checklist-title" style="color:{checklist_title_color}">{checklist_title_text}</div>
             <div class="checklist-score" style="color:{grade_color}">{total_score}/100 ({grade})</div>
         </div>
         <div class="checklist-items">
@@ -2193,6 +2576,26 @@ def main():
             st.info(f"📌 Pivot: {prior.strftime('%b %d')} (Half Day)")
         st.divider()
         st.markdown("### 📊 VIX Zone")
+        
+        # Auto-fetch VIX button
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            if st.button("🔄 Auto-Fetch VIX", use_container_width=True):
+                vix_low, vix_high, vix_curr = fetch_vix_zone_auto()
+                if vix_low > 0:
+                    st.session_state.vix_bottom = vix_low
+                    st.session_state.vix_top = vix_high
+                    st.session_state.vix_current = vix_curr
+                    st.success(f"VIX: {vix_low:.2f} - {vix_high:.2f} (Current: {vix_curr:.2f})")
+                else:
+                    # Try just current VIX
+                    vix_val, src = fetch_vix_current()
+                    if vix_val > 0:
+                        st.session_state.vix_current = vix_val
+                        st.info(f"Current VIX: {vix_val:.2f} ({src})")
+                    else:
+                        st.error("Could not fetch VIX data")
+        
         col1, col2 = st.columns(2)
         with col1:
             st.session_state.vix_bottom = st.number_input("Bottom", value=st.session_state.vix_bottom, step=0.01, format="%.2f")
@@ -2381,23 +2784,37 @@ def main():
     # Calculate MA Bias using ES futures from Yahoo Finance (23 hrs/day = more bars)
     ma_bias = fetch_es_ma_bias()
     
-    # Debug: Show MA bias in sidebar
+    # Calculate Gap Analysis
+    prior_close = prior_session.get("close", 0)
+    gap_analysis = analyze_gap(prior_close, spx_price) if prior_close > 0 and spx_price > 0 else None
+    
+    # Calculate Market Context
+    market_ctx = analyze_market_context(prior_session, st.session_state.vix_current, now.time())
+    
+    # Calculate Confluence (the key new feature!)
+    confluence = calculate_confluence(vix_zone, ma_bias, gap_analysis)
+    
+    # Debug: Show confluence in sidebar
     with st.sidebar:
         if ma_bias.sma200 > 0:
-            st.caption(f"📊 MA Bias: {ma_bias.bias} | SMA200: {ma_bias.sma200:.0f}")
-        else:
-            st.caption(f"⚠️ MA Bias: {ma_bias.bias_reason}")
+            st.caption(f"📊 MA: {ma_bias.bias} | SMA: {ma_bias.sma200:.0f}")
+        if confluence:
+            conf_emoji = "✅" if confluence.is_aligned else "⚠️" if confluence.signal_strength == "CONFLICTING" else "◐"
+            st.caption(f"{conf_emoji} Confluence: {confluence.signal_strength}")
+        if gap_analysis and gap_analysis.gap_direction != "FLAT":
+            st.caption(f"📊 Gap: {gap_analysis.gap_pct:+.2f}%")
     
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
     mins_after_open = st.session_state.entry_time_mins
     setups = generate_setups(cones, spx_price, vix_for_pricing, mins_after_open, is_after_cutoff)
     
-    day_score = calculate_day_score(vix_zone, cones, setups)
+    # Updated scoring with confluence
+    day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias)
-    components.html(html, height=4000, scrolling=True)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, gap_analysis, market_ctx)
+    components.html(html, height=4500, scrolling=True)
 
 if __name__ == "__main__":
     main()
