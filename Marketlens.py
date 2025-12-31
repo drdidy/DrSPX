@@ -3570,7 +3570,10 @@ def main():
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
     mins_after_open = st.session_state.entry_time_mins
-    setups = generate_setups(cones, spx_price, vix_for_pricing, mins_after_open, is_after_cutoff)
+    
+    # Use overnight price for setup status if provided, otherwise use SPX from Polygon
+    price_for_setups = overnight_price if overnight_price > 0 else spx_price
+    setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff)
     
     # Updated scoring with confluence
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
