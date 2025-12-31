@@ -1,11 +1,6 @@
 """
 SPX PROPHET v7.0 - INSTITUTIONAL EDITION
 "Where Structure Becomes Foresight"
-
-FIXES:
-✓ Holiday/Half-Day handling - Correctly anchors to truncated session (Dec 24 = 12pm CT close)
-✓ Clear trade setups - Shows ALL CALLS & PUTS with entries, strikes, profit projections
-✓ Legendary UI - Glassmorphism, institutional-grade design
 """
 
 import streamlit as st
@@ -2478,22 +2473,40 @@ body {{
         html += f'<div style="background:var(--bg-surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-4);font-size:12px;color:var(--text-secondary);">📅 Historical Mode: {trading_date.strftime("%A, %B %d, %Y")}</div>'
     
     # Check for NO TRADE conditions
-    is_no_trade = (confluence and confluence.no_trade) or total_score < 65
-    no_trade_reason = ""
-    if confluence and confluence.no_trade:
-        no_trade_reason = confluence.no_trade_reason
-    elif total_score < 65:
-        no_trade_reason = f"Score too low ({total_score}/100)"
+    # TRUE NO TRADE = signal conflict only. Low score = warning, not no-trade
+    has_conflict = confluence and confluence.no_trade
+    is_weak_setup = total_score < 65 and not has_conflict
+    
+    # Determine date context for messaging
+    today = get_ct_now().date()
+    if trading_date == today:
+        date_context = "Today"
+    elif trading_date > today:
+        date_context = trading_date.strftime("%A")  # "Wednesday"
+    else:
+        date_context = trading_date.strftime("%b %d")  # "Dec 30"
     
     # Determine confluence status
     conf_class = "strong" if confluence and confluence.is_aligned else "conflict" if confluence and confluence.signal_strength == "CONFLICT" else "moderate" if confluence and confluence.signal_strength == "MODERATE" else "weak"
     conf_text = confluence.recommendation if confluence else "No data"
     
-    # Signal Hero Section
-    if is_no_trade:
+    # Signal Hero Section - only grey out for TRUE conflict
+    if has_conflict:
         direction_class = "notrade"
     else:
         direction_class = "calls" if vix_zone.bias == "CALLS" else "puts" if vix_zone.bias == "PUTS" else "wait"
+    
+    # Determine the actual direction to show (use MA if VIX is mid-zone)
+    if vix_zone.bias in ["CALLS", "PUTS"]:
+        show_direction = vix_zone.bias
+        direction_text = "Go Long" if vix_zone.bias == "CALLS" else "Go Short"
+    elif ma_bias and ma_bias.bias in ["LONG", "SHORT"]:
+        show_direction = "CALLS" if ma_bias.bias == "LONG" else "PUTS"
+        direction_text = "Lean Long" if ma_bias.bias == "LONG" else "Lean Short"
+        direction_class = "calls" if ma_bias.bias == "LONG" else "puts"
+    else:
+        show_direction = "WAIT"
+        direction_text = "Wait for Setup"
     
     # Score ring calculation
     score_pct = total_score / 100 if total_score > 0 else 0
@@ -2501,10 +2514,11 @@ body {{
     stroke_offset = circumference * (1 - score_pct)
     score_class = "a" if total_score >= 80 else "b" if total_score >= 65 else "c" if total_score >= 50 else "d"
     
-    # Find BEST setup (matches VIX direction + closest + widest cone)
+    # Find BEST setup (matches direction + closest + widest cone)
     best_setup = None
-    if vix_zone.bias in ["CALLS", "PUTS"] and not is_no_trade:
-        matching = [s for s in setups if s.direction == vix_zone.bias and s.status != "GREY"]
+    search_direction = show_direction if show_direction in ["CALLS", "PUTS"] else None
+    if search_direction and not has_conflict:
+        matching = [s for s in setups if s.direction == search_direction and s.status != "GREY"]
         if matching:
             # Score each setup: closer is better, wider cone is better
             def setup_score(s):
@@ -2522,21 +2536,31 @@ body {{
         </div>
 '''
     
+    # Weak setup warning (shows direction but with warning)
+    weak_warning_html = ""
+    if is_weak_setup:
+        weak_warning_html = f'''
+        <div style="background:var(--warning-soft);color:var(--warning);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);font-size:11px;font-weight:500;margin-top:var(--space-2);">
+            ⚠️ Weak Setup — Score {total_score}/100 (65+ recommended)
+        </div>
+'''
+    
     html += f'''
 <!-- SIGNAL HERO -->
-<div class="signal-hero" style="{'opacity:0.5;' if is_no_trade else ''}">
+<div class="signal-hero" style="{'opacity:0.4;' if has_conflict else ''}">
     <div class="signal-main">
         <div class="signal-direction">
-            <div class="direction-badge {direction_class}" style="{'background:var(--danger-soft);color:var(--danger);' if is_no_trade else ''}">
-                {"⛔" if is_no_trade else "↑" if vix_zone.bias == "CALLS" else "↓" if vix_zone.bias == "PUTS" else "–"} {"NO TRADE" if is_no_trade else vix_zone.bias}
+            <div class="direction-badge {direction_class}" style="{'background:var(--danger-soft);color:var(--danger);' if has_conflict else ''}">
+                {"⛔" if has_conflict else "↑" if show_direction == "CALLS" else "↓" if show_direction == "PUTS" else "–"} {"NO TRADE" if has_conflict else show_direction}
             </div>
         </div>
         <div>
-            <div class="signal-title {direction_class}" style="{'color:var(--danger);' if is_no_trade else ''}">
-                {"No Trade Today" if is_no_trade else "Go Long" if vix_zone.bias == "CALLS" else "Go Short" if vix_zone.bias == "PUTS" else "Wait for Setup"}
+            <div class="signal-title {direction_class}" style="{'color:var(--danger);' if has_conflict else ''}">
+                {"No Trade — " + date_context if has_conflict else direction_text}
             </div>
-            <div class="signal-subtitle">{no_trade_reason if is_no_trade else vix_zone.bias_reason}</div>
+            <div class="signal-subtitle">{confluence.no_trade_reason if has_conflict else vix_zone.bias_reason}</div>
             {breakout_html}
+            {weak_warning_html}
         </div>
         <div class="signal-confluence">
             <div class="confluence-dot {conf_class}"></div>
