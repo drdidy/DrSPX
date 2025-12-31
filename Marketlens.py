@@ -542,63 +542,46 @@ def analyze_gap(prior_close, current_price):
     
     return gap
 
-def calculate_confluence(vix_zone, ma_bias, gap_analysis):
+def calculate_confluence(vix_zone, ma_bias, gap_analysis=None):
     """
-    Calculate confluence between VIX Zone, MA Bias, and Gap Analysis.
+    Calculate confluence between VIX Zone and MA Bias only.
+    Gap is informational, not part of core confluence.
     
     Scoring:
-    - VIX + MA aligned: +20 points
-    - VIX + MA conflicting: -20 points
-    - Gap supports direction: +10 points
-    - Gap opposes direction: -10 points
+    - VIX + MA aligned: Strong signal
+    - VIX + MA conflicting: Avoid
+    - One neutral: Moderate
     """
     conf = Confluence()
     conf.vix_bias = vix_zone.bias
     conf.ma_bias = ma_bias.bias if ma_bias else "NEUTRAL"
     conf.gap_bias = gap_analysis.trade_bias if gap_analysis else "NEUTRAL"
     
-    score = 0
-    reasons = []
-    
-    # VIX + MA alignment (most important)
+    # VIX + MA alignment (the only thing that matters for confluence)
     vix_direction = "LONG" if conf.vix_bias == "CALLS" else "SHORT" if conf.vix_bias == "PUTS" else "NEUTRAL"
     
-    if vix_direction == conf.ma_bias and vix_direction != "NEUTRAL":
-        score += 20
-        conf.is_aligned = True
-        reasons.append(f"VIX + MA aligned → {vix_direction}")
-    elif vix_direction != "NEUTRAL" and conf.ma_bias != "NEUTRAL" and vix_direction != conf.ma_bias:
-        score -= 20
+    if vix_direction != "NEUTRAL" and conf.ma_bias != "NEUTRAL":
+        if vix_direction == conf.ma_bias:
+            conf.is_aligned = True
+            conf.alignment_score = 30
+            conf.signal_strength = "STRONG"
+            conf.recommendation = f"✅ {vix_direction} — VIX + MA aligned"
+        else:
+            conf.is_aligned = False
+            conf.alignment_score = -20
+            conf.signal_strength = "CONFLICTING"
+            conf.recommendation = "⚠️ AVOID — VIX vs MA conflict"
+    elif vix_direction != "NEUTRAL" or conf.ma_bias != "NEUTRAL":
         conf.is_aligned = False
-        reasons.append("⚠️ VIX vs MA CONFLICT")
-    else:
-        reasons.append("Mixed signals")
-    
-    # Gap alignment
-    gap_direction = "LONG" if conf.gap_bias == "CALLS" else "SHORT" if conf.gap_bias == "PUTS" else "NEUTRAL"
-    if gap_direction != "NEUTRAL":
-        if gap_direction == vix_direction:
-            score += 10
-            reasons.append("Gap supports")
-        elif vix_direction != "NEUTRAL" and gap_direction != vix_direction:
-            score -= 10
-            reasons.append("Gap opposes")
-    
-    conf.alignment_score = score
-    
-    # Signal strength
-    if score >= 20:
-        conf.signal_strength = "STRONG"
-        conf.recommendation = f"✅ HIGH CONFIDENCE {vix_direction}"
-    elif score >= 10:
+        conf.alignment_score = 10
         conf.signal_strength = "MODERATE"
-        conf.recommendation = f"🟡 MODERATE {vix_direction}"
-    elif score <= -10:
-        conf.signal_strength = "CONFLICTING"
-        conf.recommendation = "🔴 AVOID - Conflicting signals"
+        direction = vix_direction if vix_direction != "NEUTRAL" else conf.ma_bias
+        conf.recommendation = f"◐ {direction} — Single confirmation"
     else:
+        conf.is_aligned = False
+        conf.alignment_score = 0
         conf.signal_strength = "WEAK"
-        conf.recommendation = "⚪ WEAK - Wait for clarity"
+        conf.recommendation = "– No clear direction"
     
     return conf
 
@@ -606,11 +589,11 @@ def analyze_market_context(prior_session, vix_current, current_time_ct):
     """
     Analyze overall market context for the trading day.
     
-    Includes:
-    - Prior day range analysis (trend vs range day)
-    - VIX level classification
-    - Dynamic stop loss based on VIX
-    - Prime time indicator
+    For 0DTE strategy:
+    - Optimal: 9:00-10:00 AM (best risk/reward)
+    - Good: 10:00-10:30 AM (still tradeable)
+    - Late: 10:30-11:30 AM (reduced opportunity)
+    - Very Late: After 11:30 (contracts too cheap, less edge)
     """
     ctx = MarketContext()
     
@@ -633,9 +616,8 @@ def analyze_market_context(prior_session, vix_current, current_time_ct):
             ctx.vix_level = "HIGH"
             ctx.recommended_stop = 10.0
     
-    # Prior day type (simplified - would need ATR for full analysis)
+    # Prior day type
     if ctx.prior_day_range > 0:
-        # Rough estimate: trend day if range > 40 points
         if ctx.prior_day_range > 50:
             ctx.prior_day_type = "TREND"
         elif ctx.prior_day_range < 25:
@@ -643,27 +625,27 @@ def analyze_market_context(prior_session, vix_current, current_time_ct):
         else:
             ctx.prior_day_type = "NORMAL"
     
-    # Prime time check (9:00 - 10:30 AM CT)
-    prime_start = time(9, 0)
-    prime_end = time(10, 30)
-    theta_warning = time(11, 0)
-    danger_zone = time(11, 30)
+    # Trading window assessment for 0DTE
+    optimal_start = time(9, 0)
+    optimal_end = time(10, 0)
+    good_end = time(10, 30)
+    late_end = time(11, 30)
     
-    if prime_start <= current_time_ct <= prime_end:
-        ctx.is_prime_time = True
-        ctx.time_warning = ""
-    elif prime_end < current_time_ct <= theta_warning:
-        ctx.is_prime_time = False
-        ctx.time_warning = "⚠️ Past prime time"
-    elif theta_warning < current_time_ct <= danger_zone:
-        ctx.is_prime_time = False
-        ctx.time_warning = "🟡 Theta accelerating"
-    elif current_time_ct > danger_zone:
-        ctx.is_prime_time = False
-        ctx.time_warning = "🔴 DANGER: Heavy theta decay"
-    else:
+    if current_time_ct < optimal_start:
         ctx.is_prime_time = False
         ctx.time_warning = "Pre-market"
+    elif optimal_start <= current_time_ct <= optimal_end:
+        ctx.is_prime_time = True
+        ctx.time_warning = ""  # Optimal - no warning needed
+    elif optimal_end < current_time_ct <= good_end:
+        ctx.is_prime_time = False
+        ctx.time_warning = "Good"
+    elif good_end < current_time_ct <= late_end:
+        ctx.is_prime_time = False
+        ctx.time_warning = "Late entry"
+    else:
+        ctx.is_prime_time = False
+        ctx.time_warning = "Very late"
     
     return ctx
 
@@ -1310,55 +1292,63 @@ def check_alerts(setups, vix_zone, current_time):
     return alerts
 
 def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, gap_analysis=None, market_ctx=None):
-    # Color system
+    # PREMIUM DESIGN SYSTEM - Institutional Grade
     if theme == "light":
-        bg_main = "#f1f5f9"
+        # Clean, minimal light theme inspired by Linear/Stripe
+        bg_main = "#fafafa"
         bg_card = "#ffffff"
-        bg_elevated = "#f8fafc"
-        text_primary = "#0f172a"
-        text_secondary = "#475569"
-        text_muted = "#94a3b8"
-        border_light = "#e2e8f0"
-        border_medium = "#cbd5e1"
-        shadow_sm = "0 1px 2px rgba(0,0,0,0.05)"
-        shadow_md = "0 4px 12px rgba(0,0,0,0.08)"
-        shadow_lg = "0 10px 40px rgba(0,0,0,0.12)"
+        bg_elevated = "#f5f5f5"
+        bg_subtle = "#fafafa"
+        text_primary = "#171717"
+        text_secondary = "#525252"
+        text_muted = "#a3a3a3"
+        border_light = "#e5e5e5"
+        border_medium = "#d4d4d4"
+        shadow_sm = "0 1px 2px rgba(0,0,0,0.04)"
+        shadow_md = "0 2px 8px rgba(0,0,0,0.06)"
+        shadow_lg = "0 8px 24px rgba(0,0,0,0.08)"
+        shadow_card = "0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03)"
     else:
-        bg_main = "#0c0f1a"
-        bg_card = "#151a2d"
-        bg_elevated = "#1a2038"
-        text_primary = "#f1f5f9"
-        text_secondary = "#94a3b8"
-        text_muted = "#64748b"
-        border_light = "#1e293b"
-        border_medium = "#334155"
-        shadow_sm = "0 1px 2px rgba(0,0,0,0.3)"
-        shadow_md = "0 4px 12px rgba(0,0,0,0.4)"
-        shadow_lg = "0 10px 40px rgba(0,0,0,0.5)"
+        # Rich dark theme
+        bg_main = "#09090b"
+        bg_card = "#18181b"
+        bg_elevated = "#27272a"
+        bg_subtle = "#18181b"
+        text_primary = "#fafafa"
+        text_secondary = "#a1a1aa"
+        text_muted = "#71717a"
+        border_light = "#27272a"
+        border_medium = "#3f3f46"
+        shadow_sm = "0 1px 2px rgba(0,0,0,0.4)"
+        shadow_md = "0 2px 8px rgba(0,0,0,0.5)"
+        shadow_lg = "0 8px 24px rgba(0,0,0,0.6)"
+        shadow_card = "0 1px 3px rgba(0,0,0,0.3)"
     
-    # Accent colors
-    green = "#10b981"
-    green_light = "#d1fae5" if theme == "light" else "#064e3b"
+    # Refined accent colors - more muted, professional
+    green = "#22c55e"
+    green_light = "#f0fdf4" if theme == "light" else "#14532d"
+    green_muted = "#86efac" if theme == "light" else "#166534"
     red = "#ef4444"
-    red_light = "#fee2e2" if theme == "light" else "#7f1d1d"
-    amber = "#f59e0b"
-    amber_light = "#fef3c7" if theme == "light" else "#78350f"
+    red_light = "#fef2f2" if theme == "light" else "#450a0a"
+    red_muted = "#fca5a5" if theme == "light" else "#7f1d1d"
+    amber = "#eab308"
+    amber_light = "#fefce8" if theme == "light" else "#422006"
     blue = "#3b82f6"
-    blue_light = "#dbeafe" if theme == "light" else "#1e3a8a"
-    purple = "#8b5cf6"
-    cyan = "#06b6d4"
+    blue_light = "#eff6ff" if theme == "light" else "#1e3a8a"
+    purple = "#a855f7"
+    neutral = "#737373"
     
-    bias_color = green if vix_zone.bias == "CALLS" else red if vix_zone.bias == "PUTS" else amber
-    bias_bg = green_light if vix_zone.bias == "CALLS" else red_light if vix_zone.bias == "PUTS" else amber_light
-    bias_icon = "↑" if vix_zone.bias == "CALLS" else "↓" if vix_zone.bias == "PUTS" else "•"
+    bias_color = green if vix_zone.bias == "CALLS" else red if vix_zone.bias == "PUTS" else neutral
+    bias_bg = green_light if vix_zone.bias == "CALLS" else red_light if vix_zone.bias == "PUTS" else bg_elevated
+    bias_icon = "↑" if vix_zone.bias == "CALLS" else "↓" if vix_zone.bias == "PUTS" else "–"
     
     # MA Bias colors
     if ma_bias:
-        ma_color = green if ma_bias.bias == "LONG" else red if ma_bias.bias == "SHORT" else amber
-        ma_bg = green_light if ma_bias.bias == "LONG" else red_light if ma_bias.bias == "SHORT" else amber_light
-        ma_icon = "▲" if ma_bias.bias == "LONG" else "▼" if ma_bias.bias == "SHORT" else "●"
+        ma_color = green if ma_bias.bias == "LONG" else red if ma_bias.bias == "SHORT" else neutral
+        ma_bg = green_light if ma_bias.bias == "LONG" else red_light if ma_bias.bias == "SHORT" else bg_elevated
+        ma_icon = "▲" if ma_bias.bias == "LONG" else "▼" if ma_bias.bias == "SHORT" else "–"
     else:
-        ma_color, ma_bg, ma_icon = amber, amber_light, "●"
+        ma_color, ma_bg, ma_icon = neutral, bg_elevated, "–"
     
     now = get_ct_now()
     marker_pos = min(max(vix_zone.position_pct, 3), 97) if vix_zone.zone_size > 0 else 50
@@ -1554,12 +1544,13 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {{
     --bg-main: {bg_main};
     --bg-card: {bg_card};
     --bg-elevated: {bg_elevated};
+    --bg-subtle: {bg_subtle};
     --text-primary: {text_primary};
     --text-secondary: {text_secondary};
     --text-muted: {text_muted};
@@ -1570,46 +1561,474 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     --red: {red};
     --red-light: {red_light};
     --amber: {amber};
-    --amber-light: {amber_light};
     --blue: {blue};
-    --purple: {purple};
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
 }}
 
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 
 body {{
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     background: var(--bg-main);
     color: var(--text-primary);
     line-height: 1.5;
-    padding: 24px;
+    padding: 32px;
     min-height: 100vh;
-    font-size: 14px;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }}
 
-/* Typography Scale */
-.text-xs {{ font-size: 11px; }}
-.text-sm {{ font-size: 12px; }}
-.text-base {{ font-size: 14px; }}
-.text-lg {{ font-size: 16px; }}
-.text-xl {{ font-size: 18px; }}
-.text-2xl {{ font-size: 22px; }}
-.text-3xl {{ font-size: 28px; }}
+.mono {{ font-family: 'SF Mono', 'Roboto Mono', 'Consolas', monospace; font-feature-settings: 'tnum'; }}
+.text-green {{ color: var(--green); }}
+.text-red {{ color: var(--red); }}
+.text-amber {{ color: var(--amber); }}
+.text-blue {{ color: var(--blue); }}
+.text-muted {{ color: var(--text-muted); }}
 
-/* Mono font for numbers/data */
-.mono {{ font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; }}
+.container {{ max-width: 1320px; margin: 0 auto; }}
 
-.container {{ max-width: 1400px; margin: 0 auto; }}
-
-/* Header */
+/* HEADER - Clean, minimal */
 .header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 28px;
-    padding-bottom: 20px;
+    margin-bottom: 32px;
+    padding-bottom: 24px;
     border-bottom: 1px solid var(--border-light);
 }}
+.brand {{ display: flex; align-items: center; gap: 16px; }}
+.brand-icon {{
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, {blue}, #6366f1);
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'SF Mono', monospace; font-weight: 600; font-size: 11px; color: white;
+    letter-spacing: -0.5px;
+}}
+.brand-text h1 {{ font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }}
+.brand-text span {{ font-size: 11px; color: var(--text-muted); font-weight: 500; }}
+.header-right {{ display: flex; align-items: center; gap: 32px; }}
+.clock {{
+    font-family: 'SF Mono', monospace;
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+}}
+.countdown-group {{ display: flex; gap: 24px; }}
+.countdown-item {{ text-align: center; }}
+.countdown-label {{ font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 500; }}
+.countdown-value {{ font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-top: 2px; }}
+
+/* ALERT BANNERS */
+.alert-banner {{
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 500;
+}}
+.alert-banner.info {{ background: {blue_light}; color: {blue}; }}
+.alert-banner.warning {{ background: {amber_light}; color: {"#a16207" if theme == "light" else amber}; }}
+.alert-banner.historical {{ background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border-light); }}
+
+/* CARDS - Clean, minimal elevation */
+.card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    margin-bottom: 16px;
+    overflow: hidden;
+}}
+.card-header {{
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}}
+.card-header:hover {{ background: var(--bg-elevated); }}
+.card-title {{
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}}
+.card-chevron {{
+    width: 16px; height: 16px;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}}
+.card.collapsed .card-content {{ display: none; }}
+.card.collapsed .card-chevron {{ transform: rotate(-90deg); }}
+.card-content {{ padding: 18px; }}
+
+/* MAIN GRID - Refined layout */
+.main-grid {{
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 20px;
+    margin-bottom: 24px;
+}}
+@media (max-width: 1000px) {{ .main-grid {{ grid-template-columns: 1fr; }} }}
+
+/* VIX SECTION */
+.vix-section {{ display: flex; flex-direction: column; gap: 12px; }}
+.vix-meter {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+}}
+.vix-bar {{
+    height: 8px;
+    background: linear-gradient(90deg, var(--green), var(--amber), var(--red));
+    border-radius: 4px;
+    position: relative;
+    margin: 16px 0 8px;
+}}
+.vix-marker {{
+    position: absolute;
+    width: 16px; height: 16px;
+    background: var(--bg-card);
+    border: 2px solid var(--text-primary);
+    border-radius: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: {shadow_md};
+}}
+.vix-labels {{
+    display: flex;
+    justify-content: space-between;
+    font-family: 'SF Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+}}
+.vix-stats {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 16px;
+}}
+.vix-stat {{
+    background: var(--bg-elevated);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    text-align: center;
+}}
+.vix-stat-value {{
+    font-family: 'SF Mono', monospace;
+    font-size: 15px;
+    font-weight: 600;
+}}
+.vix-stat-label {{
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}}
+
+/* SIGNAL CARDS - Clean, focused */
+.signal-card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    text-align: center;
+}}
+.signal-card.highlight {{
+    border-color: currentColor;
+    border-width: 2px;
+}}
+.signal-label {{
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}}
+.signal-icon {{
+    font-size: 28px;
+    line-height: 1;
+    margin-bottom: 6px;
+}}
+.signal-value {{
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+}}
+.signal-detail {{
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+}}
+
+/* CHECKLIST - Refined */
+.checklist-card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}}
+.checklist-header {{
+    padding: 16px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}}
+.checklist-title {{ font-size: 14px; font-weight: 600; }}
+.checklist-score {{ font-family: 'SF Mono', monospace; font-size: 14px; font-weight: 600; }}
+.checklist-items {{ padding: 4px 0; }}
+.checklist-item {{
+    display: flex;
+    align-items: center;
+    padding: 10px 18px;
+    gap: 14px;
+    border-bottom: 1px solid var(--border-light);
+}}
+.checklist-item:last-child {{ border-bottom: none; }}
+.check-pts {{
+    font-family: 'SF Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 50px;
+    text-align: center;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+}}
+.check-label {{ font-size: 12px; font-weight: 500; color: var(--text-primary); }}
+.check-detail {{ font-size: 11px; color: var(--text-muted); margin-top: 1px; }}
+
+/* SETUP SECTIONS */
+.setup-section {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    margin-bottom: 16px;
+    overflow: hidden;
+}}
+.setup-section-header {{
+    padding: 14px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.15s;
+}}
+.setup-section-header:hover {{ background: var(--bg-elevated); }}
+.setup-section-title {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+.setup-section-title.calls {{ color: var(--green); }}
+.setup-section-title.puts {{ color: var(--red); }}
+.setup-count {{
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 500;
+}}
+.setup-count.calls {{ background: var(--green-light); color: var(--green); }}
+.setup-count.puts {{ background: var(--red-light); color: var(--red); }}
+.setup-section-chevron {{ font-size: 11px; color: var(--text-muted); transition: transform 0.2s; }}
+.setup-section.collapsed .setup-section-content {{ display: none; }}
+.setup-section.collapsed .setup-section-chevron {{ transform: rotate(-90deg); }}
+.setup-section-content {{
+    padding: 16px;
+    border-top: 1px solid var(--border-light);
+    background: var(--bg-subtle);
+}}
+.setup-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 12px;
+}}
+
+/* SETUP CARDS - Clean, data-focused */
+.setup-card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    position: relative;
+}}
+.setup-card::before {{
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}}
+.setup-card.calls::before {{ background: var(--green); }}
+.setup-card.puts::before {{ background: var(--red); }}
+.setup-card.active {{ border-color: var(--green); }}
+.setup-card.active.puts {{ border-color: var(--red); }}
+.setup-card.grey {{ opacity: 0.5; }}
+
+.setup-card-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}}
+.setup-cone-name {{ font-size: 13px; font-weight: 600; }}
+.setup-status {{
+    font-size: 9px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}}
+.setup-status.active {{ background: var(--green-light); color: var(--green); }}
+.setup-status.wait {{ background: {amber_light}; color: {"#a16207" if theme == "light" else amber}; }}
+.setup-status.grey {{ background: var(--bg-elevated); color: var(--text-muted); }}
+
+.entry-display {{
+    background: var(--bg-elevated);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    text-align: center;
+    margin-bottom: 12px;
+}}
+.entry-label {{
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}}
+.entry-price {{
+    font-family: 'SF Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+}}
+.entry-price.calls {{ color: var(--green); }}
+.entry-price.puts {{ color: var(--red); }}
+.entry-distance {{
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}}
+
+.contract-info {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}}
+.contract-box {{
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+    text-align: center;
+}}
+.contract-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; }}
+.contract-value {{ font-family: 'SF Mono', monospace; font-size: 14px; font-weight: 600; margin-top: 2px; }}
+.contract-value.calls {{ color: var(--green); }}
+.contract-value.puts {{ color: var(--red); }}
+.contract-sub {{ font-size: 10px; color: var(--text-muted); margin-top: 2px; }}
+.sweet-badge {{
+    display: inline-block;
+    background: {amber_light};
+    color: {"#a16207" if theme == "light" else amber};
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+    margin-top: 4px;
+}}
+
+.targets-section {{ margin-bottom: 12px; }}
+.targets-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; }}
+.targets-grid {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+}}
+.target-box {{
+    background: var(--bg-elevated);
+    border-radius: var(--radius-sm);
+    padding: 6px 4px;
+    text-align: center;
+}}
+.target-pct {{ font-size: 9px; color: var(--text-muted); font-weight: 500; }}
+.target-price {{ font-family: 'SF Mono', monospace; font-size: 10px; color: var(--text-secondary); margin-top: 1px; }}
+.target-profit {{ font-family: 'SF Mono', monospace; font-size: 11px; font-weight: 600; color: var(--green); margin-top: 1px; }}
+
+.risk-display {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--red-light);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+}}
+.risk-label {{ font-size: 10px; color: var(--red); font-weight: 500; }}
+.risk-values {{ text-align: right; }}
+.risk-stop {{ font-family: 'SF Mono', monospace; font-size: 10px; color: var(--red); }}
+.risk-amount {{ font-family: 'SF Mono', monospace; font-size: 13px; font-weight: 600; color: var(--red); }}
+
+/* STATS ROW */
+.stats-row {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+}}
+@media (max-width: 700px) {{ .stats-row {{ grid-template-columns: repeat(2, 1fr); }} }}
+.stat-card {{
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    text-align: center;
+}}
+.stat-value {{ font-family: 'SF Mono', monospace; font-size: 16px; font-weight: 600; }}
+.stat-label {{ font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 4px; }}
+
+/* DATA TABLE */
+.data-table {{ width: 100%; border-collapse: collapse; }}
+.data-table th {{
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--text-muted);
+    padding: 10px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-medium);
+    background: var(--bg-elevated);
+}}
+.data-table td {{
+    padding: 10px 8px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border-light);
+}}
+.data-table tr:hover {{ background: var(--bg-elevated); }}
+
+/* FOOTER */
+.footer {{
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-light);
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+}}
+.footer-brand {{ font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }}
 .brand {{ display: flex; align-items: center; gap: 14px; }}
 .brand-icon {{
     width: 48px; height: 48px;
@@ -2197,12 +2616,37 @@ body {{
     
     # Market Context / Time Warning
     if market_ctx:
-        time_color = green if market_ctx.is_prime_time else amber if "Past" in market_ctx.time_warning else red if "DANGER" in market_ctx.time_warning else text_muted
+        if market_ctx.is_prime_time:
+            time_color = green
+            time_text = "OPTIMAL"
+            time_icon = "●"
+        elif market_ctx.time_warning == "Good":
+            time_color = blue
+            time_text = "GOOD"
+            time_icon = "●"
+        elif market_ctx.time_warning == "Late entry":
+            time_color = amber
+            time_text = "LATE"
+            time_icon = "○"
+        elif market_ctx.time_warning == "Very late":
+            time_color = neutral
+            time_text = "VERY LATE"
+            time_icon = "○"
+        else:
+            time_color = text_muted
+            time_text = "PRE-MARKET"
+            time_icon = "○"
+        
         html += f'''
-        <div style="margin-top:12px;padding:10px;background:var(--bg-elevated);border-radius:10px;text-align:center;">
-            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Trading Window</div>
-            <div style="font-size:14px;font-weight:600;color:{time_color};">{"🟢 PRIME TIME" if market_ctx.is_prime_time else market_ctx.time_warning or "Pre-market"}</div>
-            <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Stop: {market_ctx.recommended_stop:.0f} pts | VIX: {market_ctx.vix_level}</div>
+        <div style="margin-top:12px;padding:12px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-md);text-align:center;">
+            <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Entry Window</div>
+            <div style="font-size:14px;font-weight:600;color:{time_color};display:flex;align-items:center;justify-content:center;gap:6px;">
+                <span style="font-size:8px;">{time_icon}</span> {time_text}
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:6px;display:flex;justify-content:center;gap:12px;">
+                <span>Stop: {market_ctx.recommended_stop:.0f} pts</span>
+                <span>VIX: {market_ctx.vix_level}</span>
+            </div>
         </div>
 '''
     
