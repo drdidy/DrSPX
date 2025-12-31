@@ -1386,9 +1386,10 @@ def calculate_ma_bias(bars_30m):
 def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False, broken_structures=None, tested_structures=None):
     """Generate trade setups with calibrated option pricing
     
-    broken_structures: dict mapping cone names to True if manually marked broken
+    broken_structures: dict mapping cone names to {"CALLS": bool, "PUTS": bool}
         - BROKEN = 30-min candle closed through rail, structure invalidated
-    tested_structures: dict mapping cone names to "TESTED" if overnight breached
+        - Direction-specific: CALLS broken if descending rail violated, PUTS if ascending
+    tested_structures: dict mapping cone names to {"CALLS": "TESTED", "PUTS": "TESTED"}
         - TESTED = overnight price went through rail but came back, weakened structure
     """
     if broken_structures is None:
@@ -1401,9 +1402,9 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
         if not cone.is_tradeable:
             continue
         
-        # Check structure status
-        is_broken = broken_structures.get(cone.name, False)
-        is_tested = tested_structures.get(cone.name) == "TESTED"
+        # Get direction-specific broken/tested status for this cone
+        cone_broken = broken_structures.get(cone.name, {})
+        cone_tested = tested_structures.get(cone.name, {})
         
         # CALLS - enter at descending rail
         entry_c = cone.descending_rail
@@ -1411,12 +1412,16 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
         opt_c = get_option_data_for_entry(entry_c, "C", vix_current, mins_after_open)
         delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
         
+        # Check CALLS-specific broken/tested
+        calls_broken = cone_broken.get("CALLS", False) if isinstance(cone_broken, dict) else cone_broken
+        calls_tested = cone_tested.get("CALLS") == "TESTED" if isinstance(cone_tested, dict) else cone_tested == "TESTED"
+        
         # Determine CALLS status
         if is_after_cutoff:
             calls_status = "GREY"
-        elif is_broken:
+        elif calls_broken:
             calls_status = "BROKEN"
-        elif is_tested:
+        elif calls_tested:
             calls_status = "TESTED"
         elif dist_c <= RAIL_PROXIMITY:
             calls_status = "ACTIVE"
@@ -1441,12 +1446,16 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
         opt_p = get_option_data_for_entry(entry_p, "P", vix_current, mins_after_open)
         delta_p = abs(opt_p.spy_delta) if opt_p else DELTA_IDEAL
         
+        # Check PUTS-specific broken/tested
+        puts_broken = cone_broken.get("PUTS", False) if isinstance(cone_broken, dict) else cone_broken
+        puts_tested = cone_tested.get("PUTS") == "TESTED" if isinstance(cone_tested, dict) else cone_tested == "TESTED"
+        
         # Determine PUTS status
         if is_after_cutoff:
             puts_status = "GREY"
-        elif is_broken:
+        elif puts_broken:
             puts_status = "BROKEN"
-        elif is_tested:
+        elif puts_tested:
             puts_status = "TESTED"
         elif dist_p <= RAIL_PROXIMITY:
             puts_status = "ACTIVE"
@@ -3449,32 +3458,68 @@ def main():
         else:
             st.caption("💡 Optional: Shows distance to entry rails")
         
-        # STRUCTURE BROKEN CHECKBOXES
-        # Initialize session state
-        if "broken_prior_high" not in st.session_state:
-            st.session_state.broken_prior_high = False
-        if "broken_prior_low" not in st.session_state:
-            st.session_state.broken_prior_low = False
-        if "broken_prior_close" not in st.session_state:
-            st.session_state.broken_prior_close = False
-        if "broken_on_high" not in st.session_state:
-            st.session_state.broken_on_high = False
-        if "broken_on_low" not in st.session_state:
-            st.session_state.broken_on_low = False
+        # STRUCTURE BROKEN CHECKBOXES - Direction-specific
+        # Initialize session state for each cone and direction
+        broken_keys = [
+            "broken_prior_high_calls", "broken_prior_high_puts",
+            "broken_prior_low_calls", "broken_prior_low_puts", 
+            "broken_prior_close_calls", "broken_prior_close_puts",
+            "broken_on_high_calls", "broken_on_high_puts",
+            "broken_on_low_calls", "broken_on_low_puts"
+        ]
+        for key in broken_keys:
+            if key not in st.session_state:
+                st.session_state[key] = False
         
-        st.caption("🚫 Mark broken if 30-min closed through:")
-        col1, col2, col3 = st.columns(3)
+        st.caption("🚫 Mark broken (30-min close through rail):")
+        st.caption("↓ = Descending (CALLS) | ↑ = Ascending (PUTS)")
+        
+        # Prior High
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
-            st.session_state.broken_prior_high = st.checkbox("P.High", value=st.session_state.broken_prior_high, key="chk_high")
+            st.markdown("<small style='color:#888;'>Prior High</small>", unsafe_allow_html=True)
         with col2:
-            st.session_state.broken_prior_low = st.checkbox("P.Low", value=st.session_state.broken_prior_low, key="chk_low")
+            st.session_state.broken_prior_high_calls = st.checkbox("↓", value=st.session_state.broken_prior_high_calls, key="chk_ph_c", help="CALLS entry broken")
         with col3:
-            st.session_state.broken_prior_close = st.checkbox("P.Close", value=st.session_state.broken_prior_close, key="chk_close")
-        col1, col2 = st.columns(2)
+            st.session_state.broken_prior_high_puts = st.checkbox("↑", value=st.session_state.broken_prior_high_puts, key="chk_ph_p", help="PUTS entry broken")
+        
+        # Prior Low
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
-            st.session_state.broken_on_high = st.checkbox("O/N High", value=st.session_state.broken_on_high, key="chk_on_high")
+            st.markdown("<small style='color:#888;'>Prior Low</small>", unsafe_allow_html=True)
         with col2:
-            st.session_state.broken_on_low = st.checkbox("O/N Low", value=st.session_state.broken_on_low, key="chk_on_low")
+            st.session_state.broken_prior_low_calls = st.checkbox("↓", value=st.session_state.broken_prior_low_calls, key="chk_pl_c", help="CALLS entry broken")
+        with col3:
+            st.session_state.broken_prior_low_puts = st.checkbox("↑", value=st.session_state.broken_prior_low_puts, key="chk_pl_p", help="PUTS entry broken")
+        
+        # Prior Close
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            st.markdown("<small style='color:#888;'>Prior Close</small>", unsafe_allow_html=True)
+        with col2:
+            st.session_state.broken_prior_close_calls = st.checkbox("↓", value=st.session_state.broken_prior_close_calls, key="chk_pc_c", help="CALLS entry broken")
+        with col3:
+            st.session_state.broken_prior_close_puts = st.checkbox("↑", value=st.session_state.broken_prior_close_puts, key="chk_pc_p", help="PUTS entry broken")
+        
+        # O/N High (only show if overnight high entered)
+        if st.session_state.get("overnight_high", 0) > 0:
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                st.markdown("<small style='color:#888;'>O/N High</small>", unsafe_allow_html=True)
+            with col2:
+                st.session_state.broken_on_high_calls = st.checkbox("↓", value=st.session_state.broken_on_high_calls, key="chk_onh_c", help="CALLS entry broken")
+            with col3:
+                st.session_state.broken_on_high_puts = st.checkbox("↑", value=st.session_state.broken_on_high_puts, key="chk_onh_p", help="PUTS entry broken")
+        
+        # O/N Low (only show if overnight low entered)
+        if st.session_state.get("overnight_low", 0) > 0:
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                st.markdown("<small style='color:#888;'>O/N Low</small>", unsafe_allow_html=True)
+            with col2:
+                st.session_state.broken_on_low_calls = st.checkbox("↓", value=st.session_state.broken_on_low_calls, key="chk_onl_c", help="CALLS entry broken")
+            with col3:
+                st.session_state.broken_on_low_puts = st.checkbox("↑", value=st.session_state.broken_on_low_puts, key="chk_onl_p", help="PUTS entry broken")
         
         st.divider()
         st.markdown("### ⏰ Entry Time")
@@ -3706,16 +3751,20 @@ def main():
         highest_ascending = 0
         lowest_descending = float('inf')
     
-    # DETECT TESTED RAILS - if O/N low went below descending rails, they're tested
+    # DETECT TESTED RAILS - direction-specific
+    # O/N low below descending rail = CALLS tested
+    # O/N high above ascending rail = PUTS tested
     tested_structures = {}
     on_high_added = False
     on_low_added = False
     
     if overnight_low > 0 and tradeable_prior:
-        # Check which descending rails the overnight low breached
+        # Check which descending rails the overnight low breached (affects CALLS)
         for cone in tradeable_prior:
             if overnight_low < cone.descending_rail:
-                tested_structures[cone.name] = "TESTED"
+                if cone.name not in tested_structures:
+                    tested_structures[cone.name] = {}
+                tested_structures[cone.name]["CALLS"] = "TESTED"
         
         # Only add O/N Low as pivot if it's BELOW all descending rails (new support)
         if overnight_low < lowest_descending:
@@ -3730,10 +3779,12 @@ def main():
             on_low_added = True
     
     if overnight_high > 0 and tradeable_prior:
-        # Check which ascending rails the overnight high breached
+        # Check which ascending rails the overnight high breached (affects PUTS)
         for cone in tradeable_prior:
             if overnight_high > cone.ascending_rail:
-                tested_structures[cone.name] = "TESTED"
+                if cone.name not in tested_structures:
+                    tested_structures[cone.name] = {}
+                tested_structures[cone.name]["PUTS"] = "TESTED"
         
         # Only add O/N High as pivot if it's ABOVE all ascending rails (new resistance)
         if overnight_high > highest_ascending:
@@ -3754,7 +3805,12 @@ def main():
             if added_count > 0:
                 st.caption(f"🌙 +{added_count} overnight pivot(s) added")
             if tested_structures:
-                st.warning(f"⚠️ Tested: {', '.join(tested_structures.keys())}")
+                # Show which direction is tested for each cone
+                tested_msgs = []
+                for cone_name, directions in tested_structures.items():
+                    dirs = [d for d in directions.keys()]
+                    tested_msgs.append(f"{cone_name} ({'/'.join(dirs)})")
+                st.warning(f"⚠️ Tested: {', '.join(tested_msgs)}")
     
     # REBUILD CONES with overnight pivots included
     cones = build_cones(pivots, eval_time)
@@ -3800,13 +3856,29 @@ def main():
     # Use overnight price for setup status if provided, otherwise use SPX from Polygon
     price_for_setups = overnight_price if overnight_price > 0 else spx_price
     
-    # Get broken structure states (manually marked)
+    # Get broken structure states (manually marked) - direction-specific
+    # Format: {cone_name: {"CALLS": bool, "PUTS": bool}}
     broken_structures = {
-        "Prior High": st.session_state.get("broken_prior_high", False),
-        "Prior Low": st.session_state.get("broken_prior_low", False),
-        "Prior Close": st.session_state.get("broken_prior_close", False),
-        "O/N High": st.session_state.get("broken_on_high", False),
-        "O/N Low": st.session_state.get("broken_on_low", False)
+        "Prior High": {
+            "CALLS": st.session_state.get("broken_prior_high_calls", False),
+            "PUTS": st.session_state.get("broken_prior_high_puts", False)
+        },
+        "Prior Low": {
+            "CALLS": st.session_state.get("broken_prior_low_calls", False),
+            "PUTS": st.session_state.get("broken_prior_low_puts", False)
+        },
+        "Prior Close": {
+            "CALLS": st.session_state.get("broken_prior_close_calls", False),
+            "PUTS": st.session_state.get("broken_prior_close_puts", False)
+        },
+        "O/N High": {
+            "CALLS": st.session_state.get("broken_on_high_calls", False),
+            "PUTS": st.session_state.get("broken_on_high_puts", False)
+        },
+        "O/N Low": {
+            "CALLS": st.session_state.get("broken_on_low_calls", False),
+            "PUTS": st.session_state.get("broken_on_low_puts", False)
+        }
     }
     
     setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures, tested_structures)
