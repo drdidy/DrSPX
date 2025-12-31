@@ -93,6 +93,11 @@ class VIXZone:
     bias_reason: str = ""
     matched_rail: float = 0.0
     matched_cone: str = ""
+    # Breakout detection
+    is_breakout: bool = False
+    breakout_direction: str = ""  # "ABOVE", "BELOW"
+    breakout_level: float = 0.0   # The level it broke out from (spring/resistance)
+    distance_to_boundary: float = 0.0  # How close to breaking out
 
 @dataclass
 class GapAnalysis:
@@ -113,9 +118,11 @@ class Confluence:
     ma_bias: str = "NEUTRAL"
     gap_bias: str = "NEUTRAL"
     is_aligned: bool = False
-    alignment_score: int = 0  # -30 to +30
-    signal_strength: str = "WEAK"  # "WEAK", "MODERATE", "STRONG"
+    alignment_score: int = 0  # 0 to 40
+    signal_strength: str = "WEAK"  # "WEAK", "MODERATE", "STRONG", "CONFLICT"
     recommendation: str = ""
+    no_trade: bool = False
+    no_trade_reason: str = ""
     
 @dataclass
 class MarketContext:
@@ -544,43 +551,60 @@ def analyze_gap(prior_close, current_price):
 
 def calculate_confluence(vix_zone, ma_bias, gap_analysis=None):
     """
-    Calculate confluence between VIX Zone and MA Bias only.
-    Gap is informational, not part of core confluence.
+    Calculate confluence between VIX Zone and MA Bias.
+    Gap is informational only, not part of scoring.
     
-    Scoring:
-    - VIX + MA aligned: Strong signal
-    - VIX + MA conflicting: Avoid
-    - One neutral: Moderate
+    New Scoring (40 pts max):
+    - VIX + MA perfectly aligned: 40/40
+    - VIX clear, MA neutral: 25/40
+    - Both neutral: 15/40
+    - VIX + MA CONFLICT: 0/40 + NO TRADE warning
     """
     conf = Confluence()
     conf.vix_bias = vix_zone.bias
     conf.ma_bias = ma_bias.bias if ma_bias else "NEUTRAL"
     conf.gap_bias = gap_analysis.trade_bias if gap_analysis else "NEUTRAL"
     
-    # VIX + MA alignment (the only thing that matters for confluence)
+    # Convert to directional terms
     vix_direction = "LONG" if conf.vix_bias == "CALLS" else "SHORT" if conf.vix_bias == "PUTS" else "NEUTRAL"
     
-    if vix_direction != "NEUTRAL" and conf.ma_bias != "NEUTRAL":
-        if vix_direction == conf.ma_bias:
-            conf.is_aligned = True
-            conf.alignment_score = 30
-            conf.signal_strength = "STRONG"
-            conf.recommendation = f"✅ {vix_direction} — VIX + MA aligned"
-        else:
-            conf.is_aligned = False
-            conf.alignment_score = -20
-            conf.signal_strength = "CONFLICTING"
-            conf.recommendation = "⚠️ AVOID — VIX vs MA conflict"
-    elif vix_direction != "NEUTRAL" or conf.ma_bias != "NEUTRAL":
-        conf.is_aligned = False
-        conf.alignment_score = 10
-        conf.signal_strength = "MODERATE"
-        direction = vix_direction if vix_direction != "NEUTRAL" else conf.ma_bias
-        conf.recommendation = f"◐ {direction} — Single confirmation"
-    else:
+    # Check for conflict first (most important)
+    if vix_direction != "NEUTRAL" and conf.ma_bias != "NEUTRAL" and vix_direction != conf.ma_bias:
+        # CONFLICT - VIX says one thing, MA says opposite
         conf.is_aligned = False
         conf.alignment_score = 0
+        conf.signal_strength = "CONFLICT"
+        conf.no_trade = True
+        conf.no_trade_reason = f"VIX says {vix_direction}, MA says {conf.ma_bias}"
+        conf.recommendation = "⛔ NO TRADE — Signals conflict"
+    elif vix_direction != "NEUTRAL" and conf.ma_bias != "NEUTRAL" and vix_direction == conf.ma_bias:
+        # PERFECT ALIGNMENT
+        conf.is_aligned = True
+        conf.alignment_score = 40
+        conf.signal_strength = "STRONG"
+        conf.no_trade = False
+        breakout_note = " (BREAKOUT)" if vix_zone.is_breakout else ""
+        conf.recommendation = f"✅ {vix_direction}{breakout_note} — Full confluence"
+    elif vix_direction != "NEUTRAL":
+        # VIX has signal, MA is neutral
+        conf.is_aligned = False
+        conf.alignment_score = 25
+        conf.signal_strength = "MODERATE"
+        conf.no_trade = False
+        conf.recommendation = f"◐ {vix_direction} — VIX only, MA neutral"
+    elif conf.ma_bias != "NEUTRAL":
+        # MA has signal, VIX is neutral (mid-zone)
+        conf.is_aligned = False
+        conf.alignment_score = 15
         conf.signal_strength = "WEAK"
+        conf.no_trade = False
+        conf.recommendation = f"○ {conf.ma_bias} — MA only, VIX mid-zone"
+    else:
+        # Both neutral
+        conf.is_aligned = False
+        conf.alignment_score = 15
+        conf.signal_strength = "WEAK"
+        conf.no_trade = False
         conf.recommendation = "– No clear direction"
     
     return conf
@@ -1042,25 +1066,53 @@ def analyze_vix_zone(vix_bottom, vix_top, vix_current, cones=None):
         return zone
     zone.zone_size = round(vix_top - vix_bottom, 2)
     zone.expected_spx_move = zone.zone_size * VIX_TO_SPX_MULTIPLIER
+    
     if vix_current < vix_bottom:
-        zone.zones_away = -int(np.ceil((vix_bottom - vix_current) / zone.zone_size)) if zone.zone_size > 0 else 0
+        # BREAKOUT BELOW - VIX broke below overnight zone
+        zone.zones_away = -int(np.ceil((vix_bottom - vix_current) / zone.zone_size)) if zone.zone_size > 0 else -1
         zone.position_pct = 0
         zone.bias = "CALLS"
-        zone.bias_reason = f"VIX {abs(zone.zones_away)} zone(s) below → SPX UP"
+        zone.is_breakout = True
+        zone.breakout_direction = "BELOW"
+        zone.breakout_level = vix_bottom  # This is the spring level for calls
+        zone.bias_reason = f"⚡ BROKE BELOW {vix_bottom:.2f} → Strong CALLS"
+        zone.distance_to_boundary = 0
     elif vix_current > vix_top:
-        zone.zones_away = int(np.ceil((vix_current - vix_top) / zone.zone_size)) if zone.zone_size > 0 else 0
+        # BREAKOUT ABOVE - VIX broke above overnight zone
+        zone.zones_away = int(np.ceil((vix_current - vix_top) / zone.zone_size)) if zone.zone_size > 0 else 1
         zone.position_pct = 100
         zone.bias = "PUTS"
-        zone.bias_reason = f"VIX {zone.zones_away} zone(s) above → SPX DOWN"
+        zone.is_breakout = True
+        zone.breakout_direction = "ABOVE"
+        zone.breakout_level = vix_top  # This is the resistance/spring level
+        zone.bias_reason = f"⚡ BROKE ABOVE {vix_top:.2f} → Strong PUTS"
+        zone.distance_to_boundary = 0
     else:
         zone.zones_away = 0
         zone.position_pct = ((vix_current - vix_bottom) / zone.zone_size * 100) if zone.zone_size > 0 else 50
-        if zone.position_pct >= 75:
-            zone.bias, zone.bias_reason = "CALLS", f"VIX at {zone.position_pct:.0f}% (top) → SPX UP"
-        elif zone.position_pct <= 25:
-            zone.bias, zone.bias_reason = "PUTS", f"VIX at {zone.position_pct:.0f}% (bottom) → SPX DOWN"
+        zone.is_breakout = False
+        
+        # Calculate distance to nearest boundary
+        dist_to_top = vix_top - vix_current
+        dist_to_bottom = vix_current - vix_bottom
+        zone.distance_to_boundary = min(dist_to_top, dist_to_bottom)
+        
+        if zone.position_pct >= 80:
+            zone.bias = "CALLS"
+            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (top) → {dist_to_top:.2f} from breakout"
+        elif zone.position_pct >= 70:
+            zone.bias = "CALLS"
+            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (upper) → SPX UP"
+        elif zone.position_pct <= 20:
+            zone.bias = "PUTS"
+            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (bottom) → {dist_to_bottom:.2f} from breakout"
+        elif zone.position_pct <= 30:
+            zone.bias = "PUTS"
+            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (lower) → SPX DOWN"
         else:
-            zone.bias, zone.bias_reason = "WAIT", f"VIX at {zone.position_pct:.0f}% (mid-zone)"
+            zone.bias = "WAIT"
+            zone.bias_reason = f"VIX at {zone.position_pct:.0f}% (mid-zone) → No edge"
+    
     if cones and zone.bias in ["CALLS", "PUTS"]:
         rails = [(c.descending_rail if zone.bias == "CALLS" else c.ascending_rail, c.name) for c in cones if c.is_tradeable]
         if rails:
@@ -1205,77 +1257,88 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
 
 def calculate_day_score(vix_zone, cones, setups, confluence=None, market_ctx=None):
     """
-    Calculate trading day score with confluence weighting.
+    Calculate trading day score.
     
     New Scoring (100 points):
-    - VIX-Cone Alignment: 20 pts
-    - VIX Zone Clarity: 15 pts
-    - MA Bias Alignment: 20 pts (via confluence)
-    - Confluence Bonus: 15 pts
-    - Cone Width: 15 pts
-    - Premium Sweet Spot: 10 pts
-    - Prime Time Bonus: 5 pts
+    - VIX-MA Confluence: 40 pts (the core decision)
+    - VIX Zone Position: 30 pts (how extreme in zone)
+    - VIX-Cone Alignment: 20 pts (is there a rail to trade?)
+    - Cone Width: 10 pts (profit potential)
+    
+    NO TRADE if:
+    - Confluence conflicts (VIX vs MA)
+    - Score < 65
     """
     score = DayScore()
     total = 0
     
-    # 1. VIX-Cone Alignment (20 pts)
-    if vix_zone.bias in ["CALLS", "PUTS"] and any(s.direction == vix_zone.bias and s.distance <= 10 for s in setups):
-        total += 20
-    elif vix_zone.bias in ["CALLS", "PUTS"] and any(s.direction == vix_zone.bias and s.distance <= 20 for s in setups):
-        total += 10
+    # Check for NO TRADE condition first
+    if confluence and confluence.no_trade:
+        score.total = 0
+        score.grade = "NO TRADE"
+        score.color = "#ef4444"
+        return score
     
-    # 2. VIX Zone Clarity (15 pts)
-    if vix_zone.bias != "WAIT":
-        if vix_zone.zones_away != 0:
-            total += 15  # Outside zone = strong signal
-        elif vix_zone.position_pct >= 80 or vix_zone.position_pct <= 20:
-            total += 12  # At extremes
-        elif vix_zone.position_pct >= 70 or vix_zone.position_pct <= 30:
-            total += 8
-    
-    # 3. Confluence Score (35 pts - MA alignment + bonus)
+    # 1. VIX-MA Confluence (40 pts)
     if confluence:
-        if confluence.is_aligned and confluence.signal_strength == "STRONG":
-            total += 35  # Full points for strong alignment
-        elif confluence.is_aligned:
-            total += 25  # Aligned but not strong
-        elif confluence.signal_strength == "CONFLICTING":
-            total += 0   # No points for conflict
-        else:
-            total += 10  # Neutral
+        total += confluence.alignment_score  # Already 0-40 from confluence calc
     else:
-        total += 10  # Default if no confluence data
+        total += 15  # Default if no confluence data
     
-    # 4. Cone Width (15 pts)
+    # 2. VIX Zone Position (30 pts) - How extreme is VIX in the zone?
+    if vix_zone.is_breakout:
+        total += 30  # Breakout = maximum points
+    elif vix_zone.bias != "WAIT":
+        if vix_zone.position_pct >= 80 or vix_zone.position_pct <= 20:
+            total += 30  # At extremes
+        elif vix_zone.position_pct >= 70 or vix_zone.position_pct <= 30:
+            total += 20  # Good position
+        elif vix_zone.position_pct >= 60 or vix_zone.position_pct <= 40:
+            total += 10  # Weak position
+        else:
+            total += 0   # Mid-zone = no points
+    
+    # 3. VIX-Cone Alignment (20 pts) - Is there a rail within range?
+    if vix_zone.bias in ["CALLS", "PUTS"]:
+        matching_setups = [s for s in setups if s.direction == vix_zone.bias]
+        if matching_setups:
+            closest = min(s.distance for s in matching_setups)
+            if closest <= 5:
+                total += 20  # Very close
+            elif closest <= 10:
+                total += 15  # Close
+            elif closest <= 15:
+                total += 10  # Reachable
+            elif closest <= 25:
+                total += 5   # Far but possible
+    
+    # 4. Cone Width (10 pts) - Profit potential
     tradeable = [c for c in cones if c.is_tradeable]
     if tradeable:
         best_width = max(c.width for c in tradeable)
         if best_width >= 35:
-            total += 15
+            total += 10
         elif best_width >= 28:
-            total += 12
+            total += 7
         elif best_width >= 20:
-            total += 8
-        else:
-            total += 5
+            total += 4
     
-    # 5. Premium Sweet Spot (10 pts)
-    sweet = sum(1 for s in setups if s.option and s.option.in_sweet_spot)
-    if sweet >= 3:
-        total += 10
-    elif sweet >= 1:
-        total += 6
+    score.total = min(100, total)
+    
+    # Grade and color
+    if total >= 80:
+        score.grade = "A"
+        score.color = "#22c55e"  # Green
+    elif total >= 65:
+        score.grade = "B"
+        score.color = "#3b82f6"  # Blue
+    elif total >= 50:
+        score.grade = "C"
+        score.color = "#eab308"  # Amber
     else:
-        total += 3
+        score.grade = "D"
+        score.color = "#ef4444"  # Red
     
-    # 6. Prime Time Bonus (5 pts)
-    if market_ctx and market_ctx.is_prime_time:
-        total += 5
-    
-    score.total = min(100, total)  # Cap at 100
-    score.grade = "A+" if total >= 90 else "A" if total >= 80 else "B" if total >= 65 else "C" if total >= 50 else "D"
-    score.color = "#10b981" if total >= 80 else "#3b82f6" if total >= 65 else "#f59e0b" if total >= 50 else "#ef4444"
     return score
 
 def check_alerts(setups, vix_zone, current_time):
@@ -2391,7 +2454,7 @@ body {{
         <div class="logo-mark">SPX</div>
         <div class="logo-text">
             <div class="logo-title">SPX Prophet</div>
-            <div class="logo-subtitle">Institutional Edition v7.2</div>
+            <div class="logo-subtitle">Where Structure Becomes Foresight</div>
         </div>
     </div>
     <div class="header-meta">
@@ -2414,33 +2477,66 @@ body {{
     if is_historical:
         html += f'<div style="background:var(--bg-surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-4);font-size:12px;color:var(--text-secondary);">📅 Historical Mode: {trading_date.strftime("%A, %B %d, %Y")}</div>'
     
+    # Check for NO TRADE conditions
+    is_no_trade = (confluence and confluence.no_trade) or total_score < 65
+    no_trade_reason = ""
+    if confluence and confluence.no_trade:
+        no_trade_reason = confluence.no_trade_reason
+    elif total_score < 65:
+        no_trade_reason = f"Score too low ({total_score}/100)"
+    
     # Determine confluence status
-    conf_class = "strong" if confluence and confluence.is_aligned else "conflict" if confluence and confluence.signal_strength == "CONFLICTING" else "moderate" if confluence and confluence.signal_strength == "MODERATE" else "weak"
+    conf_class = "strong" if confluence and confluence.is_aligned else "conflict" if confluence and confluence.signal_strength == "CONFLICT" else "moderate" if confluence and confluence.signal_strength == "MODERATE" else "weak"
     conf_text = confluence.recommendation if confluence else "No data"
     
     # Signal Hero Section
-    direction_class = "calls" if vix_zone.bias == "CALLS" else "puts" if vix_zone.bias == "PUTS" else "wait"
+    if is_no_trade:
+        direction_class = "notrade"
+    else:
+        direction_class = "calls" if vix_zone.bias == "CALLS" else "puts" if vix_zone.bias == "PUTS" else "wait"
     
     # Score ring calculation
-    score_pct = total_score / 100
+    score_pct = total_score / 100 if total_score > 0 else 0
     circumference = 2 * 3.14159 * 58
     stroke_offset = circumference * (1 - score_pct)
     score_class = "a" if total_score >= 80 else "b" if total_score >= 65 else "c" if total_score >= 50 else "d"
     
+    # Find BEST setup (matches VIX direction + closest + widest cone)
+    best_setup = None
+    if vix_zone.bias in ["CALLS", "PUTS"] and not is_no_trade:
+        matching = [s for s in setups if s.direction == vix_zone.bias and s.status != "GREY"]
+        if matching:
+            # Score each setup: closer is better, wider cone is better
+            def setup_score(s):
+                distance_score = max(0, 30 - s.distance)  # Closer = higher score
+                width_score = s.cone_width  # Wider = higher score
+                return distance_score + width_score
+            best_setup = max(matching, key=setup_score)
+    
+    # Breakout indicator
+    breakout_html = ""
+    if vix_zone.is_breakout:
+        breakout_html = f'''
+        <div style="background:var(--warning-soft);color:var(--warning);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);font-size:11px;font-weight:600;margin-top:var(--space-2);">
+            ⚡ BREAKOUT {vix_zone.breakout_direction} — Spring/Resistance: {vix_zone.breakout_level:.2f}
+        </div>
+'''
+    
     html += f'''
 <!-- SIGNAL HERO -->
-<div class="signal-hero">
+<div class="signal-hero" style="{'opacity:0.5;' if is_no_trade else ''}">
     <div class="signal-main">
         <div class="signal-direction">
-            <div class="direction-badge {direction_class}">
-                {"↑" if vix_zone.bias == "CALLS" else "↓" if vix_zone.bias == "PUTS" else "–"} {vix_zone.bias}
+            <div class="direction-badge {direction_class}" style="{'background:var(--danger-soft);color:var(--danger);' if is_no_trade else ''}">
+                {"⛔" if is_no_trade else "↑" if vix_zone.bias == "CALLS" else "↓" if vix_zone.bias == "PUTS" else "–"} {"NO TRADE" if is_no_trade else vix_zone.bias}
             </div>
         </div>
         <div>
-            <div class="signal-title {direction_class}">
-                {"Go Long" if vix_zone.bias == "CALLS" else "Go Short" if vix_zone.bias == "PUTS" else "Wait for Setup"}
+            <div class="signal-title {direction_class}" style="{'color:var(--danger);' if is_no_trade else ''}">
+                {"No Trade Today" if is_no_trade else "Go Long" if vix_zone.bias == "CALLS" else "Go Short" if vix_zone.bias == "PUTS" else "Wait for Setup"}
             </div>
-            <div class="signal-subtitle">{vix_zone.bias_reason}</div>
+            <div class="signal-subtitle">{no_trade_reason if is_no_trade else vix_zone.bias_reason}</div>
+            {breakout_html}
         </div>
         <div class="signal-confluence">
             <div class="confluence-dot {conf_class}"></div>
@@ -2448,7 +2544,7 @@ body {{
         </div>
         <div class="signal-metrics">
             <div class="metric">
-                <div class="metric-value">{vix_zone.current:.1f}</div>
+                <div class="metric-value">{vix_zone.current:.2f}</div>
                 <div class="metric-label">VIX</div>
             </div>
             <div class="metric">
@@ -2573,14 +2669,16 @@ body {{
 '''
     for s in calls_setups:
         opt = s.option
+        is_best = best_setup and s.cone_name == best_setup.cone_name and s.direction == best_setup.direction
         status_class = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
-        status_text = "ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT"
-        status_style = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait"
+        status_text = "★ BEST" if is_best else ("ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT")
+        status_style = "best" if is_best else ("active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait")
+        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best else ""
         html += f'''
-            <div class="setup-card calls {status_class}">
+            <div class="setup-card calls {status_class}" style="{best_style}">
                 <div class="setup-header">
-                    <div class="setup-name">{s.cone_name}</div>
-                    <div class="setup-status {status_style}">{status_text}</div>
+                    <div class="setup-name">{"⭐ " if is_best else ""}{s.cone_name}</div>
+                    <div class="setup-status {status_style}" style="{'background:var(--warning-soft);color:var(--warning);' if is_best else ''}">{status_text}</div>
                 </div>
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
@@ -2630,14 +2728,16 @@ body {{
 '''
     for s in puts_setups:
         opt = s.option
+        is_best = best_setup and s.cone_name == best_setup.cone_name and s.direction == best_setup.direction
         status_class = "active puts" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else ""
-        status_text = "ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT"
-        status_style = "active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait"
+        status_text = "★ BEST" if is_best else ("ACTIVE" if s.status == "ACTIVE" else "CLOSED" if s.status == "GREY" else "WAIT")
+        status_style = "best" if is_best else ("active" if s.status == "ACTIVE" else "grey" if s.status == "GREY" else "wait")
+        best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best else ""
         html += f'''
-            <div class="setup-card puts {status_class}">
+            <div class="setup-card puts {status_class}" style="{best_style}">
                 <div class="setup-header">
-                    <div class="setup-name">{s.cone_name}</div>
-                    <div class="setup-status {status_style}">{status_text}</div>
+                    <div class="setup-name">{"⭐ " if is_best else ""}{s.cone_name}</div>
+                    <div class="setup-status {status_style}" style="{'background:var(--warning-soft);color:var(--warning);' if is_best else ''}">{status_text}</div>
                 </div>
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
@@ -2673,32 +2773,27 @@ body {{
     # Prior Session Stats
     html += f'''
 <!-- PRIOR SESSION -->
-<div class="card">
-    <div class="card-header">
-        <div class="card-title">
-            <span class="card-title-icon">📈</span>
-            Prior Session ({pivot_date.strftime("%b %d")})
-        </div>
-        <span class="card-chevron">▼</span>
+<div class="table-section">
+    <div class="table-header">
+        <div class="table-title">📈 Prior Session ({pivot_date.strftime("%b %d")})</div>
+        <span class="setups-chevron">▾</span>
     </div>
-    <div class="card-content">
-        <div class="stats-row">
-            <div class="stat-card">
-                <div class="stat-value text-green">{prior_session.get("high",0):,.2f}</div>
-                <div class="stat-label">High</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value text-red">{prior_session.get("low",0):,.2f}</div>
-                <div class="stat-label">Low</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{prior_session.get("close",0):,.2f}</div>
-                <div class="stat-label">Close</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value text-blue">{prior_session.get("high",0) - prior_session.get("low",0):,.0f}</div>
-                <div class="stat-label">Range</div>
-            </div>
+    <div style="padding:var(--space-4);display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3);">
+        <div style="background:var(--bg-surface-2);border-radius:var(--radius-md);padding:var(--space-3);text-align:center;">
+            <div class="mono text-success" style="font-size:16px;font-weight:600;">{prior_session.get("high",0):,.2f}</div>
+            <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;margin-top:4px;">High</div>
+        </div>
+        <div style="background:var(--bg-surface-2);border-radius:var(--radius-md);padding:var(--space-3);text-align:center;">
+            <div class="mono text-danger" style="font-size:16px;font-weight:600;">{prior_session.get("low",0):,.2f}</div>
+            <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;margin-top:4px;">Low</div>
+        </div>
+        <div style="background:var(--bg-surface-2);border-radius:var(--radius-md);padding:var(--space-3);text-align:center;">
+            <div class="mono" style="font-size:16px;font-weight:600;">{prior_session.get("close",0):,.2f}</div>
+            <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;margin-top:4px;">Close</div>
+        </div>
+        <div style="background:var(--bg-surface-2);border-radius:var(--radius-md);padding:var(--space-3);text-align:center;">
+            <div class="mono" style="font-size:16px;font-weight:600;color:var(--info);">{prior_session.get("high",0) - prior_session.get("low",0):,.0f}</div>
+            <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;margin-top:4px;">Range</div>
         </div>
     </div>
 </div>
@@ -2707,91 +2802,81 @@ body {{
     # Structural Cones
     html += f'''
 <!-- STRUCTURAL CONES -->
-<div class="card">
-    <div class="card-header">
-        <div class="card-title">
-            <span class="card-title-icon">📐</span>
-            Structural Cones
-        </div>
-        <span class="card-chevron">▼</span>
+<div class="table-section">
+    <div class="table-header">
+        <div class="table-title">📐 Structural Cones</div>
+        <span class="setups-chevron">▾</span>
     </div>
-    <div class="card-content">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Pivot</th>
-                    <th>Ascending (Puts)</th>
-                    <th>Descending (Calls)</th>
-                    <th>Width</th>
-                    <th>Tradeable</th>
-                </tr>
-            </thead>
-            <tbody>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Pivot</th>
+                <th>Ascending (Puts)</th>
+                <th>Descending (Calls)</th>
+                <th>Width</th>
+                <th>Tradeable</th>
+            </tr>
+        </thead>
+        <tbody>
 '''
     for c in cones:
-        width_color = "text-green" if c.width >= 25 else "text-amber" if c.width >= MIN_CONE_WIDTH else "text-red"
-        badge = '<span class="badge badge-green">YES</span>' if c.is_tradeable else '<span class="badge badge-red">NO</span>'
+        width_color = "text-success" if c.width >= 25 else "text-warning" if c.width >= MIN_CONE_WIDTH else "text-danger"
+        badge = '<span style="background:var(--success-soft);color:var(--success);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;">YES</span>' if c.is_tradeable else '<span style="background:var(--danger-soft);color:var(--danger);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;">NO</span>'
         html += f'''
-                <tr>
-                    <td><strong>{c.name}</strong></td>
-                    <td class="mono text-red">{c.ascending_rail:,.2f}</td>
-                    <td class="mono text-green">{c.descending_rail:,.2f}</td>
-                    <td class="mono {width_color}">{c.width:.0f} pts</td>
-                    <td>{badge}</td>
-                </tr>
+            <tr>
+                <td><strong>{c.name}</strong></td>
+                <td class="mono text-danger">{c.ascending_rail:,.2f}</td>
+                <td class="mono text-success">{c.descending_rail:,.2f}</td>
+                <td class="mono {width_color}">{c.width:.0f} pts</td>
+                <td>{badge}</td>
+            </tr>
 '''
     html += '''
-            </tbody>
-        </table>
-    </div>
+        </tbody>
+    </table>
 </div>
 '''
     
     # Pivot Table (collapsed by default)
     html += f'''
 <!-- PIVOT TABLE -->
-<div class="card collapsed">
-    <div class="card-header">
-        <div class="card-title">
-            <span class="card-title-icon">📋</span>
-            Pivot Time Table
-        </div>
-        <span class="card-chevron">▼</span>
+<div class="table-section collapsed">
+    <div class="table-header">
+        <div class="table-title">📋 Pivot Time Table</div>
+        <span class="setups-chevron">▾</span>
     </div>
-    <div class="card-content">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Time CT</th>
-                    <th>High ▲</th>
-                    <th>High ▼</th>
-                    <th>Low ▲</th>
-                    <th>Low ▼</th>
-                    <th>Close ▲</th>
-                    <th>Close ▼</th>
-                </tr>
-            </thead>
-            <tbody>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Time CT</th>
+                <th>High ▲</th>
+                <th>High ▼</th>
+                <th>Low ▲</th>
+                <th>Low ▼</th>
+                <th>Close ▲</th>
+                <th>Close ▼</th>
+            </tr>
+        </thead>
+        <tbody>
 '''
     for row in pivot_table:
         is_inst = INST_WINDOW_START <= row.time_ct <= INST_WINDOW_END
         inst_marker = " 🏛️" if is_inst else ""
-        row_style = f'style="background:{amber_light}"' if is_inst else ""
+        row_style = f'style="background:var(--warning-soft);"' if is_inst else ""
         html += f'''
-                <tr {row_style}>
-                    <td><strong>{row.time_block}{inst_marker}</strong></td>
-                    <td class="mono text-red">{row.prior_high_asc:,.2f}</td>
-                    <td class="mono text-green">{row.prior_high_desc:,.2f}</td>
-                    <td class="mono text-red">{row.prior_low_asc:,.2f}</td>
-                    <td class="mono text-green">{row.prior_low_desc:,.2f}</td>
-                    <td class="mono text-red">{row.prior_close_asc:,.2f}</td>
-                    <td class="mono text-green">{row.prior_close_desc:,.2f}</td>
-                </tr>
+            <tr {row_style}>
+                <td><strong>{row.time_block}{inst_marker}</strong></td>
+                <td class="mono text-danger">{row.prior_high_asc:,.2f}</td>
+                <td class="mono text-success">{row.prior_high_desc:,.2f}</td>
+                <td class="mono text-danger">{row.prior_low_asc:,.2f}</td>
+                <td class="mono text-success">{row.prior_low_desc:,.2f}</td>
+                <td class="mono text-danger">{row.prior_close_asc:,.2f}</td>
+                <td class="mono text-success">{row.prior_close_desc:,.2f}</td>
+            </tr>
 '''
     html += '''
-            </tbody>
-        </table>
-    </div>
+        </tbody>
+    </table>
 </div>
 '''
     
@@ -2799,8 +2884,8 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v7.2 — Institutional Edition</div>
-    <div class="footer-meta">Trading: {trading_date.strftime("%B %d, %Y")} • Pivot: {pivot_date.strftime("%B %d, %Y")}</div>
+    <div class="footer-brand">SPX Prophet v7.2</div>
+    <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
 <script>
@@ -2851,17 +2936,17 @@ document.addEventListener('DOMContentLoaded', function() {{
     return html
 
 def main():
-    st.set_page_config(page_title="SPX Prophet v7.0", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
-    defaults = {'theme': 'light', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'entry_time_mins': 30, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None}
+    st.set_page_config(page_title="SPX Prophet", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
+    defaults = {'theme': 'dark', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 'entry_time_mins': 30, 'use_manual_pivots': False, 'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 'trading_date': None, 'last_refresh': None}
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
     
     with st.sidebar:
-        st.markdown("## 📈 SPX Prophet v7.0")
-        st.caption("Institutional Edition")
+        st.markdown("## 📈 SPX Prophet")
+        st.caption("Where Structure Becomes Foresight")
         st.divider()
-        theme = st.radio("🎨 Theme", ["Light", "Dark"], horizontal=True, index=0 if st.session_state.theme == "light" else 1)
+        theme = st.radio("🎨 Theme", ["Dark", "Light"], horizontal=True, index=0 if st.session_state.theme == "dark" else 1)
         st.session_state.theme = theme.lower()
         st.divider()
         st.markdown("### 📅 Trading Date")
