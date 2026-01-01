@@ -1,11 +1,15 @@
 """
-SPX PROPHET v7.0 - INSTITUTIONAL EDITION
+SPX PROPHET v7.4 - INSTITUTIONAL EDITION
 "Where Structure Becomes Foresight"
 
-FIXES:
-✓ Holiday/Half-Day handling - Correctly anchors to truncated session (Dec 24 = 12pm CT close)
-✓ Clear trade setups - Shows ALL CALLS & PUTS with entries, strikes, profit projections
-✓ Legendary UI - Glassmorphism, institutional-grade design
+CORE FEATURES:
+✓ Prior Session Cones - H/L/C pivots with 0.45/30min expansion
+✓ VIX Zone Analysis - Direction bias from zone position
+✓ MA Confluence - 200 SMA / 50 EMA alignment check
+✓ Day Structure - Asia→London trendlines for confluence detection
+✓ Tested/Broken Rails - Track structure integrity
+✓ Best Setup Selection - Prioritizes day structure confluence
+✓ Institutional-grade UI with glassmorphism design
 """
 
 import streamlit as st
@@ -2922,32 +2926,64 @@ body {{
     stroke_offset = circumference * (1 - score_pct)
     score_class = "a" if total_score >= 80 else "b" if total_score >= 65 else "c" if total_score >= 50 else "d"
     
-    # Find BEST setup (matches direction + closest to price + widest cone)
-    # PRIORITY: If inside a cone, that cone's setup is best (when direction matches)
+    # Find BEST setup - NEW PRIORITY ORDER:
+    # 1. Day structure confluence (closest to DS line)
+    # 2. If inside a cone, that cone's setup  
+    # 3. Score by proximity to current price
     best_setup = None
+    setups_with_confluence = []  # Track which setups have DS confluence
+    
     search_direction = show_direction if show_direction in ["CALLS", "PUTS"] else None
     if search_direction and not has_conflict:
         # Exclude GREY, BROKEN, and TESTED setups from consideration
         matching = [s for s in setups if s.direction == search_direction and s.status not in ["GREY", "BROKEN", "TESTED"]]
         if matching:
-            # PRIORITY 1: If inside a cone and that cone has a matching setup, use it
-            if price_proximity and price_proximity.inside_cone and price_proximity.inside_cone_name:
-                inside_match = [s for s in matching if s.cone_name == price_proximity.inside_cone_name]
-                if inside_match:
-                    best_setup = inside_match[0]  # The setup from the cone we're inside
+            # PRIORITY 1: Day Structure Confluence
+            # For CALLS, check low line confluence (support)
+            # For PUTS, check high line confluence (resistance)
+            if day_structure:
+                if search_direction == "CALLS" and day_structure.low_line_valid and day_structure.low_line_at_entry > 0:
+                    # Find setup closest to day structure low line
+                    for s in matching:
+                        dist_to_ds = abs(s.entry - day_structure.low_line_at_entry)
+                        if dist_to_ds <= 10:  # Within 10 pts = confluence
+                            setups_with_confluence.append((s, dist_to_ds))
+                    if setups_with_confluence:
+                        # Best = closest to day structure line
+                        setups_with_confluence.sort(key=lambda x: x[1])
+                        best_setup = setups_with_confluence[0][0]
+                
+                elif search_direction == "PUTS" and day_structure.high_line_valid and day_structure.high_line_at_entry > 0:
+                    # Find setup closest to day structure high line
+                    for s in matching:
+                        dist_to_ds = abs(s.entry - day_structure.high_line_at_entry)
+                        if dist_to_ds <= 10:  # Within 10 pts = confluence
+                            setups_with_confluence.append((s, dist_to_ds))
+                    if setups_with_confluence:
+                        setups_with_confluence.sort(key=lambda x: x[1])
+                        best_setup = setups_with_confluence[0][0]
             
-            # PRIORITY 2: Otherwise, score by proximity to current price
+            # PRIORITY 2: If inside a cone and that cone has a matching setup, use it
+            if not best_setup:
+                if price_proximity and price_proximity.inside_cone and price_proximity.inside_cone_name:
+                    inside_match = [s for s in matching if s.cone_name == price_proximity.inside_cone_name]
+                    if inside_match:
+                        best_setup = inside_match[0]
+            
+            # PRIORITY 3: Score by proximity to current price
             if not best_setup:
                 def setup_score(s):
-                    # If overnight price provided, use distance from price to entry
                     if price_proximity and price_proximity.current_price > 0:
                         price_to_entry = abs(s.entry - price_proximity.current_price)
-                        distance_score = max(0, 50 - price_to_entry)  # Closer to current price = higher score
+                        distance_score = max(0, 50 - price_to_entry)
                     else:
-                        distance_score = max(0, 30 - s.distance)  # Closer = higher score
-                    width_score = s.cone_width  # Wider = higher score
+                        distance_score = max(0, 30 - s.distance)
+                    width_score = s.cone_width
                     return distance_score + width_score
                 best_setup = max(matching, key=setup_score)
+    
+    # Create set of cone names with confluence for de-emphasizing others
+    confluence_cone_names = set(s.cone_name for s, _ in setups_with_confluence) if setups_with_confluence else set()
     
     # Breakout indicator
     breakout_html = ""
@@ -3084,6 +3120,42 @@ body {{
                 </div>'''
             rail_dist_html += '</div>'
         
+        # Day Structure Channel Position
+        ds_channel_html = ""
+        if day_structure and (day_structure.high_line_valid or day_structure.low_line_valid):
+            current = price_proximity.current_price
+            ds_position = ""
+            ds_color = "var(--text-secondary)"
+            
+            if day_structure.high_line_valid and day_structure.low_line_valid:
+                if current > day_structure.high_line_at_entry:
+                    ds_position = f"ABOVE Day Structure Channel (+{current - day_structure.high_line_at_entry:.0f} pts)"
+                    ds_color = "var(--danger)"
+                elif current < day_structure.low_line_at_entry:
+                    ds_position = f"BELOW Day Structure Channel ({current - day_structure.low_line_at_entry:.0f} pts)"
+                    ds_color = "var(--success)"
+                else:
+                    # Inside channel
+                    dist_to_high = day_structure.high_line_at_entry - current
+                    dist_to_low = current - day_structure.low_line_at_entry
+                    ds_position = f"INSIDE Channel (↑{dist_to_high:.0f} to high, ↓{dist_to_low:.0f} to low)"
+                    ds_color = "var(--accent)"
+            elif day_structure.high_line_valid:
+                dist = current - day_structure.high_line_at_entry
+                ds_position = f"{'Above' if dist > 0 else 'Below'} DS High Line ({dist:+.0f} pts)"
+                ds_color = "var(--danger)" if dist > 0 else "var(--success)"
+            elif day_structure.low_line_valid:
+                dist = current - day_structure.low_line_at_entry
+                ds_position = f"{'Above' if dist > 0 else 'Below'} DS Low Line ({dist:+.0f} pts)"
+                ds_color = "var(--success)" if dist > 0 else "var(--danger)"
+            
+            if ds_position:
+                ds_channel_html = f'''
+                <div style="margin-top:var(--space-2);padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-sm);border-left:3px solid var(--accent);">
+                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">📐 Day Structure</div>
+                    <div style="font-size:12px;font-weight:600;color:{ds_color};">{ds_position}</div>
+                </div>'''
+        
         html += f'''
 <!-- PRICE PROXIMITY ALERT -->
 <div style="background:{prox_bg};border:1px solid {prox_border};border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
@@ -3096,6 +3168,7 @@ body {{
             </div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:var(--space-2);">{price_proximity.position_detail}</div>
             <div style="font-size:14px;font-weight:600;color:var(--text-primary);">{price_proximity.action_detail}</div>
+            {ds_channel_html}
             {rail_dist_html}
         </div>
         <div style="text-align:right;">
@@ -3276,6 +3349,10 @@ body {{
         is_best = best_setup and s.cone_name == best_setup.cone_name and s.direction == best_setup.direction
         is_broken = s.status == "BROKEN"
         is_tested = s.status == "TESTED"
+        has_ds_confluence = s.cone_name in confluence_cone_names
+        
+        # De-emphasize setups without confluence when confluence exists
+        should_deemphasize = bool(confluence_cone_names) and not has_ds_confluence and not is_broken and not is_tested
         
         # Status class and text
         if is_broken:
@@ -3288,7 +3365,7 @@ body {{
             status_style = "tested"
         elif s.status == "ACTIVE":
             status_class = "active"
-            status_text = "★ BEST" if is_best else "ACTIVE"
+            status_text = "📐 BEST" if is_best and has_ds_confluence else "★ BEST" if is_best else "ACTIVE"
             status_style = "best" if is_best else "active"
         elif s.status == "GREY":
             status_class = "grey"
@@ -3296,12 +3373,15 @@ body {{
             status_style = "grey"
         else:
             status_class = ""
-            status_text = "★ BEST" if is_best else "WAIT"
+            status_text = "📐 BEST" if is_best and has_ds_confluence else "★ BEST" if is_best else "WAIT"
             status_style = "best" if is_best else "wait"
         
+        # Styling
         best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best and not is_broken and not is_tested else ""
+        confluence_style = "border:2px solid var(--accent);box-shadow:0 0 15px rgba(139,92,246,0.3);" if has_ds_confluence and is_best else ""
         broken_style = "opacity:0.5;border:1px solid var(--danger);" if is_broken else ""
         tested_style = "opacity:0.7;border:1px dashed var(--warning);" if is_tested else ""
+        deemph_style = "opacity:0.5;" if should_deemphasize else ""
         
         # Calculate distance from overnight price if available
         if price_proximity and price_proximity.current_price > 0:
@@ -3312,16 +3392,23 @@ body {{
             distance_display = f"{s.distance:.0f} pts away"
             distance_color = "var(--text-secondary)"
         
+        # Confluence badge
+        confluence_badge = ""
+        if has_ds_confluence and day_structure and day_structure.low_line_at_entry > 0:
+            ds_dist = abs(s.entry - day_structure.low_line_at_entry)
+            confluence_badge = f'<div style="background:var(--accent-soft);color:var(--accent);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;margin-top:4px;">📐 DS Low @ {day_structure.low_line_at_entry:,.0f} ({ds_dist:.0f} pts)</div>'
+        
         html += f'''
-            <div class="setup-card calls {status_class}" style="{best_style}{broken_style}{tested_style}">
+            <div class="setup-card calls {status_class}" style="{best_style}{confluence_style}{broken_style}{tested_style}{deemph_style}">
                 <div class="setup-header">
                     <div class="setup-name">{"⭐ " if is_best and not is_broken and not is_tested else ""}{s.cone_name}</div>
-                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--warning-soft);color:var(--warning);' if is_tested or is_best else ''}">{status_text}</div>
+                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--accent-soft);color:var(--accent);' if has_ds_confluence and is_best else 'background:var(--warning-soft);color:var(--warning);' if is_tested or is_best else ''}">{status_text}</div>
                 </div>
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
                     <div class="setup-entry-price calls">{s.entry:,.2f}</div>
                     <div class="setup-entry-distance" style="color:{distance_color};">{distance_display}</div>
+                    {confluence_badge}
                 </div>
                 <div class="setup-contract">
                     <div class="contract-item">
@@ -3369,6 +3456,10 @@ body {{
         is_best = best_setup and s.cone_name == best_setup.cone_name and s.direction == best_setup.direction
         is_broken = s.status == "BROKEN"
         is_tested = s.status == "TESTED"
+        has_ds_confluence = s.cone_name in confluence_cone_names
+        
+        # De-emphasize setups without confluence when confluence exists
+        should_deemphasize = bool(confluence_cone_names) and not has_ds_confluence and not is_broken and not is_tested
         
         # Status class and text
         if is_broken:
@@ -3381,7 +3472,7 @@ body {{
             status_style = "tested"
         elif s.status == "ACTIVE":
             status_class = "active puts"
-            status_text = "★ BEST" if is_best else "ACTIVE"
+            status_text = "📐 BEST" if is_best and has_ds_confluence else "★ BEST" if is_best else "ACTIVE"
             status_style = "best" if is_best else "active"
         elif s.status == "GREY":
             status_class = "grey"
@@ -3389,12 +3480,15 @@ body {{
             status_style = "grey"
         else:
             status_class = ""
-            status_text = "★ BEST" if is_best else "WAIT"
+            status_text = "📐 BEST" if is_best and has_ds_confluence else "★ BEST" if is_best else "WAIT"
             status_style = "best" if is_best else "wait"
         
+        # Styling
         best_style = "border:2px solid var(--warning);box-shadow:0 0 20px rgba(234,179,8,0.3);" if is_best and not is_broken and not is_tested else ""
+        confluence_style = "border:2px solid var(--accent);box-shadow:0 0 15px rgba(139,92,246,0.3);" if has_ds_confluence and is_best else ""
         broken_style = "opacity:0.5;border:1px solid var(--danger);" if is_broken else ""
         tested_style = "opacity:0.7;border:1px dashed var(--warning);" if is_tested else ""
+        deemph_style = "opacity:0.5;" if should_deemphasize else ""
         
         # Calculate distance from overnight price if available
         if price_proximity and price_proximity.current_price > 0:
@@ -3405,16 +3499,23 @@ body {{
             distance_display = f"{s.distance:.0f} pts away"
             distance_color = "var(--text-secondary)"
         
+        # Confluence badge
+        confluence_badge = ""
+        if has_ds_confluence and day_structure and day_structure.high_line_at_entry > 0:
+            ds_dist = abs(s.entry - day_structure.high_line_at_entry)
+            confluence_badge = f'<div style="background:var(--accent-soft);color:var(--accent);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;margin-top:4px;">📐 DS High @ {day_structure.high_line_at_entry:,.0f} ({ds_dist:.0f} pts)</div>'
+        
         html += f'''
-            <div class="setup-card puts {status_class}" style="{best_style}{broken_style}{tested_style}">
+            <div class="setup-card puts {status_class}" style="{best_style}{confluence_style}{broken_style}{tested_style}{deemph_style}">
                 <div class="setup-header">
                     <div class="setup-name">{"⭐ " if is_best and not is_broken and not is_tested else ""}{s.cone_name}</div>
-                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--warning-soft);color:var(--warning);' if is_tested or is_best else ''}">{status_text}</div>
+                    <div class="setup-status {status_style}" style="{'background:var(--danger-soft);color:var(--danger);' if is_broken else 'background:var(--accent-soft);color:var(--accent);' if has_ds_confluence and is_best else 'background:var(--warning-soft);color:var(--warning);' if is_tested or is_best else ''}">{status_text}</div>
                 </div>
                 <div class="setup-entry">
                     <div class="setup-entry-label">Entry Rail</div>
                     <div class="setup-entry-price puts">{s.entry:,.2f}</div>
                     <div class="setup-entry-distance" style="color:{distance_color};">{distance_display}</div>
+                    {confluence_badge}
                 </div>
                 <div class="setup-contract">
                     <div class="contract-item">
@@ -3556,7 +3657,7 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v7.2</div>
+    <div class="footer-brand">SPX Prophet v7.4</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
@@ -3610,14 +3711,21 @@ document.addEventListener('DOMContentLoaded', function() {{
 def main():
     st.set_page_config(page_title="SPX Prophet", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
     defaults = {
-        'theme': 'dark', 'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 
-        'entry_time_mins': 30, 'use_manual_pivots': False, 
-        'high_price': 0.0, 'high_time': "10:30", 'low_price': 0.0, 'low_time': "14:00", 'close_price': 0.0, 
-        'trading_date': None, 'last_refresh': None, 
-        'overnight_high': 0.0, 'overnight_high_time': "02:00", 'overnight_low': 0.0, 'overnight_low_time': "04:00",
-        # Day Structure - Session pivots
-        'asia_high': 0.0, 'asia_high_time': "21:00", 'asia_low': 0.0, 'asia_low_time': "23:00",
-        'london_high': 0.0, 'london_high_time': "03:00", 'london_low': 0.0, 'london_low_time': "05:00"
+        'theme': 'dark', 
+        'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 
+        'entry_time_mins': 30, 
+        'use_manual_pivots': False, 
+        'high_price': 0.0, 'high_time': "10:30", 
+        'low_price': 0.0, 'low_time': "14:00", 
+        'close_price': 0.0, 
+        'trading_date': None, 
+        'last_refresh': None,
+        'overnight_spx': 0.0,  # Current SPX/ES price for proximity analysis
+        # Day Structure - Session pivots for trendlines
+        'asia_high': 0.0, 'asia_high_time': "21:00", 
+        'asia_low': 0.0, 'asia_low_time': "23:00",
+        'london_high': 0.0, 'london_high_time': "03:00", 
+        'london_low': 0.0, 'london_low_time': "05:00"
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -3703,14 +3811,11 @@ def main():
         else:
             st.caption("💡 Optional: Shows distance to entry rails")
         
-        # STRUCTURE BROKEN CHECKBOXES - Direction-specific
-        # Initialize session state for each cone and direction
+        # STRUCTURE BROKEN CHECKBOXES - Direction-specific (Prior session only)
         broken_keys = [
             "broken_prior_high_calls", "broken_prior_high_puts",
             "broken_prior_low_calls", "broken_prior_low_puts", 
-            "broken_prior_close_calls", "broken_prior_close_puts",
-            "broken_on_high_calls", "broken_on_high_puts",
-            "broken_on_low_calls", "broken_on_low_puts"
+            "broken_prior_close_calls", "broken_prior_close_puts"
         ]
         for key in broken_keys:
             if key not in st.session_state:
@@ -3745,26 +3850,6 @@ def main():
             st.session_state.broken_prior_close_calls = st.checkbox("↓", value=st.session_state.broken_prior_close_calls, key="chk_pc_c", help="CALLS entry broken")
         with col3:
             st.session_state.broken_prior_close_puts = st.checkbox("↑", value=st.session_state.broken_prior_close_puts, key="chk_pc_p", help="PUTS entry broken")
-        
-        # O/N High (only show if overnight high entered)
-        if st.session_state.get("overnight_high", 0) > 0:
-            col1, col2, col3 = st.columns([2, 1, 1])
-            with col1:
-                st.markdown("<small style='color:#888;'>O/N High</small>", unsafe_allow_html=True)
-            with col2:
-                st.session_state.broken_on_high_calls = st.checkbox("↓", value=st.session_state.broken_on_high_calls, key="chk_onh_c", help="CALLS entry broken")
-            with col3:
-                st.session_state.broken_on_high_puts = st.checkbox("↑", value=st.session_state.broken_on_high_puts, key="chk_onh_p", help="PUTS entry broken")
-        
-        # O/N Low (only show if overnight low entered)
-        if st.session_state.get("overnight_low", 0) > 0:
-            col1, col2, col3 = st.columns([2, 1, 1])
-            with col1:
-                st.markdown("<small style='color:#888;'>O/N Low</small>", unsafe_allow_html=True)
-            with col2:
-                st.session_state.broken_on_low_calls = st.checkbox("↓", value=st.session_state.broken_on_low_calls, key="chk_onl_c", help="CALLS entry broken")
-            with col3:
-                st.session_state.broken_on_low_puts = st.checkbox("↑", value=st.session_state.broken_on_low_puts, key="chk_onl_p", help="PUTS entry broken")
         
         st.divider()
         st.markdown("### ⏰ Entry Time")
@@ -3924,23 +4009,6 @@ def main():
             st.session_state.close_price = st.number_input("Close $", value=st.session_state.close_price, step=0.01, format="%.2f")
         
         st.divider()
-        st.markdown("### 🌙 Overnight Pivots")
-        st.caption("Add overnight H/L to track extended session structure")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.session_state.overnight_high = st.number_input("O/N High $", value=st.session_state.overnight_high, step=0.01, format="%.2f", help="Overnight session high")
-        with c2:
-            st.session_state.overnight_high_time = st.text_input("Time", value=st.session_state.overnight_high_time, key="oht", help="e.g., 02:00")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.session_state.overnight_low = st.number_input("O/N Low $", value=st.session_state.overnight_low, step=0.01, format="%.2f", help="Overnight session low")
-        with c2:
-            st.session_state.overnight_low_time = st.text_input("Time", value=st.session_state.overnight_low_time, key="olt", help="e.g., 04:00")
-        
-        if st.session_state.overnight_high > 0 or st.session_state.overnight_low > 0:
-            st.success("🌙 Overnight pivots active")
-        
-        st.divider()
         if st.button("🔄 REFRESH", use_container_width=True, type="primary"):
             st.session_state.last_refresh = get_ct_now()
             st.rerun()
@@ -4004,24 +4072,9 @@ def main():
     with st.sidebar:
         st.caption(f"📍 Pivots found: {len(pivots)}")
     
-    # BUILD INITIAL CONES from prior session pivots (without overnight)
+    # BUILD CONES from prior session pivots
     eval_time = CT_TZ.localize(datetime.combine(trading_date, time(9, 0)))
     prior_cones = build_cones(pivots, eval_time)
-    
-    # GET OVERNIGHT HIGH/LOW
-    overnight_high = st.session_state.get("overnight_high", 0.0)
-    overnight_low = st.session_state.get("overnight_low", 0.0)
-    overnight_high_time = st.session_state.get("overnight_high_time", "02:00")
-    overnight_low_time = st.session_state.get("overnight_low_time", "04:00")
-    
-    def parse_overnight_time(t_str, base_date):
-        """Parse overnight time string to datetime."""
-        try:
-            parts = t_str.replace(" ", "").split(":")
-            h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
-            return CT_TZ.localize(datetime.combine(base_date, time(h, m)))
-        except:
-            return CT_TZ.localize(datetime.combine(base_date, time(4, 0)))
     
     # DETERMINE STRUCTURE BOUNDARIES from prior session cones
     tradeable_prior = [c for c in prior_cones if c.is_tradeable]
@@ -4032,69 +4085,51 @@ def main():
         highest_ascending = 0
         lowest_descending = float('inf')
     
-    # DETECT TESTED RAILS - direction-specific
-    # O/N low below descending rail = CALLS tested
-    # O/N high above ascending rail = PUTS tested
-    tested_structures = {}
-    on_high_added = False
-    on_low_added = False
+    # Use prior_cones as final cones (no overnight pivots added)
+    cones = prior_cones
     
-    if overnight_low > 0 and tradeable_prior:
-        # Check which descending rails the overnight low breached (affects CALLS)
+    # DETECT TESTED RAILS using Day Structure
+    # If day structure low went below descending rails = CALLS tested
+    # If day structure high went above ascending rails = PUTS tested
+    tested_structures = {}
+    
+    # Get day structure session lows/highs for tested detection
+    # Use the LOWER of Asia Low and London Low as the session low test level
+    asia_low = st.session_state.get("asia_low", 0.0)
+    london_low = st.session_state.get("london_low", 0.0)
+    asia_high = st.session_state.get("asia_high", 0.0)
+    london_high = st.session_state.get("london_high", 0.0)
+    
+    # Session low = lowest point in Asia or London (tests descending rails)
+    # Session high = highest point in Asia or London (tests ascending rails)
+    session_low = min(asia_low, london_low) if asia_low > 0 and london_low > 0 else max(asia_low, london_low)
+    session_high = max(asia_high, london_high) if asia_high > 0 and london_high > 0 else max(asia_high, london_high)
+    
+    if session_low > 0 and tradeable_prior:
+        # Check which descending rails the session low breached (affects CALLS)
         for cone in tradeable_prior:
-            if overnight_low < cone.descending_rail:
+            if session_low < cone.descending_rail:
                 if cone.name not in tested_structures:
                     tested_structures[cone.name] = {}
                 tested_structures[cone.name]["CALLS"] = "TESTED"
-        
-        # Only add O/N Low as pivot if it's BELOW all descending rails (new support)
-        if overnight_low < lowest_descending:
-            on_low_dt = parse_overnight_time(overnight_low_time, trading_date)
-            pivots.append(Pivot(
-                name="O/N Low", 
-                price=overnight_low, 
-                pivot_time=on_low_dt, 
-                pivot_type="LOW", 
-                candle_open=overnight_low
-            ))
-            on_low_added = True
     
-    if overnight_high > 0 and tradeable_prior:
-        # Check which ascending rails the overnight high breached (affects PUTS)
+    if session_high > 0 and tradeable_prior:
+        # Check which ascending rails the session high breached (affects PUTS)
         for cone in tradeable_prior:
-            if overnight_high > cone.ascending_rail:
+            if session_high > cone.ascending_rail:
                 if cone.name not in tested_structures:
                     tested_structures[cone.name] = {}
                 tested_structures[cone.name]["PUTS"] = "TESTED"
-        
-        # Only add O/N High as pivot if it's ABOVE all ascending rails (new resistance)
-        if overnight_high > highest_ascending:
-            on_high_dt = parse_overnight_time(overnight_high_time, trading_date)
-            pivots.append(Pivot(
-                name="O/N High", 
-                price=overnight_high, 
-                pivot_time=on_high_dt, 
-                pivot_type="HIGH", 
-                candle_high=overnight_high
-            ))
-            on_high_added = True
     
-    # Debug: Show overnight analysis
-    with st.sidebar:
-        if overnight_high > 0 or overnight_low > 0:
-            added_count = (1 if on_high_added else 0) + (1 if on_low_added else 0)
-            if added_count > 0:
-                st.caption(f"🌙 +{added_count} overnight pivot(s) added")
-            if tested_structures:
-                # Show which direction is tested for each cone
-                tested_msgs = []
-                for cone_name, directions in tested_structures.items():
-                    dirs = [d for d in directions.keys()]
-                    tested_msgs.append(f"{cone_name} ({'/'.join(dirs)})")
-                st.warning(f"⚠️ Tested: {', '.join(tested_msgs)}")
+    # Debug: Show tested structures
+    if tested_structures:
+        with st.sidebar:
+            tested_msgs = []
+            for cone_name, directions in tested_structures.items():
+                dirs = [d for d in directions.keys()]
+                tested_msgs.append(f"{cone_name} ({'/'.join(dirs)})")
+            st.warning(f"⚠️ Tested: {', '.join(tested_msgs)}")
     
-    # REBUILD CONES with overnight pivots included
-    cones = build_cones(pivots, eval_time)
     vix_zone = analyze_vix_zone(st.session_state.vix_bottom, st.session_state.vix_top, st.session_state.vix_current, cones)
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
@@ -4138,7 +4173,6 @@ def main():
     price_for_setups = overnight_price if overnight_price > 0 else spx_price
     
     # Get broken structure states (manually marked) - direction-specific
-    # Format: {cone_name: {"CALLS": bool, "PUTS": bool}}
     broken_structures = {
         "Prior High": {
             "CALLS": st.session_state.get("broken_prior_high_calls", False),
@@ -4151,14 +4185,6 @@ def main():
         "Prior Close": {
             "CALLS": st.session_state.get("broken_prior_close_calls", False),
             "PUTS": st.session_state.get("broken_prior_close_puts", False)
-        },
-        "O/N High": {
-            "CALLS": st.session_state.get("broken_on_high_calls", False),
-            "PUTS": st.session_state.get("broken_on_high_puts", False)
-        },
-        "O/N Low": {
-            "CALLS": st.session_state.get("broken_on_low_calls", False),
-            "PUTS": st.session_state.get("broken_on_low_puts", False)
         }
     }
     
