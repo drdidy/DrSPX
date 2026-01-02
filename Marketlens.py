@@ -1,15 +1,23 @@
 """
-SPX PROPHET v7.4 - INSTITUTIONAL EDITION
+SPX PROPHET v8.0 - INTEGRATED TRADING SYSTEM
 "Where Structure Becomes Foresight"
+
+DECISION TREE:
+1. VIX Zone → Direction (CALLS at bottom/below, PUTS at top/above)
+2. MA Confluence → Confirmation (LONG/SHORT/NEUTRAL)
+3. Day Structure → Best Entry (cone + trendline confluence)
+4. Contract Pricing → Exact cost from session slope projections
+5. Flip Signals → If structure breaks, watch contract for retest entry
 
 CORE FEATURES:
 ✓ Prior Session Cones - H/L/C pivots with 0.45/30min expansion
-✓ VIX Zone Analysis - Direction bias from zone position
+✓ VIX Zone Analysis - Direction bias from zone position + breakouts
 ✓ MA Confluence - 200 SMA / 50 EMA alignment check
-✓ Day Structure - Asia→London trendlines for confluence detection
+✓ Day Structure - Asia→London trendlines with CONTRACT PRICING
+✓ Integrated Contract Slopes - PUT/CALL prices projected to entry time
+✓ Flip Signals - When structure breaks, watch for retest entries
 ✓ Tested/Broken Rails - Track structure integrity
 ✓ Best Setup Selection - Prioritizes day structure confluence
-✓ Institutional-grade UI with glassmorphism design
 """
 
 import streamlit as st
@@ -255,18 +263,21 @@ class PriceProximity:
 
 @dataclass
 class DayStructure:
-    """Trendlines from Asian session to London session projected into RTH"""
+    """Trendlines from Asian session to London session projected into RTH
     
-    # High trendline (Asia High → London High)
+    Includes contract price projections for integrated entry planning.
+    """
+    
+    # High trendline (Asia High → London High) - for PUTS
     high_line_valid: bool = False
-    high_line_slope: float = 0.0  # $/minute
-    high_line_at_entry: float = 0.0  # Projected price at entry time
+    high_line_slope: float = 0.0  # SPX $/minute
+    high_line_at_entry: float = 0.0  # Projected SPX price at entry time
     high_line_direction: str = ""  # "ASCENDING", "DESCENDING", "FLAT"
     
-    # Low trendline (Asia Low → London Low)
+    # Low trendline (Asia Low → London Low) - for CALLS
     low_line_valid: bool = False
-    low_line_slope: float = 0.0  # $/minute
-    low_line_at_entry: float = 0.0  # Projected price at entry time
+    low_line_slope: float = 0.0  # SPX $/minute
+    low_line_at_entry: float = 0.0  # Projected SPX price at entry time
     low_line_direction: str = ""  # "ASCENDING", "DESCENDING", "FLAT"
     
     # Overall structure shape
@@ -284,6 +295,27 @@ class DayStructure:
     # Best confluence
     has_confluence: bool = False
     best_confluence_detail: str = ""
+    
+    # CONTRACT PRICING - PUT (tracks high line for resistance)
+    put_price_asia: float = 0.0  # PUT contract price at Asia High
+    put_price_london: float = 0.0  # PUT contract price at London High
+    put_price_at_entry: float = 0.0  # Projected PUT price at entry time
+    put_slope_per_hour: float = 0.0  # PUT decay rate $/hour
+    put_strike: int = 0  # Strike = SPX @ entry - 15
+    
+    # CONTRACT PRICING - CALL (tracks low line for support)
+    call_price_asia: float = 0.0  # CALL contract price at Asia Low
+    call_price_london: float = 0.0  # CALL contract price at London Low
+    call_price_at_entry: float = 0.0  # Projected CALL price at entry time
+    call_slope_per_hour: float = 0.0  # CALL decay rate $/hour
+    call_strike: int = 0  # Strike = SPX @ entry + 15
+    
+    # BREAK & RETEST signals
+    high_line_broken: bool = False  # SPX broke above high line
+    low_line_broken: bool = False  # SPX broke below low line
+    
+    # When high line breaks UP: watch PUT to return to put_price_at_entry → enter CALLS
+    # When low line breaks DOWN: watch CALL to return to call_price_at_entry → enter PUTS
 
 def get_ct_now():
     return datetime.now(CT_TZ)
@@ -738,14 +770,21 @@ def analyze_market_context(prior_session, vix_current, current_time_ct):
 
 def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
                             london_high, london_high_time, london_low, london_low_time,
-                            entry_time_mins, cones, trading_date):
+                            entry_time_mins, cones, trading_date,
+                            put_price_asia=0, put_price_london=0,
+                            call_price_asia=0, call_price_london=0,
+                            high_line_broken=False, low_line_broken=False):
     """
     Calculate day structure trendlines from Asian to London session pivots.
     Project them into RTH and find confluence with cone rails.
     
+    Also calculates contract price projections for integrated entry planning.
+    
     Times are in CT (Central Time).
     """
     ds = DayStructure()
+    ds.high_line_broken = high_line_broken
+    ds.low_line_broken = low_line_broken
     
     def parse_time_to_mins_from_midnight(t_str):
         """Parse time string to minutes from midnight"""
@@ -761,7 +800,7 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
     # Entry time in minutes from midnight (8:30 AM + entry_time_mins)
     entry_mins = 8 * 60 + 30 + entry_time_mins
     
-    # HIGH TRENDLINE: Asia High → London High
+    # HIGH TRENDLINE: Asia High → London High (for PUTS)
     if asia_high > 0 and london_high > 0:
         asia_h_mins = parse_time_to_mins_from_midnight(asia_high_time)
         london_h_mins = parse_time_to_mins_from_midnight(london_high_time)
@@ -773,10 +812,9 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
         time_diff = london_h_mins - asia_h_mins
         if time_diff > 0:
             ds.high_line_valid = True
-            ds.high_line_slope = (london_high - asia_high) / time_diff  # $/minute
+            ds.high_line_slope = (london_high - asia_high) / time_diff  # SPX $/minute
             
-            # Project to entry time
-            # Entry time relative to Asia high time
+            # Project SPX to entry time
             entry_mins_adj = entry_mins
             if entry_mins < asia_h_mins:
                 entry_mins_adj += 24 * 60  # Next day
@@ -791,8 +829,23 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
                 ds.high_line_direction = "DESCENDING"
             else:
                 ds.high_line_direction = "FLAT"
+            
+            # PUT CONTRACT PRICING
+            ds.put_price_asia = put_price_asia
+            ds.put_price_london = put_price_london
+            if put_price_asia > 0 and put_price_london > 0:
+                time_diff_hours = time_diff / 60
+                ds.put_slope_per_hour = (put_price_london - put_price_asia) / time_diff_hours if time_diff_hours > 0 else 0
+                
+                # Project PUT price to entry time
+                hours_from_asia = mins_from_asia / 60
+                ds.put_price_at_entry = put_price_asia + (ds.put_slope_per_hour * hours_from_asia)
+                ds.put_price_at_entry = max(0.10, ds.put_price_at_entry)  # Floor at $0.10
+                
+                # PUT strike = SPX @ entry - 15
+                ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) - 15
     
-    # LOW TRENDLINE: Asia Low → London Low
+    # LOW TRENDLINE: Asia Low → London Low (for CALLS)
     if asia_low > 0 and london_low > 0:
         asia_l_mins = parse_time_to_mins_from_midnight(asia_low_time)
         london_l_mins = parse_time_to_mins_from_midnight(london_low_time)
@@ -804,9 +857,9 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
         time_diff = london_l_mins - asia_l_mins
         if time_diff > 0:
             ds.low_line_valid = True
-            ds.low_line_slope = (london_low - asia_low) / time_diff  # $/minute
+            ds.low_line_slope = (london_low - asia_low) / time_diff  # SPX $/minute
             
-            # Project to entry time
+            # Project SPX to entry time
             entry_mins_adj = entry_mins
             if entry_mins < asia_l_mins:
                 entry_mins_adj += 24 * 60
@@ -821,6 +874,21 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
                 ds.low_line_direction = "DESCENDING"
             else:
                 ds.low_line_direction = "FLAT"
+            
+            # CALL CONTRACT PRICING
+            ds.call_price_asia = call_price_asia
+            ds.call_price_london = call_price_london
+            if call_price_asia > 0 and call_price_london > 0:
+                time_diff_hours = time_diff / 60
+                ds.call_slope_per_hour = (call_price_london - call_price_asia) / time_diff_hours if time_diff_hours > 0 else 0
+                
+                # Project CALL price to entry time
+                hours_from_asia = mins_from_asia / 60
+                ds.call_price_at_entry = call_price_asia + (ds.call_slope_per_hour * hours_from_asia)
+                ds.call_price_at_entry = max(0.10, ds.call_price_at_entry)  # Floor at $0.10
+                
+                # CALL strike = SPX @ entry + 15
+                ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) + 15
     
     # STRUCTURE SHAPE
     if ds.high_line_valid and ds.low_line_valid:
@@ -872,9 +940,9 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
         ds.has_confluence = True
         details = []
         if ds.low_confluence_cone:
-            details.append(f"Low line → {ds.low_confluence_cone} desc ({ds.low_confluence_dist:.0f} pts) = CALLS")
+            details.append(f"Low → {ds.low_confluence_cone} ({ds.low_confluence_dist:.0f} pts) = CALLS")
         if ds.high_confluence_cone:
-            details.append(f"High line → {ds.high_confluence_cone} asc ({ds.high_confluence_dist:.0f} pts) = PUTS")
+            details.append(f"High → {ds.high_confluence_cone} ({ds.high_confluence_dist:.0f} pts) = PUTS")
         ds.best_confluence_detail = " | ".join(details)
     
     return ds
@@ -3185,39 +3253,108 @@ body {{
         ds_bg = "linear-gradient(135deg, rgba(139,92,246,0.15) 0%, rgba(139,92,246,0.05) 100%)" if day_structure.has_confluence else "var(--bg-surface)"
         ds_border = "var(--accent)" if day_structure.has_confluence else "var(--border)"
         
-        # Build trendline info
+        # Build HIGH LINE info (for PUTS)
         high_line_html = ""
         if day_structure.high_line_valid:
             h_dir_icon = "↗" if day_structure.high_line_direction == "ASCENDING" else "↘" if day_structure.high_line_direction == "DESCENDING" else "→"
-            h_confl = f"<span style='color:var(--success);font-weight:600;'> ✓ {day_structure.high_confluence_cone} ({day_structure.high_confluence_dist:.0f} pts)</span>" if day_structure.high_confluence_cone else ""
+            h_confl = f"<span style='color:var(--success);font-weight:600;'> ✓ {day_structure.high_confluence_cone}</span>" if day_structure.high_confluence_cone else ""
+            h_broken = "<span style='color:var(--warning);font-weight:600;'> ⚡BROKEN</span>" if day_structure.high_line_broken else ""
+            
+            # Contract pricing for PUTS
+            put_price_html = ""
+            if day_structure.put_price_at_entry > 0:
+                put_price_html = f'''
+                <div style="margin-top:8px;padding:8px;background:var(--bg-surface);border-radius:4px;border-left:3px solid var(--danger);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div>
+                            <span style="color:var(--danger);font-weight:600;">{day_structure.put_strike}P</span>
+                            <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">15 OTM</span>
+                        </div>
+                        <div style="text-align:right;">
+                            <span style="font-family:var(--font-mono);font-weight:700;color:var(--text-primary);font-size:16px;">${day_structure.put_price_at_entry:.2f}</span>
+                            <span style="color:var(--text-muted);font-size:10px;display:block;">{day_structure.put_slope_per_hour:+.2f}/hr</span>
+                        </div>
+                    </div>
+                </div>'''
+            
+            # Flip signal if broken
+            flip_html = ""
+            if day_structure.high_line_broken and day_structure.put_price_at_entry > 0:
+                flip_html = f'''
+                <div style="margin-top:8px;padding:8px;background:var(--warning-soft);border-radius:4px;">
+                    <div style="color:var(--warning);font-size:11px;font-weight:600;">⚡ FLIP SIGNAL</div>
+                    <div style="color:var(--text-primary);font-size:12px;margin-top:4px;">
+                        Watch {day_structure.put_strike}P return to <strong>${day_structure.put_price_at_entry:.2f}</strong> → Enter CALLS
+                    </div>
+                </div>'''
+            
             high_line_html = f'''
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-sm);margin-bottom:var(--space-2);">
-                <div>
-                    <span style="color:var(--danger);font-weight:600;">{h_dir_icon} High Line</span>
-                    <span style="color:var(--text-secondary);font-size:12px;margin-left:8px;">Asia H → London H</span>
+            <div style="padding:var(--space-3);background:var(--bg-elevated);border-radius:var(--radius-sm);margin-bottom:var(--space-2);border-left:3px solid var(--danger);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <span style="color:var(--danger);font-weight:700;font-size:14px;">{h_dir_icon} HIGH LINE</span>
+                        <span style="color:var(--text-secondary);font-size:11px;margin-left:8px;">PUTS</span>
+                        {h_confl}{h_broken}
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);font-size:16px;">{day_structure.high_line_at_entry:,.0f}</span>
+                        <span style="color:var(--text-muted);font-size:10px;display:block;">SPX @ entry</span>
+                    </div>
                 </div>
-                <div style="text-align:right;">
-                    <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);">{day_structure.high_line_at_entry:,.0f}</span>
-                    <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">@ entry</span>
-                    {h_confl}
-                </div>
+                {put_price_html}
+                {flip_html}
             </div>'''
         
+        # Build LOW LINE info (for CALLS)
         low_line_html = ""
         if day_structure.low_line_valid:
             l_dir_icon = "↗" if day_structure.low_line_direction == "ASCENDING" else "↘" if day_structure.low_line_direction == "DESCENDING" else "→"
-            l_confl = f"<span style='color:var(--success);font-weight:600;'> ✓ {day_structure.low_confluence_cone} ({day_structure.low_confluence_dist:.0f} pts)</span>" if day_structure.low_confluence_cone else ""
+            l_confl = f"<span style='color:var(--success);font-weight:600;'> ✓ {day_structure.low_confluence_cone}</span>" if day_structure.low_confluence_cone else ""
+            l_broken = "<span style='color:var(--warning);font-weight:600;'> ⚡BROKEN</span>" if day_structure.low_line_broken else ""
+            
+            # Contract pricing for CALLS
+            call_price_html = ""
+            if day_structure.call_price_at_entry > 0:
+                call_price_html = f'''
+                <div style="margin-top:8px;padding:8px;background:var(--bg-surface);border-radius:4px;border-left:3px solid var(--success);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div>
+                            <span style="color:var(--success);font-weight:600;">{day_structure.call_strike}C</span>
+                            <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">15 OTM</span>
+                        </div>
+                        <div style="text-align:right;">
+                            <span style="font-family:var(--font-mono);font-weight:700;color:var(--text-primary);font-size:16px;">${day_structure.call_price_at_entry:.2f}</span>
+                            <span style="color:var(--text-muted);font-size:10px;display:block;">{day_structure.call_slope_per_hour:+.2f}/hr</span>
+                        </div>
+                    </div>
+                </div>'''
+            
+            # Flip signal if broken
+            flip_html = ""
+            if day_structure.low_line_broken and day_structure.call_price_at_entry > 0:
+                flip_html = f'''
+                <div style="margin-top:8px;padding:8px;background:var(--warning-soft);border-radius:4px;">
+                    <div style="color:var(--warning);font-size:11px;font-weight:600;">⚡ FLIP SIGNAL</div>
+                    <div style="color:var(--text-primary);font-size:12px;margin-top:4px;">
+                        Watch {day_structure.call_strike}C return to <strong>${day_structure.call_price_at_entry:.2f}</strong> → Enter PUTS
+                    </div>
+                </div>'''
+            
             low_line_html = f'''
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-sm);">
-                <div>
-                    <span style="color:var(--success);font-weight:600;">{l_dir_icon} Low Line</span>
-                    <span style="color:var(--text-secondary);font-size:12px;margin-left:8px;">Asia L → London L</span>
+            <div style="padding:var(--space-3);background:var(--bg-elevated);border-radius:var(--radius-sm);margin-bottom:var(--space-2);border-left:3px solid var(--success);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <span style="color:var(--success);font-weight:700;font-size:14px;">{l_dir_icon} LOW LINE</span>
+                        <span style="color:var(--text-secondary);font-size:11px;margin-left:8px;">CALLS</span>
+                        {l_confl}{l_broken}
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);font-size:16px;">{day_structure.low_line_at_entry:,.0f}</span>
+                        <span style="color:var(--text-muted);font-size:10px;display:block;">SPX @ entry</span>
+                    </div>
                 </div>
-                <div style="text-align:right;">
-                    <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);">{day_structure.low_line_at_entry:,.0f}</span>
-                    <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">@ entry</span>
-                    {l_confl}
-                </div>
+                {call_price_html}
+                {flip_html}
             </div>'''
         
         confluence_badge = ""
@@ -3232,7 +3369,7 @@ body {{
 <div style="background:{ds_bg};border:1px solid {ds_border};border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
     <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
         <span style="font-size:20px;">📐</span>
-        <span style="font-size:14px;font-weight:700;color:var(--text-primary);">Day Structure</span>
+        <span style="font-size:14px;font-weight:700;color:var(--text-primary);">Day Structure + Contract Pricing</span>
         <span style="font-size:12px;color:var(--text-secondary);margin-left:auto;">{day_structure.structure_shape}</span>
     </div>
     {high_line_html}
@@ -3657,7 +3794,7 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v7.4</div>
+    <div class="footer-brand">SPX Prophet v8.0</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
@@ -3725,7 +3862,16 @@ def main():
         'asia_high': 0.0, 'asia_high_time': "21:00", 
         'asia_low': 0.0, 'asia_low_time': "23:00",
         'london_high': 0.0, 'london_high_time': "03:00", 
-        'london_low': 0.0, 'london_low_time': "05:00"
+        'london_low': 0.0, 'london_low_time': "05:00",
+        # Contract Slopes - PUT (tracks high line)
+        'put_price_asia': 0.0,  # PUT price at Asia High
+        'put_price_london': 0.0,  # PUT price at London High
+        # Contract Slopes - CALL (tracks low line)
+        'call_price_asia': 0.0,  # CALL price at Asia Low
+        'call_price_london': 0.0,  # CALL price at London Low
+        # Structure broken flags
+        'high_line_broken': False,
+        'low_line_broken': False
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -3853,7 +3999,7 @@ def main():
         
         st.divider()
         st.markdown("### ⏰ Entry Time")
-        st.caption("Slide to estimate contract prices at your entry time")
+        st.caption("Target entry time for projections")
         st.session_state.entry_time_mins = st.slider(
             "Entry Time (CT)", 
             min_value=0, 
@@ -3867,105 +4013,78 @@ def main():
         st.caption(f"📍 Pricing at **{entry_hour}:{entry_min:02d} AM CT**")
         st.divider()
         
-        # DAY STRUCTURE - Session Trendlines
+        # DAY STRUCTURE - INTEGRATED with Contract Pricing
         st.markdown("### 📐 Day Structure")
-        st.caption("Trendlines: Asia H→London H, Asia L→London L")
-        with st.expander("Session Pivots", expanded=False):
-            st.markdown("**Asian Session** (6pm-12am CT)")
+        st.caption("Session trendlines + contract projections")
+        
+        with st.expander("HIGH LINE (PUTS)", expanded=False):
+            st.markdown("**SPX Price Points**")
             c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.asia_high = st.number_input("Asia High $", value=st.session_state.asia_high, step=0.01, format="%.2f", key="asia_h")
+                st.session_state.asia_high = st.number_input("Asia High SPX", value=st.session_state.asia_high, step=0.01, format="%.2f", key="asia_h")
             with c2:
-                st.session_state.asia_high_time = st.text_input("Time", value=st.session_state.asia_high_time, key="asia_ht", help="CT time, e.g. 21:00")
+                st.session_state.asia_high_time = st.text_input("Time", value=st.session_state.asia_high_time, key="asia_ht", help="CT, e.g. 21:00")
             c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.asia_low = st.number_input("Asia Low $", value=st.session_state.asia_low, step=0.01, format="%.2f", key="asia_l")
+                st.session_state.london_high = st.number_input("London High SPX", value=st.session_state.london_high, step=0.01, format="%.2f", key="london_h")
             with c2:
-                st.session_state.asia_low_time = st.text_input("Time", value=st.session_state.asia_low_time, key="asia_lt")
+                st.session_state.london_high_time = st.text_input("Time", value=st.session_state.london_high_time, key="london_ht")
             
-            st.markdown("**London Session** (2am-8am CT)")
-            c1, c2 = st.columns([2, 1])
+            st.markdown("**PUT Contract Price** (15 OTM)")
+            c1, c2 = st.columns(2)
             with c1:
-                st.session_state.london_high = st.number_input("London High $", value=st.session_state.london_high, step=0.01, format="%.2f", key="london_h")
+                st.session_state.put_price_asia = st.number_input("PUT @ Asia High", value=st.session_state.put_price_asia, step=0.10, format="%.2f", key="put_asia")
             with c2:
-                st.session_state.london_high_time = st.text_input("Time", value=st.session_state.london_high_time, key="london_ht", help="CT time, e.g. 03:00")
+                st.session_state.put_price_london = st.number_input("PUT @ London High", value=st.session_state.put_price_london, step=0.10, format="%.2f", key="put_london")
+            
+            # High line broken checkbox
+            st.session_state.high_line_broken = st.checkbox("⚡ High line BROKEN (SPX broke above)", value=st.session_state.get("high_line_broken", False), key="high_broken")
+        
+        with st.expander("LOW LINE (CALLS)", expanded=False):
+            st.markdown("**SPX Price Points**")
             c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.london_low = st.number_input("London Low $", value=st.session_state.london_low, step=0.01, format="%.2f", key="london_l")
+                st.session_state.asia_low = st.number_input("Asia Low SPX", value=st.session_state.asia_low, step=0.01, format="%.2f", key="asia_l")
+            with c2:
+                st.session_state.asia_low_time = st.text_input("Time", value=st.session_state.asia_low_time, key="asia_lt", help="CT, e.g. 23:00")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.london_low = st.number_input("London Low SPX", value=st.session_state.london_low, step=0.01, format="%.2f", key="london_l")
             with c2:
                 st.session_state.london_low_time = st.text_input("Time", value=st.session_state.london_low_time, key="london_lt")
+            
+            st.markdown("**CALL Contract Price** (15 OTM)")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.session_state.call_price_asia = st.number_input("CALL @ Asia Low", value=st.session_state.call_price_asia, step=0.10, format="%.2f", key="call_asia")
+            with c2:
+                st.session_state.call_price_london = st.number_input("CALL @ London Low", value=st.session_state.call_price_london, step=0.10, format="%.2f", key="call_london")
+            
+            # Low line broken checkbox
+            st.session_state.low_line_broken = st.checkbox("⚡ Low line BROKEN (SPX broke below)", value=st.session_state.get("low_line_broken", False), key="low_broken")
         
         # Show day structure status
-        has_day_structure = (st.session_state.asia_high > 0 and st.session_state.london_high > 0) or \
-                           (st.session_state.asia_low > 0 and st.session_state.london_low > 0)
-        if has_day_structure:
-            st.success("📐 Day structure active")
+        has_high_line = st.session_state.asia_high > 0 and st.session_state.london_high > 0
+        has_low_line = st.session_state.asia_low > 0 and st.session_state.london_low > 0
+        has_put_prices = st.session_state.put_price_asia > 0 and st.session_state.put_price_london > 0
+        has_call_prices = st.session_state.call_price_asia > 0 and st.session_state.call_price_london > 0
         
-        st.divider()
-        
-        # CONTRACT SLOPE CALCULATOR
-        st.markdown("### 📈 Contract Slope")
-        st.caption("Input 2 price points to project future prices")
-        with st.expander("Open Calculator", expanded=False):
-            col1, col2 = st.columns(2)
-            with col1:
-                slope_time1 = st.text_input("Time 1", value="7:30 PM", key="slope_t1", help="e.g., 7:30 PM, 8:30 AM")
-                slope_price1 = st.number_input("Price 1", value=0.0, step=0.10, format="%.2f", key="slope_p1")
-            with col2:
-                slope_time2 = st.text_input("Time 2", value="7:30 AM", key="slope_t2")
-                slope_price2 = st.number_input("Price 2", value=0.0, step=0.10, format="%.2f", key="slope_p2")
+        if has_high_line or has_low_line:
+            status_parts = []
+            if has_high_line:
+                status_parts.append("High ✓")
+            if has_low_line:
+                status_parts.append("Low ✓")
+            if has_put_prices:
+                status_parts.append("PUT$ ✓")
+            if has_call_prices:
+                status_parts.append("CALL$ ✓")
+            st.success(f"📐 {' | '.join(status_parts)}")
             
-            if slope_price1 > 0 and slope_price2 > 0 and slope_price1 != slope_price2:
-                # Parse times and calculate slope
-                def parse_time_to_mins(t_str):
-                    """Convert time string to minutes from midnight, handling PM/AM"""
-                    t_str = t_str.strip().upper()
-                    is_pm = "PM" in t_str or "P" in t_str
-                    is_am = "AM" in t_str or "A" in t_str
-                    t_str = t_str.replace("PM", "").replace("AM", "").replace("P", "").replace("A", "").strip()
-                    parts = t_str.replace(":", " ").split()
-                    hour = int(parts[0])
-                    mins = int(parts[1]) if len(parts) > 1 else 0
-                    if is_pm and hour != 12:
-                        hour += 12
-                    elif is_am and hour == 12:
-                        hour = 0
-                    return hour * 60 + mins
-                
-                try:
-                    mins1 = parse_time_to_mins(slope_time1)
-                    mins2 = parse_time_to_mins(slope_time2)
-                    
-                    # Handle overnight (if time2 < time1, add 24 hours)
-                    if mins2 < mins1:
-                        mins2 += 24 * 60
-                    
-                    time_diff = mins2 - mins1
-                    price_diff = slope_price2 - slope_price1
-                    slope_per_min = price_diff / time_diff if time_diff > 0 else 0
-                    slope_per_30min = slope_per_min * 30
-                    
-                    st.success(f"**Slope:** ${slope_per_30min:+.3f}/30 mins")
-                    
-                    # Project prices at key times
-                    st.markdown("**Projected Prices:**")
-                    target_times = [
-                        ("8:30 AM", 8 * 60 + 30),
-                        ("9:00 AM", 9 * 60),
-                        ("9:30 AM", 9 * 60 + 30),
-                        ("10:00 AM", 10 * 60),
-                    ]
-                    
-                    for label, target_mins in target_times:
-                        # Handle overnight projection
-                        if target_mins < mins1:
-                            target_mins += 24 * 60
-                        mins_from_p1 = target_mins - mins1
-                        projected = slope_price1 + (slope_per_min * mins_from_p1)
-                        st.write(f"  {label}: **${projected:.2f}**")
-                        
-                except Exception as e:
-                    st.error(f"Invalid time format. Use: 7:30 PM or 8:30 AM")
+            if st.session_state.high_line_broken:
+                st.warning("⚡ HIGH LINE BROKEN → Watch PUT return to entry price → Enter CALLS")
+            if st.session_state.low_line_broken:
+                st.warning("⚡ LOW LINE BROKEN → Watch CALL return to entry price → Enter PUTS")
         
         st.divider()
         
@@ -4190,7 +4309,7 @@ def main():
     
     setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures, tested_structures)
     
-    # Calculate Day Structure (session trendlines)
+    # Calculate Day Structure (session trendlines + contract pricing)
     day_structure = calculate_day_structure(
         st.session_state.get("asia_high", 0.0),
         st.session_state.get("asia_high_time", "21:00"),
@@ -4202,13 +4321,25 @@ def main():
         st.session_state.get("london_low_time", "05:00"),
         mins_after_open,
         cones,
-        trading_date
+        trading_date,
+        put_price_asia=st.session_state.get("put_price_asia", 0.0),
+        put_price_london=st.session_state.get("put_price_london", 0.0),
+        call_price_asia=st.session_state.get("call_price_asia", 0.0),
+        call_price_london=st.session_state.get("call_price_london", 0.0),
+        high_line_broken=st.session_state.get("high_line_broken", False),
+        low_line_broken=st.session_state.get("low_line_broken", False)
     )
     
-    # Debug: Show day structure confluence in sidebar
+    # Debug: Show day structure info in sidebar
     if day_structure.has_confluence:
         with st.sidebar:
-            st.success(f"📐 Confluence: {day_structure.best_confluence_detail}")
+            st.success(f"📐 {day_structure.best_confluence_detail}")
+    if day_structure.put_price_at_entry > 0:
+        with st.sidebar:
+            st.caption(f"PUT: ${day_structure.put_price_at_entry:.2f} @ {day_structure.put_strike}P")
+    if day_structure.call_price_at_entry > 0:
+        with st.sidebar:
+            st.caption(f"CALL: ${day_structure.call_price_at_entry:.2f} @ {day_structure.call_strike}C")
     
     # Updated scoring with confluence
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
