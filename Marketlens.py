@@ -3097,10 +3097,19 @@ body {{
             trade_target_spx = day_structure.high_line_at_entry if day_structure.high_line_valid else 0
             trade_ds_line = "Low Line"
             trade_cone = day_structure.low_confluence_cone if day_structure.low_confluence_cone else "Day Structure"
+            
+            # Get contract price if available
             if day_structure.call_price_at_entry > 0:
                 trade_contract_price = day_structure.call_price_at_entry
-                trade_strike = day_structure.call_strike
-                trade_contract = f"{trade_strike}C"
+            
+            # Calculate strike: Target - 20 (20 ITM at exit)
+            if trade_target_spx > 0:
+                trade_strike = int(round(trade_target_spx / 5) * 5) - 20
+            else:
+                # Fallback: Entry + 30 (rough estimate of target)
+                trade_strike = int(round(trade_entry_spx / 5) * 5) + 30
+            trade_contract = f"{trade_strike}C"
+            
             trade_stop = trade_entry_spx - dynamic_stop
             
             # Check for flip signal (low line broken)
@@ -3115,10 +3124,19 @@ body {{
             trade_target_spx = day_structure.low_line_at_entry if day_structure.low_line_valid else 0
             trade_ds_line = "High Line"
             trade_cone = day_structure.high_confluence_cone if day_structure.high_confluence_cone else "Day Structure"
+            
+            # Get contract price if available
             if day_structure.put_price_at_entry > 0:
                 trade_contract_price = day_structure.put_price_at_entry
-                trade_strike = day_structure.put_strike
-                trade_contract = f"{trade_strike}P"
+            
+            # Calculate strike: Target + 20 (20 ITM at exit)
+            if trade_target_spx > 0:
+                trade_strike = int(round(trade_target_spx / 5) * 5) + 20
+            else:
+                # Fallback: Entry - 30 (rough estimate of target)
+                trade_strike = int(round(trade_entry_spx / 5) * 5) - 30
+            trade_contract = f"{trade_strike}P"
+            
             trade_stop = trade_entry_spx + dynamic_stop
             
             # Check for flip signal (high line broken)
@@ -3386,7 +3404,7 @@ body {{
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <div>
                             <span style="color:var(--danger);font-weight:600;">{day_structure.put_strike}P</span>
-                            <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">15 OTM</span>
+                            <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">20 ITM @ target</span>
                         </div>
                         <div style="text-align:right;">
                             <span style="font-family:var(--font-mono);font-weight:700;color:var(--text-primary);font-size:16px;">${day_structure.put_price_at_entry:.2f}</span>
@@ -3438,7 +3456,7 @@ body {{
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <div>
                             <span style="color:var(--success);font-weight:600;">{day_structure.call_strike}C</span>
-                            <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">15 OTM</span>
+                            <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">20 ITM @ target</span>
                         </div>
                         <div style="text-align:right;">
                             <span style="font-family:var(--font-mono);font-weight:700;color:var(--text-primary);font-size:16px;">${day_structure.call_price_at_entry:.2f}</span>
