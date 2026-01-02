@@ -3091,10 +3091,11 @@ body {{
             trade_direction = "PUTS"
     
     # Find the best entry from Day Structure + Cone confluence
-    if trade_direction and day_structure:
-        if trade_direction == "CALLS" and day_structure.low_line_valid:
+    # REQUIRES BOTH LINES - need target for strike calculation
+    if trade_direction and day_structure and day_structure.high_line_valid and day_structure.low_line_valid:
+        if trade_direction == "CALLS":
             trade_entry_spx = day_structure.low_line_at_entry
-            trade_target_spx = day_structure.high_line_at_entry if day_structure.high_line_valid else 0
+            trade_target_spx = day_structure.high_line_at_entry
             trade_ds_line = "Low Line"
             trade_cone = day_structure.low_confluence_cone if day_structure.low_confluence_cone else "Day Structure"
             
@@ -3103,11 +3104,7 @@ body {{
                 trade_contract_price = day_structure.call_price_at_entry
             
             # Calculate strike: Target - 20 (20 ITM at exit)
-            if trade_target_spx > 0:
-                trade_strike = int(round(trade_target_spx / 5) * 5) - 20
-            else:
-                # Fallback: Entry + 30 (rough estimate of target)
-                trade_strike = int(round(trade_entry_spx / 5) * 5) + 30
+            trade_strike = int(round(trade_target_spx / 5) * 5) - 20
             trade_contract = f"{trade_strike}C"
             
             trade_stop = trade_entry_spx - dynamic_stop
@@ -3119,9 +3116,9 @@ body {{
                 flip_watch_price = trade_contract_price
                 flip_enter_direction = "PUTS"
                 
-        elif trade_direction == "PUTS" and day_structure.high_line_valid:
+        elif trade_direction == "PUTS":
             trade_entry_spx = day_structure.high_line_at_entry
-            trade_target_spx = day_structure.low_line_at_entry if day_structure.low_line_valid else 0
+            trade_target_spx = day_structure.low_line_at_entry
             trade_ds_line = "High Line"
             trade_cone = day_structure.high_confluence_cone if day_structure.high_confluence_cone else "Day Structure"
             
@@ -3130,11 +3127,7 @@ body {{
                 trade_contract_price = day_structure.put_price_at_entry
             
             # Calculate strike: Target + 20 (20 ITM at exit)
-            if trade_target_spx > 0:
-                trade_strike = int(round(trade_target_spx / 5) * 5) + 20
-            else:
-                # Fallback: Entry - 30 (rough estimate of target)
-                trade_strike = int(round(trade_entry_spx / 5) * 5) - 30
+            trade_strike = int(round(trade_target_spx / 5) * 5) + 20
             trade_contract = f"{trade_strike}P"
             
             trade_stop = trade_entry_spx + dynamic_stop
@@ -3190,7 +3183,7 @@ body {{
         
         # Contract display with target
         contract_html = ""
-        if trade_contract and trade_contract_price > 0:
+        if trade_contract:
             target_html = ""
             if trade_target_spx > 0:
                 target_html = f'''
@@ -3198,6 +3191,21 @@ body {{
                         <div style="font-size:11px;color:var(--text-muted);">TARGET</div>
                         <div style="font-size:16px;font-weight:600;color:var(--success);font-family:var(--font-mono);">{trade_target_spx:,.0f}</div>
                         <div style="font-size:10px;color:var(--text-muted);">{channel_width:.0f} pts</div>
+                    </div>'''
+            
+            # Show price if available, otherwise show "needs 2 prices" message
+            if trade_contract_price > 0:
+                price_html = f'''
+                    <div style="text-align:center;">
+                        <div style="font-size:11px;color:var(--text-muted);">PROJECTED COST</div>
+                        <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">${trade_contract_price:.2f}</div>
+                    </div>'''
+            else:
+                price_html = f'''
+                    <div style="text-align:center;">
+                        <div style="font-size:11px;color:var(--text-muted);">PROJECTED COST</div>
+                        <div style="font-size:14px;font-weight:600;color:var(--warning);">Need 2 prices</div>
+                        <div style="font-size:10px;color:var(--text-muted);">Asia + London</div>
                     </div>'''
             
             contract_html = f'''
@@ -3208,10 +3216,7 @@ body {{
                         <div style="font-size:20px;font-weight:700;color:{trade_color};font-family:var(--font-mono);">{trade_contract}</div>
                         <div style="font-size:10px;color:var(--text-muted);">20 ITM at target</div>
                     </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:11px;color:var(--text-muted);">PROJECTED COST</div>
-                        <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">${trade_contract_price:.2f}</div>
-                    </div>
+                    {price_html}
                     {target_html}
                     <div style="text-align:right;">
                         <div style="font-size:11px;color:var(--text-muted);">STOP</div>
@@ -3300,7 +3305,7 @@ body {{
         <div>
             <div style="font-size:12px;color:var(--text-muted);letter-spacing:1px;">WAITING</div>
             <div style="font-size:28px;font-weight:700;color:var(--text-secondary);">Enter Day Structure</div>
-            <div style="font-size:14px;color:var(--text-muted);margin-top:4px;">Add Asia/London session data for entry projection</div>
+            <div style="font-size:14px;color:var(--text-muted);margin-top:4px;">Need BOTH High Line + Low Line for strike calculation</div>
         </div>
     </div>
 </div>
