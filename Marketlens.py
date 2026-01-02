@@ -1,24 +1,26 @@
 """
-SPX PROPHET v8.1 - UNIFIED TRADING SYSTEM
+SPX PROPHET v8.3 - CLEAN INTEGRATED SYSTEM
 "Where Structure Becomes Foresight"
 
-NEW: YOUR TRADE card - single unified view of:
-- Direction (from VIX + MA confluence)
-- Entry level (from Day Structure + Cone confluence)  
-- Contract & projected cost (from session slope)
-- Risk/Reward calculation
-- Flip signal if structure breaks
-
-DECISION TREE:
+THREE PILLARS:
 1. VIX Zone → Direction (CALLS at bottom/below, PUTS at top/above)
-2. MA Confluence → Confirmation (LONG/SHORT/NEUTRAL)
-3. Day Structure → Best Entry (cone + trendline confluence)
-4. Contract Pricing → Exact cost from session slope projections
-5. Flip Signals → If structure breaks, watch contract for retest entry
+2. MA Bias → Confirmation (LONG/SHORT/NEUTRAL)
+3. Day Structure → Entry + Contract + Stop
 
-REMOVED:
-- Complex Price Proximity section (redundant with Day Structure)
-- Individual cone rail distances (focus on confluence entry only)
+CONFLUENCE SCORING (40 pts max):
+- VIX + MA aligned: 40/40 (STRONG) → Trade
+- VIX only, MA neutral: 25/40 (MODERATE) → Trade with caution
+- MA only, VIX neutral: 15/40 (WEAK) → Wait for better setup
+- VIX + MA CONFLICT: 0/40 → NO TRADE
+
+KEY FEATURES:
+✓ VIX Zone scaling (1% of VIX, rounded to 0.05 ticks)
+✓ Dynamic stops based on VIX level (4-10 pts)
+✓ Strike = Target - 20 (20 pts ITM at exit zone)
+✓ Day Structure = Buy Zone / Exit Zone with contract pricing
+✓ Flip signals when structure breaks
+
+REMOVED: Gap Analysis (redundant - VIX already reflects overnight move)
 """
 
 import streamlit as st
@@ -113,23 +115,10 @@ class VIXZone:
     distance_to_boundary: float = 0.0  # How close to breaking out
 
 @dataclass
-class GapAnalysis:
-    """Overnight gap analysis for 0DTE edge"""
-    prior_close: float = 0.0
-    open_price: float = 0.0
-    gap_points: float = 0.0
-    gap_pct: float = 0.0
-    gap_direction: str = "FLAT"  # "UP", "DOWN", "FLAT"
-    gap_size: str = "NONE"  # "SMALL" (<0.3%), "MEDIUM" (0.3-0.7%), "LARGE" (>0.7%)
-    trade_bias: str = "NEUTRAL"  # What the gap suggests
-    trade_reason: str = ""
-
-@dataclass
 class Confluence:
     """VIX + MA Bias confluence scoring"""
     vix_bias: str = "WAIT"
     ma_bias: str = "NEUTRAL"
-    gap_bias: str = "NEUTRAL"
     is_aligned: bool = False
     alignment_score: int = 0  # 0 to 40
     signal_strength: str = "WEAK"  # "WEAK", "MODERATE", "STRONG", "CONFLICT"
@@ -237,30 +226,22 @@ class PivotTableRow:
 
 @dataclass
 class PriceProximity:
-    """Analyzes current price position relative to structural cones"""
+    """Simplified - just stores current overnight SPX price for calculations"""
     current_price: float = 0.0
     
-    # Position relative to all cones
-    position: str = "UNKNOWN"  # "ABOVE_ALL", "BELOW_ALL", "INSIDE_CONE", "NEAR_RAIL", "BETWEEN_CONES"
-    position_detail: str = ""  # Human-readable description
-    
-    # Nearest rail info
+    # Legacy fields kept for compatibility but not actively used
+    position: str = "UNKNOWN"
+    position_detail: str = ""
     nearest_rail: float = 0.0
-    nearest_rail_name: str = ""  # e.g., "Prior High ascending"
-    nearest_rail_type: str = ""  # "ascending" or "descending"
-    nearest_rail_distance: float = 0.0  # Positive = above, Negative = below
+    nearest_rail_name: str = ""
+    nearest_rail_type: str = ""
+    nearest_rail_distance: float = 0.0
     nearest_cone_name: str = ""
-    
-    # If inside a cone
     inside_cone: bool = False
     inside_cone_name: str = ""
-    
-    # Action guidance
-    action: str = ""  # What to do: "WAIT_FOR_PULLBACK", "WAIT_FOR_RALLY", "WATCH_FOR_ENTRY", "INSIDE_WAIT"
-    action_detail: str = ""  # Specific instruction
-    
-    # All rail distances for table display
-    rail_distances: Dict = None  # {cone_name: {"asc": dist, "desc": dist}}
+    action: str = ""
+    action_detail: str = ""
+    rail_distances: Dict = None
 
 @dataclass
 class DayStructure:
@@ -302,14 +283,14 @@ class DayStructure:
     put_price_london: float = 0.0  # PUT contract price at London High
     put_price_at_entry: float = 0.0  # Projected PUT price at entry time
     put_slope_per_hour: float = 0.0  # PUT decay rate $/hour
-    put_strike: int = 0  # Strike = SPX @ entry - 15
+    put_strike: int = 0  # Strike = Low Line (target) + 20 → 20 ITM at exit
     
     # CONTRACT PRICING - CALL (tracks low line for support)
     call_price_asia: float = 0.0  # CALL contract price at Asia Low
     call_price_london: float = 0.0  # CALL contract price at London Low
     call_price_at_entry: float = 0.0  # Projected CALL price at entry time
     call_slope_per_hour: float = 0.0  # CALL decay rate $/hour
-    call_strike: int = 0  # Strike = SPX @ entry + 15
+    call_strike: int = 0  # Strike = High Line (target) - 20 → 20 ITM at exit
     
     # BREAK & RETEST signals
     high_line_broken: bool = False  # SPX broke above high line
@@ -584,82 +565,20 @@ def fetch_vix_zone_auto():
     
     return (0.0, 0.0, 0.0)
 
-def analyze_gap(prior_close, current_price):
-    """
-    Analyze overnight gap for 0DTE trading edge.
-    
-    Gap Rules:
-    - Gap UP into VIX at top → Fade (PUTS)
-    - Gap DOWN into VIX at bottom → Fade (CALLS)  
-    - Gap in direction of trend → Continuation
-    """
-    gap = GapAnalysis()
-    gap.prior_close = prior_close
-    gap.open_price = current_price
-    
-    if prior_close <= 0 or current_price <= 0:
-        gap.trade_bias = "NEUTRAL"
-        gap.trade_reason = "No gap data"
-        return gap
-    
-    gap.gap_points = round(current_price - prior_close, 2)
-    gap.gap_pct = round((gap.gap_points / prior_close) * 100, 3)
-    
-    # Determine gap direction
-    if gap.gap_pct > 0.05:
-        gap.gap_direction = "UP"
-    elif gap.gap_pct < -0.05:
-        gap.gap_direction = "DOWN"
-    else:
-        gap.gap_direction = "FLAT"
-    
-    # Determine gap size
-    abs_pct = abs(gap.gap_pct)
-    if abs_pct < 0.3:
-        gap.gap_size = "SMALL"
-    elif abs_pct < 0.7:
-        gap.gap_size = "MEDIUM"
-    else:
-        gap.gap_size = "LARGE"
-    
-    # Trading bias based on gap
-    # Large gaps tend to fill (fade them)
-    # Small gaps in trend direction tend to continue
-    if gap.gap_size == "LARGE":
-        if gap.gap_direction == "UP":
-            gap.trade_bias = "PUTS"
-            gap.trade_reason = f"Large gap up (+{gap.gap_pct:.2f}%) → Fade"
-        elif gap.gap_direction == "DOWN":
-            gap.trade_bias = "CALLS"
-            gap.trade_reason = f"Large gap down ({gap.gap_pct:.2f}%) → Fade"
-    elif gap.gap_size == "MEDIUM":
-        if gap.gap_direction == "UP":
-            gap.trade_bias = "NEUTRAL"
-            gap.trade_reason = f"Medium gap up (+{gap.gap_pct:.2f}%) → Wait for direction"
-        elif gap.gap_direction == "DOWN":
-            gap.trade_bias = "NEUTRAL"
-            gap.trade_reason = f"Medium gap down ({gap.gap_pct:.2f}%) → Wait for direction"
-    else:
-        gap.trade_bias = "NEUTRAL"
-        gap.trade_reason = f"Small/no gap ({gap.gap_pct:+.2f}%) → No edge"
-    
-    return gap
-
-def calculate_confluence(vix_zone, ma_bias, gap_analysis=None):
+def calculate_confluence(vix_zone, ma_bias):
     """
     Calculate confluence between VIX Zone and MA Bias.
-    Gap is informational only, not part of scoring.
     
-    New Scoring (40 pts max):
-    - VIX + MA perfectly aligned: 40/40
-    - VIX clear, MA neutral: 25/40
-    - Both neutral: 15/40
-    - VIX + MA CONFLICT: 0/40 + NO TRADE warning
+    Scoring (40 pts max):
+    - VIX + MA aligned: 40/40 (STRONG)
+    - VIX clear, MA neutral: 25/40 (MODERATE)
+    - MA clear, VIX neutral: 15/40 (WEAK)
+    - Both neutral: 15/40 (WEAK)
+    - VIX + MA CONFLICT: 0/40 + NO TRADE
     """
     conf = Confluence()
     conf.vix_bias = vix_zone.bias
     conf.ma_bias = ma_bias.bias if ma_bias else "NEUTRAL"
-    conf.gap_bias = gap_analysis.trade_bias if gap_analysis else "NEUTRAL"
     
     # Convert to directional terms
     vix_direction = "LONG" if conf.vix_bias == "CALLS" else "SHORT" if conf.vix_bias == "PUTS" else "NEUTRAL"
@@ -674,19 +593,19 @@ def calculate_confluence(vix_zone, ma_bias, gap_analysis=None):
         conf.no_trade_reason = f"VIX says {vix_direction}, MA says {conf.ma_bias}"
         conf.recommendation = "⛔ NO TRADE — Signals conflict"
     elif vix_direction != "NEUTRAL" and conf.ma_bias != "NEUTRAL" and vix_direction == conf.ma_bias:
-        # PERFECT ALIGNMENT
+        # VIX + MA ALIGNED
         conf.is_aligned = True
+        conf.no_trade = False
         conf.alignment_score = 40
         conf.signal_strength = "STRONG"
-        conf.no_trade = False
         breakout_note = " (BREAKOUT)" if vix_zone.is_breakout else ""
         conf.recommendation = f"✅ {vix_direction}{breakout_note} — Full confluence"
     elif vix_direction != "NEUTRAL":
         # VIX has signal, MA is neutral
         conf.is_aligned = False
+        conf.no_trade = False
         conf.alignment_score = 25
         conf.signal_strength = "MODERATE"
-        conf.no_trade = False
         conf.recommendation = f"◐ {vix_direction} — VIX only, MA neutral"
     elif conf.ma_bias != "NEUTRAL":
         # MA has signal, VIX is neutral (mid-zone)
@@ -843,8 +762,13 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
                 ds.put_price_at_entry = put_price_asia + (ds.put_slope_per_hour * hours_from_asia)
                 ds.put_price_at_entry = max(0.10, ds.put_price_at_entry)  # Floor at $0.10
                 
-                # PUT strike = SPX @ entry - 15
-                ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) - 15
+                # PUT strike = TARGET (Low Line) + 20
+                # Will be 20 pts ITM when SPX reaches the exit zone
+                # Note: If low line not set, fall back to entry - 50 as rough target
+                if ds.low_line_at_entry > 0:
+                    ds.put_strike = int(round(ds.low_line_at_entry / 5) * 5) + 20
+                else:
+                    ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) - 50  # Rough fallback
     
     # LOW TRENDLINE: Asia Low → London Low (for CALLS)
     if asia_low > 0 and london_low > 0:
@@ -888,8 +812,13 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
                 ds.call_price_at_entry = call_price_asia + (ds.call_slope_per_hour * hours_from_asia)
                 ds.call_price_at_entry = max(0.10, ds.call_price_at_entry)  # Floor at $0.10
                 
-                # CALL strike = SPX @ entry + 15
-                ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) + 15
+                # CALL strike = TARGET (High Line) - 20
+                # Will be 20 pts ITM when SPX reaches the exit zone
+                # Note: If high line not set, fall back to entry + 50 as rough target
+                if ds.high_line_at_entry > 0:
+                    ds.call_strike = int(round(ds.high_line_at_entry / 5) * 5) - 20
+                else:
+                    ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) + 50  # Rough fallback
     
     # STRUCTURE SHAPE
     if ds.high_line_valid and ds.low_line_valid:
@@ -1822,7 +1751,7 @@ def check_alerts(setups, vix_zone, current_time):
         alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window (9:00-9:30 CT)"})
     return alerts
 
-def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, gap_analysis=None, market_ctx=None, price_proximity=None, day_structure=None):
+def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, market_ctx=None, price_proximity=None, day_structure=None):
     # PREMIUM DESIGN SYSTEM - Institutional Grade
     if theme == "light":
         # Clean, minimal light theme inspired by Linear/Stripe
@@ -3135,9 +3064,13 @@ body {{
     # Shows: Direction + Entry + Contract + Risk/Reward + Flip Signal
     # ════════════════════════════════════════════════════════════════════════
     
+    # Get dynamic stop from market context (based on VIX level)
+    dynamic_stop = market_ctx.recommended_stop if market_ctx else STOP_LOSS_PTS
+    
     # Determine the best trade based on VIX + MA + Day Structure
     trade_direction = None
     trade_entry_spx = 0
+    trade_target_spx = 0  # Exit zone
     trade_contract = ""
     trade_contract_price = 0
     trade_strike = 0
@@ -3161,13 +3094,14 @@ body {{
     if trade_direction and day_structure:
         if trade_direction == "CALLS" and day_structure.low_line_valid:
             trade_entry_spx = day_structure.low_line_at_entry
+            trade_target_spx = day_structure.high_line_at_entry if day_structure.high_line_valid else 0
             trade_ds_line = "Low Line"
             trade_cone = day_structure.low_confluence_cone if day_structure.low_confluence_cone else "Day Structure"
             if day_structure.call_price_at_entry > 0:
                 trade_contract_price = day_structure.call_price_at_entry
                 trade_strike = day_structure.call_strike
                 trade_contract = f"{trade_strike}C"
-            trade_stop = trade_entry_spx - STOP_LOSS_PTS
+            trade_stop = trade_entry_spx - dynamic_stop
             
             # Check for flip signal (low line broken)
             if day_structure.low_line_broken and trade_contract_price > 0:
@@ -3178,13 +3112,14 @@ body {{
                 
         elif trade_direction == "PUTS" and day_structure.high_line_valid:
             trade_entry_spx = day_structure.high_line_at_entry
+            trade_target_spx = day_structure.low_line_at_entry if day_structure.low_line_valid else 0
             trade_ds_line = "High Line"
             trade_cone = day_structure.high_confluence_cone if day_structure.high_confluence_cone else "Day Structure"
             if day_structure.put_price_at_entry > 0:
                 trade_contract_price = day_structure.put_price_at_entry
                 trade_strike = day_structure.put_strike
                 trade_contract = f"{trade_strike}P"
-            trade_stop = trade_entry_spx + STOP_LOSS_PTS
+            trade_stop = trade_entry_spx + dynamic_stop
             
             # Check for flip signal (high line broken)
             if day_structure.high_line_broken and trade_contract_price > 0:
@@ -3232,23 +3167,38 @@ body {{
         elif trade_cone:
             confluence_text = trade_cone
         
-        # Contract display
+        # Calculate channel width (profit runway)
+        channel_width = abs(trade_target_spx - trade_entry_spx) if trade_target_spx > 0 else 0
+        
+        # Contract display with target
         contract_html = ""
         if trade_contract and trade_contract_price > 0:
+            target_html = ""
+            if trade_target_spx > 0:
+                target_html = f'''
+                    <div style="text-align:center;">
+                        <div style="font-size:11px;color:var(--text-muted);">TARGET</div>
+                        <div style="font-size:16px;font-weight:600;color:var(--success);font-family:var(--font-mono);">{trade_target_spx:,.0f}</div>
+                        <div style="font-size:10px;color:var(--text-muted);">{channel_width:.0f} pts</div>
+                    </div>'''
+            
             contract_html = f'''
             <div style="background:var(--bg-surface);padding:var(--space-3);border-radius:var(--radius-sm);border-left:3px solid {trade_color};margin-top:var(--space-3);">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <div>
                         <div style="font-size:11px;color:var(--text-muted);">CONTRACT</div>
                         <div style="font-size:20px;font-weight:700;color:{trade_color};font-family:var(--font-mono);">{trade_contract}</div>
+                        <div style="font-size:10px;color:var(--text-muted);">20 ITM at target</div>
                     </div>
                     <div style="text-align:center;">
                         <div style="font-size:11px;color:var(--text-muted);">PROJECTED COST</div>
                         <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">${trade_contract_price:.2f}</div>
                     </div>
+                    {target_html}
                     <div style="text-align:right;">
                         <div style="font-size:11px;color:var(--text-muted);">STOP</div>
                         <div style="font-size:16px;font-weight:600;color:var(--danger);font-family:var(--font-mono);">{trade_stop:,.0f}</div>
+                        <div style="font-size:10px;color:var(--text-muted);">{dynamic_stop:.0f} pts</div>
                     </div>
                 </div>
             </div>'''
@@ -3609,20 +3559,6 @@ body {{
     </div>
 '''
     
-    # Gap Card
-    if gap_analysis and gap_analysis.gap_direction != "FLAT":
-        gap_class = "long" if gap_analysis.trade_bias == "CALLS" else "short" if gap_analysis.trade_bias == "PUTS" else "neutral"
-        html += f'''
-    <div class="indicator-card">
-        <div class="indicator-header">
-            <div class="indicator-title">Overnight Gap</div>
-            <div class="indicator-status {gap_class}"></div>
-        </div>
-        <div class="indicator-value {gap_class}">{gap_analysis.gap_pct:+.2f}%</div>
-        <div class="indicator-detail">{gap_analysis.trade_reason}</div>
-    </div>
-'''
-    
     # Price Proximity Card (only show if overnight price provided)
     if price_proximity and price_proximity.current_price > 0:
         prox_class = "long" if price_proximity.position == "NEAR_RAIL" else "short" if price_proximity.position in ["ABOVE_ALL", "BELOW_ALL"] else "neutral"
@@ -3968,7 +3904,7 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v8.1</div>
+    <div class="footer-brand">SPX Prophet v8.3</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
@@ -4472,25 +4408,19 @@ def main():
     # Calculate MA Bias using ES futures from Yahoo Finance (23 hrs/day = more bars)
     ma_bias = fetch_es_ma_bias()
     
-    # Calculate Gap Analysis
-    prior_close = prior_session.get("close", 0)
-    gap_analysis = analyze_gap(prior_close, spx_price) if prior_close > 0 and spx_price > 0 else None
-    
     # Calculate Market Context
     market_ctx = analyze_market_context(prior_session, st.session_state.vix_current, now.time())
     
-    # Calculate Confluence (the key new feature!)
-    confluence = calculate_confluence(vix_zone, ma_bias, gap_analysis)
+    # Calculate Confluence (VIX + MA)
+    confluence = calculate_confluence(vix_zone, ma_bias)
     
     # Debug: Show confluence in sidebar
     with st.sidebar:
         if ma_bias.sma200 > 0:
             st.caption(f"📊 MA: {ma_bias.bias} | SMA: {ma_bias.sma200:.0f}")
         if confluence:
-            conf_emoji = "✅" if confluence.is_aligned else "⚠️" if confluence.signal_strength == "CONFLICTING" else "◐"
+            conf_emoji = "✅" if confluence.is_aligned else "⚠️" if confluence.signal_strength == "CONFLICT" else "◐"
             st.caption(f"{conf_emoji} Confluence: {confluence.signal_strength}")
-        if gap_analysis and gap_analysis.gap_direction != "FLAT":
-            st.caption(f"📊 Gap: {gap_analysis.gap_pct:+.2f}%")
         if price_proximity and price_proximity.position != "UNKNOWN":
             st.caption(f"📍 {price_proximity.position_detail}")
     
@@ -4555,7 +4485,7 @@ def main():
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, gap_analysis, market_ctx, price_proximity, day_structure)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, price_proximity, day_structure)
     components.html(html, height=4500, scrolling=True)
 
 if __name__ == "__main__":
