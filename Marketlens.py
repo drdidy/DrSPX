@@ -761,14 +761,7 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
                 hours_from_asia = mins_from_asia / 60
                 ds.put_price_at_entry = put_price_asia + (ds.put_slope_per_hour * hours_from_asia)
                 ds.put_price_at_entry = max(0.10, ds.put_price_at_entry)  # Floor at $0.10
-                
-                # PUT strike = TARGET (Low Line) + 20
-                # Will be 20 pts ITM when SPX reaches the exit zone
-                # Note: If low line not set, fall back to entry - 50 as rough target
-                if ds.low_line_at_entry > 0:
-                    ds.put_strike = int(round(ds.low_line_at_entry / 5) * 5) + 20
-                else:
-                    ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) - 50  # Rough fallback
+                # Note: PUT strike calculated after both lines are known
     
     # LOW TRENDLINE: Asia Low → London Low (for CALLS)
     if asia_low > 0 and london_low > 0:
@@ -811,14 +804,7 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
                 hours_from_asia = mins_from_asia / 60
                 ds.call_price_at_entry = call_price_asia + (ds.call_slope_per_hour * hours_from_asia)
                 ds.call_price_at_entry = max(0.10, ds.call_price_at_entry)  # Floor at $0.10
-                
-                # CALL strike = TARGET (High Line) - 20
-                # Will be 20 pts ITM when SPX reaches the exit zone
-                # Note: If high line not set, fall back to entry + 50 as rough target
-                if ds.high_line_at_entry > 0:
-                    ds.call_strike = int(round(ds.high_line_at_entry / 5) * 5) - 20
-                else:
-                    ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) + 50  # Rough fallback
+                # Note: CALL strike calculated after both lines are known
     
     # STRUCTURE SHAPE
     if ds.high_line_valid and ds.low_line_valid:
@@ -836,6 +822,15 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
         ds.structure_shape = "HIGH_ONLY"
     elif ds.low_line_valid:
         ds.structure_shape = "LOW_ONLY"
+    
+    # CALCULATE STRIKES (requires both lines for proper target)
+    # PUT: Buy at High Line, Target = Low Line, Strike = Target + 20
+    # CALL: Buy at Low Line, Target = High Line, Strike = Target - 20
+    if ds.high_line_valid and ds.low_line_valid:
+        # PUT strike = Low Line (target) + 20 → 20 ITM when SPX reaches target
+        ds.put_strike = int(round(ds.low_line_at_entry / 5) * 5) + 20
+        # CALL strike = High Line (target) - 20 → 20 ITM when SPX reaches target
+        ds.call_strike = int(round(ds.high_line_at_entry / 5) * 5) - 20
     
     # FIND CONFLUENCE WITH CONE RAILS
     if cones:
