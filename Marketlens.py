@@ -3891,9 +3891,9 @@ body {{
 <div class="table-section">
     <div class="table-header">
         <div class="table-title">📈 Prior Session ({pivot_date.strftime("%b %d")})</div>
-        <span class="setups-chevron">▾</span>
+        <span class="collapse-icon">▼</span>
     </div>
-    <div style="padding:var(--space-4);display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3);">
+    <div class="table-content" style="padding:var(--space-4);display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3);">
         <div style="background:var(--bg-surface-2);border-radius:var(--radius-md);padding:var(--space-3);text-align:center;">
             <div class="mono text-success" style="font-size:16px;font-weight:600;">{prior_session.get("high",0):,.2f}</div>
             <div style="font-size:10px;color:var(--text-tertiary);text-transform:uppercase;margin-top:4px;">High</div>
@@ -3920,7 +3920,7 @@ body {{
 <div class="table-section">
     <div class="table-header">
         <div class="table-title">📐 Structural Cones</div>
-        <span class="setups-chevron">▾</span>
+        <span class="collapse-icon">▼</span>
     </div>
     <table class="data-table">
         <thead>
@@ -3958,7 +3958,7 @@ body {{
 <div class="table-section collapsed">
     <div class="table-header">
         <div class="table-title">📋 Pivot Time Table</div>
-        <span class="setups-chevron">▾</span>
+        <span class="collapse-icon">▼</span>
     </div>
     <table class="data-table">
         <thead>
