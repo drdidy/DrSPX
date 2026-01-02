@@ -1,6 +1,13 @@
 """
-SPX PROPHET v8.0 - INTEGRATED TRADING SYSTEM
+SPX PROPHET v8.1 - UNIFIED TRADING SYSTEM
 "Where Structure Becomes Foresight"
+
+NEW: YOUR TRADE card - single unified view of:
+- Direction (from VIX + MA confluence)
+- Entry level (from Day Structure + Cone confluence)  
+- Contract & projected cost (from session slope)
+- Risk/Reward calculation
+- Flip signal if structure breaks
 
 DECISION TREE:
 1. VIX Zone → Direction (CALLS at bottom/below, PUTS at top/above)
@@ -9,15 +16,9 @@ DECISION TREE:
 4. Contract Pricing → Exact cost from session slope projections
 5. Flip Signals → If structure breaks, watch contract for retest entry
 
-CORE FEATURES:
-✓ Prior Session Cones - H/L/C pivots with 0.45/30min expansion
-✓ VIX Zone Analysis - Direction bias from zone position + breakouts
-✓ MA Confluence - 200 SMA / 50 EMA alignment check
-✓ Day Structure - Asia→London trendlines with CONTRACT PRICING
-✓ Integrated Contract Slopes - PUT/CALL prices projected to entry time
-✓ Flip Signals - When structure breaks, watch for retest entries
-✓ Tested/Broken Rails - Track structure integrity
-✓ Best Setup Selection - Prioritizes day structure confluence
+REMOVED:
+- Complex Price Proximity section (redundant with Day Structure)
+- Individual cone rail distances (focus on confluence entry only)
 """
 
 import streamlit as st
@@ -3129,121 +3130,262 @@ body {{
 </div>
 '''
 
-    # Price Proximity Alert Box (only show if overnight price provided)
-    if price_proximity and price_proximity.current_price > 0:
-        # Determine alert styling based on position
-        if price_proximity.position == "NEAR_RAIL":
-            prox_bg = "linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(34,197,94,0.05) 100%)"
-            prox_border = "var(--success)"
-            prox_icon = "🎯"
-            prox_title = "SETUP ACTIVE"
-        elif price_proximity.position == "ABOVE_ALL":
-            prox_bg = "linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(239,68,68,0.05) 100%)"
-            prox_border = "var(--danger)"
-            prox_icon = "⚡"
-            prox_title = "EXTENDED ABOVE"
-        elif price_proximity.position == "BELOW_ALL":
-            prox_bg = "linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(239,68,68,0.05) 100%)"
-            prox_border = "var(--danger)"
-            prox_icon = "⚡"
-            prox_title = "EXTENDED BELOW"
-        elif price_proximity.position == "INSIDE_CONE":
-            prox_bg = "linear-gradient(135deg, rgba(234,179,8,0.15) 0%, rgba(234,179,8,0.05) 100%)"
-            prox_border = "var(--warning)"
-            prox_icon = "📍"
-            prox_title = "INSIDE STRUCTURE"
-        else:
-            prox_bg = "var(--bg-surface)"
-            prox_border = "var(--border)"
-            prox_icon = "📍"
-            prox_title = "PRICE POSITION"
+    # ════════════════════════════════════════════════════════════════════════
+    # YOUR TRADE - The Main Focus (replaces old Price Proximity)
+    # Shows: Direction + Entry + Contract + Risk/Reward + Flip Signal
+    # ════════════════════════════════════════════════════════════════════════
+    
+    # Determine the best trade based on VIX + MA + Day Structure
+    trade_direction = None
+    trade_entry_spx = 0
+    trade_contract = ""
+    trade_contract_price = 0
+    trade_strike = 0
+    trade_stop = 0
+    trade_cone = ""
+    trade_ds_line = ""
+    flip_watch_contract = ""
+    flip_watch_price = 0
+    flip_enter_direction = ""
+    has_flip_signal = False
+    current_price = price_proximity.current_price if price_proximity else 0
+    
+    # Get direction from VIX/MA confluence
+    if not has_conflict:
+        if vix_zone.bias == "CALLS" or (vix_zone.bias == "WAIT" and ma_bias and ma_bias.bias == "LONG"):
+            trade_direction = "CALLS"
+        elif vix_zone.bias == "PUTS" or (vix_zone.bias == "WAIT" and ma_bias and ma_bias.bias == "SHORT"):
+            trade_direction = "PUTS"
+    
+    # Find the best entry from Day Structure + Cone confluence
+    if trade_direction and day_structure:
+        if trade_direction == "CALLS" and day_structure.low_line_valid:
+            trade_entry_spx = day_structure.low_line_at_entry
+            trade_ds_line = "Low Line"
+            trade_cone = day_structure.low_confluence_cone if day_structure.low_confluence_cone else "Day Structure"
+            if day_structure.call_price_at_entry > 0:
+                trade_contract_price = day_structure.call_price_at_entry
+                trade_strike = day_structure.call_strike
+                trade_contract = f"{trade_strike}C"
+            trade_stop = trade_entry_spx - STOP_LOSS_PTS
+            
+            # Check for flip signal (low line broken)
+            if day_structure.low_line_broken and trade_contract_price > 0:
+                has_flip_signal = True
+                flip_watch_contract = trade_contract
+                flip_watch_price = trade_contract_price
+                flip_enter_direction = "PUTS"
+                
+        elif trade_direction == "PUTS" and day_structure.high_line_valid:
+            trade_entry_spx = day_structure.high_line_at_entry
+            trade_ds_line = "High Line"
+            trade_cone = day_structure.high_confluence_cone if day_structure.high_confluence_cone else "Day Structure"
+            if day_structure.put_price_at_entry > 0:
+                trade_contract_price = day_structure.put_price_at_entry
+                trade_strike = day_structure.put_strike
+                trade_contract = f"{trade_strike}P"
+            trade_stop = trade_entry_spx + STOP_LOSS_PTS
+            
+            # Check for flip signal (high line broken)
+            if day_structure.high_line_broken and trade_contract_price > 0:
+                has_flip_signal = True
+                flip_watch_contract = trade_contract
+                flip_watch_price = trade_contract_price
+                flip_enter_direction = "CALLS"
+    
+    # Fallback to best setup from cones if no Day Structure
+    elif trade_direction and best_setup:
+        trade_entry_spx = best_setup.entry
+        trade_cone = best_setup.cone_name
+        trade_ds_line = ""
+        trade_stop = best_setup.stop
+        if best_setup.option:
+            trade_strike = best_setup.option.spx_strike
+            trade_contract = f"{trade_strike}{'C' if trade_direction == 'CALLS' else 'P'}"
+            trade_contract_price = best_setup.option.spx_price_est
+    
+    # Calculate distance from current price
+    distance_to_entry = 0
+    if current_price > 0 and trade_entry_spx > 0:
+        distance_to_entry = trade_entry_spx - current_price
+    
+    # Calculate risk/reward if we have contract price
+    risk_dollars = 0
+    target_50_dollars = 0
+    target_100_dollars = 0
+    if trade_contract_price > 0:
+        # Assuming 1 contract = 100 multiplier for SPX options
+        risk_dollars = STOP_LOSS_PTS * 10  # Rough estimate: $10 per point for ATM-ish options
+        target_50_dollars = trade_contract_price * 0.5 * 100  # 50% gain on contract
+        target_100_dollars = trade_contract_price * 1.0 * 100  # 100% gain on contract
+    
+    # Build YOUR TRADE section
+    if trade_direction and trade_entry_spx > 0:
+        trade_color = "var(--success)" if trade_direction == "CALLS" else "var(--danger)"
+        trade_bg = "linear-gradient(135deg, rgba(34,197,94,0.15) 0%, rgba(34,197,94,0.05) 100%)" if trade_direction == "CALLS" else "linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(239,68,68,0.05) 100%)"
+        trade_icon = "↑" if trade_direction == "CALLS" else "↓"
         
-        # Build rail distances display for each cone - show actual prices and distances
-        rail_dist_html = ""
-        if price_proximity.rail_distances:
-            rail_dist_html = '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:var(--space-3);margin-top:var(--space-3);">'
-            for cone_name, dists in price_proximity.rail_distances.items():
-                asc_dist = dists["ascending"]
-                desc_dist = dists["descending"]
-                asc_rail = dists["asc_rail"]
-                desc_rail = dists["desc_rail"]
-                asc_color = "var(--success)" if abs(asc_dist) <= 8 else "var(--text-secondary)"
-                desc_color = "var(--success)" if abs(desc_dist) <= 8 else "var(--text-secondary)"
-                # Highlight the cone we're inside
-                is_inside = price_proximity.inside_cone and price_proximity.inside_cone_name == cone_name
-                box_border = "border:1px solid var(--warning);" if is_inside else ""
-                rail_dist_html += f'''
-                <div style="background:var(--bg-elevated);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);font-size:11px;{box_border}">
-                    <div style="font-weight:600;color:var(--text-primary);margin-bottom:6px;">{cone_name}{"  ◀ YOU ARE HERE" if is_inside else ""}</div>
-                    <div style="display:flex;justify-content:space-between;gap:var(--space-3);">
-                        <div>
-                            <div style="color:var(--text-muted);font-size:9px;margin-bottom:2px;">PUTS Entry ↑</div>
-                            <div style="color:{asc_color};font-weight:600;">{asc_rail:,.0f} <span style="font-weight:400;">({asc_dist:+.0f})</span></div>
-                        </div>
-                        <div style="text-align:right;">
-                            <div style="color:var(--text-muted);font-size:9px;margin-bottom:2px;">CALLS Entry ↓</div>
-                            <div style="color:{desc_color};font-weight:600;">{desc_rail:,.0f} <span style="font-weight:400;">({desc_dist:+.0f})</span></div>
-                        </div>
+        # Confluence info
+        confluence_text = f"{trade_ds_line}"
+        if trade_cone and trade_ds_line:
+            confluence_text += f" + {trade_cone}"
+        elif trade_cone:
+            confluence_text = trade_cone
+        
+        # Contract display
+        contract_html = ""
+        if trade_contract and trade_contract_price > 0:
+            contract_html = f'''
+            <div style="background:var(--bg-surface);padding:var(--space-3);border-radius:var(--radius-sm);border-left:3px solid {trade_color};margin-top:var(--space-3);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <div style="font-size:11px;color:var(--text-muted);">CONTRACT</div>
+                        <div style="font-size:20px;font-weight:700;color:{trade_color};font-family:var(--font-mono);">{trade_contract}</div>
                     </div>
-                </div>'''
-            rail_dist_html += '</div>'
+                    <div style="text-align:center;">
+                        <div style="font-size:11px;color:var(--text-muted);">PROJECTED COST</div>
+                        <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">${trade_contract_price:.2f}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:11px;color:var(--text-muted);">STOP</div>
+                        <div style="font-size:16px;font-weight:600;color:var(--danger);font-family:var(--font-mono);">{trade_stop:,.0f}</div>
+                    </div>
+                </div>
+            </div>'''
         
-        # Day Structure Channel Position
-        ds_channel_html = ""
-        if day_structure and (day_structure.high_line_valid or day_structure.low_line_valid):
-            current = price_proximity.current_price
-            ds_position = ""
-            ds_color = "var(--text-secondary)"
-            
-            if day_structure.high_line_valid and day_structure.low_line_valid:
-                if current > day_structure.high_line_at_entry:
-                    ds_position = f"ABOVE Day Structure Channel (+{current - day_structure.high_line_at_entry:.0f} pts)"
-                    ds_color = "var(--danger)"
-                elif current < day_structure.low_line_at_entry:
-                    ds_position = f"BELOW Day Structure Channel ({current - day_structure.low_line_at_entry:.0f} pts)"
-                    ds_color = "var(--success)"
-                else:
-                    # Inside channel
-                    dist_to_high = day_structure.high_line_at_entry - current
-                    dist_to_low = current - day_structure.low_line_at_entry
-                    ds_position = f"INSIDE Channel (↑{dist_to_high:.0f} to high, ↓{dist_to_low:.0f} to low)"
-                    ds_color = "var(--accent)"
-            elif day_structure.high_line_valid:
-                dist = current - day_structure.high_line_at_entry
-                ds_position = f"{'Above' if dist > 0 else 'Below'} DS High Line ({dist:+.0f} pts)"
-                ds_color = "var(--danger)" if dist > 0 else "var(--success)"
-            elif day_structure.low_line_valid:
-                dist = current - day_structure.low_line_at_entry
-                ds_position = f"{'Above' if dist > 0 else 'Below'} DS Low Line ({dist:+.0f} pts)"
-                ds_color = "var(--success)" if dist > 0 else "var(--danger)"
-            
-            if ds_position:
-                ds_channel_html = f'''
-                <div style="margin-top:var(--space-2);padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-sm);border-left:3px solid var(--accent);">
-                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:2px;">📐 Day Structure</div>
-                    <div style="font-size:12px;font-weight:600;color:{ds_color};">{ds_position}</div>
-                </div>'''
+        # Distance from current price
+        distance_html = ""
+        if current_price > 0:
+            dist_color = "var(--success)" if abs(distance_to_entry) <= 10 else "var(--warning)" if abs(distance_to_entry) <= 20 else "var(--text-secondary)"
+            distance_html = f'''
+            <div style="margin-top:var(--space-3);padding:var(--space-2);background:var(--bg-elevated);border-radius:var(--radius-sm);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <span style="color:var(--text-muted);font-size:11px;">CURRENT PRICE</span>
+                        <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);margin-left:8px;">{current_price:,.0f}</span>
+                    </div>
+                    <div style="text-align:right;">
+                        <span style="color:var(--text-muted);font-size:11px;">DISTANCE TO ENTRY</span>
+                        <span style="font-family:var(--font-mono);font-weight:700;color:{dist_color};margin-left:8px;">{distance_to_entry:+.0f} pts</span>
+                    </div>
+                </div>
+            </div>'''
+        
+        # Flip signal
+        flip_html = ""
+        if has_flip_signal:
+            flip_html = f'''
+            <div style="margin-top:var(--space-3);padding:var(--space-3);background:var(--warning-soft);border-radius:var(--radius-sm);border:1px solid var(--warning);">
+                <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2);">
+                    <span style="font-size:16px;">⚡</span>
+                    <span style="font-size:12px;font-weight:700;color:var(--warning);">STRUCTURE BROKEN - FLIP SIGNAL ACTIVE</span>
+                </div>
+                <div style="color:var(--text-primary);font-size:13px;">
+                    Watch <strong style="font-family:var(--font-mono);">{flip_watch_contract}</strong> return to 
+                    <strong style="font-family:var(--font-mono);">${flip_watch_price:.2f}</strong> 
+                    → Then enter <strong style="color:{'var(--danger)' if flip_enter_direction == 'PUTS' else 'var(--success)'};">{flip_enter_direction}</strong>
+                </div>
+            </div>'''
         
         html += f'''
-<!-- PRICE PROXIMITY ALERT -->
-<div style="background:{prox_bg};border:1px solid {prox_border};border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
-    <div style="display:flex;align-items:flex-start;gap:var(--space-3);">
-        <div style="font-size:28px;">{prox_icon}</div>
-        <div style="flex:1;">
-            <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-1);">
-                <span style="font-size:12px;font-weight:700;color:var(--text-primary);letter-spacing:0.5px;">{prox_title}</span>
-                <span style="font-size:18px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">SPX @ {price_proximity.current_price:,.2f}</span>
-            </div>
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:var(--space-2);">{price_proximity.position_detail}</div>
-            <div style="font-size:14px;font-weight:600;color:var(--text-primary);">{price_proximity.action_detail}</div>
-            {ds_channel_html}
-            {rail_dist_html}
+<!-- YOUR TRADE - PRIMARY ACTION -->
+<div style="background:{trade_bg};border:2px solid {trade_color};border-radius:var(--radius-xl);padding:var(--space-5);margin-bottom:var(--space-4);box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+    <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3);">
+        <div style="width:48px;height:48px;background:{trade_color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;color:white;font-weight:700;">{trade_icon}</div>
+        <div>
+            <div style="font-size:12px;color:var(--text-muted);letter-spacing:1px;">YOUR TRADE</div>
+            <div style="font-size:28px;font-weight:700;color:{trade_color};">{trade_direction}</div>
         </div>
+        <div style="margin-left:auto;text-align:right;">
+            <div style="font-size:11px;color:var(--text-muted);">ENTRY LEVEL</div>
+            <div style="font-size:32px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{trade_entry_spx:,.0f}</div>
+            <div style="font-size:12px;color:var(--text-secondary);">{confluence_text}</div>
+        </div>
+    </div>
+    {contract_html}
+    {distance_html}
+    {flip_html}
+</div>
+'''
+    elif has_conflict:
+        # NO TRADE state
+        html += f'''
+<!-- NO TRADE -->
+<div style="background:var(--danger-soft);border:2px solid var(--danger);border-radius:var(--radius-xl);padding:var(--space-5);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:center;gap:var(--space-3);">
+        <div style="width:48px;height:48px;background:var(--danger);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;color:white;">⛔</div>
+        <div>
+            <div style="font-size:12px;color:var(--text-muted);letter-spacing:1px;">SIGNAL CONFLICT</div>
+            <div style="font-size:28px;font-weight:700;color:var(--danger);">NO TRADE</div>
+            <div style="font-size:14px;color:var(--text-secondary);margin-top:4px;">{confluence.no_trade_reason if confluence else "VIX and MA signals conflict"}</div>
+        </div>
+    </div>
+</div>
+'''
+    else:
+        # WAIT state - need more data
+        html += f'''
+<!-- WAITING FOR SETUP -->
+<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-xl);padding:var(--space-5);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:center;gap:var(--space-3);">
+        <div style="width:48px;height:48px;background:var(--bg-elevated);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--text-muted);">⏳</div>
+        <div>
+            <div style="font-size:12px;color:var(--text-muted);letter-spacing:1px;">WAITING</div>
+            <div style="font-size:28px;font-weight:700;color:var(--text-secondary);">Enter Day Structure</div>
+            <div style="font-size:14px;color:var(--text-muted);margin-top:4px;">Add Asia/London session data for entry projection</div>
+        </div>
+    </div>
+</div>
+'''
+
+    # ════════════════════════════════════════════════════════════════════════
+    # SIMPLIFIED POSITION TRACKER (replaces complex Price Proximity)
+    # Just shows: Current Price → Distance to CALLS entry / PUTS entry
+    # ════════════════════════════════════════════════════════════════════════
+    
+    if current_price > 0 and day_structure and (day_structure.low_line_valid or day_structure.high_line_valid):
+        calls_entry = day_structure.low_line_at_entry if day_structure.low_line_valid else 0
+        puts_entry = day_structure.high_line_at_entry if day_structure.high_line_valid else 0
+        
+        calls_dist = calls_entry - current_price if calls_entry > 0 else 0
+        puts_dist = puts_entry - current_price if puts_entry > 0 else 0
+        
+        # Position in channel
+        position_text = ""
+        if calls_entry > 0 and puts_entry > 0:
+            if current_price < calls_entry:
+                position_text = "BELOW CALLS ENTRY"
+                position_color = "var(--danger)"
+            elif current_price > puts_entry:
+                position_text = "ABOVE PUTS ENTRY"
+                position_color = "var(--danger)"
+            else:
+                position_text = "INSIDE CHANNEL"
+                position_color = "var(--success)"
+        
+        html += f'''
+<!-- POSITION TRACKER -->
+<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">CURRENT PRICE</div>
+            <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{current_price:,.0f}</div>
+            <div style="font-size:12px;color:{position_color};font-weight:600;">{position_text}</div>
+        </div>
+        {"" if calls_entry == 0 else f'''
+        <div style="text-align:center;padding:0 var(--space-4);border-left:1px solid var(--border);border-right:1px solid var(--border);">
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">↓ CALLS ENTRY</div>
+            <div style="font-size:18px;font-weight:600;color:var(--success);font-family:var(--font-mono);">{calls_entry:,.0f}</div>
+            <div style="font-size:12px;color:{"var(--success)" if abs(calls_dist) <= 15 else "var(--text-secondary)"};">{calls_dist:+.0f} pts</div>
+        </div>
+        '''}
+        {"" if puts_entry == 0 else f'''
         <div style="text-align:right;">
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Nearest Rail</div>
-            <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">{price_proximity.nearest_rail:,.0f}</div>
-            <div style="font-size:12px;color:var(--text-secondary);">{price_proximity.nearest_rail_distance:+.0f} pts</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">↑ PUTS ENTRY</div>
+            <div style="font-size:18px;font-weight:600;color:var(--danger);font-family:var(--font-mono);">{puts_entry:,.0f}</div>
+            <div style="font-size:12px;color:{"var(--success)" if abs(puts_dist) <= 15 else "var(--text-secondary)"};">{puts_dist:+.0f} pts</div>
         </div>
+        '''}
     </div>
 </div>
 '''
@@ -3364,17 +3506,23 @@ body {{
                 ✨ CONFLUENCE: {day_structure.best_confluence_detail}
             </div>'''
         
+        # Simplified Day Structure - just shows both lines with contract info
         html += f'''
-<!-- DAY STRUCTURE -->
-<div style="background:{ds_bg};border:1px solid {ds_border};border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
-    <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
-        <span style="font-size:20px;">📐</span>
-        <span style="font-size:14px;font-weight:700;color:var(--text-primary);">Day Structure + Contract Pricing</span>
-        <span style="font-size:12px;color:var(--text-secondary);margin-left:auto;">{day_structure.structure_shape}</span>
+<!-- DAY STRUCTURE DETAILS (Collapsible) -->
+<div class="table-section collapsed" style="margin-bottom:var(--space-4);">
+    <div class="table-header" style="cursor:pointer;padding:var(--space-3);background:{ds_bg};border:1px solid {ds_border};border-radius:var(--radius-lg);">
+        <div style="display:flex;align-items:center;gap:var(--space-2);">
+            <span style="font-size:16px;">📐</span>
+            <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Day Structure Details</span>
+            <span style="font-size:11px;color:var(--text-secondary);margin-left:8px;">{day_structure.structure_shape}</span>
+        </div>
+        <span class="table-chevron" style="color:var(--text-muted);">▾</span>
     </div>
-    {high_line_html}
-    {low_line_html}
-    {confluence_badge}
+    <div class="table-body" style="padding:var(--space-3);background:var(--bg-surface);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-lg) var(--radius-lg);">
+        {high_line_html}
+        {low_line_html}
+        {confluence_badge}
+    </div>
 </div>
 '''
 
@@ -3794,7 +3942,7 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v8.0</div>
+    <div class="footer-brand">SPX Prophet v8.1</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
