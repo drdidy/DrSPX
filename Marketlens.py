@@ -1,5 +1,5 @@
 """
-SPX PROPHET v8.3 - CLEAN INTEGRATED SYSTEM
+SPX PROPHET v8.4 - RULES INTEGRATED
 "Where Structure Becomes Foresight"
 
 THREE PILLARS:
@@ -7,11 +7,10 @@ THREE PILLARS:
 2. MA Bias → Confirmation (LONG/SHORT/NEUTRAL)
 3. Day Structure → Entry + Contract + Stop
 
-CONFLUENCE SCORING (40 pts max):
-- VIX + MA aligned: 40/40 (STRONG) → Trade
-- VIX only, MA neutral: 25/40 (MODERATE) → Trade with caution
-- MA only, VIX neutral: 15/40 (WEAK) → Wait for better setup
-- VIX + MA CONFLICT: 0/40 → NO TRADE
+NEW IN v8.4:
+✓ Trading Rules Reference (collapsible section at bottom)
+✓ Contextual Rule Warnings (inline alerts when rules violated)
+✓ Day Structure window updated to 5pm-7am CT
 
 KEY FEATURES:
 ✓ VIX Zone scaling (1% of VIX, rounded to 0.05 ticks)
@@ -19,8 +18,7 @@ KEY FEATURES:
 ✓ Strike = Target - 20 (20 pts ITM at exit zone)
 ✓ Day Structure = Buy Zone / Exit Zone with contract pricing
 ✓ Flip signals when structure breaks
-
-REMOVED: Gap Analysis (redundant - VIX already reflects overnight move)
+✓ Round Number Magnet Rule (0.786 Fib on contract price)
 """
 
 import streamlit as st
@@ -3055,6 +3053,78 @@ body {{
 '''
 
     # ════════════════════════════════════════════════════════════════════════
+    # CONTEXTUAL RULE WARNINGS
+    # Show warnings when rules are being violated or need attention
+    # ════════════════════════════════════════════════════════════════════════
+    
+    rule_warnings = []
+    
+    # Rule 1.2: Never trade against trend
+    if ma_bias and vix_zone:
+        if ma_bias.bias == "LONG" and vix_zone.bias == "PUTS":
+            rule_warnings.append(("Rule 1.2", "Do not look for PUTS in bullish environment (50 EMA > 200 SMA, Price > 50 EMA)", "danger"))
+        elif ma_bias.bias == "SHORT" and vix_zone.bias == "CALLS":
+            rule_warnings.append(("Rule 1.2", "Do not look for CALLS in bearish environment (50 EMA < 200 SMA, Price < 50 EMA)", "danger"))
+    
+    # Rule 2.4: VIX + MA must align
+    if has_conflict:
+        rule_warnings.append(("Rule 2.4", f"VIX and MA bias CONFLICT — No trade allowed", "danger"))
+    
+    # Rule 3.2: Both lines required
+    if day_structure:
+        if day_structure.high_line_valid and not day_structure.low_line_valid:
+            rule_warnings.append(("Rule 3.2", "Only High Line defined — Need BOTH lines for strike calculation", "warning"))
+        elif day_structure.low_line_valid and not day_structure.high_line_valid:
+            rule_warnings.append(("Rule 3.2", "Only Low Line defined — Need BOTH lines for strike calculation", "warning"))
+    
+    # Rule 4.2: Need 2 price points for projection
+    if day_structure and day_structure.high_line_valid and day_structure.low_line_valid:
+        if vix_zone.bias == "CALLS" or (vix_zone.bias == "WAIT" and ma_bias and ma_bias.bias == "LONG"):
+            if day_structure.call_price_asia > 0 and day_structure.call_price_london == 0:
+                rule_warnings.append(("Rule 4.2", "Only 1 CALL price point — Need Asia + London for projection", "warning"))
+            elif day_structure.call_price_asia == 0 and day_structure.call_price_london > 0:
+                rule_warnings.append(("Rule 4.2", "Only 1 CALL price point — Need Asia + London for projection", "warning"))
+        if vix_zone.bias == "PUTS" or (vix_zone.bias == "WAIT" and ma_bias and ma_bias.bias == "SHORT"):
+            if day_structure.put_price_asia > 0 and day_structure.put_price_london == 0:
+                rule_warnings.append(("Rule 4.2", "Only 1 PUT price point — Need Asia + London for projection", "warning"))
+            elif day_structure.put_price_asia == 0 and day_structure.put_price_london > 0:
+                rule_warnings.append(("Rule 4.2", "Only 1 PUT price point — Need Asia + London for projection", "warning"))
+    
+    # Rule 5.2: Entry window check
+    if market_ctx and market_ctx.time_warning:
+        if market_ctx.time_warning == "Very late":
+            rule_warnings.append(("Rule 5.2", "After 11:30am CT — Contracts too cheap, theta dominant", "danger"))
+        elif market_ctx.time_warning == "Late entry":
+            rule_warnings.append(("Rule 5.2", "10:30-11:30am CT — Late entry, reduced opportunity", "warning"))
+    
+    # Display warnings if any
+    if rule_warnings:
+        html += '''
+<!-- RULE WARNINGS -->
+<div style="margin-bottom:var(--space-4);">
+'''
+        for rule_id, rule_msg, severity in rule_warnings:
+            if severity == "danger":
+                bg_color = "var(--danger-soft)"
+                border_color = "var(--danger)"
+                icon = "⛔"
+            else:
+                bg_color = "var(--warning-soft)"
+                border_color = "var(--warning)"
+                icon = "⚠️"
+            
+            html += f'''
+    <div style="background:{bg_color};border:1px solid {border_color};border-radius:var(--radius-sm);padding:var(--space-3);margin-bottom:var(--space-2);display:flex;align-items:center;gap:var(--space-2);">
+        <span style="font-size:16px;">{icon}</span>
+        <div>
+            <span style="font-weight:700;color:var(--text-primary);">{rule_id}:</span>
+            <span style="color:var(--text-secondary);">{rule_msg}</span>
+        </div>
+    </div>
+'''
+        html += '</div>'
+
+    # ════════════════════════════════════════════════════════════════════════
     # YOUR TRADE - The Main Focus (replaces old Price Proximity)
     # Shows: Direction + Entry + Contract + Risk/Reward + Flip Signal
     # ════════════════════════════════════════════════════════════════════════
@@ -3917,12 +3987,93 @@ body {{
     </table>
 </div>
 '''
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TRADING RULES REFERENCE - Collapsible Section
+    # ════════════════════════════════════════════════════════════════════════
+    html += '''
+<!-- TRADING RULES -->
+<div class="table-section collapsed" style="margin-top:var(--space-4);">
+    <div class="table-header" style="cursor:pointer;">
+        <span>📖 Trading Rules Reference</span>
+        <span class="collapse-icon">▼</span>
+    </div>
+    <div class="table-content" style="padding:var(--space-4);font-size:13px;line-height:1.6;">
+        
+        <div style="margin-bottom:var(--space-4);">
+            <h3 style="color:var(--accent);margin-bottom:var(--space-2);font-size:15px;">PART 1: MARKET ENVIRONMENT</h3>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 1.1:</strong> Determine market bias using 50 EMA vs 200 SMA on SPX 24-hour chart.</p>
+            <ul style="color:var(--text-secondary);margin-left:var(--space-4);margin-bottom:var(--space-2);">
+                <li><span style="color:var(--success);">BULLISH:</span> 50 EMA > 200 SMA, Price > 50 EMA → CALLS only</li>
+                <li><span style="color:var(--danger);">BEARISH:</span> 50 EMA < 200 SMA, Price < 50 EMA → PUTS only</li>
+                <li><span style="color:var(--warning);">TRANSITIONAL:</span> Mixed signals → Trade with caution</li>
+            </ul>
+            <p style="color:var(--text-secondary);"><strong style="color:var(--text-primary);">Rule 1.2:</strong> <span style="color:var(--danger);">NEVER</span> trade against the trend. No PUTS in bullish, no CALLS in bearish.</p>
+        </div>
+        
+        <div style="margin-bottom:var(--space-4);">
+            <h3 style="color:var(--accent);margin-bottom:var(--space-2);font-size:15px;">PART 2: VIX ZONE</h3>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 2.1:</strong> Track VIX from 5pm-8:30am CT to establish overnight zone.</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 2.2:</strong> Expected zone = 1% of VIX, rounded to 0.05.</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 2.3:</strong> VIX position determines direction:</p>
+            <ul style="color:var(--text-secondary);margin-left:var(--space-4);margin-bottom:var(--space-2);">
+                <li>At/Below Bottom → <span style="color:var(--success);">CALLS</span></li>
+                <li>At/Above Top → <span style="color:var(--danger);">PUTS</span></li>
+                <li>Mid-Zone → WAIT (defer to MA bias)</li>
+            </ul>
+            <p style="color:var(--text-secondary);"><strong style="color:var(--text-primary);">Rule 2.4:</strong> VIX + MA must align. Conflict = <span style="color:var(--danger);">NO TRADE</span>.</p>
+        </div>
+        
+        <div style="margin-bottom:var(--space-4);">
+            <h3 style="color:var(--accent);margin-bottom:var(--space-2);font-size:15px;">PART 3: DAY STRUCTURE</h3>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.1:</strong> Build Day Structure from 5pm-7am CT (Asia High/Low → London High/Low).</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.2:</strong> <span style="color:var(--warning);">BOTH</span> lines required for proper strike calculation.</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.3:</strong> Low Line = CALL buy zone (cheapest). High Line = PUT buy zone (cheapest).</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.4:</strong> Break & Retest:</p>
+            <ul style="color:var(--text-secondary);margin-left:var(--space-4);">
+                <li>Below structure at open → Wait for GREEN candle to touch Low Line (not break above) → Enter PUTS</li>
+                <li>Above structure at open → Wait for RED candle to touch High Line (not break below) → Enter CALLS</li>
+            </ul>
+        </div>
+        
+        <div style="margin-bottom:var(--space-4);">
+            <h3 style="color:var(--accent);margin-bottom:var(--space-2);font-size:15px;">PART 4: CONTRACT SELECTION</h3>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 4.1:</strong> Strike = Target - 20 (20 pts ITM at exit zone).</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 4.2:</strong> Contract projection requires 2 price points (Asia + London).</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 4.3:</strong> Round Number Magnet Rule:</p>
+            <ul style="color:var(--text-secondary);margin-left:var(--space-4);">
+                <li><span style="color:var(--danger);">PUTS:</span> 8:30 drop below round # (6850, 6800) → Watch that PUT contract rally → Enter at 0.786 Fib retracement of contract price rally</li>
+                <li><span style="color:var(--success);">CALLS:</span> 8:30 rally above round # (6900, 7000) → Watch that CALL contract rally → Enter at 0.786 Fib retracement of contract price rally</li>
+            </ul>
+        </div>
+        
+        <div style="margin-bottom:var(--space-4);">
+            <h3 style="color:var(--accent);margin-bottom:var(--space-2);font-size:15px;">PART 5: RISK MANAGEMENT</h3>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 5.1:</strong> Dynamic stop based on VIX: <14 = 4pts | 14-20 = 6pts | 20-25 = 8pts | >25 = 10pts</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 5.2:</strong> Entry window: <span style="color:var(--success);">9-10am optimal</span> | 10-10:30am good | 10:30-11:30am late | After 11:30am avoid</p>
+            <p style="color:var(--text-secondary);"><strong style="color:var(--text-primary);">Rule 5.3:</strong> Structure break = Flip signal. Watch contract return to entry price → Enter opposite direction.</p>
+        </div>
+        
+        <div>
+            <h3 style="color:var(--accent);margin-bottom:var(--space-2);font-size:15px;">PART 6: NO TRADE CONDITIONS</h3>
+            <ul style="color:var(--danger);margin-left:var(--space-4);">
+                <li>VIX and MA bias in CONFLICT</li>
+                <li>PUTS in bullish environment / CALLS in bearish environment</li>
+                <li>Only one Day Structure line defined</li>
+                <li>After 11:30am CT cutoff</li>
+                <li>Holiday or half-day</li>
+            </ul>
+        </div>
+        
+    </div>
+</div>
+'''
     
     # Footer
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v8.3</div>
+    <div class="footer-brand">SPX Prophet v8.4</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
