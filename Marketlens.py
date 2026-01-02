@@ -4039,11 +4039,25 @@ def main():
         with col1:
             if st.button("📍 Next", use_container_width=True):
                 st.session_state.trading_date = next_trade
+                st.rerun()
         with col2:
             if st.button("📆 Prior", use_container_width=True):
                 st.session_state.trading_date = get_prior_trading_day(today)
-        selected_date = st.date_input("Select", value=st.session_state.trading_date or next_trade, min_value=today - timedelta(days=730), max_value=today + timedelta(days=400))
-        st.session_state.trading_date = selected_date
+                st.rerun()
+        
+        # Use a unique key and only set default value if not already set
+        default_date = st.session_state.trading_date if st.session_state.trading_date else next_trade
+        selected_date = st.date_input(
+            "Select", 
+            value=default_date, 
+            min_value=today - timedelta(days=730), 
+            max_value=today + timedelta(days=400),
+            key="date_picker"
+        )
+        # Only update session state if user actually selected a different date
+        if selected_date != st.session_state.trading_date:
+            st.session_state.trading_date = selected_date
+        
         if is_holiday(selected_date):
             holiday_name = HOLIDAYS_2025.get(selected_date) or HOLIDAYS_2026.get(selected_date, "Holiday")
             st.error(f"🚫 {holiday_name} - Closed")
