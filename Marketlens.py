@@ -3339,8 +3339,9 @@ body {{
 '''
 
     # ════════════════════════════════════════════════════════════════════════
-    # SIMPLIFIED POSITION TRACKER (replaces complex Price Proximity)
-    # Just shows: Current Price → Distance to CALLS entry / PUTS entry
+    # DAY STRUCTURE ZONES - Buy & Exit Points
+    # Low Line = CALL BUY ZONE (cheapest) / PUT EXIT ZONE (exhausted)
+    # High Line = PUT BUY ZONE (cheapest) / CALL EXIT ZONE (exhausted)
     # ════════════════════════════════════════════════════════════════════════
     
     if current_price > 0 and day_structure and (day_structure.low_line_valid or day_structure.high_line_valid):
@@ -3350,40 +3351,65 @@ body {{
         calls_dist = calls_entry - current_price if calls_entry > 0 else 0
         puts_dist = puts_entry - current_price if puts_entry > 0 else 0
         
+        # Channel width = profit runway
+        channel_width = puts_entry - calls_entry if (puts_entry > 0 and calls_entry > 0) else 0
+        
         # Position in channel
         position_text = ""
+        position_color = "var(--text-secondary)"
         if calls_entry > 0 and puts_entry > 0:
             if current_price < calls_entry:
-                position_text = "BELOW CALLS ENTRY"
+                position_text = "BELOW CHANNEL"
                 position_color = "var(--danger)"
             elif current_price > puts_entry:
-                position_text = "ABOVE PUTS ENTRY"
+                position_text = "ABOVE CHANNEL"
                 position_color = "var(--danger)"
             else:
-                position_text = "INSIDE CHANNEL"
+                # Calculate position as percentage through channel
+                pct_through = ((current_price - calls_entry) / channel_width * 100) if channel_width > 0 else 50
+                position_text = f"IN CHANNEL ({pct_through:.0f}% from bottom)"
                 position_color = "var(--success)"
         
+        # Call contract info at each level
+        call_at_low = f"${day_structure.call_price_at_entry:.2f}" if day_structure.call_price_at_entry > 0 else "—"
+        put_at_high = f"${day_structure.put_price_at_entry:.2f}" if day_structure.put_price_at_entry > 0 else "—"
+        
         html += f'''
-<!-- POSITION TRACKER -->
+<!-- DAY STRUCTURE ZONES -->
 <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">CURRENT PRICE</div>
-            <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{current_price:,.0f}</div>
-            <div style="font-size:12px;color:{position_color};font-weight:600;">{position_text}</div>
-        </div>
+    <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
+        <span style="font-size:16px;">📐</span>
+        <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Day Structure Zones</span>
+        {"" if channel_width == 0 else f'<span style="font-size:11px;color:var(--text-muted);margin-left:auto;">Channel: {channel_width:.0f} pts</span>'}
+    </div>
+    
+    <div style="display:flex;justify-content:space-between;align-items:stretch;gap:var(--space-3);">
+        <!-- LOW LINE = CALL BUY ZONE -->
         {"" if calls_entry == 0 else f'''
-        <div style="text-align:center;padding:0 var(--space-4);border-left:1px solid var(--border);border-right:1px solid var(--border);">
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">↓ CALLS ENTRY</div>
-            <div style="font-size:18px;font-weight:600;color:var(--success);font-family:var(--font-mono);">{calls_entry:,.0f}</div>
-            <div style="font-size:12px;color:{"var(--success)" if abs(calls_dist) <= 15 else "var(--text-secondary)"};">{calls_dist:+.0f} pts</div>
+        <div style="flex:1;padding:var(--space-3);background:var(--success-soft);border-radius:var(--radius-sm);border-left:3px solid var(--success);">
+            <div style="font-size:10px;color:var(--success);font-weight:600;margin-bottom:4px;">📥 CALL BUY ZONE</div>
+            <div style="font-size:20px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{calls_entry:,.0f}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">CALL cheapest here: {call_at_low}</div>
+            <div style="font-size:11px;color:var(--text-muted);">PUT exhausted here</div>
+            <div style="font-size:12px;font-weight:600;color:{"var(--success)" if abs(calls_dist) <= 15 else "var(--text-secondary)"};margin-top:8px;">{calls_dist:+.0f} pts away</div>
         </div>
         '''}
+        
+        <!-- CURRENT PRICE -->
+        <div style="flex:1;padding:var(--space-3);background:var(--bg-elevated);border-radius:var(--radius-sm);text-align:center;">
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">CURRENT PRICE</div>
+            <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{current_price:,.0f}</div>
+            <div style="font-size:12px;color:{position_color};font-weight:600;margin-top:8px;">{position_text}</div>
+        </div>
+        
+        <!-- HIGH LINE = PUT BUY ZONE -->
         {"" if puts_entry == 0 else f'''
-        <div style="text-align:right;">
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">↑ PUTS ENTRY</div>
-            <div style="font-size:18px;font-weight:600;color:var(--danger);font-family:var(--font-mono);">{puts_entry:,.0f}</div>
-            <div style="font-size:12px;color:{"var(--success)" if abs(puts_dist) <= 15 else "var(--text-secondary)"};">{puts_dist:+.0f} pts</div>
+        <div style="flex:1;padding:var(--space-3);background:var(--danger-soft);border-radius:var(--radius-sm);border-right:3px solid var(--danger);">
+            <div style="font-size:10px;color:var(--danger);font-weight:600;margin-bottom:4px;">📥 PUT BUY ZONE</div>
+            <div style="font-size:20px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{puts_entry:,.0f}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">PUT cheapest here: {put_at_high}</div>
+            <div style="font-size:11px;color:var(--text-muted);">CALL exhausted here</div>
+            <div style="font-size:12px;font-weight:600;color:{"var(--success)" if abs(puts_dist) <= 15 else "var(--text-secondary)"};margin-top:8px;">{puts_dist:+.0f} pts away</div>
         </div>
         '''}
     </div>
@@ -4092,10 +4118,32 @@ def main():
         
         col1, col2 = st.columns(2)
         with col1:
-            st.session_state.vix_bottom = st.number_input("Bottom", value=st.session_state.vix_bottom, step=0.01, format="%.2f")
+            st.session_state.vix_bottom = st.number_input("Bottom", value=st.session_state.vix_bottom, step=0.05, format="%.2f")
         with col2:
-            st.session_state.vix_top = st.number_input("Top", value=st.session_state.vix_top, step=0.01, format="%.2f")
-        st.session_state.vix_current = st.number_input("Current VIX", value=st.session_state.vix_current, step=0.01, format="%.2f")
+            st.session_state.vix_top = st.number_input("Top", value=st.session_state.vix_top, step=0.05, format="%.2f")
+        st.session_state.vix_current = st.number_input("Current VIX", value=st.session_state.vix_current, step=0.05, format="%.2f")
+        
+        # VIX Zone Validation - Expected zone = 1% of VIX, rounded to 0.05
+        if st.session_state.vix_bottom > 0 and st.session_state.vix_top > 0:
+            actual_zone = st.session_state.vix_top - st.session_state.vix_bottom
+            vix_mid = (st.session_state.vix_top + st.session_state.vix_bottom) / 2
+            expected_zone_raw = vix_mid * 0.01  # 1% of VIX
+            expected_zone = round(expected_zone_raw / 0.05) * 0.05  # Round to nearest 0.05
+            zone_ticks = int(round(actual_zone / 0.05))
+            
+            # Determine zone status
+            if actual_zone <= expected_zone - 0.05:
+                zone_status = "🔵 Tight (expect expansion)"
+                zone_color = "blue"
+            elif actual_zone >= expected_zone + 0.10:
+                zone_status = "🟠 Wide (volatile night)"
+                zone_color = "orange"
+            else:
+                zone_status = "🟢 Normal"
+                zone_color = "green"
+            
+            st.caption(f"Zone: {actual_zone:.2f} ({zone_ticks} ticks) | Expected: {expected_zone:.2f} | {zone_status}")
+        
         st.divider()
         
         # OVERNIGHT SPX PRICE INPUT
