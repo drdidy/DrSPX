@@ -2768,6 +2768,11 @@ body {{
     background: var(--bg-surface-2);
 }}
 
+.collapse-icon {{
+    transition: transform 0.2s ease;
+    color: var(--text-muted);
+}}
+
 .table-title {{
     font-size: 12px;
     font-weight: 600;
@@ -2806,7 +2811,9 @@ body {{
 }}
 
 .table-section.collapsed .data-table {{ display: none; }}
+.table-section.collapsed .table-content {{ display: none; }}
 .table-section.collapsed .table-header {{ border-bottom: none; }}
+.table-section.collapsed .collapse-icon {{ transform: rotate(-90deg); }}
 
 /* ─────────────────────────────────────────────────────────────────
    FOOTER
