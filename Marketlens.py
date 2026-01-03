@@ -258,6 +258,12 @@ class DayStructure:
     low_line_at_entry: float = 0.0  # Projected SPX price at entry time
     low_line_direction: str = ""  # "ASCENDING", "DESCENDING", "FLAT"
     
+    # Original anchor points (for strike calculation when lines break)
+    asia_high: float = 0.0
+    asia_low: float = 0.0
+    london_high: float = 0.0
+    london_low: float = 0.0
+    
     # Overall structure shape
     structure_shape: str = ""  # "EXPANDING", "CONTRACTING", "PARALLEL_UP", "PARALLEL_DOWN", "MIXED"
     
@@ -279,21 +285,22 @@ class DayStructure:
     put_price_london: float = 0.0  # PUT contract price at London High
     put_price_at_entry: float = 0.0  # Projected PUT price at entry time
     put_slope_per_hour: float = 0.0  # PUT decay rate $/hour
-    put_strike: int = 0  # Strike = Low Line (target) + 20 → 20 ITM at exit
+    put_strike: int = 0  # Strike = Entry (High Line) + 10-15 (slightly ITM at entry)
     
     # CONTRACT PRICING - CALL (tracks low line for support)
     call_price_asia: float = 0.0  # CALL contract price at Asia Low
     call_price_london: float = 0.0  # CALL contract price at London Low
     call_price_at_entry: float = 0.0  # Projected CALL price at entry time
     call_slope_per_hour: float = 0.0  # CALL decay rate $/hour
-    call_strike: int = 0  # Strike = High Line (target) - 20 → 20 ITM at exit
+    call_strike: int = 0  # Strike = Entry (Low Line) - 10-15 (slightly ITM at entry)
     
     # BREAK & RETEST signals
-    high_line_broken: bool = False  # SPX broke above high line
-    low_line_broken: bool = False  # SPX broke below low line
+    high_line_broken: bool = False  # SPX broke above high line → FLIP to CALLS
+    low_line_broken: bool = False  # SPX broke below low line → FLIP to PUTS
     
-    # When high line breaks UP: watch PUT to return to put_price_at_entry → enter CALLS
-    # When low line breaks DOWN: watch CALL to return to call_price_at_entry → enter PUTS
+    # FLIP TRADE LOGIC:
+    # When low line breaks DOWN: Direction = PUTS, Strike = Broken Low Line
+    # When high line breaks UP: Direction = CALLS, Strike = Broken High Line
 
 def get_ct_now():
     return datetime.now(CT_TZ)
@@ -706,6 +713,12 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
     ds.high_line_broken = high_line_broken
     ds.low_line_broken = low_line_broken
     
+    # Store original anchor points for strike calculation
+    ds.asia_high = asia_high
+    ds.asia_low = asia_low
+    ds.london_high = london_high
+    ds.london_low = london_low
+    
     def parse_time_to_mins_from_midnight(t_str):
         """Parse time string to minutes from midnight"""
         try:
@@ -824,13 +837,36 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
         ds.structure_shape = "LOW_ONLY"
     
     # CALCULATE STRIKES (requires both lines for proper target)
-    # PUT: Buy at High Line, Target = Low Line, Strike = Target + 20
-    # CALL: Buy at Low Line, Target = High Line, Strike = Target - 20
+    # ═══════════════════════════════════════════════════════════════════════
+    # CORRECTED STRIKE LOGIC:
+    # Strike should be AT or NEAR the ENTRY point (slightly ITM at entry)
+    # As price moves to target, contract goes deeper ITM = bigger gains
+    #
+    # PUT: Entry at High Line → Strike = High Line + 10-15 (slightly ITM at entry)
+    # CALL: Entry at Low Line → Strike = Low Line - 10-15 (slightly ITM at entry)
+    #
+    # WHEN LINE IS BROKEN (FLIP TRADE):
+    # Strike = The LONDON value (where support/resistance actually was)
+    # ═══════════════════════════════════════════════════════════════════════
     if ds.high_line_valid and ds.low_line_valid:
-        # PUT strike = Low Line (target) + 20 → 20 ITM when SPX reaches target
-        ds.put_strike = int(round(ds.low_line_at_entry / 5) * 5) + 20
-        # CALL strike = High Line (target) - 20 → 20 ITM when SPX reaches target
-        ds.call_strike = int(round(ds.high_line_at_entry / 5) * 5) - 20
+        if ds.low_line_broken:
+            # FLIP to PUTS: Strike = London Low (where support broke)
+            break_level = ds.london_low if ds.london_low > 0 else ds.low_line_at_entry
+            ds.put_strike = int(round(break_level / 5) * 5)
+            # CALL is invalidated when low breaks, but set a placeholder
+            ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) - 15
+        elif ds.high_line_broken:
+            # FLIP to CALLS: Strike = London High (where resistance broke)
+            break_level = ds.london_high if ds.london_high > 0 else ds.high_line_at_entry
+            ds.call_strike = int(round(break_level / 5) * 5)
+            # PUT is invalidated when high breaks, but set a placeholder
+            ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) + 15
+        else:
+            # Normal: Strike near entry point
+            # PUT: Entry at High Line → Strike slightly above High Line
+            ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) + 10
+            # CALL: Entry at Low Line → Strike slightly below Low Line
+            ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) - 10
     
     # FIND CONFLUENCE WITH CONE RAILS
     if cones:
@@ -1650,11 +1686,34 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
 def generate_day_structure_setups(day_structure, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False, dynamic_stop=6.0):
     """Generate CALL and PUT setups from Day Structure lines
     
-    DAY STRUCTURE SETUP:
-    - CALL: Entry at Low Line, Target at High Line
-    - PUT: Entry at High Line, Target at Low Line
-    - Strike = Target - 20 (20 ITM at exit)
-    - Uses Day Structure contract pricing if available
+    DAY STRUCTURE SETUP LOGIC:
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    NORMAL (no breaks):
+    - CALL: Entry at Low Line (support), Target at High Line
+           Strike = Entry - 15 to 20 (slightly ITM at entry, deeper ITM at target)
+    - PUT:  Entry at High Line (resistance), Target at Low Line
+           Strike = Entry + 15 to 20 (slightly ITM at entry, deeper ITM at target)
+    
+    WHEN LOW LINE BREAKS (FLIP TO PUTS):
+    - CALL setup is INVALIDATED (removed entirely)
+    - PUT becomes the FLIP trade:
+           Entry: Wait for retest of broken low OR enter at high line
+           Strike = Broken Low Line (will be ATM/ITM as price drops through)
+           Example: Low broke at 6875 → Buy 6880P or 6875P
+    
+    WHEN HIGH LINE BREAKS (FLIP TO CALLS):
+    - PUT setup is INVALIDATED (removed entirely)  
+    - CALL becomes the FLIP trade:
+           Entry: Wait for retest of broken high OR enter at low line
+           Strike = Broken High Line (will be ATM/ITM as price rises through)
+           Example: High broke at 6920 → Buy 6920C or 6915C
+    
+    STRIKE SELECTION PRINCIPLE:
+    - Strike should be near ENTRY point, so contract is slightly ITM or ATM
+    - As price moves to target, contract goes deeper ITM = bigger gains
+    - Round to nearest 5 for SPX options
+    ═══════════════════════════════════════════════════════════════════════════
     """
     setups = []
     
@@ -1677,124 +1736,161 @@ def generate_day_structure_setups(day_structure, current_price, vix_current=16, 
     if structure_width < 5:  # Too narrow
         return setups
     
+    low_line_broken = day_structure.low_line_broken
+    high_line_broken = day_structure.high_line_broken
+    
     # ═══════════════════════════════════════════════════════════════════════
     # DAY STRUCTURE CALL SETUP
-    # Entry: Low Line (support) | Target: High Line (resistance)
+    # Normal: Entry at Low Line (support) | Target at High Line
+    # If High Line broken: This becomes the FLIP trade
+    # If Low Line broken: This setup is INVALIDATED - don't show it
     # ═══════════════════════════════════════════════════════════════════════
     
-    entry_c = low_line
-    dist_c = abs(current_price - entry_c)
-    
-    # Use Day Structure contract pricing if available, else estimate
-    if day_structure.call_price_at_entry > 0:
-        call_premium = day_structure.call_price_at_entry
-        # Estimate delta from premium (rough: premium / 10 for 0DTE)
-        delta_c = min(0.50, max(0.15, call_premium / 12))
-    else:
-        opt_c = get_option_data_for_entry(entry_c, "C", vix_current, mins_after_open)
-        call_premium = opt_c.spx_price_est if opt_c else 0
-        delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
-    
-    # Strike = Target - 20 (will be 20 ITM at High Line)
-    call_strike = day_structure.call_strike if day_structure.call_strike > 0 else int(round(high_line / 5) * 5) - 20
-    
-    # Determine status
-    if is_after_cutoff:
-        calls_status = "GREY"
-    elif day_structure.low_line_broken:
-        calls_status = "BROKEN"
-    elif dist_c <= RAIL_PROXIMITY:
-        calls_status = "ACTIVE"
-    else:
-        calls_status = "WAIT"
-    
-    # Create option data for display
-    call_option = OptionData(
-        spx_strike=call_strike,
-        spx_price_est=call_premium,
-        spy_delta=delta_c,
-        otm_distance=abs(entry_c - call_strike),
-        in_sweet_spot=(PREMIUM_SWEET_LOW <= call_premium <= PREMIUM_SWEET_HIGH) if call_premium > 0 else False
-    )
-    
-    setups.append(TradeSetup(
-        direction="CALLS",
-        cone_name="Day Structure",
-        cone_width=structure_width,
-        entry=round(entry_c, 2),
-        stop=round(entry_c - dynamic_stop, 2),
-        target_25=round(entry_c + structure_width * 0.25, 2),
-        target_50=round(entry_c + structure_width * 0.50, 2),
-        target_75=round(entry_c + structure_width * 0.75, 2),
-        target_100=round(high_line, 2),  # Full target = High Line
-        distance=round(dist_c, 1),
-        option=call_option,
-        profit_25=round(structure_width * 0.25 * delta_c * 100, 0),
-        profit_50=round(structure_width * 0.50 * delta_c * 100, 0),
-        profit_75=round(structure_width * 0.75 * delta_c * 100, 0),
-        profit_100=round(structure_width * delta_c * 100, 0),
-        risk_dollars=round(dynamic_stop * delta_c * 100, 0),
-        status=calls_status
-    ))
+    if not low_line_broken:  # Only show CALL if Low Line is intact
+        entry_c = low_line
+        dist_c = abs(current_price - entry_c)
+        
+        # Use Day Structure contract pricing if available, else estimate
+        if day_structure.call_price_at_entry > 0:
+            call_premium = day_structure.call_price_at_entry
+            delta_c = min(0.50, max(0.15, call_premium / 12))
+        else:
+            opt_c = get_option_data_for_entry(entry_c, "C", vix_current, mins_after_open)
+            call_premium = opt_c.spx_price_est if opt_c else 0
+            delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
+        
+        # STRIKE LOGIC FOR CALLS:
+        # Strike should be AT or BELOW entry (slightly ITM at entry)
+        # As price rises to High Line target, contract goes deeper ITM
+        # Use Entry - 15 to 20 points, rounded to nearest 5
+        if day_structure.call_strike > 0:
+            call_strike = day_structure.call_strike
+        else:
+            # Strike = Entry rounded down to nearest 5, minus 15
+            call_strike = int((entry_c // 5) * 5) - 15
+        
+        # Determine status
+        if is_after_cutoff:
+            calls_status = "GREY"
+        elif high_line_broken:
+            # High line broke UP = bullish, CALL is the FLIP trade (but we show it as active opportunity)
+            calls_status = "ACTIVE" if dist_c <= RAIL_PROXIMITY * 2 else "WAIT"
+        elif dist_c <= RAIL_PROXIMITY:
+            calls_status = "ACTIVE"
+        else:
+            calls_status = "WAIT"
+        
+        call_option = OptionData(
+            spx_strike=call_strike,
+            spx_price_est=call_premium,
+            spy_delta=delta_c,
+            otm_distance=abs(entry_c - call_strike),
+            in_sweet_spot=(PREMIUM_SWEET_LOW <= call_premium <= PREMIUM_SWEET_HIGH) if call_premium > 0 else False
+        )
+        
+        setups.append(TradeSetup(
+            direction="CALLS",
+            cone_name="Day Structure",
+            cone_width=structure_width,
+            entry=round(entry_c, 2),
+            stop=round(entry_c - dynamic_stop, 2),
+            target_25=round(entry_c + structure_width * 0.25, 2),
+            target_50=round(entry_c + structure_width * 0.50, 2),
+            target_75=round(entry_c + structure_width * 0.75, 2),
+            target_100=round(high_line, 2),
+            distance=round(dist_c, 1),
+            option=call_option,
+            profit_25=round(structure_width * 0.25 * delta_c * 100, 0),
+            profit_50=round(structure_width * 0.50 * delta_c * 100, 0),
+            profit_75=round(structure_width * 0.75 * delta_c * 100, 0),
+            profit_100=round(structure_width * delta_c * 100, 0),
+            risk_dollars=round(dynamic_stop * delta_c * 100, 0),
+            status=calls_status
+        ))
     
     # ═══════════════════════════════════════════════════════════════════════
-    # DAY STRUCTURE PUT SETUP
-    # Entry: High Line (resistance) | Target: Low Line (support)
+    # DAY STRUCTURE PUT SETUP  
+    # Normal: Entry at High Line (resistance) | Target at Low Line
+    # If Low Line broken: This becomes the FLIP trade - THE BIG ONE
+    # If High Line broken: This setup is INVALIDATED - don't show it
     # ═══════════════════════════════════════════════════════════════════════
     
-    entry_p = high_line
-    dist_p = abs(current_price - entry_p)
-    
-    # Use Day Structure contract pricing if available, else estimate
-    if day_structure.put_price_at_entry > 0:
-        put_premium = day_structure.put_price_at_entry
-        delta_p = min(0.50, max(0.15, put_premium / 12))
-    else:
-        opt_p = get_option_data_for_entry(entry_p, "P", vix_current, mins_after_open)
-        put_premium = opt_p.spx_price_est if opt_p else 0
-        delta_p = abs(opt_p.spy_delta) if opt_p else DELTA_IDEAL
-    
-    # Strike = Target + 20 (will be 20 ITM at Low Line)
-    put_strike = day_structure.put_strike if day_structure.put_strike > 0 else int(round(low_line / 5) * 5) + 20
-    
-    # Determine status
-    if is_after_cutoff:
-        puts_status = "GREY"
-    elif day_structure.high_line_broken:
-        puts_status = "BROKEN"
-    elif dist_p <= RAIL_PROXIMITY:
-        puts_status = "ACTIVE"
-    else:
-        puts_status = "WAIT"
-    
-    # Create option data for display
-    put_option = OptionData(
-        spx_strike=put_strike,
-        spx_price_est=put_premium,
-        spy_delta=delta_p,
-        otm_distance=abs(entry_p - put_strike),
-        in_sweet_spot=(PREMIUM_SWEET_LOW <= put_premium <= PREMIUM_SWEET_HIGH) if put_premium > 0 else False
-    )
-    
-    setups.append(TradeSetup(
-        direction="PUTS",
-        cone_name="Day Structure",
-        cone_width=structure_width,
-        entry=round(entry_p, 2),
-        stop=round(entry_p + dynamic_stop, 2),
-        target_25=round(entry_p - structure_width * 0.25, 2),
-        target_50=round(entry_p - structure_width * 0.50, 2),
-        target_75=round(entry_p - structure_width * 0.75, 2),
-        target_100=round(low_line, 2),  # Full target = Low Line
-        distance=round(dist_p, 1),
-        option=put_option,
-        profit_25=round(structure_width * 0.25 * delta_p * 100, 0),
-        profit_50=round(structure_width * 0.50 * delta_p * 100, 0),
-        profit_75=round(structure_width * 0.75 * delta_p * 100, 0),
-        profit_100=round(structure_width * delta_p * 100, 0),
-        risk_dollars=round(dynamic_stop * delta_p * 100, 0),
-        status=puts_status
-    ))
+    if not high_line_broken:  # Only show PUT if High Line is intact
+        entry_p = high_line
+        dist_p = abs(current_price - entry_p)
+        
+        # Use Day Structure contract pricing if available, else estimate
+        if day_structure.put_price_at_entry > 0:
+            put_premium = day_structure.put_price_at_entry
+            delta_p = min(0.50, max(0.15, put_premium / 12))
+        else:
+            opt_p = get_option_data_for_entry(entry_p, "P", vix_current, mins_after_open)
+            put_premium = opt_p.spx_price_est if opt_p else 0
+            delta_p = abs(opt_p.spy_delta) if opt_p else DELTA_IDEAL
+        
+        # STRIKE LOGIC FOR PUTS:
+        # ═══════════════════════════════════════════════════════════════════
+        # CRITICAL FIX: When Low Line is BROKEN, this is the FLIP trade
+        # Strike should be AT or NEAR the LONDON LOW (the actual break level)
+        # Example: London Low 6874.9 → Strike = 6875P or 6880P
+        # This way, as price drops through, the contract goes deep ITM
+        # ═══════════════════════════════════════════════════════════════════
+        
+        if low_line_broken:
+            # FLIP TRADE: Strike = London Low (where support actually was)
+            break_level = day_structure.london_low if day_structure.london_low > 0 else low_line
+            put_strike = int(round(break_level / 5) * 5)
+            # If premium is tiny, we're already deep OTM - adjust strike higher
+            if put_premium > 0 and put_premium < 1.0:
+                # Contract too cheap, strike too far OTM
+                # Move strike closer to current price
+                put_strike = int(round(current_price / 5) * 5) - 5
+        elif day_structure.put_strike > 0:
+            put_strike = day_structure.put_strike
+        else:
+            # Normal: Strike = Entry + 15 to 20 (slightly ITM at entry)
+            # As price falls to Low Line target, contract goes deeper ITM
+            put_strike = int((entry_p // 5) * 5) + 15
+        
+        # Determine status
+        if is_after_cutoff:
+            puts_status = "GREY"
+        elif low_line_broken:
+            # LOW LINE BROKE DOWN = bearish FLIP signal
+            # PUT is now the active trade - price should retest and reject
+            puts_status = "ACTIVE"  # Always active when it's a FLIP trade
+        elif dist_p <= RAIL_PROXIMITY:
+            puts_status = "ACTIVE"
+        else:
+            puts_status = "WAIT"
+        
+        put_option = OptionData(
+            spx_strike=put_strike,
+            spx_price_est=put_premium,
+            spy_delta=delta_p,
+            otm_distance=abs(entry_p - put_strike),
+            in_sweet_spot=(PREMIUM_SWEET_LOW <= put_premium <= PREMIUM_SWEET_HIGH) if put_premium > 0 else False
+        )
+        
+        setups.append(TradeSetup(
+            direction="PUTS",
+            cone_name="Day Structure" + (" ⚡FLIP" if low_line_broken else ""),
+            cone_width=structure_width,
+            entry=round(entry_p, 2),
+            stop=round(entry_p + dynamic_stop, 2),
+            target_25=round(entry_p - structure_width * 0.25, 2),
+            target_50=round(entry_p - structure_width * 0.50, 2),
+            target_75=round(entry_p - structure_width * 0.75, 2),
+            target_100=round(low_line, 2),
+            distance=round(dist_p, 1),
+            option=put_option,
+            profit_25=round(structure_width * 0.25 * delta_p * 100, 0),
+            profit_50=round(structure_width * 0.50 * delta_p * 100, 0),
+            profit_75=round(structure_width * 0.75 * delta_p * 100, 0),
+            profit_100=round(structure_width * delta_p * 100, 0),
+            risk_dollars=round(dynamic_stop * delta_p * 100, 0),
+            status=puts_status
+        ))
     
     return setups
 
@@ -3644,9 +3740,74 @@ body {{
         elif vix_zone.bias == "PUTS" or (vix_zone.bias == "WAIT" and ma_bias and ma_bias.bias == "SHORT"):
             trade_direction = "PUTS"
     
-    # Find the best entry from Day Structure + Cone confluence
-    # REQUIRES BOTH LINES - need target for strike calculation
-    if trade_direction and day_structure and day_structure.high_line_valid and day_structure.low_line_valid:
+    # ════════════════════════════════════════════════════════════════════════
+    # FLIP SIGNAL LOGIC - When a line breaks, REVERSE the trade
+    # ════════════════════════════════════════════════════════════════════════
+    # When Low Line breaks DOWN → FLIP to PUTS (bearish)
+    # When High Line breaks UP → FLIP to CALLS (bullish)
+    # The FLIP trade is often the biggest move of the day
+    # ════════════════════════════════════════════════════════════════════════
+    
+    if day_structure and day_structure.high_line_valid and day_structure.low_line_valid:
+        # Check for FLIP conditions FIRST - these override normal direction
+        if day_structure.low_line_broken:
+            # LOW LINE BROKEN = FLIP TO PUTS
+            # This is bearish - support broke, expect continuation down
+            has_flip_signal = True
+            trade_direction = "PUTS"  # Override to PUTS regardless of VIX/MA
+            trade_entry_spx = day_structure.high_line_at_entry  # Enter at high line
+            trade_target_spx = day_structure.low_line_at_entry  # Target = broken low
+            trade_ds_line = "High Line + Day Structure"
+            trade_cone = "Day Structure ⚡FLIP"
+            
+            # CRITICAL FIX: Strike = The LONDON LOW (where support actually was)
+            # NOT the projected line at entry time
+            # Example: London Low 6874.9 → Strike = 6875P or 6880P
+            break_level = day_structure.london_low if day_structure.london_low > 0 else day_structure.low_line_at_entry
+            trade_strike = int(round(break_level / 5) * 5)
+            trade_contract = f"{trade_strike}P"
+            
+            # Use PUT contract price
+            if day_structure.put_price_at_entry > 0:
+                trade_contract_price = day_structure.put_price_at_entry
+            
+            trade_stop = trade_entry_spx + dynamic_stop
+            
+            # Show what to watch for
+            if day_structure.call_price_at_entry > 0:
+                flip_watch_contract = f"{trade_strike - 5}C"
+                flip_watch_price = day_structure.call_price_at_entry
+                flip_enter_direction = "PUTS"  # When CALL returns to this price, enter PUTS
+        
+        elif day_structure.high_line_broken:
+            # HIGH LINE BROKEN = FLIP TO CALLS
+            # This is bullish - resistance broke, expect continuation up
+            has_flip_signal = True
+            trade_direction = "CALLS"  # Override to CALLS regardless of VIX/MA
+            trade_entry_spx = day_structure.low_line_at_entry  # Enter at low line
+            trade_target_spx = day_structure.high_line_at_entry  # Target = broken high
+            trade_ds_line = "Low Line + Day Structure"
+            trade_cone = "Day Structure ⚡FLIP"
+            
+            # CRITICAL FIX: Strike = The LONDON HIGH (where resistance actually was)
+            break_level = day_structure.london_high if day_structure.london_high > 0 else day_structure.high_line_at_entry
+            trade_strike = int(round(break_level / 5) * 5)
+            trade_contract = f"{trade_strike}C"
+            
+            # Use CALL contract price
+            if day_structure.call_price_at_entry > 0:
+                trade_contract_price = day_structure.call_price_at_entry
+            
+            trade_stop = trade_entry_spx - dynamic_stop
+            
+            # Show what to watch for
+            if day_structure.put_price_at_entry > 0:
+                flip_watch_contract = f"{trade_strike + 5}P"
+                flip_watch_price = day_structure.put_price_at_entry
+                flip_enter_direction = "CALLS"  # When PUT returns to this price, enter CALLS
+    
+    # NORMAL trade (no flip) - use Day Structure if available
+    if trade_direction and not has_flip_signal and day_structure and day_structure.high_line_valid and day_structure.low_line_valid:
         if trade_direction == "CALLS":
             trade_entry_spx = day_structure.low_line_at_entry
             trade_target_spx = day_structure.high_line_at_entry
@@ -3657,18 +3818,11 @@ body {{
             if day_structure.call_price_at_entry > 0:
                 trade_contract_price = day_structure.call_price_at_entry
             
-            # Calculate strike: Target - 20 (20 ITM at exit)
-            trade_strike = int(round(trade_target_spx / 5) * 5) - 20
+            # Strike = Entry - 10-15 (slightly ITM at entry, deeper ITM at target)
+            trade_strike = int(round(trade_entry_spx / 5) * 5) - 15
             trade_contract = f"{trade_strike}C"
             
             trade_stop = trade_entry_spx - dynamic_stop
-            
-            # Check for flip signal (low line broken)
-            if day_structure.low_line_broken and trade_contract_price > 0:
-                has_flip_signal = True
-                flip_watch_contract = trade_contract
-                flip_watch_price = trade_contract_price
-                flip_enter_direction = "PUTS"
                 
         elif trade_direction == "PUTS":
             trade_entry_spx = day_structure.high_line_at_entry
@@ -3680,21 +3834,14 @@ body {{
             if day_structure.put_price_at_entry > 0:
                 trade_contract_price = day_structure.put_price_at_entry
             
-            # Calculate strike: Target + 20 (20 ITM at exit)
-            trade_strike = int(round(trade_target_spx / 5) * 5) + 20
+            # Strike = Entry + 10-15 (slightly ITM at entry, deeper ITM at target)
+            trade_strike = int(round(trade_entry_spx / 5) * 5) + 15
             trade_contract = f"{trade_strike}P"
             
             trade_stop = trade_entry_spx + dynamic_stop
-            
-            # Check for flip signal (high line broken)
-            if day_structure.high_line_broken and trade_contract_price > 0:
-                has_flip_signal = True
-                flip_watch_contract = trade_contract
-                flip_watch_price = trade_contract_price
-                flip_enter_direction = "CALLS"
     
     # Fallback to best setup from cones if no Day Structure
-    elif trade_direction and best_setup:
+    elif trade_direction and best_setup and not has_flip_signal:
         trade_entry_spx = best_setup.entry
         trade_cone = best_setup.cone_name
         trade_ds_line = ""
