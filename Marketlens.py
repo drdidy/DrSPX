@@ -2002,8 +2002,8 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* ═══════════════════════════════════════════════════════════════
-   SPX PROPHET v7 - PREMIUM INSTITUTIONAL DESIGN SYSTEM
-   Inspired by: Bloomberg Terminal, Stripe Dashboard, Linear App
+   SPX PROPHET v9 - LEGENDARY PREMIUM DESIGN SYSTEM
+   Bloomberg Terminal × Stripe × Apple × Linear
    ═══════════════════════════════════════════════════════════════ */
 
 :root {{
@@ -2020,12 +2020,25 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     /* Semantic Colors */
     --success: {green};
     --success-soft: {green_light};
+    --success-glow: {"rgba(34,197,94,0.4)" if theme == "dark" else "rgba(34,197,94,0.2)"};
     --danger: {red};
     --danger-soft: {red_light};
+    --danger-glow: {"rgba(239,68,68,0.4)" if theme == "dark" else "rgba(239,68,68,0.2)"};
     --warning: {amber};
     --warning-soft: {amber_light};
     --info: {blue};
     --info-soft: {blue_light};
+    
+    /* Premium Gradients */
+    --gradient-calls: linear-gradient(135deg, rgba(34,197,94,0.2) 0%, rgba(34,197,94,0.05) 100%);
+    --gradient-puts: linear-gradient(135deg, rgba(239,68,68,0.2) 0%, rgba(239,68,68,0.05) 100%);
+    --gradient-premium: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+    --gradient-gold: linear-gradient(135deg, #f59e0b 0%, #eab308 50%, #fbbf24 100%);
+    
+    /* Glassmorphism */
+    --glass-bg: {"rgba(24,24,27,0.8)" if theme == "dark" else "rgba(255,255,255,0.8)"};
+    --glass-border: {"rgba(255,255,255,0.1)" if theme == "dark" else "rgba(0,0,0,0.1)"};
+    --glass-blur: blur(20px);
     
     /* Spacing Scale */
     --space-1: 4px;
@@ -2046,7 +2059,71 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     --radius-md: 8px;
     --radius-lg: 12px;
     --radius-xl: 16px;
+    --radius-2xl: 24px;
+    
+    /* Shadows */
+    --shadow-sm: {shadow_sm};
+    --shadow-md: {shadow_md};
+    --shadow-lg: {shadow_lg};
+    --shadow-glow-green: 0 0 30px rgba(34,197,94,0.3), 0 0 60px rgba(34,197,94,0.1);
+    --shadow-glow-red: 0 0 30px rgba(239,68,68,0.3), 0 0 60px rgba(239,68,68,0.1);
 }}
+
+/* ─────────────────────────────────────────────────────────────────
+   ANIMATIONS
+   ───────────────────────────────────────────────────────────────── */
+
+@keyframes pulse-glow {{
+    0%, 100% {{ opacity: 1; }}
+    50% {{ opacity: 0.7; }}
+}}
+
+@keyframes slide-up {{
+    from {{ opacity: 0; transform: translateY(10px); }}
+    to {{ opacity: 1; transform: translateY(0); }}
+}}
+
+@keyframes shimmer {{
+    0% {{ background-position: -200% 0; }}
+    100% {{ background-position: 200% 0; }}
+}}
+
+@keyframes float {{
+    0%, 100% {{ transform: translateY(0); }}
+    50% {{ transform: translateY(-5px); }}
+}}
+
+@keyframes gradient-shift {{
+    0% {{ background-position: 0% 50%; }}
+    50% {{ background-position: 100% 50%; }}
+    100% {{ background-position: 0% 50%; }}
+}}
+
+@keyframes border-pulse {{
+    0%, 100% {{ border-color: var(--success); }}
+    50% {{ border-color: rgba(34,197,94,0.5); }}
+}}
+
+@keyframes countdown-pulse {{
+    0%, 100% {{ transform: scale(1); }}
+    50% {{ transform: scale(1.05); }}
+}}
+
+.animate-slide-up {{
+    animation: slide-up 0.4s ease-out;
+}}
+
+.animate-pulse {{
+    animation: pulse-glow 2s ease-in-out infinite;
+}}
+
+.animate-float {{
+    animation: float 3s ease-in-out infinite;
+}}
+
+/* ─────────────────────────────────────────────────────────────────
+   BASE STYLES
+   ───────────────────────────────────────────────────────────────── */
 
 *, *::before, *::after {{ 
     margin: 0; 
@@ -2078,13 +2155,22 @@ body {{
     padding: var(--space-6);
 }}
 
+/* ─────────────────────────────────────────────────────────────────
+   PREMIUM HEADER
+   ───────────────────────────────────────────────────────────────── */
+
 .header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: var(--space-5);
+    padding: var(--space-5);
     margin-bottom: var(--space-6);
-    border-bottom: 1px solid var(--border);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
 }}
 
 .logo {{
@@ -2096,48 +2182,39 @@ body {{
 .logo-mark {{
     width: 56px;
     height: 56px;
-    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+    background: var(--gradient-premium);
     border-radius: var(--radius-lg);
-    display: grid;
-    place-items: center;
-    font-family: var(--font-mono);
-    font-size: 15px;
-    font-weight: 700;
-    color: white;
-    letter-spacing: -0.5px;
-    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
-}}
-
-.logo-text {{
     display: flex;
-    flex-direction: column;
-    gap: 3px;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 800;
+    font-size: 14px;
+    letter-spacing: -0.5px;
+    box-shadow: 0 4px 15px rgba(99,102,241,0.4);
+    animation: float 4s ease-in-out infinite;
 }}
 
 .logo-title {{
-    font-size: 28px;
+    font-size: 22px;
     font-weight: 700;
-    color: var(--text-primary);
     letter-spacing: -0.5px;
-    line-height: 1.1;
-    background: linear-gradient(135deg, var(--text-primary) 0%, #a78bfa 100%);
+    background: var(--gradient-premium);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }}
 
 .logo-subtitle {{
-    font-size: 14px;
-    color: var(--text-secondary);
+    font-size: 12px;
+    color: var(--text-tertiary);
     font-weight: 500;
-    letter-spacing: 0.5px;
-    font-style: italic;
 }}
 
 .header-meta {{
     display: flex;
     align-items: center;
-    gap: var(--space-8);
+    gap: var(--space-6);
 }}
 
 .meta-group {{
@@ -2146,329 +2223,262 @@ body {{
 }}
 
 .meta-item {{
-    text-align: right;
+    text-align: center;
+    padding: var(--space-2) var(--space-4);
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
 }}
 
 .meta-label {{
-    font-size: 10px;
-    font-weight: 500;
+    font-size: 9px;
+    font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
 }}
 
 .meta-value {{
+    font-size: 16px;
+    font-weight: 700;
     font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-top: 2px;
+    color: var(--text-primary);
 }}
 
 .clock {{
+    font-size: 32px;
+    font-weight: 300;
     font-family: var(--font-mono);
-    font-size: 24px;
-    font-weight: 500;
-    color: var(--text-primary);
+    color: var(--text-secondary);
     letter-spacing: -1px;
+    padding: var(--space-2) var(--space-4);
+    background: var(--bg-surface);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
 }}
 
 /* ─────────────────────────────────────────────────────────────────
-   SIGNAL HERO - The main decision display
+   SIGNAL HERO CARD - THE MAIN EVENT
    ───────────────────────────────────────────────────────────────── */
 
 .signal-hero {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    padding: var(--space-6);
-    margin-bottom: var(--space-5);
-    display: grid;
-    grid-template-columns: 1fr 280px;
-    gap: var(--space-6);
+    position: relative;
+    border-radius: var(--radius-2xl);
+    padding: var(--space-8);
+    margin-bottom: var(--space-6);
+    overflow: hidden;
+    animation: slide-up 0.5s ease-out;
 }}
 
-.signal-main {{
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
+.signal-hero.calls {{
+    background: var(--gradient-calls);
+    border: 2px solid var(--success);
+    box-shadow: var(--shadow-glow-green);
+}}
+
+.signal-hero.puts {{
+    background: var(--gradient-puts);
+    border: 2px solid var(--danger);
+    box-shadow: var(--shadow-glow-red);
+}}
+
+.signal-hero.wait {{
+    background: var(--bg-surface);
+    border: 2px solid var(--border);
+}}
+
+.signal-hero.notrade {{
+    background: var(--danger-soft);
+    border: 2px solid var(--danger);
+}}
+
+.signal-hero::before {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--gradient-premium);
+}}
+
+.signal-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: var(--space-4);
+}}
+
+.signal-badge.strong {{
+    background: var(--success);
+    color: white;
+    box-shadow: var(--shadow-glow-green);
+    animation: pulse-glow 2s ease-in-out infinite;
+}}
+
+.signal-badge.moderate {{
+    background: var(--warning);
+    color: black;
+}}
+
+.signal-badge.weak {{
+    background: var(--bg-surface-2);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
 }}
 
 .signal-direction {{
     display: flex;
     align-items: center;
     gap: var(--space-4);
+    margin-bottom: var(--space-4);
 }}
 
-.direction-badge {{
-    display: inline-flex;
+.direction-icon {{
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-4);
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    font-weight: 600;
+    justify-content: center;
+    font-size: 36px;
+    font-weight: 700;
+    color: white;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
 }}
 
-.direction-badge.calls {{
-    background: var(--success-soft);
-    color: var(--success);
+.direction-icon.calls {{
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
 }}
 
-.direction-badge.puts {{
-    background: var(--danger-soft);
-    color: var(--danger);
+.direction-icon.puts {{
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
 }}
 
-.direction-badge.wait {{
+.direction-icon.wait {{
     background: var(--bg-surface-2);
     color: var(--text-tertiary);
 }}
 
-.signal-title {{
-    font-size: 32px;
-    font-weight: 700;
-    letter-spacing: -1px;
-    line-height: 1.1;
+.direction-text {{
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    line-height: 1;
 }}
 
-.signal-title.calls {{ color: var(--success); }}
-.signal-title.puts {{ color: var(--danger); }}
-.signal-title.wait {{ color: var(--text-tertiary); }}
+.direction-text.calls {{ color: var(--success); }}
+.direction-text.puts {{ color: var(--danger); }}
+.direction-text.wait {{ color: var(--text-tertiary); }}
 
-.signal-subtitle {{
+.direction-subtitle {{
     font-size: 14px;
     color: var(--text-secondary);
     margin-top: var(--space-1);
 }}
 
-.signal-confluence {{
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-md);
-    width: fit-content;
-}}
+/* ─────────────────────────────────────────────────────────────────
+   SIGNAL DETAILS GRID
+   ───────────────────────────────────────────────────────────────── */
 
-.confluence-dot {{
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-}}
-
-.confluence-dot.strong {{ background: var(--success); }}
-.confluence-dot.moderate {{ background: var(--info); }}
-.confluence-dot.weak {{ background: var(--text-tertiary); }}
-.confluence-dot.conflict {{ background: var(--danger); }}
-
-.confluence-text {{
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-secondary);
-}}
-
-.signal-metrics {{
+.signal-grid {{
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: var(--space-3);
+    gap: var(--space-4);
+    margin-top: var(--space-5);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--glass-border);
 }}
 
-.metric {{
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-md);
-    padding: var(--space-3);
+.signal-stat {{
     text-align: center;
+    padding: var(--space-4);
+    background: var(--glass-bg);
+    backdrop-filter: blur(10px);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    transition: transform 0.2s, box-shadow 0.2s;
 }}
 
-.metric-value {{
-    font-family: var(--font-mono);
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--text-primary);
+.signal-stat:hover {{
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
 }}
 
-.metric-value.success {{ color: var(--success); }}
-.metric-value.danger {{ color: var(--danger); }}
-
-.metric-label {{
+.stat-label {{
     font-size: 10px;
-    font-weight: 500;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    margin-top: var(--space-1);
-}}
-
-/* Score Ring */
-.signal-score {{
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-3);
-}}
-
-.score-ring {{
-    position: relative;
-    width: 140px;
-    height: 140px;
-}}
-
-.score-ring svg {{
-    transform: rotate(-90deg);
-}}
-
-.score-ring-bg {{
-    fill: none;
-    stroke: var(--bg-surface-2);
-    stroke-width: 8;
-}}
-
-.score-ring-fill {{
-    fill: none;
-    stroke-width: 8;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 0.5s ease;
-}}
-
-.score-ring-fill.a {{ stroke: var(--success); }}
-.score-ring-fill.b {{ stroke: var(--info); }}
-.score-ring-fill.c {{ stroke: var(--warning); }}
-.score-ring-fill.d {{ stroke: var(--danger); }}
-
-.score-center {{
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-}}
-
-.score-value {{
-    font-family: var(--font-mono);
-    font-size: 36px;
-    font-weight: 700;
-    letter-spacing: -2px;
-}}
-
-.score-grade {{
-    font-size: 11px;
     font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
     letter-spacing: 1px;
+    margin-bottom: var(--space-2);
 }}
 
-.score-label {{
-    font-size: 12px;
-    color: var(--text-tertiary);
-    font-weight: 500;
-}}
-
-/* ─────────────────────────────────────────────────────────────────
-   VIX METER
-   ───────────────────────────────────────────────────────────────── */
-
-.vix-section {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    padding: var(--space-5);
-    margin-bottom: var(--space-5);
-}}
-
-.section-header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--space-4);
-}}
-
-.section-title {{
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}}
-
-.vix-display {{
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: var(--space-5);
-    align-items: center;
-}}
-
-.vix-meter-track {{
-    height: 6px;
-    background: linear-gradient(90deg, var(--success) 0%, var(--warning) 50%, var(--danger) 100%);
-    border-radius: 3px;
-    position: relative;
-}}
-
-.vix-meter-thumb {{
-    position: absolute;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 14px;
-    height: 14px;
-    background: var(--bg-surface);
-    border: 2px solid var(--text-primary);
-    border-radius: 50%;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}}
-
-.vix-meter-labels {{
-    display: flex;
-    justify-content: space-between;
-    margin-top: var(--space-2);
-}}
-
-.vix-meter-label {{
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-tertiary);
-}}
-
-.vix-current {{
-    text-align: right;
-}}
-
-.vix-current-value {{
-    font-family: var(--font-mono);
+.stat-value {{
     font-size: 28px;
-    font-weight: 600;
+    font-weight: 700;
+    font-family: var(--font-mono);
     color: var(--text-primary);
     letter-spacing: -1px;
 }}
 
-.vix-current-label {{
-    font-size: 10px;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+.stat-value.highlight {{
+    color: var(--success);
+}}
+
+.stat-detail {{
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: var(--space-1);
 }}
 
 /* ─────────────────────────────────────────────────────────────────
-   INDICATOR CARDS - MA Bias, Gap, etc.
+   INDICATOR CARDS - GLASSMORPHISM
    ───────────────────────────────────────────────────────────────── */
 
 .indicators-grid {{
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: var(--space-4);
-    margin-bottom: var(--space-5);
+    margin-bottom: var(--space-6);
 }}
 
 .indicator-card {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    padding: var(--space-5);
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
 }}
+
+.indicator-card:hover {{
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+}}
+
+.indicator-card::before {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+}}
+
+.indicator-card.long::before {{ background: var(--success); }}
+.indicator-card.short::before {{ background: var(--danger); }}
+.indicator-card.neutral::before {{ background: var(--text-tertiary); }}
 
 .indicator-header {{
     display: flex;
@@ -2486,17 +2496,18 @@ body {{
 }}
 
 .indicator-status {{
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
+    animation: pulse-glow 2s ease-in-out infinite;
 }}
 
-.indicator-status.long {{ background: var(--success); }}
-.indicator-status.short {{ background: var(--danger); }}
+.indicator-status.long {{ background: var(--success); box-shadow: 0 0 10px var(--success); }}
+.indicator-status.short {{ background: var(--danger); box-shadow: 0 0 10px var(--danger); }}
 .indicator-status.neutral {{ background: var(--text-tertiary); }}
 
 .indicator-value {{
-    font-size: 20px;
+    font-size: 24px;
     font-weight: 700;
     letter-spacing: -0.5px;
     margin-bottom: var(--space-1);
@@ -2507,9 +2518,62 @@ body {{
 .indicator-value.neutral {{ color: var(--text-tertiary); }}
 
 .indicator-detail {{
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
 }}
+
+/* ─────────────────────────────────────────────────────────────────
+   VIX ZONE VISUALIZATION - PREMIUM
+   ───────────────────────────────────────────────────────────────── */
+
+.vix-zone-container {{
+    position: relative;
+    height: 48px;
+    background: linear-gradient(90deg, var(--success-soft) 0%, var(--bg-surface-2) 50%, var(--danger-soft) 100%);
+    border-radius: 100px;
+    margin: var(--space-4) 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+}}
+
+.vix-zone-track {{
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    right: 4px;
+    border-radius: 100px;
+    background: var(--bg-surface);
+}}
+
+.vix-marker {{
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 24px;
+    height: 24px;
+    background: var(--gradient-premium);
+    border-radius: 50%;
+    border: 3px solid white;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3), 0 0 20px rgba(99,102,241,0.5);
+    z-index: 10;
+    transition: left 0.5s ease;
+}}
+
+.vix-labels {{
+    display: flex;
+    justify-content: space-between;
+    margin-top: var(--space-2);
+}}
+
+.vix-label {{
+    font-size: 11px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+}}
+
+.vix-label.calls {{ color: var(--success); }}
+.vix-label.puts {{ color: var(--danger); }}
 
 /* ─────────────────────────────────────────────────────────────────
    SETUP CARDS
@@ -2523,12 +2587,12 @@ body {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-4);
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: all 0.2s;
 }}
 
 .setups-header:hover {{
@@ -2539,7 +2603,7 @@ body {{
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
 }}
 
@@ -2547,238 +2611,138 @@ body {{
 .setups-title.puts {{ color: var(--danger); }}
 
 .setups-count {{
-    font-size: 11px;
-    font-weight: 500;
-    padding: 2px 8px;
-    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: var(--space-1) var(--space-3);
+    border-radius: 100px;
 }}
 
-.setups-count.calls {{ background: var(--success-soft); color: var(--success); }}
-.setups-count.puts {{ background: var(--danger-soft); color: var(--danger); }}
-
-.setups-chevron {{
-    font-size: 10px;
-    color: var(--text-tertiary);
-    transition: transform 0.2s;
+.setups-count.calls {{
+    background: var(--success-soft);
+    color: var(--success);
 }}
 
-.setups-body {{
-    background: var(--bg-surface-2);
+.setups-count.puts {{
+    background: var(--danger-soft);
+    color: var(--danger);
+}}
+
+.setups-content {{
     border: 1px solid var(--border);
     border-top: none;
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-    padding: var(--space-4);
-}}
-
-.setups-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--space-3);
-}}
-
-.setup-card {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-    position: relative;
     overflow: hidden;
 }}
 
-.setup-card::before {{
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
+.setup-card {{
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: var(--space-4);
+    align-items: center;
+    padding: var(--space-4);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    transition: all 0.2s;
 }}
 
-.setup-card.calls::before {{ background: var(--success); }}
-.setup-card.puts::before {{ background: var(--danger); }}
-.setup-card.active {{ border-color: var(--success); }}
-.setup-card.active.puts {{ border-color: var(--danger); }}
-.setup-card.grey {{ opacity: 0.5; }}
+.setup-card:last-child {{
+    border-bottom: none;
+}}
 
-.setup-header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--space-3);
+.setup-card:hover {{
+    background: var(--bg-surface-2);
+}}
+
+.setup-card.highlighted {{
+    background: var(--success-soft);
+    border-left: 4px solid var(--success);
 }}
 
 .setup-name {{
+    font-weight: 600;
     font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
 }}
-
-.setup-status {{
-    font-size: 9px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 3px 8px;
-    border-radius: 4px;
-}}
-
-.setup-status.active {{ background: var(--success-soft); color: var(--success); }}
-.setup-status.wait {{ background: var(--warning-soft); color: var(--warning); }}
-.setup-status.grey {{ background: var(--bg-surface-2); color: var(--text-tertiary); }}
 
 .setup-entry {{
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-sm);
-    padding: var(--space-3);
-    text-align: center;
-    margin-bottom: var(--space-3);
-}}
-
-.setup-entry-label {{
-    font-size: 9px;
-    font-weight: 500;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}}
-
-.setup-entry-price {{
     font-family: var(--font-mono);
-    font-size: 22px;
-    font-weight: 600;
-    margin-top: 2px;
+    font-weight: 700;
+    font-size: 15px;
 }}
 
-.setup-entry-price.calls {{ color: var(--success); }}
-.setup-entry-price.puts {{ color: var(--danger); }}
-
-.setup-entry-distance {{
-    font-size: 10px;
-    color: var(--text-tertiary);
-    margin-top: 2px;
-}}
-
-.setup-contract {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-2);
-    margin-bottom: var(--space-3);
-}}
-
-.contract-item {{
-    background: var(--bg-surface-2);
+.setup-distance {{
+    font-size: 12px;
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
-    padding: var(--space-2);
-    text-align: center;
+    font-weight: 600;
 }}
 
-.contract-label {{
-    font-size: 9px;
+.setup-distance.close {{
+    background: var(--success-soft);
+    color: var(--success);
+}}
+
+.setup-distance.medium {{
+    background: var(--warning-soft);
+    color: var(--warning);
+}}
+
+.setup-distance.far {{
+    background: var(--bg-surface-2);
     color: var(--text-tertiary);
-    text-transform: uppercase;
 }}
 
-.contract-value {{
+.setup-premium {{
     font-family: var(--font-mono);
     font-size: 13px;
-    font-weight: 600;
-    margin-top: 1px;
+    color: var(--text-secondary);
 }}
-
-.contract-value.calls {{ color: var(--success); }}
-.contract-value.puts {{ color: var(--danger); }}
-
-.setup-targets {{
-    margin-bottom: var(--space-3);
-}}
-
-.targets-row {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
-}}
-
-.target-item {{
-    background: var(--bg-surface-2);
-    border-radius: 4px;
-    padding: 6px 4px;
-    text-align: center;
-}}
-
-.target-pct {{
-    font-size: 9px;
-    color: var(--text-tertiary);
-    font-weight: 500;
-}}
-
-.target-profit {{
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--success);
-    margin-top: 1px;
-}}
-
-.setup-risk {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: var(--danger-soft);
-    border-radius: var(--radius-sm);
-    padding: var(--space-2) var(--space-3);
-}}
-
-.risk-label {{
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--danger);
-}}
-
-.risk-value {{
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--danger);
-}}
-
-/* Collapsed state */
-.setups-section.collapsed .setups-body {{ display: none; }}
-.setups-section.collapsed .setups-chevron {{ transform: rotate(-90deg); }}
 
 /* ─────────────────────────────────────────────────────────────────
-   DATA TABLE
+   DATA TABLES - PREMIUM STYLE
    ───────────────────────────────────────────────────────────────── */
 
 .table-section {{
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-xl);
     overflow: hidden;
     margin-bottom: var(--space-5);
+}}
+
+.table-section.collapsed .table-content {{
+    display: none;
+}}
+
+.table-section.collapsed .collapse-icon {{
+    transform: rotate(-90deg);
+}}
+
+.collapse-icon {{
+    transition: transform 0.2s ease;
+    color: var(--text-tertiary);
 }}
 
 .table-header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border);
+    padding: var(--space-4) var(--space-5);
+    background: var(--bg-surface-2);
     cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
 }}
 
 .table-header:hover {{
-    background: var(--bg-surface-2);
-}}
-
-.collapse-icon {{
-    transition: transform 0.2s ease;
-    color: var(--text-muted);
+    background: var(--bg-surface-3);
 }}
 
 .table-title {{
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
-    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
 }}
 
 .data-table {{
@@ -2787,20 +2751,20 @@ body {{
 }}
 
 .data-table th {{
+    padding: var(--space-3) var(--space-4);
+    text-align: left;
     font-size: 10px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
     color: var(--text-tertiary);
-    padding: var(--space-3);
-    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
     background: var(--bg-surface-2);
     border-bottom: 1px solid var(--border);
 }}
 
 .data-table td {{
-    font-size: 12px;
-    padding: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    font-size: 13px;
     border-bottom: 1px solid var(--border);
 }}
 
@@ -2808,14 +2772,146 @@ body {{
     border-bottom: none;
 }}
 
-.data-table tr:hover {{
+.data-table tr:hover td {{
     background: var(--bg-surface-2);
 }}
 
-.table-section.collapsed .data-table {{ display: none; }}
-.table-section.collapsed .table-content {{ display: none; }}
-.table-section.collapsed .table-header {{ border-bottom: none; }}
-.table-section.collapsed .collapse-icon {{ transform: rotate(-90deg); }}
+/* ─────────────────────────────────────────────────────────────────
+   COUNTDOWN TIMERS
+   ───────────────────────────────────────────────────────────────── */
+
+.countdown {{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    font-weight: 600;
+}}
+
+.countdown.urgent {{
+    background: var(--danger-soft);
+    color: var(--danger);
+    animation: countdown-pulse 1s ease-in-out infinite;
+}}
+
+.countdown.soon {{
+    background: var(--warning-soft);
+    color: var(--warning);
+}}
+
+.countdown.ready {{
+    background: var(--success-soft);
+    color: var(--success);
+}}
+
+/* ─────────────────────────────────────────────────────────────────
+   PROGRESS BARS
+   ───────────────────────────────────────────────────────────────── */
+
+.progress-bar {{
+    height: 6px;
+    background: var(--bg-surface-2);
+    border-radius: 100px;
+    overflow: hidden;
+}}
+
+.progress-fill {{
+    height: 100%;
+    border-radius: 100px;
+    transition: width 0.5s ease;
+}}
+
+.progress-fill.success {{ background: var(--gradient-calls); }}
+.progress-fill.danger {{ background: var(--gradient-puts); }}
+.progress-fill.warning {{ background: var(--gradient-gold); }}
+
+/* ─────────────────────────────────────────────────────────────────
+   ALERTS & WARNINGS
+   ───────────────────────────────────────────────────────────────── */
+
+.alert {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--space-4);
+    border: 1px solid;
+}}
+
+.alert.danger {{
+    background: var(--danger-soft);
+    border-color: var(--danger);
+}}
+
+.alert.warning {{
+    background: var(--warning-soft);
+    border-color: var(--warning);
+}}
+
+.alert.success {{
+    background: var(--success-soft);
+    border-color: var(--success);
+}}
+
+.alert-icon {{
+    font-size: 20px;
+}}
+
+.alert-content {{
+    flex: 1;
+}}
+
+.alert-title {{
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 2px;
+}}
+
+.alert-message {{
+    font-size: 12px;
+    color: var(--text-secondary);
+}}
+
+/* ─────────────────────────────────────────────────────────────────
+   FLIP SIGNAL BOX
+   ───────────────────────────────────────────────────────────────── */
+
+.flip-signal {{
+    background: linear-gradient(135deg, rgba(234,179,8,0.15) 0%, rgba(234,179,8,0.05) 100%);
+    border: 2px solid var(--warning);
+    border-radius: var(--radius-xl);
+    padding: var(--space-5);
+    margin-top: var(--space-4);
+    position: relative;
+    overflow: hidden;
+}}
+
+.flip-signal::before {{
+    content: '⚡';
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 40px;
+    opacity: 0.2;
+}}
+
+.flip-title {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 700;
+    color: var(--warning);
+    margin-bottom: var(--space-2);
+}}
+
+.flip-content {{
+    font-size: 14px;
+    color: var(--text-primary);
+}}
 
 /* ─────────────────────────────────────────────────────────────────
    FOOTER
@@ -2823,20 +2919,23 @@ body {{
 
 .footer {{
     text-align: center;
-    padding: var(--space-5);
+    padding: var(--space-8) 0;
     border-top: 1px solid var(--border);
-    margin-top: var(--space-6);
+    margin-top: var(--space-8);
 }}
 
 .footer-brand {{
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: var(--space-1);
+    font-size: 16px;
+    font-weight: 700;
+    background: var(--gradient-premium);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: var(--space-2);
 }}
 
-.footer-meta {{
-    font-size: 11px;
+.footer-tagline {{
+    font-size: 12px;
     color: var(--text-tertiary);
 }}
 
@@ -2849,6 +2948,36 @@ body {{
 .text-danger {{ color: var(--danger); }}
 .text-warning {{ color: var(--warning); }}
 .text-muted {{ color: var(--text-tertiary); }}
+.text-center {{ text-align: center; }}
+.font-bold {{ font-weight: 700; }}
+.uppercase {{ text-transform: uppercase; }}
+
+/* ─────────────────────────────────────────────────────────────────
+   RESPONSIVE
+   ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {{
+    .dashboard {{
+        padding: var(--space-4);
+    }}
+    
+    .header {{
+        flex-direction: column;
+        gap: var(--space-4);
+    }}
+    
+    .signal-grid {{
+        grid-template-columns: repeat(2, 1fr);
+    }}
+    
+    .indicators-grid {{
+        grid-template-columns: 1fr;
+    }}
+    
+    .direction-text {{
+        font-size: 36px;
+    }}
+}}
 
 </style>
 </head>
