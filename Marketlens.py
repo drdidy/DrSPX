@@ -7,7 +7,7 @@ THREE PILLARS:
 2. MA Bias → Confirmation (50 EMA vs 200 SMA)
 3. Day Structure → Entry + Contract + Stop
 
-TRADING FRAMEWORK:
+PREMIUM FEATURES:
 ✓ VIX Zone scaling (1% of VIX, rounded to 0.05)
 ✓ Dynamic stops based on VIX level (4-10 pts)
 ✓ Strike = Target - 20 (20 pts ITM at exit)
@@ -16,7 +16,12 @@ TRADING FRAMEWORK:
 ✓ Trading Rules Reference
 ✓ Contextual Rule Warnings
 
-CLEAN & FOCUSED - Everything you need, nothing you don't.
+LEGENDARY UI:
+✓ Animated glowing signals
+✓ Floating logo animation
+✓ Pulsing status indicators
+✓ Hover effects on all cards
+✓ Premium gradient accents
 """
 
 import streamlit as st
@@ -2020,25 +2025,17 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     /* Semantic Colors */
     --success: {green};
     --success-soft: {green_light};
-    --success-glow: {"rgba(34,197,94,0.4)" if theme == "dark" else "rgba(34,197,94,0.2)"};
     --danger: {red};
     --danger-soft: {red_light};
-    --danger-glow: {"rgba(239,68,68,0.4)" if theme == "dark" else "rgba(239,68,68,0.2)"};
     --warning: {amber};
     --warning-soft: {amber_light};
     --info: {blue};
     --info-soft: {blue_light};
     
-    /* Premium Gradients */
-    --gradient-calls: linear-gradient(135deg, rgba(34,197,94,0.2) 0%, rgba(34,197,94,0.05) 100%);
-    --gradient-puts: linear-gradient(135deg, rgba(239,68,68,0.2) 0%, rgba(239,68,68,0.05) 100%);
+    /* Premium Additions */
+    --success-glow: {"rgba(34,197,94,0.4)" if theme == "dark" else "rgba(34,197,94,0.25)"};
+    --danger-glow: {"rgba(239,68,68,0.4)" if theme == "dark" else "rgba(239,68,68,0.25)"};
     --gradient-premium: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
-    --gradient-gold: linear-gradient(135deg, #f59e0b 0%, #eab308 50%, #fbbf24 100%);
-    
-    /* Glassmorphism */
-    --glass-bg: {"rgba(24,24,27,0.8)" if theme == "dark" else "rgba(255,255,255,0.8)"};
-    --glass-border: {"rgba(255,255,255,0.1)" if theme == "dark" else "rgba(0,0,0,0.1)"};
-    --glass-blur: blur(20px);
     
     /* Spacing Scale */
     --space-1: 4px;
@@ -2060,27 +2057,20 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     --radius-lg: 12px;
     --radius-xl: 16px;
     --radius-2xl: 24px;
-    
-    /* Shadows */
-    --shadow-sm: {shadow_sm};
-    --shadow-md: {shadow_md};
-    --shadow-lg: {shadow_lg};
-    --shadow-glow-green: 0 0 30px rgba(34,197,94,0.3), 0 0 60px rgba(34,197,94,0.1);
-    --shadow-glow-red: 0 0 30px rgba(239,68,68,0.3), 0 0 60px rgba(239,68,68,0.1);
 }}
 
-/* ─────────────────────────────────────────────────────────────────
-   ANIMATIONS
-   ───────────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+   PREMIUM ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
 
 @keyframes pulse-glow {{
     0%, 100% {{ opacity: 1; }}
-    50% {{ opacity: 0.7; }}
+    50% {{ opacity: 0.6; }}
 }}
 
-@keyframes slide-up {{
-    from {{ opacity: 0; transform: translateY(10px); }}
-    to {{ opacity: 1; transform: translateY(0); }}
+@keyframes float {{
+    0%, 100% {{ transform: translateY(0px); }}
+    50% {{ transform: translateY(-4px); }}
 }}
 
 @keyframes shimmer {{
@@ -2088,42 +2078,20 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     100% {{ background-position: 200% 0; }}
 }}
 
-@keyframes float {{
-    0%, 100% {{ transform: translateY(0); }}
-    50% {{ transform: translateY(-5px); }}
+@keyframes border-glow {{
+    0%, 100% {{ box-shadow: 0 0 20px var(--success-glow); }}
+    50% {{ box-shadow: 0 0 40px var(--success-glow), 0 0 60px var(--success-glow); }}
 }}
 
-@keyframes gradient-shift {{
-    0% {{ background-position: 0% 50%; }}
-    50% {{ background-position: 100% 50%; }}
-    100% {{ background-position: 0% 50%; }}
+@keyframes border-glow-red {{
+    0%, 100% {{ box-shadow: 0 0 20px var(--danger-glow); }}
+    50% {{ box-shadow: 0 0 40px var(--danger-glow), 0 0 60px var(--danger-glow); }}
 }}
 
-@keyframes border-pulse {{
-    0%, 100% {{ border-color: var(--success); }}
-    50% {{ border-color: rgba(34,197,94,0.5); }}
-}}
-
-@keyframes countdown-pulse {{
-    0%, 100% {{ transform: scale(1); }}
-    50% {{ transform: scale(1.05); }}
-}}
-
-.animate-slide-up {{
-    animation: slide-up 0.4s ease-out;
-}}
-
-.animate-pulse {{
-    animation: pulse-glow 2s ease-in-out infinite;
-}}
-
-.animate-float {{
-    animation: float 3s ease-in-out infinite;
-}}
-
-/* ─────────────────────────────────────────────────────────────────
-   BASE STYLES
-   ───────────────────────────────────────────────────────────────── */
+.animate-pulse {{ animation: pulse-glow 2s ease-in-out infinite; }}
+.animate-float {{ animation: float 3s ease-in-out infinite; }}
+.glow-green {{ animation: border-glow 2s ease-in-out infinite; }}
+.glow-red {{ animation: border-glow-red 2s ease-in-out infinite; }}
 
 *, *::before, *::after {{ 
     margin: 0; 
@@ -2155,22 +2123,13 @@ body {{
     padding: var(--space-6);
 }}
 
-/* ─────────────────────────────────────────────────────────────────
-   PREMIUM HEADER
-   ───────────────────────────────────────────────────────────────── */
-
 .header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-5);
+    padding-bottom: var(--space-5);
     margin-bottom: var(--space-6);
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg);
+    border-bottom: 1px solid var(--border);
 }}
 
 .logo {{
@@ -2182,39 +2141,49 @@ body {{
 .logo-mark {{
     width: 56px;
     height: 56px;
-    background: var(--gradient-premium);
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
     border-radius: var(--radius-lg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 700;
     color: white;
-    font-weight: 800;
-    font-size: 14px;
     letter-spacing: -0.5px;
-    box-shadow: 0 4px 15px rgba(99,102,241,0.4);
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
     animation: float 4s ease-in-out infinite;
 }}
 
+.logo-text {{
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}}
+
 .logo-title {{
-    font-size: 22px;
+    font-size: 28px;
     font-weight: 700;
+    color: var(--text-primary);
     letter-spacing: -0.5px;
-    background: var(--gradient-premium);
+    line-height: 1.1;
+    background: linear-gradient(135deg, var(--text-primary) 0%, #a78bfa 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }}
 
 .logo-subtitle {{
-    font-size: 12px;
-    color: var(--text-tertiary);
+    font-size: 14px;
+    color: var(--text-secondary);
     font-weight: 500;
+    letter-spacing: 0.5px;
+    font-style: italic;
 }}
 
 .header-meta {{
     display: flex;
     align-items: center;
-    gap: var(--space-6);
+    gap: var(--space-8);
 }}
 
 .meta-group {{
@@ -2223,248 +2192,337 @@ body {{
 }}
 
 .meta-item {{
-    text-align: center;
-    padding: var(--space-2) var(--space-4);
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border);
+    text-align: right;
 }}
 
 .meta-label {{
-    font-size: 9px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 500;
     color: var(--text-tertiary);
     text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 2px;
+    letter-spacing: 0.5px;
 }}
 
 .meta-value {{
-    font-size: 16px;
-    font-weight: 700;
     font-family: var(--font-mono);
-    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-top: 2px;
 }}
 
 .clock {{
-    font-size: 32px;
-    font-weight: 300;
     font-family: var(--font-mono);
-    color: var(--text-secondary);
+    font-size: 24px;
+    font-weight: 500;
+    color: var(--text-primary);
     letter-spacing: -1px;
-    padding: var(--space-2) var(--space-4);
-    background: var(--bg-surface);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
 }}
 
 /* ─────────────────────────────────────────────────────────────────
-   SIGNAL HERO CARD - THE MAIN EVENT
+   SIGNAL HERO - The main decision display
    ───────────────────────────────────────────────────────────────── */
 
 .signal-hero {{
-    position: relative;
-    border-radius: var(--radius-2xl);
-    padding: var(--space-8);
-    margin-bottom: var(--space-6);
-    overflow: hidden;
-    animation: slide-up 0.5s ease-out;
-}}
-
-.signal-hero.calls {{
-    background: var(--gradient-calls);
-    border: 2px solid var(--success);
-    box-shadow: var(--shadow-glow-green);
-}}
-
-.signal-hero.puts {{
-    background: var(--gradient-puts);
-    border: 2px solid var(--danger);
-    box-shadow: var(--shadow-glow-red);
-}}
-
-.signal-hero.wait {{
     background: var(--bg-surface);
-    border: 2px solid var(--border);
-}}
-
-.signal-hero.notrade {{
-    background: var(--danger-soft);
-    border: 2px solid var(--danger);
-}}
-
-.signal-hero::before {{
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: var(--gradient-premium);
-}}
-
-.signal-badge {{
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-4);
-    border-radius: 100px;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: var(--space-4);
-}}
-
-.signal-badge.strong {{
-    background: var(--success);
-    color: white;
-    box-shadow: var(--shadow-glow-green);
-    animation: pulse-glow 2s ease-in-out infinite;
-}}
-
-.signal-badge.moderate {{
-    background: var(--warning);
-    color: black;
-}}
-
-.signal-badge.weak {{
-    background: var(--bg-surface-2);
-    color: var(--text-secondary);
     border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
+    margin-bottom: var(--space-5);
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: var(--space-6);
+}}
+
+.signal-main {{
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
 }}
 
 .signal-direction {{
     display: flex;
     align-items: center;
     gap: var(--space-4);
-    margin-bottom: var(--space-4);
 }}
 
-.direction-icon {{
-    width: 72px;
-    height: 72px;
-    border-radius: 50%;
-    display: flex;
+.direction-badge {{
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    font-size: 36px;
-    font-weight: 700;
-    color: white;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
 }}
 
-.direction-icon.calls {{
-    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+.direction-badge.calls {{
+    background: var(--success-soft);
+    color: var(--success);
 }}
 
-.direction-icon.puts {{
-    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+.direction-badge.puts {{
+    background: var(--danger-soft);
+    color: var(--danger);
 }}
 
-.direction-icon.wait {{
+.direction-badge.wait {{
     background: var(--bg-surface-2);
     color: var(--text-tertiary);
 }}
 
-.direction-text {{
-    font-size: 48px;
-    font-weight: 800;
-    letter-spacing: -2px;
-    line-height: 1;
+.signal-title {{
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1.1;
 }}
 
-.direction-text.calls {{ color: var(--success); }}
-.direction-text.puts {{ color: var(--danger); }}
-.direction-text.wait {{ color: var(--text-tertiary); }}
+.signal-title.calls {{ color: var(--success); }}
+.signal-title.puts {{ color: var(--danger); }}
+.signal-title.wait {{ color: var(--text-tertiary); }}
 
-.direction-subtitle {{
+.signal-subtitle {{
     font-size: 14px;
     color: var(--text-secondary);
     margin-top: var(--space-1);
 }}
 
-/* ─────────────────────────────────────────────────────────────────
-   SIGNAL DETAILS GRID
-   ───────────────────────────────────────────────────────────────── */
+.signal-confluence {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-md);
+    width: fit-content;
+}}
 
-.signal-grid {{
+.confluence-dot {{
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}}
+
+.confluence-dot.strong {{ background: var(--success); }}
+.confluence-dot.moderate {{ background: var(--info); }}
+.confluence-dot.weak {{ background: var(--text-tertiary); }}
+.confluence-dot.conflict {{ background: var(--danger); }}
+
+.confluence-text {{
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}}
+
+.signal-metrics {{
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: var(--space-4);
-    margin-top: var(--space-5);
-    padding-top: var(--space-5);
-    border-top: 1px solid var(--glass-border);
+    gap: var(--space-3);
 }}
 
-.signal-stat {{
+.metric {{
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
     text-align: center;
-    padding: var(--space-4);
-    background: var(--glass-bg);
-    backdrop-filter: blur(10px);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--glass-border);
-    transition: transform 0.2s, box-shadow 0.2s;
 }}
 
-.signal-stat:hover {{
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
+.metric-value {{
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
 }}
 
-.stat-label {{
+.metric-value.success {{ color: var(--success); }}
+.metric-value.danger {{ color: var(--danger); }}
+
+.metric-label {{
     font-size: 10px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-top: var(--space-1);
+}}
+
+/* Score Ring */
+.signal-score {{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+}}
+
+.score-ring {{
+    position: relative;
+    width: 140px;
+    height: 140px;
+}}
+
+.score-ring svg {{
+    transform: rotate(-90deg);
+}}
+
+.score-ring-bg {{
+    fill: none;
+    stroke: var(--bg-surface-2);
+    stroke-width: 8;
+}}
+
+.score-ring-fill {{
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.5s ease;
+}}
+
+.score-ring-fill.a {{ stroke: var(--success); }}
+.score-ring-fill.b {{ stroke: var(--info); }}
+.score-ring-fill.c {{ stroke: var(--warning); }}
+.score-ring-fill.d {{ stroke: var(--danger); }}
+
+.score-center {{
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}}
+
+.score-value {{
+    font-family: var(--font-mono);
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -2px;
+}}
+
+.score-grade {{
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
     letter-spacing: 1px;
-    margin-bottom: var(--space-2);
 }}
 
-.stat-value {{
-    font-size: 28px;
-    font-weight: 700;
+.score-label {{
+    font-size: 12px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+}}
+
+/* ─────────────────────────────────────────────────────────────────
+   VIX METER
+   ───────────────────────────────────────────────────────────────── */
+
+.vix-section {{
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    padding: var(--space-5);
+    margin-bottom: var(--space-5);
+}}
+
+.section-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-4);
+}}
+
+.section-title {{
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.vix-display {{
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: var(--space-5);
+    align-items: center;
+}}
+
+.vix-meter-track {{
+    height: 6px;
+    background: linear-gradient(90deg, var(--success) 0%, var(--warning) 50%, var(--danger) 100%);
+    border-radius: 3px;
+    position: relative;
+}}
+
+.vix-meter-thumb {{
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 14px;
+    height: 14px;
+    background: var(--bg-surface);
+    border: 2px solid var(--text-primary);
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}}
+
+.vix-meter-labels {{
+    display: flex;
+    justify-content: space-between;
+    margin-top: var(--space-2);
+}}
+
+.vix-meter-label {{
     font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+}}
+
+.vix-current {{
+    text-align: right;
+}}
+
+.vix-current-value {{
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -1px;
 }}
 
-.stat-value.highlight {{
-    color: var(--success);
-}}
-
-.stat-detail {{
-    font-size: 11px;
-    color: var(--text-secondary);
-    margin-top: var(--space-1);
+.vix-current-label {{
+    font-size: 10px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }}
 
 /* ─────────────────────────────────────────────────────────────────
-   INDICATOR CARDS - GLASSMORPHISM
+   INDICATOR CARDS - MA Bias, Gap, etc.
    ───────────────────────────────────────────────────────────────── */
 
 .indicators-grid {{
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: var(--space-4);
-    margin-bottom: var(--space-6);
+    margin-bottom: var(--space-5);
 }}
 
 .indicator-card {{
-    background: var(--glass-bg);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-xl);
-    padding: var(--space-5);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
 }}
 
 .indicator-card:hover {{
-    transform: translateY(-4px);
-    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+    border-color: var(--border-strong);
 }}
 
 .indicator-card::before {{
@@ -2474,11 +2532,14 @@ body {{
     left: 0;
     right: 0;
     height: 3px;
+    background: var(--gradient-premium);
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }}
 
-.indicator-card.long::before {{ background: var(--success); }}
-.indicator-card.short::before {{ background: var(--danger); }}
-.indicator-card.neutral::before {{ background: var(--text-tertiary); }}
+.indicator-card:hover::before {{
+    opacity: 1;
+}}
 
 .indicator-header {{
     display: flex;
@@ -2502,12 +2563,18 @@ body {{
     animation: pulse-glow 2s ease-in-out infinite;
 }}
 
-.indicator-status.long {{ background: var(--success); box-shadow: 0 0 10px var(--success); }}
-.indicator-status.short {{ background: var(--danger); box-shadow: 0 0 10px var(--danger); }}
+.indicator-status.long {{ 
+    background: var(--success); 
+    box-shadow: 0 0 8px var(--success), 0 0 16px var(--success-glow);
+}}
+.indicator-status.short {{ 
+    background: var(--danger); 
+    box-shadow: 0 0 8px var(--danger), 0 0 16px var(--danger-glow);
+}}
 .indicator-status.neutral {{ background: var(--text-tertiary); }}
 
 .indicator-value {{
-    font-size: 24px;
+    font-size: 22px;
     font-weight: 700;
     letter-spacing: -0.5px;
     margin-bottom: var(--space-1);
@@ -2518,62 +2585,9 @@ body {{
 .indicator-value.neutral {{ color: var(--text-tertiary); }}
 
 .indicator-detail {{
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-secondary);
 }}
-
-/* ─────────────────────────────────────────────────────────────────
-   VIX ZONE VISUALIZATION - PREMIUM
-   ───────────────────────────────────────────────────────────────── */
-
-.vix-zone-container {{
-    position: relative;
-    height: 48px;
-    background: linear-gradient(90deg, var(--success-soft) 0%, var(--bg-surface-2) 50%, var(--danger-soft) 100%);
-    border-radius: 100px;
-    margin: var(--space-4) 0;
-    overflow: hidden;
-    border: 1px solid var(--border);
-}}
-
-.vix-zone-track {{
-    position: absolute;
-    top: 4px;
-    bottom: 4px;
-    left: 4px;
-    right: 4px;
-    border-radius: 100px;
-    background: var(--bg-surface);
-}}
-
-.vix-marker {{
-    position: absolute;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 24px;
-    height: 24px;
-    background: var(--gradient-premium);
-    border-radius: 50%;
-    border: 3px solid white;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.3), 0 0 20px rgba(99,102,241,0.5);
-    z-index: 10;
-    transition: left 0.5s ease;
-}}
-
-.vix-labels {{
-    display: flex;
-    justify-content: space-between;
-    margin-top: var(--space-2);
-}}
-
-.vix-label {{
-    font-size: 11px;
-    font-family: var(--font-mono);
-    font-weight: 600;
-}}
-
-.vix-label.calls {{ color: var(--success); }}
-.vix-label.puts {{ color: var(--danger); }}
 
 /* ─────────────────────────────────────────────────────────────────
    SETUP CARDS
@@ -2587,12 +2601,12 @@ body {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-4);
+    padding: var(--space-3) var(--space-4);
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.15s;
 }}
 
 .setups-header:hover {{
@@ -2603,7 +2617,7 @@ body {{
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
 }}
 
@@ -2611,138 +2625,248 @@ body {{
 .setups-title.puts {{ color: var(--danger); }}
 
 .setups-count {{
-    font-size: 12px;
-    font-weight: 600;
-    padding: var(--space-1) var(--space-3);
-    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
 }}
 
-.setups-count.calls {{
-    background: var(--success-soft);
-    color: var(--success);
+.setups-count.calls {{ background: var(--success-soft); color: var(--success); }}
+.setups-count.puts {{ background: var(--danger-soft); color: var(--danger); }}
+
+.setups-chevron {{
+    font-size: 10px;
+    color: var(--text-tertiary);
+    transition: transform 0.2s;
 }}
 
-.setups-count.puts {{
-    background: var(--danger-soft);
-    color: var(--danger);
-}}
-
-.setups-content {{
+.setups-body {{
+    background: var(--bg-surface-2);
     border: 1px solid var(--border);
     border-top: none;
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-    overflow: hidden;
+    padding: var(--space-4);
+}}
+
+.setups-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-3);
 }}
 
 .setup-card {{
-    display: grid;
-    grid-template-columns: 1fr auto auto auto;
-    gap: var(--space-4);
-    align-items: center;
-    padding: var(--space-4);
     background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    transition: all 0.2s;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    position: relative;
+    overflow: hidden;
 }}
 
-.setup-card:last-child {{
-    border-bottom: none;
+.setup-card::before {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
 }}
 
-.setup-card:hover {{
-    background: var(--bg-surface-2);
-}}
+.setup-card.calls::before {{ background: var(--success); }}
+.setup-card.puts::before {{ background: var(--danger); }}
+.setup-card.active {{ border-color: var(--success); }}
+.setup-card.active.puts {{ border-color: var(--danger); }}
+.setup-card.grey {{ opacity: 0.5; }}
 
-.setup-card.highlighted {{
-    background: var(--success-soft);
-    border-left: 4px solid var(--success);
+.setup-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-3);
 }}
 
 .setup-name {{
-    font-weight: 600;
     font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
 }}
+
+.setup-status {{
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+}}
+
+.setup-status.active {{ background: var(--success-soft); color: var(--success); }}
+.setup-status.wait {{ background: var(--warning-soft); color: var(--warning); }}
+.setup-status.grey {{ background: var(--bg-surface-2); color: var(--text-tertiary); }}
 
 .setup-entry {{
-    font-family: var(--font-mono);
-    font-weight: 700;
-    font-size: 15px;
-}}
-
-.setup-distance {{
-    font-size: 12px;
-    padding: var(--space-1) var(--space-2);
-    border-radius: var(--radius-sm);
-    font-weight: 600;
-}}
-
-.setup-distance.close {{
-    background: var(--success-soft);
-    color: var(--success);
-}}
-
-.setup-distance.medium {{
-    background: var(--warning-soft);
-    color: var(--warning);
-}}
-
-.setup-distance.far {{
     background: var(--bg-surface-2);
-    color: var(--text-tertiary);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+    text-align: center;
+    margin-bottom: var(--space-3);
 }}
 
-.setup-premium {{
+.setup-entry-label {{
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.setup-entry-price {{
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 600;
+    margin-top: 2px;
+}}
+
+.setup-entry-price.calls {{ color: var(--success); }}
+.setup-entry-price.puts {{ color: var(--danger); }}
+
+.setup-entry-distance {{
+    font-size: 10px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}}
+
+.setup-contract {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}}
+
+.contract-item {{
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+    text-align: center;
+}}
+
+.contract-label {{
+    font-size: 9px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+}}
+
+.contract-value {{
     font-family: var(--font-mono);
     font-size: 13px;
-    color: var(--text-secondary);
+    font-weight: 600;
+    margin-top: 1px;
 }}
 
+.contract-value.calls {{ color: var(--success); }}
+.contract-value.puts {{ color: var(--danger); }}
+
+.setup-targets {{
+    margin-bottom: var(--space-3);
+}}
+
+.targets-row {{
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+}}
+
+.target-item {{
+    background: var(--bg-surface-2);
+    border-radius: 4px;
+    padding: 6px 4px;
+    text-align: center;
+}}
+
+.target-pct {{
+    font-size: 9px;
+    color: var(--text-tertiary);
+    font-weight: 500;
+}}
+
+.target-profit {{
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--success);
+    margin-top: 1px;
+}}
+
+.setup-risk {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--danger-soft);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+}}
+
+.risk-label {{
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--danger);
+}}
+
+.risk-value {{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--danger);
+}}
+
+/* Collapsed state */
+.setups-section.collapsed .setups-body {{ display: none; }}
+.setups-section.collapsed .setups-chevron {{ transform: rotate(-90deg); }}
+
 /* ─────────────────────────────────────────────────────────────────
-   DATA TABLES - PREMIUM STYLE
+   DATA TABLE
    ───────────────────────────────────────────────────────────────── */
 
 .table-section {{
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
     overflow: hidden;
     margin-bottom: var(--space-5);
+    transition: all 0.3s ease;
 }}
 
-.table-section.collapsed .table-content {{
-    display: none;
-}}
-
-.table-section.collapsed .collapse-icon {{
-    transform: rotate(-90deg);
-}}
-
-.collapse-icon {{
-    transition: transform 0.2s ease;
-    color: var(--text-tertiary);
+.table-section:hover {{
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
 }}
 
 .table-header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-4) var(--space-5);
-    background: var(--bg-surface-2);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
     cursor: pointer;
-    user-select: none;
-    transition: background 0.2s;
+    transition: all 0.2s ease;
 }}
 
 .table-header:hover {{
-    background: var(--bg-surface-3);
+    background: var(--bg-surface-2);
+}}
+
+.collapse-icon {{
+    transition: transform 0.3s ease;
+    color: var(--text-muted);
+}}
+
+.table-section.collapsed .collapse-icon {{
+    transform: rotate(-90deg);
 }}
 
 .table-title {{
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
+    color: var(--text-secondary);
 }}
 
 .data-table {{
@@ -2751,20 +2875,20 @@ body {{
 }}
 
 .data-table th {{
-    padding: var(--space-3) var(--space-4);
-    text-align: left;
     font-size: 10px;
     font-weight: 600;
-    color: var(--text-tertiary);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
+    color: var(--text-tertiary);
+    padding: var(--space-3);
+    text-align: left;
     background: var(--bg-surface-2);
     border-bottom: 1px solid var(--border);
 }}
 
 .data-table td {{
-    padding: var(--space-3) var(--space-4);
-    font-size: 13px;
+    font-size: 12px;
+    padding: var(--space-3);
     border-bottom: 1px solid var(--border);
 }}
 
@@ -2772,146 +2896,14 @@ body {{
     border-bottom: none;
 }}
 
-.data-table tr:hover td {{
+.data-table tr:hover {{
     background: var(--bg-surface-2);
 }}
 
-/* ─────────────────────────────────────────────────────────────────
-   COUNTDOWN TIMERS
-   ───────────────────────────────────────────────────────────────── */
-
-.countdown {{
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-md);
-    font-family: var(--font-mono);
-    font-weight: 600;
-}}
-
-.countdown.urgent {{
-    background: var(--danger-soft);
-    color: var(--danger);
-    animation: countdown-pulse 1s ease-in-out infinite;
-}}
-
-.countdown.soon {{
-    background: var(--warning-soft);
-    color: var(--warning);
-}}
-
-.countdown.ready {{
-    background: var(--success-soft);
-    color: var(--success);
-}}
-
-/* ─────────────────────────────────────────────────────────────────
-   PROGRESS BARS
-   ───────────────────────────────────────────────────────────────── */
-
-.progress-bar {{
-    height: 6px;
-    background: var(--bg-surface-2);
-    border-radius: 100px;
-    overflow: hidden;
-}}
-
-.progress-fill {{
-    height: 100%;
-    border-radius: 100px;
-    transition: width 0.5s ease;
-}}
-
-.progress-fill.success {{ background: var(--gradient-calls); }}
-.progress-fill.danger {{ background: var(--gradient-puts); }}
-.progress-fill.warning {{ background: var(--gradient-gold); }}
-
-/* ─────────────────────────────────────────────────────────────────
-   ALERTS & WARNINGS
-   ───────────────────────────────────────────────────────────────── */
-
-.alert {{
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-4);
-    border-radius: var(--radius-lg);
-    margin-bottom: var(--space-4);
-    border: 1px solid;
-}}
-
-.alert.danger {{
-    background: var(--danger-soft);
-    border-color: var(--danger);
-}}
-
-.alert.warning {{
-    background: var(--warning-soft);
-    border-color: var(--warning);
-}}
-
-.alert.success {{
-    background: var(--success-soft);
-    border-color: var(--success);
-}}
-
-.alert-icon {{
-    font-size: 20px;
-}}
-
-.alert-content {{
-    flex: 1;
-}}
-
-.alert-title {{
-    font-weight: 600;
-    font-size: 13px;
-    margin-bottom: 2px;
-}}
-
-.alert-message {{
-    font-size: 12px;
-    color: var(--text-secondary);
-}}
-
-/* ─────────────────────────────────────────────────────────────────
-   FLIP SIGNAL BOX
-   ───────────────────────────────────────────────────────────────── */
-
-.flip-signal {{
-    background: linear-gradient(135deg, rgba(234,179,8,0.15) 0%, rgba(234,179,8,0.05) 100%);
-    border: 2px solid var(--warning);
-    border-radius: var(--radius-xl);
-    padding: var(--space-5);
-    margin-top: var(--space-4);
-    position: relative;
-    overflow: hidden;
-}}
-
-.flip-signal::before {{
-    content: '⚡';
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    font-size: 40px;
-    opacity: 0.2;
-}}
-
-.flip-title {{
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-weight: 700;
-    color: var(--warning);
-    margin-bottom: var(--space-2);
-}}
-
-.flip-content {{
-    font-size: 14px;
-    color: var(--text-primary);
-}}
+.table-section.collapsed .data-table {{ display: none; }}
+.table-section.collapsed .table-content {{ display: none; }}
+.table-section.collapsed .table-header {{ border-bottom: none; }}
+.table-section.collapsed .collapse-icon {{ transform: rotate(-90deg); }}
 
 /* ─────────────────────────────────────────────────────────────────
    FOOTER
@@ -2919,23 +2911,20 @@ body {{
 
 .footer {{
     text-align: center;
-    padding: var(--space-8) 0;
+    padding: var(--space-5);
     border-top: 1px solid var(--border);
-    margin-top: var(--space-8);
+    margin-top: var(--space-6);
 }}
 
 .footer-brand {{
-    font-size: 16px;
-    font-weight: 700;
-    background: var(--gradient-premium);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: var(--space-2);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-1);
 }}
 
-.footer-tagline {{
-    font-size: 12px;
+.footer-meta {{
+    font-size: 11px;
     color: var(--text-tertiary);
 }}
 
@@ -2948,36 +2937,6 @@ body {{
 .text-danger {{ color: var(--danger); }}
 .text-warning {{ color: var(--warning); }}
 .text-muted {{ color: var(--text-tertiary); }}
-.text-center {{ text-align: center; }}
-.font-bold {{ font-weight: 700; }}
-.uppercase {{ text-transform: uppercase; }}
-
-/* ─────────────────────────────────────────────────────────────────
-   RESPONSIVE
-   ───────────────────────────────────────────────────────────────── */
-
-@media (max-width: 768px) {{
-    .dashboard {{
-        padding: var(--space-4);
-    }}
-    
-    .header {{
-        flex-direction: column;
-        gap: var(--space-4);
-    }}
-    
-    .signal-grid {{
-        grid-template-columns: repeat(2, 1fr);
-    }}
-    
-    .indicators-grid {{
-        grid-template-columns: 1fr;
-    }}
-    
-    .direction-text {{
-        font-size: 36px;
-    }}
-}}
 
 </style>
 </head>
@@ -3463,18 +3422,21 @@ body {{
                 </div>
             </div>'''
         
+        # Determine glow class based on direction
+        glow_class = "glow-green" if trade_direction == "CALLS" else "glow-red"
+        
         html += f'''
 <!-- YOUR TRADE - PRIMARY ACTION -->
-<div style="background:{trade_bg};border:2px solid {trade_color};border-radius:var(--radius-xl);padding:var(--space-5);margin-bottom:var(--space-4);box-shadow:0 4px 20px rgba(0,0,0,0.2);">
+<div class="{glow_class}" style="background:{trade_bg};border:2px solid {trade_color};border-radius:var(--radius-xl);padding:var(--space-5);margin-bottom:var(--space-4);">
     <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3);">
-        <div style="width:48px;height:48px;background:{trade_color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;color:white;font-weight:700;">{trade_icon}</div>
+        <div style="width:56px;height:56px;background:{trade_color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;color:white;font-weight:700;box-shadow:0 4px 20px {trade_color}40;">{trade_icon}</div>
         <div>
-            <div style="font-size:12px;color:var(--text-muted);letter-spacing:1px;">YOUR TRADE</div>
-            <div style="font-size:28px;font-weight:700;color:{trade_color};">{trade_direction}</div>
+            <div style="font-size:11px;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase;">Your Trade</div>
+            <div style="font-size:36px;font-weight:800;color:{trade_color};letter-spacing:-1px;">{trade_direction}</div>
         </div>
         <div style="margin-left:auto;text-align:right;">
-            <div style="font-size:11px;color:var(--text-muted);">ENTRY LEVEL</div>
-            <div style="font-size:32px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{trade_entry_spx:,.0f}</div>
+            <div style="font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;">Entry Level</div>
+            <div style="font-size:40px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);letter-spacing:-2px;">{trade_entry_spx:,.0f}</div>
             <div style="font-size:12px;color:var(--text-secondary);">{confluence_text}</div>
         </div>
     </div>
@@ -4211,7 +4173,7 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v9.0</div>
+    <div class="footer-brand">SPX Prophet v9.0 — Legendary Edition</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
@@ -4274,6 +4236,7 @@ def main():
         'close_price': 0.0, 
         'trading_date': None, 
         'last_refresh': None,
+        'overnight_spx': 0.0,  # Current SPX/ES price for proximity analysis
         # Day Structure - Session pivots for trendlines
         'asia_high': 0.0, 'asia_high_time': "21:00", 
         'asia_low': 0.0, 'asia_low_time': "23:00",
@@ -4388,6 +4351,68 @@ def main():
         
         st.divider()
         
+        # OVERNIGHT SPX PRICE INPUT
+        st.markdown("### 📍 Overnight SPX Price")
+        st.caption("Enter current SPX/ES price for proximity analysis")
+        
+        # Initialize session state for overnight price
+        if "overnight_spx" not in st.session_state:
+            st.session_state.overnight_spx = 0.0
+        
+        st.session_state.overnight_spx = st.number_input(
+            "Current SPX Price", 
+            value=st.session_state.overnight_spx, 
+            step=1.0, 
+            format="%.2f",
+            help="Enter the current overnight SPX futures price to see distance to entries"
+        )
+        
+        if st.session_state.overnight_spx > 0:
+            st.success(f"📊 Price tracking: {st.session_state.overnight_spx:,.2f}")
+        else:
+            st.caption("💡 Optional: Shows distance to entry rails")
+        
+        # STRUCTURE BROKEN CHECKBOXES - Direction-specific (Prior session only)
+        broken_keys = [
+            "broken_prior_high_calls", "broken_prior_high_puts",
+            "broken_prior_low_calls", "broken_prior_low_puts", 
+            "broken_prior_close_calls", "broken_prior_close_puts"
+        ]
+        for key in broken_keys:
+            if key not in st.session_state:
+                st.session_state[key] = False
+        
+        st.caption("🚫 Mark broken (30-min close through rail):")
+        st.caption("↓ = Descending (CALLS) | ↑ = Ascending (PUTS)")
+        
+        # Prior High
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            st.markdown("<small style='color:#888;'>Prior High</small>", unsafe_allow_html=True)
+        with col2:
+            st.session_state.broken_prior_high_calls = st.checkbox("↓", value=st.session_state.broken_prior_high_calls, key="chk_ph_c", help="CALLS entry broken")
+        with col3:
+            st.session_state.broken_prior_high_puts = st.checkbox("↑", value=st.session_state.broken_prior_high_puts, key="chk_ph_p", help="PUTS entry broken")
+        
+        # Prior Low
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            st.markdown("<small style='color:#888;'>Prior Low</small>", unsafe_allow_html=True)
+        with col2:
+            st.session_state.broken_prior_low_calls = st.checkbox("↓", value=st.session_state.broken_prior_low_calls, key="chk_pl_c", help="CALLS entry broken")
+        with col3:
+            st.session_state.broken_prior_low_puts = st.checkbox("↑", value=st.session_state.broken_prior_low_puts, key="chk_pl_p", help="PUTS entry broken")
+        
+        # Prior Close
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            st.markdown("<small style='color:#888;'>Prior Close</small>", unsafe_allow_html=True)
+        with col2:
+            st.session_state.broken_prior_close_calls = st.checkbox("↓", value=st.session_state.broken_prior_close_calls, key="chk_pc_c", help="CALLS entry broken")
+        with col3:
+            st.session_state.broken_prior_close_puts = st.checkbox("↑", value=st.session_state.broken_prior_close_puts, key="chk_pc_p", help="PUTS entry broken")
+        
+        st.divider()
         st.markdown("### ⏰ Entry Time")
         st.caption("Target entry time for projections")
         st.session_state.entry_time_mins = st.slider(
@@ -4643,6 +4668,12 @@ def main():
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     
+    # Analyze price proximity if overnight SPX price provided
+    overnight_price = st.session_state.get("overnight_spx", 0.0)
+    price_proximity = None
+    if overnight_price > 0 and cones:
+        price_proximity = analyze_price_proximity(overnight_price, cones, vix_zone)
+    
     # Calculate MA Bias using ES futures from Yahoo Finance (23 hrs/day = more bars)
     ma_bias = fetch_es_ma_bias()
     
@@ -4659,11 +4690,15 @@ def main():
         if confluence:
             conf_emoji = "✅" if confluence.is_aligned else "⚠️" if confluence.signal_strength == "CONFLICT" else "◐"
             st.caption(f"{conf_emoji} Confluence: {confluence.signal_strength}")
+        if price_proximity and price_proximity.position != "UNKNOWN":
+            st.caption(f"📍 {price_proximity.position_detail}")
     
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
     mins_after_open = st.session_state.entry_time_mins
-    price_for_setups = spx_price  # Use current SPX price from Polygon
+    
+    # Use overnight price for setup status if provided, otherwise use SPX from Polygon
+    price_for_setups = overnight_price if overnight_price > 0 else spx_price
     
     # Get broken structure states (manually marked) - direction-specific
     broken_structures = {
@@ -4719,7 +4754,7 @@ def main():
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, None, day_structure)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, price_proximity, day_structure)
     components.html(html, height=4500, scrolling=True)
 
 if __name__ == "__main__":
