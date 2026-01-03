@@ -4534,6 +4534,7 @@ def main():
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
     mins_after_open = st.session_state.entry_time_mins
+    price_for_setups = spx_price  # Use current SPX price from Polygon
     
     # Get broken structure states (manually marked) - direction-specific
     broken_structures = {
