@@ -2154,20 +2154,116 @@ body {{
 }}
 
 /* ─────────────────────────────────────────────────────────────────
-   HEADER - Premium Glass Panel
+   BRAND HERO - Dramatic Entry
+   ───────────────────────────────────────────────────────────────── */
+
+.brand-hero {{
+    text-align: center;
+    padding: var(--space-10) var(--space-6) var(--space-8);
+    margin-bottom: var(--space-6);
+    position: relative;
+    overflow: hidden;
+}}
+
+/* Ambient glow behind the brand */
+.brand-hero::before {{
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px;
+    height: 400px;
+    background: radial-gradient(ellipse, {"rgba(139,92,246,0.15)" if theme == "dark" else "rgba(139,92,246,0.08)"} 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+}}
+
+.brand-icon {{
+    width: 120px;
+    height: 120px;
+    margin: 0 auto var(--space-5);
+    position: relative;
+    z-index: 1;
+    animation: float 4s ease-in-out infinite;
+    filter: drop-shadow(0 10px 40px {"rgba(139,92,246,0.4)" if theme == "dark" else "rgba(139,92,246,0.2)"});
+}}
+
+.brand-icon svg {{
+    width: 100%;
+    height: 100%;
+}}
+
+.brand-name {{
+    font-size: 56px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    line-height: 1;
+    margin-bottom: var(--space-3);
+    position: relative;
+    z-index: 1;
+    background: var(--gradient-premium);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+}}
+
+/* Glow effect behind text */
+.brand-name::after {{
+    content: 'SPX PROPHET';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    font-size: 56px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    background: var(--gradient-premium);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: blur(30px);
+    opacity: 0.5;
+    z-index: -1;
+}}
+
+.brand-tagline {{
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    position: relative;
+    z-index: 1;
+}}
+
+.brand-divider {{
+    width: 80px;
+    height: 2px;
+    background: var(--gradient-premium);
+    margin: var(--space-5) auto 0;
+    border-radius: 1px;
+    position: relative;
+    z-index: 1;
+}}
+
+/* ─────────────────────────────────────────────────────────────────
+   HEADER - Slim Info Bar (simplified after brand hero)
    ───────────────────────────────────────────────────────────────── */
 
 .header {{
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
-    padding: var(--space-5) var(--space-6);
+    gap: var(--space-6);
+    padding: var(--space-4) var(--space-6);
     margin-bottom: var(--space-6);
     background: var(--glass-bg);
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
     border: 1px solid var(--glass-border);
-    border-radius: var(--radius-2xl);
+    border-radius: var(--radius-xl);
     box-shadow: var(--shadow-card);
     position: relative;
 }}
@@ -2181,18 +2277,17 @@ body {{
     right: 0;
     height: 1px;
     background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
 }}
 
+/* Hide old logo section - no longer needed */
 .logo {{
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
+    display: none;
 }}
 
 .logo-mark {{
-    width: 56px;
-    height: 56px;
+    display: none;
+}}
     background: var(--gradient-premium);
     border-radius: var(--radius-lg);
     display: grid;
@@ -2239,27 +2334,31 @@ body {{
 
 .meta-group {{
     display: flex;
-    gap: var(--space-5);
+    gap: var(--space-6);
 }}
 
 .meta-item {{
-    text-align: right;
+    text-align: center;
+    padding: var(--space-2) var(--space-4);
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
 }}
 
 .meta-label {{
-    font-size: 10px;
-    font-weight: 500;
+    font-size: 9px;
+    font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
 }}
 
 .meta-value {{
     font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-top: 2px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
 }}
 
 .clock {{
@@ -3048,27 +3147,64 @@ body {{
 <body>
 <div class="dashboard">
 
-<!-- HEADER -->
-<header class="header">
-    <div class="logo">
-        <div class="logo-mark">SPX</div>
-        <div class="logo-text">
-            <div class="logo-title">SPX Prophet</div>
-            <div class="logo-subtitle">Where Structure Becomes Foresight</div>
-        </div>
+<!-- BRAND HERO -->
+<div class="brand-hero">
+    <div class="brand-icon">
+        <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <!-- Three ascending triangles forming a pyramid -->
+            <!-- Back triangle (largest, most transparent) -->
+            <path d="M60 10 L105 95 L15 95 Z" fill="url(#grad1)" opacity="0.3"/>
+            <!-- Middle triangle -->
+            <path d="M60 25 L95 90 L25 90 Z" fill="url(#grad2)" opacity="0.6"/>
+            <!-- Front triangle (smallest, most solid) -->
+            <path d="M60 40 L85 85 L35 85 Z" fill="url(#grad3)" opacity="0.9"/>
+            <!-- Glow center line -->
+            <path d="M60 40 L60 85" stroke="url(#grad3)" stroke-width="2" opacity="0.8"/>
+            <!-- Three pillar dots -->
+            <circle cx="40" cy="85" r="4" fill="#8b5cf6"/>
+            <circle cx="60" cy="40" r="4" fill="#a855f7"/>
+            <circle cx="80" cy="85" r="4" fill="#8b5cf6"/>
+            <!-- Gradients -->
+            <defs>
+                <linearGradient id="grad1" x1="60" y1="10" x2="60" y2="95" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stop-color="#6366f1"/>
+                    <stop offset="100%" stop-color="#8b5cf6"/>
+                </linearGradient>
+                <linearGradient id="grad2" x1="60" y1="25" x2="60" y2="90" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stop-color="#7c3aed"/>
+                    <stop offset="100%" stop-color="#a855f7"/>
+                </linearGradient>
+                <linearGradient id="grad3" x1="60" y1="40" x2="60" y2="85" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stop-color="#8b5cf6"/>
+                    <stop offset="100%" stop-color="#c084fc"/>
+                </linearGradient>
+            </defs>
+        </svg>
     </div>
-    <div class="header-meta">
-        <div class="meta-group">
-            <div class="meta-item">
-                <div class="meta-label">Entry Window</div>
-                <div class="meta-value">{format_countdown(get_time_until(ENTRY_TARGET))}</div>
-            </div>
-            <div class="meta-item">
-                <div class="meta-label">Cutoff</div>
-                <div class="meta-value">{format_countdown(get_time_until(CUTOFF_TIME))}</div>
-            </div>
+    <div class="brand-name">SPX PROPHET</div>
+    <div class="brand-tagline">Where Structure Becomes Foresight</div>
+    <div class="brand-divider"></div>
+</div>
+
+<!-- HEADER (Info Bar) -->
+<header class="header">
+    <div class="meta-group">
+        <div class="meta-item">
+            <div class="meta-label">Entry Window</div>
+            <div class="meta-value">{format_countdown(get_time_until(ENTRY_TARGET))}</div>
         </div>
-        <div class="clock">{now.strftime("%H:%M")}</div>
+        <div class="meta-item">
+            <div class="meta-label">Cutoff</div>
+            <div class="meta-value">{format_countdown(get_time_until(CUTOFF_TIME))}</div>
+        </div>
+        <div class="meta-item">
+            <div class="meta-label">Time CT</div>
+            <div class="meta-value">{now.strftime("%H:%M")}</div>
+        </div>
+        <div class="meta-item">
+            <div class="meta-label">Date</div>
+            <div class="meta-value">{trading_date.strftime("%b %d")}</div>
+        </div>
     </div>
 </header>
 '''
