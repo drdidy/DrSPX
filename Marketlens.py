@@ -4227,11 +4227,17 @@ body {{
 '''
 
     # VIX Section
+    # Calculate stacked zone boundaries
+    zone_width = vix_zone.zone_size
+    zone_minus1 = round(vix_zone.bottom - zone_width, 2) if zone_width > 0 else 0
+    zone_plus1 = round(vix_zone.top + zone_width, 2) if zone_width > 0 else 0
+    
     html += f'''
 <!-- VIX METER -->
 <div class="vix-section">
     <div class="section-header">
         <div class="section-title">VIX Zone Analysis</div>
+        <div style="font-size:12px;color:var(--text-secondary);">Zone Width: {zone_width:.2f} (5pm-3am range)</div>
     </div>
     <div class="vix-display">
         <div style="flex:1;">
@@ -4838,6 +4844,7 @@ def main():
             st.info(f"📌 Pivot: {prior.strftime('%b %d')} (Half Day)")
         st.divider()
         st.markdown("### 📊 VIX Zone")
+        st.caption("5pm-3am overnight range = Zone 0")
         
         # Auto-fetch VIX button
         col1, col2 = st.columns([2, 1])
@@ -4859,31 +4866,47 @@ def main():
         
         col1, col2 = st.columns(2)
         with col1:
-            st.session_state.vix_bottom = st.number_input("Bottom", value=st.session_state.vix_bottom, step=0.05, format="%.2f")
+            st.session_state.vix_bottom = st.number_input("Bottom (5pm-3am Low)", value=st.session_state.vix_bottom, step=0.05, format="%.2f")
         with col2:
-            st.session_state.vix_top = st.number_input("Top", value=st.session_state.vix_top, step=0.05, format="%.2f")
+            st.session_state.vix_top = st.number_input("Top (5pm-3am High)", value=st.session_state.vix_top, step=0.05, format="%.2f")
         st.session_state.vix_current = st.number_input("Current VIX", value=st.session_state.vix_current, step=0.05, format="%.2f")
         
-        # VIX Zone Validation - Expected zone = 1% of VIX, rounded to 0.05
+        # VIX Zone Info with stacking explanation
         if st.session_state.vix_bottom > 0 and st.session_state.vix_top > 0:
             actual_zone = st.session_state.vix_top - st.session_state.vix_bottom
-            vix_mid = (st.session_state.vix_top + st.session_state.vix_bottom) / 2
-            expected_zone_raw = vix_mid * 0.01  # 1% of VIX
-            expected_zone = round(expected_zone_raw / 0.05) * 0.05  # Round to nearest 0.05
+            zone_width = actual_zone
             zone_ticks = int(round(actual_zone / 0.05))
             
-            # Determine zone status
-            if actual_zone <= expected_zone - 0.05:
-                zone_status = "🔵 Tight (expect expansion)"
-                zone_color = "blue"
-            elif actual_zone >= expected_zone + 0.10:
-                zone_status = "🟠 Wide (volatile night)"
-                zone_color = "orange"
-            else:
-                zone_status = "🟢 Normal"
-                zone_color = "green"
+            # Show zone width and stacked zones
+            st.caption(f"**Zone Width: {actual_zone:.2f}** ({zone_ticks} ticks)")
             
-            st.caption(f"Zone: {actual_zone:.2f} ({zone_ticks} ticks) | Expected: {expected_zone:.2f} | {zone_status}")
+            # Show stacked zones
+            z_bottom = st.session_state.vix_bottom
+            z_top = st.session_state.vix_top
+            zone_minus1_bottom = round(z_bottom - zone_width, 2)
+            zone_plus1_top = round(z_top + zone_width, 2)
+            
+            with st.expander("📊 Zone Stack", expanded=False):
+                st.markdown(f"""
+**Zone +1**: {z_top:.2f} - {zone_plus1_top:.2f} *(PUTS territory)*  
+**Zone 0**: {z_bottom:.2f} - {z_top:.2f} *(Overnight range)*  
+**Zone -1**: {zone_minus1_bottom:.2f} - {z_bottom:.2f} *(CALLS territory)*
+
+*Width: ±{zone_width:.2f} per zone*
+                """)
+            
+            # Current position info
+            if st.session_state.vix_current > 0:
+                vix_curr = st.session_state.vix_current
+                if vix_curr < z_bottom:
+                    zones_away = -int(np.ceil((z_bottom - vix_curr) / zone_width)) if zone_width > 0 else -1
+                    st.info(f"VIX {vix_curr:.2f} → **{zones_away} zones** (CALLS)")
+                elif vix_curr > z_top:
+                    zones_away = int(np.ceil((vix_curr - z_top) / zone_width)) if zone_width > 0 else 1
+                    st.warning(f"VIX {vix_curr:.2f} → **+{zones_away} zones** (PUTS)")
+                else:
+                    pct = ((vix_curr - z_bottom) / zone_width * 100) if zone_width > 0 else 50
+                    st.success(f"VIX {vix_curr:.2f} → **{pct:.0f}%** in Zone 0")
         
         st.divider()
         
