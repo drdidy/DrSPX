@@ -1,24 +1,22 @@
 """
-SPX PROPHET v8.4 - RULES INTEGRATED
+SPX PROPHET v9.0 - LEGENDARY EDITION
 "Where Structure Becomes Foresight"
 
 THREE PILLARS:
-1. VIX Zone → Direction (CALLS at bottom/below, PUTS at top/above)
-2. MA Bias → Confirmation (LONG/SHORT/NEUTRAL)
+1. VIX Zone → Direction (CALLS at bottom, PUTS at top)
+2. MA Bias → Confirmation (50 EMA vs 200 SMA)
 3. Day Structure → Entry + Contract + Stop
 
-NEW IN v8.4:
-✓ Trading Rules Reference (collapsible section at bottom)
-✓ Contextual Rule Warnings (inline alerts when rules violated)
-✓ Day Structure window updated to 5pm-7am CT
-
-KEY FEATURES:
-✓ VIX Zone scaling (1% of VIX, rounded to 0.05 ticks)
+TRADING FRAMEWORK:
+✓ VIX Zone scaling (1% of VIX, rounded to 0.05)
 ✓ Dynamic stops based on VIX level (4-10 pts)
-✓ Strike = Target - 20 (20 pts ITM at exit zone)
-✓ Day Structure = Buy Zone / Exit Zone with contract pricing
+✓ Strike = Target - 20 (20 pts ITM at exit)
+✓ 2-point contract pricing (Asia + London)
 ✓ Flip signals when structure breaks
-✓ Round Number Magnet Rule (0.786 Fib on contract price)
+✓ Trading Rules Reference
+✓ Contextual Rule Warnings
+
+CLEAN & FOCUSED - Everything you need, nothing you don't.
 """
 
 import streamlit as st
@@ -27,7 +25,7 @@ import requests
 import numpy as np
 from datetime import datetime, date, time, timedelta
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import pytz
 
 # Configuration
@@ -365,6 +363,10 @@ def format_countdown(td):
     if hours > 0:
         return f"{hours}h {minutes}m"
     return f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# POLYGON API
+# ═══════════════════════════════════════════════════════════════════════════
 
 def polygon_get(endpoint, params=None):
     try:
@@ -4080,7 +4082,7 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v8.4</div>
+    <div class="footer-brand">SPX Prophet v9.0</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
@@ -4143,7 +4145,6 @@ def main():
         'close_price': 0.0, 
         'trading_date': None, 
         'last_refresh': None,
-        'overnight_spx': 0.0,  # Current SPX/ES price for proximity analysis
         # Day Structure - Session pivots for trendlines
         'asia_high': 0.0, 'asia_high_time': "21:00", 
         'asia_low': 0.0, 'asia_low_time': "23:00",
@@ -4169,6 +4170,7 @@ def main():
         st.divider()
         theme = st.radio("🎨 Theme", ["Dark", "Light"], horizontal=True, index=0 if st.session_state.theme == "dark" else 1)
         st.session_state.theme = theme.lower()
+        
         st.divider()
         st.markdown("### 📅 Trading Date")
         today = get_ct_now().date()
@@ -4220,7 +4222,6 @@ def main():
                     st.session_state.vix_current = vix_curr
                     st.success(f"VIX: {vix_low:.2f} - {vix_high:.2f} (Current: {vix_curr:.2f})")
                 else:
-                    # Try just current VIX
                     vix_val, src = fetch_vix_current()
                     if vix_val > 0:
                         st.session_state.vix_current = vix_val
@@ -4258,68 +4259,6 @@ def main():
         
         st.divider()
         
-        # OVERNIGHT SPX PRICE INPUT
-        st.markdown("### 📍 Overnight SPX Price")
-        st.caption("Enter current SPX/ES price for proximity analysis")
-        
-        # Initialize session state for overnight price
-        if "overnight_spx" not in st.session_state:
-            st.session_state.overnight_spx = 0.0
-        
-        st.session_state.overnight_spx = st.number_input(
-            "Current SPX Price", 
-            value=st.session_state.overnight_spx, 
-            step=1.0, 
-            format="%.2f",
-            help="Enter the current overnight SPX futures price to see distance to entries"
-        )
-        
-        if st.session_state.overnight_spx > 0:
-            st.success(f"📊 Price tracking: {st.session_state.overnight_spx:,.2f}")
-        else:
-            st.caption("💡 Optional: Shows distance to entry rails")
-        
-        # STRUCTURE BROKEN CHECKBOXES - Direction-specific (Prior session only)
-        broken_keys = [
-            "broken_prior_high_calls", "broken_prior_high_puts",
-            "broken_prior_low_calls", "broken_prior_low_puts", 
-            "broken_prior_close_calls", "broken_prior_close_puts"
-        ]
-        for key in broken_keys:
-            if key not in st.session_state:
-                st.session_state[key] = False
-        
-        st.caption("🚫 Mark broken (30-min close through rail):")
-        st.caption("↓ = Descending (CALLS) | ↑ = Ascending (PUTS)")
-        
-        # Prior High
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.markdown("<small style='color:#888;'>Prior High</small>", unsafe_allow_html=True)
-        with col2:
-            st.session_state.broken_prior_high_calls = st.checkbox("↓", value=st.session_state.broken_prior_high_calls, key="chk_ph_c", help="CALLS entry broken")
-        with col3:
-            st.session_state.broken_prior_high_puts = st.checkbox("↑", value=st.session_state.broken_prior_high_puts, key="chk_ph_p", help="PUTS entry broken")
-        
-        # Prior Low
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.markdown("<small style='color:#888;'>Prior Low</small>", unsafe_allow_html=True)
-        with col2:
-            st.session_state.broken_prior_low_calls = st.checkbox("↓", value=st.session_state.broken_prior_low_calls, key="chk_pl_c", help="CALLS entry broken")
-        with col3:
-            st.session_state.broken_prior_low_puts = st.checkbox("↑", value=st.session_state.broken_prior_low_puts, key="chk_pl_p", help="PUTS entry broken")
-        
-        # Prior Close
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.markdown("<small style='color:#888;'>Prior Close</small>", unsafe_allow_html=True)
-        with col2:
-            st.session_state.broken_prior_close_calls = st.checkbox("↓", value=st.session_state.broken_prior_close_calls, key="chk_pc_c", help="CALLS entry broken")
-        with col3:
-            st.session_state.broken_prior_close_puts = st.checkbox("↑", value=st.session_state.broken_prior_close_puts, key="chk_pc_p", help="PUTS entry broken")
-        
-        st.divider()
         st.markdown("### ⏰ Entry Time")
         st.caption("Target entry time for projections")
         st.session_state.entry_time_mins = st.slider(
@@ -4337,7 +4276,7 @@ def main():
         
         # DAY STRUCTURE - INTEGRATED with Contract Pricing
         st.markdown("### 📐 Day Structure")
-        st.caption("Session trendlines + contract projections")
+        st.caption("Session trendlines (5pm-7am CT)")
         
         with st.expander("HIGH LINE (PUTS)", expanded=False):
             st.markdown("**SPX Price Points**")
@@ -4575,12 +4514,6 @@ def main():
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     
-    # Analyze price proximity if overnight SPX price provided
-    overnight_price = st.session_state.get("overnight_spx", 0.0)
-    price_proximity = None
-    if overnight_price > 0 and cones:
-        price_proximity = analyze_price_proximity(overnight_price, cones, vix_zone)
-    
     # Calculate MA Bias using ES futures from Yahoo Finance (23 hrs/day = more bars)
     ma_bias = fetch_es_ma_bias()
     
@@ -4597,15 +4530,10 @@ def main():
         if confluence:
             conf_emoji = "✅" if confluence.is_aligned else "⚠️" if confluence.signal_strength == "CONFLICT" else "◐"
             st.caption(f"{conf_emoji} Confluence: {confluence.signal_strength}")
-        if price_proximity and price_proximity.position != "UNKNOWN":
-            st.caption(f"📍 {price_proximity.position_detail}")
     
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
     mins_after_open = st.session_state.entry_time_mins
-    
-    # Use overnight price for setup status if provided, otherwise use SPX from Polygon
-    price_for_setups = overnight_price if overnight_price > 0 else spx_price
     
     # Get broken structure states (manually marked) - direction-specific
     broken_structures = {
@@ -4661,7 +4589,7 @@ def main():
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, price_proximity, day_structure)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, None, day_structure)
     components.html(html, height=4500, scrolling=True)
 
 if __name__ == "__main__":
