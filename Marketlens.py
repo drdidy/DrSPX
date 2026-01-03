@@ -1,5 +1,5 @@
 """
-SPX PROPHET v8.4 - RULES INTEGRATED
+SPX PROPHET v8.5 - SCHWAB API INTEGRATION
 "Where Structure Becomes Foresight"
 
 THREE PILLARS:
@@ -7,10 +7,11 @@ THREE PILLARS:
 2. MA Bias → Confirmation (LONG/SHORT/NEUTRAL)
 3. Day Structure → Entry + Contract + Stop
 
-NEW IN v8.4:
-✓ Trading Rules Reference (collapsible section at bottom)
-✓ Contextual Rule Warnings (inline alerts when rules violated)
-✓ Day Structure window updated to 5pm-7am CT
+NEW IN v8.5:
+✓ Schwab API integration for REAL option prices
+✓ Live SPX/VIX quotes (no more estimates)
+✓ Real Greeks (delta, gamma, theta)
+✓ Auto-fetch overnight session data
 
 KEY FEATURES:
 ✓ VIX Zone scaling (1% of VIX, rounded to 0.05 ticks)
@@ -19,6 +20,8 @@ KEY FEATURES:
 ✓ Day Structure = Buy Zone / Exit Zone with contract pricing
 ✓ Flip signals when structure breaks
 ✓ Round Number Magnet Rule (0.786 Fib on contract price)
+✓ Trading Rules Reference (collapsible)
+✓ Contextual Rule Warnings
 """
 
 import streamlit as st
@@ -27,14 +30,20 @@ import requests
 import numpy as np
 from datetime import datetime, date, time, timedelta
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import pytz
+import base64
+import os
 
 # Configuration
 POLYGON_API_KEY = "jrbBZ2y12cJAOp2Buqtlay0TdprcTDIm"
 POLYGON_BASE = "https://api.polygon.io"
 CT_TZ = pytz.timezone('America/Chicago')
 ET_TZ = pytz.timezone('America/New_York')
+
+# Schwab API Configuration
+SCHWAB_AUTH_URL = "https://api.schwabapi.com/v1/oauth/token"
+SCHWAB_MARKET_URL = "https://api.schwabapi.com/marketdata/v1"
 
 SLOPE_PER_30MIN = 0.45
 MIN_CONE_WIDTH = 18.0
@@ -365,6 +374,343 @@ def format_countdown(td):
     if hours > 0:
         return f"{hours}h {minutes}m"
     return f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCHWAB API INTEGRATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class SchwabCredentials:
+    """Schwab API credentials"""
+    app_key: str = ""
+    app_secret: str = ""
+    access_token: str = ""
+    refresh_token: str = ""
+    token_expires_at: datetime = None
+    
+    def is_token_expired(self) -> bool:
+        if not self.token_expires_at:
+            return True
+        return datetime.now() >= (self.token_expires_at - timedelta(minutes=5))
+
+@dataclass
+class SchwabOptionQuote:
+    """Option contract quote with Greeks"""
+    symbol: str = ""
+    strike: float = 0.0
+    expiration: str = ""
+    option_type: str = ""
+    bid: float = 0.0
+    ask: float = 0.0
+    last: float = 0.0
+    mark: float = 0.0
+    volume: int = 0
+    open_interest: int = 0
+    delta: float = 0.0
+    gamma: float = 0.0
+    theta: float = 0.0
+    vega: float = 0.0
+    implied_volatility: float = 0.0
+
+
+class SchwabAPI:
+    """Schwab API Client for real-time market data"""
+    
+    def __init__(self):
+        self.credentials = SchwabCredentials()
+        self._session = requests.Session()
+        self._initialized = False
+    
+    def load_credentials(self) -> bool:
+        """Load credentials from Streamlit session state or secrets"""
+        try:
+            # Try Streamlit session state first (user entered)
+            if 'schwab_access_token' in st.session_state and st.session_state.schwab_access_token:
+                self.credentials.app_key = st.session_state.get('schwab_app_key', '')
+                self.credentials.app_secret = st.session_state.get('schwab_app_secret', '')
+                self.credentials.access_token = st.session_state.get('schwab_access_token', '')
+                self.credentials.refresh_token = st.session_state.get('schwab_refresh_token', '')
+                self._initialized = True
+                return True
+            
+            # Try Streamlit secrets
+            if hasattr(st, 'secrets') and 'schwab' in st.secrets:
+                self.credentials.app_key = st.secrets.schwab.get("app_key", "")
+                self.credentials.app_secret = st.secrets.schwab.get("app_secret", "")
+                self.credentials.access_token = st.secrets.schwab.get("access_token", "")
+                self.credentials.refresh_token = st.secrets.schwab.get("refresh_token", "")
+                self._initialized = True
+                return True
+            
+            # Try environment variables
+            if os.environ.get("SCHWAB_ACCESS_TOKEN"):
+                self.credentials.app_key = os.environ.get("SCHWAB_APP_KEY", "")
+                self.credentials.app_secret = os.environ.get("SCHWAB_APP_SECRET", "")
+                self.credentials.access_token = os.environ.get("SCHWAB_ACCESS_TOKEN", "")
+                self.credentials.refresh_token = os.environ.get("SCHWAB_REFRESH_TOKEN", "")
+                self._initialized = True
+                return True
+        except:
+            pass
+        
+        return False
+    
+    def refresh_access_token(self) -> bool:
+        """Refresh the access token"""
+        if not self.credentials.refresh_token or not self.credentials.app_key:
+            return False
+        
+        try:
+            auth_string = f"{self.credentials.app_key}:{self.credentials.app_secret}"
+            auth_b64 = base64.b64encode(auth_string.encode()).decode()
+            
+            headers = {
+                "Authorization": f"Basic {auth_b64}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            
+            data = {
+                "grant_type": "refresh_token",
+                "refresh_token": self.credentials.refresh_token
+            }
+            
+            resp = self._session.post(SCHWAB_AUTH_URL, headers=headers, data=data, timeout=30)
+            
+            if resp.status_code == 200:
+                token_data = resp.json()
+                self.credentials.access_token = token_data.get("access_token", "")
+                new_refresh = token_data.get("refresh_token")
+                if new_refresh:
+                    self.credentials.refresh_token = new_refresh
+                    # Update session state
+                    st.session_state.schwab_access_token = self.credentials.access_token
+                    st.session_state.schwab_refresh_token = self.credentials.refresh_token
+                expires_in = token_data.get("expires_in", 1800)
+                self.credentials.token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+                return True
+        except Exception as e:
+            st.warning(f"Token refresh failed: {e}")
+        
+        return False
+    
+    def _get_headers(self) -> Dict:
+        return {
+            "Authorization": f"Bearer {self.credentials.access_token}",
+            "Accept": "application/json"
+        }
+    
+    def _api_get(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
+        """Make authenticated GET request"""
+        if not self._initialized:
+            self.load_credentials()
+        
+        if not self.credentials.access_token:
+            return None
+        
+        # Check if token expired
+        if self.credentials.is_token_expired():
+            if not self.refresh_access_token():
+                return None
+        
+        try:
+            url = f"{SCHWAB_MARKET_URL}{endpoint}"
+            resp = self._session.get(url, headers=self._get_headers(), params=params, timeout=30)
+            
+            if resp.status_code == 200:
+                return resp.json()
+            elif resp.status_code == 401:
+                if self.refresh_access_token():
+                    resp = self._session.get(url, headers=self._get_headers(), params=params, timeout=30)
+                    if resp.status_code == 200:
+                        return resp.json()
+            return None
+        except:
+            return None
+    
+    def get_quote(self, symbol: str) -> Optional[Dict]:
+        """Get real-time quote for a symbol"""
+        data = self._api_get(f"/{symbol}/quotes")
+        if data and symbol in data:
+            return data[symbol].get("quote", {})
+        return None
+    
+    def get_quotes(self, symbols: List[str]) -> Dict[str, Dict]:
+        """Get quotes for multiple symbols"""
+        symbols_str = ",".join(symbols)
+        data = self._api_get("/quotes", params={"symbols": symbols_str})
+        if not data:
+            return {}
+        
+        results = {}
+        for symbol in symbols:
+            if symbol in data:
+                results[symbol] = data[symbol].get("quote", {})
+        return results
+    
+    def get_spx_vix(self) -> Tuple[float, float]:
+        """Get current SPX and VIX prices"""
+        quotes = self.get_quotes(["$SPX", "$VIX"])
+        spx = quotes.get("$SPX", {}).get("lastPrice", 0.0)
+        vix = quotes.get("$VIX", {}).get("lastPrice", 0.0)
+        return spx, vix
+    
+    def get_option_chain(self, 
+                         symbol: str = "$SPX",
+                         expiration_date: str = None,
+                         strike_count: int = 10,
+                         option_type: str = "ALL") -> Dict[str, List[SchwabOptionQuote]]:
+        """Get option chain for a symbol"""
+        if not expiration_date:
+            expiration_date = datetime.now().strftime("%Y-%m-%d")
+        
+        params = {
+            "symbol": symbol,
+            "contractType": option_type,
+            "strikeCount": strike_count,
+            "includeUnderlyingQuote": "true",
+            "toDate": expiration_date,
+            "fromDate": expiration_date
+        }
+        
+        data = self._api_get("/chains", params=params)
+        if not data:
+            return {"calls": [], "puts": []}
+        
+        results = {"calls": [], "puts": []}
+        
+        # Parse calls
+        for exp_date, strikes in data.get("callExpDateMap", {}).items():
+            for strike_str, contracts in strikes.items():
+                for contract in contracts:
+                    opt = self._parse_option(contract, "CALL")
+                    if opt:
+                        results["calls"].append(opt)
+        
+        # Parse puts
+        for exp_date, strikes in data.get("putExpDateMap", {}).items():
+            for strike_str, contracts in strikes.items():
+                for contract in contracts:
+                    opt = self._parse_option(contract, "PUT")
+                    if opt:
+                        results["puts"].append(opt)
+        
+        results["calls"].sort(key=lambda x: x.strike)
+        results["puts"].sort(key=lambda x: x.strike)
+        
+        return results
+    
+    def _parse_option(self, contract: Dict, opt_type: str) -> Optional[SchwabOptionQuote]:
+        try:
+            return SchwabOptionQuote(
+                symbol=contract.get("symbol", ""),
+                strike=contract.get("strikePrice", 0.0),
+                expiration=contract.get("expirationDate", ""),
+                option_type=opt_type,
+                bid=contract.get("bid", 0.0),
+                ask=contract.get("ask", 0.0),
+                last=contract.get("last", 0.0),
+                mark=contract.get("mark", 0.0),
+                volume=contract.get("totalVolume", 0),
+                open_interest=contract.get("openInterest", 0),
+                delta=contract.get("delta", 0.0),
+                gamma=contract.get("gamma", 0.0),
+                theta=contract.get("theta", 0.0),
+                vega=contract.get("vega", 0.0),
+                implied_volatility=contract.get("volatility", 0.0)
+            )
+        except:
+            return None
+    
+    def get_0dte_contract(self, strike: int, option_type: str = "CALL") -> Optional[SchwabOptionQuote]:
+        """Get a specific 0DTE contract"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        chain = self.get_option_chain(
+            symbol="$SPX",
+            expiration_date=today,
+            option_type=option_type.upper(),
+            strike_count=20
+        )
+        
+        contracts = chain.get("calls" if option_type.upper() == "CALL" else "puts", [])
+        
+        for contract in contracts:
+            if abs(contract.strike - strike) < 1:
+                return contract
+        
+        return None
+    
+    def get_price_history(self, symbol: str = "$SPX", 
+                          period_type: str = "day",
+                          period: int = 1,
+                          frequency_type: str = "minute",
+                          frequency: int = 5) -> List[Dict]:
+        """Get historical price data"""
+        params = {
+            "symbol": symbol,
+            "periodType": period_type,
+            "period": period,
+            "frequencyType": frequency_type,
+            "frequency": frequency,
+            "needExtendedHoursData": "true"
+        }
+        
+        data = self._api_get("/pricehistory", params=params)
+        if not data or "candles" not in data:
+            return []
+        
+        return data["candles"]
+    
+    def is_available(self) -> bool:
+        """Check if Schwab API is configured and working"""
+        if not self._initialized:
+            self.load_credentials()
+        return bool(self.credentials.access_token)
+
+
+# Global Schwab API instance
+_schwab_api = None
+
+def get_schwab_api() -> SchwabAPI:
+    """Get or create Schwab API instance"""
+    global _schwab_api
+    if _schwab_api is None:
+        _schwab_api = SchwabAPI()
+        _schwab_api.load_credentials()
+    return _schwab_api
+
+def schwab_get_spx_price() -> float:
+    """Get SPX price via Schwab (returns 0 if not available)"""
+    api = get_schwab_api()
+    if not api.is_available():
+        return 0.0
+    spx, _ = api.get_spx_vix()
+    return spx
+
+def schwab_get_vix() -> float:
+    """Get VIX via Schwab (returns 0 if not available)"""
+    api = get_schwab_api()
+    if not api.is_available():
+        return 0.0
+    _, vix = api.get_spx_vix()
+    return vix
+
+def schwab_get_option_price(strike: int, option_type: str = "CALL") -> Tuple[float, float, float]:
+    """
+    Get real option price via Schwab.
+    Returns (mark_price, delta, theta) or (0, 0, 0) if not available.
+    """
+    api = get_schwab_api()
+    if not api.is_available():
+        return (0.0, 0.0, 0.0)
+    
+    contract = api.get_0dte_contract(strike, option_type)
+    if contract:
+        return (contract.mark, contract.delta, contract.theta)
+    return (0.0, 0.0, 0.0)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# POLYGON API (FALLBACK)
+# ═══════════════════════════════════════════════════════════════════════════
 
 def polygon_get(endpoint, params=None):
     try:
@@ -4080,7 +4426,7 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v8.4</div>
+    <div class="footer-brand">SPX Prophet v8.5</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
@@ -4169,6 +4515,38 @@ def main():
         st.divider()
         theme = st.radio("🎨 Theme", ["Dark", "Light"], horizontal=True, index=0 if st.session_state.theme == "dark" else 1)
         st.session_state.theme = theme.lower()
+        
+        # Schwab API Configuration
+        with st.expander("🔑 Schwab API", expanded=False):
+            schwab_api = get_schwab_api()
+            if schwab_api.is_available():
+                st.success("✅ Connected")
+                if st.button("🔄 Refresh Token", use_container_width=True):
+                    if schwab_api.refresh_access_token():
+                        st.success("Token refreshed!")
+                    else:
+                        st.error("Refresh failed")
+            else:
+                st.warning("Not connected")
+                st.caption("Enter your Schwab API credentials:")
+                app_key = st.text_input("App Key", type="password", key="schwab_app_key_input")
+                app_secret = st.text_input("App Secret", type="password", key="schwab_app_secret_input")
+                access_token = st.text_input("Access Token", type="password", key="schwab_access_input")
+                refresh_token = st.text_input("Refresh Token", type="password", key="schwab_refresh_input")
+                
+                if st.button("💾 Save & Connect", use_container_width=True):
+                    if access_token:
+                        st.session_state.schwab_app_key = app_key
+                        st.session_state.schwab_app_secret = app_secret
+                        st.session_state.schwab_access_token = access_token
+                        st.session_state.schwab_refresh_token = refresh_token
+                        # Reinitialize API
+                        global _schwab_api
+                        _schwab_api = None
+                        st.rerun()
+                    else:
+                        st.error("Access token required")
+        
         st.divider()
         st.markdown("### 📅 Trading Date")
         today = get_ct_now().date()
@@ -4209,24 +4587,44 @@ def main():
         st.divider()
         st.markdown("### 📊 VIX Zone")
         
-        # Auto-fetch VIX button
+        # Auto-fetch VIX button - Try Schwab first, fallback to Polygon
         col1, col2 = st.columns([2, 1])
         with col1:
-            if st.button("🔄 Auto-Fetch VIX", use_container_width=True):
-                vix_low, vix_high, vix_curr = fetch_vix_zone_auto()
-                if vix_low > 0:
-                    st.session_state.vix_bottom = vix_low
-                    st.session_state.vix_top = vix_high
-                    st.session_state.vix_current = vix_curr
-                    st.success(f"VIX: {vix_low:.2f} - {vix_high:.2f} (Current: {vix_curr:.2f})")
-                else:
-                    # Try just current VIX
-                    vix_val, src = fetch_vix_current()
-                    if vix_val > 0:
-                        st.session_state.vix_current = vix_val
-                        st.info(f"Current VIX: {vix_val:.2f} ({src})")
+            schwab_api = get_schwab_api()
+            fetch_label = "🔄 Fetch (Schwab)" if schwab_api.is_available() else "🔄 Auto-Fetch VIX"
+            if st.button(fetch_label, use_container_width=True):
+                # Try Schwab first
+                if schwab_api.is_available():
+                    spx_price, vix_price = schwab_api.get_spx_vix()
+                    if vix_price > 0:
+                        st.session_state.vix_current = vix_price
+                        st.success(f"✅ Schwab VIX: {vix_price:.2f}")
+                        if spx_price > 0:
+                            st.session_state.overnight_spx = spx_price
+                            st.info(f"SPX: {spx_price:,.2f}")
                     else:
-                        st.error("Could not fetch VIX data")
+                        st.warning("Schwab returned no data, trying Polygon...")
+                        vix_low, vix_high, vix_curr = fetch_vix_zone_auto()
+                        if vix_low > 0:
+                            st.session_state.vix_bottom = vix_low
+                            st.session_state.vix_top = vix_high
+                            st.session_state.vix_current = vix_curr
+                            st.success(f"VIX: {vix_low:.2f} - {vix_high:.2f}")
+                else:
+                    # Fallback to Polygon
+                    vix_low, vix_high, vix_curr = fetch_vix_zone_auto()
+                    if vix_low > 0:
+                        st.session_state.vix_bottom = vix_low
+                        st.session_state.vix_top = vix_high
+                        st.session_state.vix_current = vix_curr
+                        st.success(f"VIX: {vix_low:.2f} - {vix_high:.2f} (Current: {vix_curr:.2f})")
+                    else:
+                        vix_val, src = fetch_vix_current()
+                        if vix_val > 0:
+                            st.session_state.vix_current = vix_val
+                            st.info(f"Current VIX: {vix_val:.2f} ({src})")
+                        else:
+                            st.error("Could not fetch VIX data")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -4338,6 +4736,34 @@ def main():
         # DAY STRUCTURE - INTEGRATED with Contract Pricing
         st.markdown("### 📐 Day Structure")
         st.caption("Session trendlines + contract projections")
+        
+        # Schwab real-time option fetch button
+        schwab_api = get_schwab_api()
+        if schwab_api.is_available():
+            if st.button("💰 Fetch Real Option Prices (Schwab)", use_container_width=True):
+                # We need strikes first - calculate from day structure if available
+                asia_high = st.session_state.asia_high
+                asia_low = st.session_state.asia_low
+                london_high = st.session_state.london_high
+                london_low = st.session_state.london_low
+                
+                # Estimate current lines
+                if asia_high > 0 and london_high > 0:
+                    high_line_est = (asia_high + london_high) / 2
+                    put_strike = int(round((min(asia_low, london_low) if asia_low > 0 and london_low > 0 else high_line_est - 50) / 5) * 5) + 20
+                    put_quote = schwab_api.get_0dte_contract(put_strike, "PUT")
+                    if put_quote:
+                        st.success(f"PUT {put_strike}P: ${put_quote.mark:.2f} (Δ:{put_quote.delta:.3f})")
+                
+                if asia_low > 0 and london_low > 0:
+                    low_line_est = (asia_low + london_low) / 2
+                    call_strike = int(round((max(asia_high, london_high) if asia_high > 0 and london_high > 0 else low_line_est + 50) / 5) * 5) - 20
+                    call_quote = schwab_api.get_0dte_contract(call_strike, "CALL")
+                    if call_quote:
+                        st.success(f"CALL {call_strike}C: ${call_quote.mark:.2f} (Δ:{call_quote.delta:.3f})")
+                
+                if not (asia_high > 0 or asia_low > 0):
+                    st.warning("Enter Day Structure SPX levels first")
         
         with st.expander("HIGH LINE (PUTS)", expanded=False):
             st.markdown("**SPX Price Points**")
