@@ -660,6 +660,123 @@ class SchwabAPI:
         
         return data["candles"]
     
+    def fetch_overnight_structure(self, es_spx_offset: float = 15.0) -> Dict:
+        """
+        Fetch overnight ES futures data and convert to SPX Day Structure.
+        
+        Sessions (CT time):
+        - Asia: 5pm (17:00) to midnight (00:00)
+        - London: midnight (00:00) to 7am (07:00)
+        
+        Args:
+            es_spx_offset: Points to subtract from ES to get SPX equivalent
+                           (ES typically trades above SPX)
+        
+        Returns:
+            Dict with asia_high, asia_low, london_high, london_low, times, etc.
+        """
+        result = {
+            "success": False,
+            "error": "",
+            "asia_high": 0.0,
+            "asia_high_time": "",
+            "asia_low": 0.0,
+            "asia_low_time": "",
+            "london_high": 0.0,
+            "london_high_time": "",
+            "london_low": 0.0,
+            "london_low_time": "",
+            "es_spx_offset": es_spx_offset
+        }
+        
+        try:
+            # Fetch ES futures - /ES or ES=F
+            # Try different symbol formats
+            candles = self.get_price_history(
+                symbol="/ES",
+                period_type="day",
+                period=2,  # Get 2 days to cover overnight
+                frequency_type="minute",
+                frequency=5
+            )
+            
+            if not candles:
+                # Try alternative symbol
+                candles = self.get_price_history(
+                    symbol="ES",
+                    period_type="day",
+                    period=2,
+                    frequency_type="minute",
+                    frequency=5
+                )
+            
+            if not candles:
+                result["error"] = "Could not fetch ES data"
+                return result
+            
+            # Parse candles into session buckets
+            asia_candles = []  # 5pm - midnight CT
+            london_candles = []  # midnight - 7am CT
+            
+            for candle in candles:
+                try:
+                    # Schwab returns timestamp in milliseconds
+                    ts = candle.get("datetime", 0)
+                    if ts > 0:
+                        # Convert to datetime (assuming UTC, adjust to CT)
+                        dt = datetime.fromtimestamp(ts / 1000)
+                        hour = dt.hour
+                        
+                        candle_data = {
+                            "dt": dt,
+                            "time_str": dt.strftime("%H:%M"),
+                            "high": candle.get("high", 0),
+                            "low": candle.get("low", 0),
+                            "open": candle.get("open", 0),
+                            "close": candle.get("close", 0)
+                        }
+                        
+                        # Asia session: 5pm (17) to midnight (23:59)
+                        if 17 <= hour <= 23:
+                            asia_candles.append(candle_data)
+                        # London session: midnight (0) to 7am (6:59)
+                        elif 0 <= hour < 7:
+                            london_candles.append(candle_data)
+                except:
+                    continue
+            
+            # Find Asia high/low
+            if asia_candles:
+                asia_high_candle = max(asia_candles, key=lambda c: c["high"])
+                asia_low_candle = min(asia_candles, key=lambda c: c["low"])
+                
+                result["asia_high"] = round(asia_high_candle["high"] - es_spx_offset, 2)
+                result["asia_high_time"] = asia_high_candle["time_str"]
+                result["asia_low"] = round(asia_low_candle["low"] - es_spx_offset, 2)
+                result["asia_low_time"] = asia_low_candle["time_str"]
+            
+            # Find London high/low
+            if london_candles:
+                london_high_candle = max(london_candles, key=lambda c: c["high"])
+                london_low_candle = min(london_candles, key=lambda c: c["low"])
+                
+                result["london_high"] = round(london_high_candle["high"] - es_spx_offset, 2)
+                result["london_high_time"] = london_high_candle["time_str"]
+                result["london_low"] = round(london_low_candle["low"] - es_spx_offset, 2)
+                result["london_low_time"] = london_low_candle["time_str"]
+            
+            # Check if we got data
+            if result["asia_high"] > 0 or result["london_high"] > 0:
+                result["success"] = True
+            else:
+                result["error"] = "No overnight session data found"
+            
+            return result
+            
+        except Exception as e:
+            result["error"] = str(e)
+            return result
+    
     def is_available(self) -> bool:
         """Check if Schwab API is configured and working"""
         if not self._initialized:
@@ -4503,7 +4620,14 @@ def main():
         'call_price_london': 0.0,  # CALL price at London Low
         # Structure broken flags
         'high_line_broken': False,
-        'low_line_broken': False
+        'low_line_broken': False,
+        # ES to SPX offset (ES typically trades above SPX)
+        'es_spx_offset': 15.0,
+        # Schwab credentials (pre-populated)
+        'schwab_app_key': 'mLgLwkRB1Y93Gtqc80G2qS4exFtSZD4rpmEJGvPD7SA6eZ9x',
+        'schwab_app_secret': '5BBVH9UK5jJ8c8EUuLHKX69mEBUaubz63L0X4z9hHDUb5tpGxxvaV5AX1A9k5S4s',
+        'schwab_access_token': '',
+        'schwab_refresh_token': ''
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -4737,17 +4861,50 @@ def main():
         st.markdown("### 📐 Day Structure")
         st.caption("Session trendlines + contract projections")
         
-        # Schwab real-time option fetch button
+        # ES to SPX Offset input
+        st.session_state.es_spx_offset = st.number_input(
+            "ES→SPX Offset", 
+            value=st.session_state.es_spx_offset, 
+            step=1.0, 
+            format="%.1f",
+            help="Points to subtract from ES to get SPX (ES usually trades above SPX)"
+        )
+        
+        # Auto-fetch Day Structure from Schwab
         schwab_api = get_schwab_api()
         if schwab_api.is_available():
-            if st.button("💰 Fetch Real Option Prices (Schwab)", use_container_width=True):
-                # We need strikes first - calculate from day structure if available
+            if st.button("🔄 Auto-Fetch Day Structure (ES)", use_container_width=True):
+                with st.spinner("Fetching overnight ES data..."):
+                    ds_data = schwab_api.fetch_overnight_structure(st.session_state.es_spx_offset)
+                    
+                    if ds_data["success"]:
+                        # Populate the fields
+                        if ds_data["asia_high"] > 0:
+                            st.session_state.asia_high = ds_data["asia_high"]
+                            st.session_state.asia_high_time = ds_data["asia_high_time"]
+                        if ds_data["asia_low"] > 0:
+                            st.session_state.asia_low = ds_data["asia_low"]
+                            st.session_state.asia_low_time = ds_data["asia_low_time"]
+                        if ds_data["london_high"] > 0:
+                            st.session_state.london_high = ds_data["london_high"]
+                            st.session_state.london_high_time = ds_data["london_high_time"]
+                        if ds_data["london_low"] > 0:
+                            st.session_state.london_low = ds_data["london_low"]
+                            st.session_state.london_low_time = ds_data["london_low_time"]
+                        
+                        st.success(f"✅ Day Structure loaded (offset: {st.session_state.es_spx_offset})")
+                        st.caption(f"Asia: {ds_data['asia_high']:.0f}/{ds_data['asia_low']:.0f} | London: {ds_data['london_high']:.0f}/{ds_data['london_low']:.0f}")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed: {ds_data['error']}")
+            
+            # Real option prices button
+            if st.button("💰 Fetch Real Option Prices", use_container_width=True):
                 asia_high = st.session_state.asia_high
                 asia_low = st.session_state.asia_low
                 london_high = st.session_state.london_high
                 london_low = st.session_state.london_low
                 
-                # Estimate current lines
                 if asia_high > 0 and london_high > 0:
                     high_line_est = (asia_high + london_high) / 2
                     put_strike = int(round((min(asia_low, london_low) if asia_low > 0 and london_low > 0 else high_line_est - 50) / 5) * 5) + 20
@@ -4764,6 +4921,8 @@ def main():
                 
                 if not (asia_high > 0 or asia_low > 0):
                     st.warning("Enter Day Structure SPX levels first")
+        else:
+            st.info("Connect Schwab API for auto-fetch")
         
         with st.expander("HIGH LINE (PUTS)", expanded=False):
             st.markdown("**SPX Price Points**")
