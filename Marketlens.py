@@ -505,11 +505,13 @@ class SchwabAPI:
             self.load_credentials()
         
         if not self.credentials.access_token:
+            self._last_error = "No access token"
             return None
         
         # Check if token expired
         if self.credentials.is_token_expired():
             if not self.refresh_access_token():
+                self._last_error = "Token refresh failed"
                 return None
         
         try:
@@ -517,15 +519,35 @@ class SchwabAPI:
             resp = self._session.get(url, headers=self._get_headers(), params=params, timeout=30)
             
             if resp.status_code == 200:
+                self._last_error = ""
                 return resp.json()
             elif resp.status_code == 401:
+                self._last_error = f"401 Unauthorized - Token may be invalid"
                 if self.refresh_access_token():
                     resp = self._session.get(url, headers=self._get_headers(), params=params, timeout=30)
                     if resp.status_code == 200:
                         return resp.json()
+            else:
+                self._last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
             return None
-        except:
+        except Exception as e:
+            self._last_error = f"Request error: {str(e)}"
             return None
+    
+    def test_connection(self) -> Tuple[bool, str]:
+        """Test the API connection and return status"""
+        if not self.credentials.access_token:
+            return False, "No access token configured"
+        
+        # Try a simple quote
+        data = self._api_get("/$SPX/quotes")
+        if data:
+            price = data.get("$SPX", {}).get("quote", {}).get("lastPrice", 0)
+            if price > 0:
+                return True, f"Connected! SPX: ${price:,.2f}"
+            return True, "Connected but no price data"
+        
+        return False, self._last_error if hasattr(self, '_last_error') else "Unknown error"
     
     def get_quote(self, symbol: str) -> Optional[Dict]:
         """Get real-time quote for a symbol"""
@@ -4660,12 +4682,21 @@ def main():
         with st.expander("🔑 Schwab API", expanded=False):
             schwab_api = get_schwab_api()
             if schwab_api.is_available():
-                st.success("✅ Connected")
-                if st.button("🔄 Refresh Token", use_container_width=True):
-                    if schwab_api.refresh_access_token():
-                        st.success("Token refreshed!")
-                    else:
-                        st.error("Refresh failed")
+                st.success("✅ Token loaded")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🧪 Test", use_container_width=True):
+                        success, msg = schwab_api.test_connection()
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+                with col2:
+                    if st.button("🔄 Refresh", use_container_width=True):
+                        if schwab_api.refresh_access_token():
+                            st.success("Token refreshed!")
+                        else:
+                            st.error("Refresh failed")
             else:
                 st.warning("Not connected")
                 st.caption("Enter your Schwab API credentials:")
