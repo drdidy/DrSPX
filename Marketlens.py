@@ -1,27 +1,29 @@
 """
-SPX PROPHET v9.0 - LEGENDARY EDITION
+SPX PROPHET v9.0 - OBSIDIAN PREMIUM
 "Where Structure Becomes Foresight"
+
+DESIGN SYSTEM: Bloomberg Terminal × Apple × Stripe × Linear × Vercel
+- Deep obsidian dark theme with purple/emerald accents
+- True glassmorphism with layered depth and shine effects  
+- Glowing, pulsing trade signals
+- Premium typography (Inter + JetBrains Mono)
+- Smooth micro-interactions and animations
 
 THREE PILLARS:
 1. VIX Zone → Direction (CALLS at bottom, PUTS at top)
 2. MA Bias → Confirmation (50 EMA vs 200 SMA)
 3. Day Structure → Entry + Contract + Stop
 
-PREMIUM FEATURES:
+TRADING FRAMEWORK:
 ✓ VIX Zone scaling (1% of VIX, rounded to 0.05)
 ✓ Dynamic stops based on VIX level (4-10 pts)
 ✓ Strike = Target - 20 (20 pts ITM at exit)
 ✓ 2-point contract pricing (Asia + London)
 ✓ Flip signals when structure breaks
-✓ Trading Rules Reference
-✓ Contextual Rule Warnings
+✓ Trading Rules Reference (collapsible)
+✓ Contextual Rule Warnings (inline alerts)
 
-LEGENDARY UI:
-✓ Animated glowing signals
-✓ Floating logo animation
-✓ Pulsing status indicators
-✓ Hover effects on all cards
-✓ Premium gradient accents
+CLEAN & FOCUSED - Everything you need, nothing you don't.
 """
 
 import streamlit as st
@@ -1752,7 +1754,11 @@ def check_alerts(setups, vix_zone, current_time):
     return alerts
 
 def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, market_ctx=None, price_proximity=None, day_structure=None):
-    # PREMIUM DESIGN SYSTEM - Institutional Grade
+    # ═══════════════════════════════════════════════════════════════════════
+    # OBSIDIAN PREMIUM DESIGN SYSTEM
+    # Inspired by: Bloomberg Terminal × Apple × Stripe × Linear × Vercel
+    # ═══════════════════════════════════════════════════════════════════════
+    
     if theme == "light":
         # Clean, minimal light theme inspired by Linear/Stripe
         bg_main = "#fafafa"
@@ -1769,34 +1775,53 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
         shadow_lg = "0 8px 24px rgba(0,0,0,0.08)"
         shadow_card = "0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03)"
     else:
-        # Rich dark theme
-        bg_main = "#09090b"
-        bg_card = "#18181b"
-        bg_elevated = "#27272a"
-        bg_subtle = "#18181b"
-        text_primary = "#fafafa"
-        text_secondary = "#a1a1aa"
-        text_muted = "#71717a"
-        border_light = "#27272a"
-        border_medium = "#3f3f46"
-        shadow_sm = "0 1px 2px rgba(0,0,0,0.4)"
-        shadow_md = "0 2px 8px rgba(0,0,0,0.5)"
-        shadow_lg = "0 8px 24px rgba(0,0,0,0.6)"
-        shadow_card = "0 1px 3px rgba(0,0,0,0.3)"
+        # OBSIDIAN DARK - Deep, rich, premium
+        bg_main = "#050507"  # Nearly black with slight blue undertone
+        bg_card = "#0c0c0f"  # Slightly elevated
+        bg_elevated = "#141418"  # Card surfaces
+        bg_subtle = "#1a1a1f"  # Subtle backgrounds
+        text_primary = "#f4f4f5"  # Bright but not harsh white
+        text_secondary = "#a1a1aa"  # Muted text
+        text_muted = "#52525b"  # Very subtle text
+        border_light = "rgba(255,255,255,0.06)"  # Subtle borders
+        border_medium = "rgba(255,255,255,0.1)"  # More visible borders
+        shadow_sm = "0 1px 2px rgba(0,0,0,0.5)"
+        shadow_md = "0 4px 12px rgba(0,0,0,0.4)"
+        shadow_lg = "0 8px 32px rgba(0,0,0,0.5)"
+        shadow_card = "0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05)"
     
-    # Refined accent colors - more muted, professional
-    green = "#22c55e"
-    green_light = "#f0fdf4" if theme == "light" else "#14532d"
-    green_muted = "#86efac" if theme == "light" else "#166534"
-    red = "#ef4444"
-    red_light = "#fef2f2" if theme == "light" else "#450a0a"
-    red_muted = "#fca5a5" if theme == "light" else "#7f1d1d"
-    amber = "#eab308"
-    amber_light = "#fefce8" if theme == "light" else "#422006"
+    # ═══════════════════════════════════════════════════════════════════════
+    # PREMIUM COLOR PALETTE - Vibrant but sophisticated
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    # Emerald Success - Rich, glowing green
+    green = "#10b981"  # Emerald-500
+    green_bright = "#34d399"  # Brighter for accents
+    green_light = "#f0fdf4" if theme == "light" else "rgba(16,185,129,0.15)"
+    green_muted = "#86efac" if theme == "light" else "rgba(16,185,129,0.3)"
+    green_glow = "rgba(16,185,129,0.5)"
+    
+    # Crimson Danger - Deep, intense red
+    red = "#ef4444"  # Red-500
+    red_bright = "#f87171"  # Brighter for accents
+    red_light = "#fef2f2" if theme == "light" else "rgba(239,68,68,0.15)"
+    red_muted = "#fca5a5" if theme == "light" else "rgba(239,68,68,0.3)"
+    red_glow = "rgba(239,68,68,0.5)"
+    
+    # Amber Warning - Warm, attention-grabbing
+    amber = "#f59e0b"
+    amber_light = "#fefce8" if theme == "light" else "rgba(245,158,11,0.15)"
+    
+    # Sapphire Info - Professional blue
     blue = "#3b82f6"
-    blue_light = "#eff6ff" if theme == "light" else "#1e3a8a"
-    purple = "#a855f7"
-    neutral = "#737373"
+    blue_light = "#eff6ff" if theme == "light" else "rgba(59,130,246,0.15)"
+    
+    # Purple Premium - Luxury accent
+    purple = "#8b5cf6"
+    purple_light = "rgba(139,92,246,0.15)"
+    
+    # Neutral
+    neutral = "#71717a"
     
     bias_color = green if vix_zone.bias == "CALLS" else red if vix_zone.bias == "PUTS" else neutral
     bias_bg = green_light if vix_zone.bias == "CALLS" else red_light if vix_zone.bias == "PUTS" else bg_elevated
@@ -2004,14 +2029,15 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-/* ═══════════════════════════════════════════════════════════════
-   SPX PROPHET v9 - LEGENDARY PREMIUM DESIGN SYSTEM
-   Bloomberg Terminal × Stripe × Apple × Linear
-   ═══════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPX PROPHET - OBSIDIAN PREMIUM DESIGN SYSTEM
+   Bloomberg Terminal × Apple × Stripe × Linear × Vercel
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {{
+    /* ─── Core Colors ─── */
     --bg-base: {bg_main};
     --bg-surface: {bg_card};
     --bg-surface-2: {bg_elevated};
@@ -2022,22 +2048,41 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     --border: {border_light};
     --border-strong: {border_medium};
     
-    /* Semantic Colors */
+    /* ─── Semantic Colors with Glow ─── */
     --success: {green};
+    --success-bright: {green_bright};
     --success-soft: {green_light};
+    --success-muted: {green_muted};
+    --success-glow: {green_glow};
     --danger: {red};
+    --danger-bright: {red_bright};
     --danger-soft: {red_light};
+    --danger-muted: {red_muted};
+    --danger-glow: {red_glow};
     --warning: {amber};
     --warning-soft: {amber_light};
     --info: {blue};
     --info-soft: {blue_light};
+    --accent: {purple};
+    --accent-soft: {purple_light};
     
-    /* Premium Additions */
-    --success-glow: {"rgba(34,197,94,0.4)" if theme == "dark" else "rgba(34,197,94,0.25)"};
-    --danger-glow: {"rgba(239,68,68,0.4)" if theme == "dark" else "rgba(239,68,68,0.25)"};
+    /* ─── Premium Gradients ─── */
+    --gradient-calls: linear-gradient(135deg, rgba(16,185,129,0.2) 0%, rgba(16,185,129,0.05) 50%, rgba(16,185,129,0.1) 100%);
+    --gradient-puts: linear-gradient(135deg, rgba(239,68,68,0.2) 0%, rgba(239,68,68,0.05) 50%, rgba(239,68,68,0.1) 100%);
     --gradient-premium: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+    --gradient-gold: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+    --gradient-obsidian: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 100%);
+    --gradient-shine: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.05) 50%, transparent 100%);
     
-    /* Spacing Scale */
+    /* ─── Glassmorphism ─── */
+    --glass-bg: {"rgba(12,12,15,0.85)" if theme == "dark" else "rgba(255,255,255,0.9)"};
+    --glass-bg-heavy: {"rgba(12,12,15,0.95)" if theme == "dark" else "rgba(255,255,255,0.95)"};
+    --glass-border: {"rgba(255,255,255,0.08)" if theme == "dark" else "rgba(0,0,0,0.08)"};
+    --glass-border-bright: {"rgba(255,255,255,0.15)" if theme == "dark" else "rgba(0,0,0,0.12)"};
+    --glass-blur: blur(24px);
+    --glass-blur-heavy: blur(40px);
+    
+    /* ─── Spacing Scale ─── */
     --space-1: 4px;
     --space-2: 8px;
     --space-3: 12px;
@@ -2046,31 +2091,59 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     --space-6: 24px;
     --space-8: 32px;
     --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
     
-    /* Typography */
+    /* ─── Typography ─── */
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    --font-mono: 'SF Mono', 'Roboto Mono', 'Fira Code', monospace;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
     
-    /* Radius */
-    --radius-sm: 6px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
-    --radius-xl: 16px;
-    --radius-2xl: 24px;
+    /* ─── Radius ─── */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --radius-2xl: 28px;
+    --radius-full: 9999px;
+    
+    /* ─── Shadows ─── */
+    --shadow-sm: {shadow_sm};
+    --shadow-md: {shadow_md};
+    --shadow-lg: {shadow_lg};
+    --shadow-card: {shadow_card};
+    --shadow-glow-green: 0 0 40px rgba(16,185,129,0.4), 0 0 80px rgba(16,185,129,0.2), 0 0 120px rgba(16,185,129,0.1);
+    --shadow-glow-red: 0 0 40px rgba(239,68,68,0.4), 0 0 80px rgba(239,68,68,0.2), 0 0 120px rgba(239,68,68,0.1);
+    --shadow-glow-purple: 0 0 40px rgba(139,92,246,0.3), 0 0 80px rgba(139,92,246,0.15);
+    --shadow-float: 0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
 }}
 
-/* ═══════════════════════════════════════════════════════════════
-   PREMIUM ANIMATIONS
-   ═══════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANIMATIONS - Smooth, Premium Feel
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 @keyframes pulse-glow {{
-    0%, 100% {{ opacity: 1; }}
-    50% {{ opacity: 0.6; }}
+    0%, 100% {{ opacity: 1; filter: brightness(1); }}
+    50% {{ opacity: 0.85; filter: brightness(1.1); }}
 }}
 
-@keyframes float {{
-    0%, 100% {{ transform: translateY(0px); }}
-    50% {{ transform: translateY(-4px); }}
+@keyframes pulse-border {{
+    0%, 100% {{ border-color: var(--success); box-shadow: var(--shadow-glow-green); }}
+    50% {{ border-color: var(--success-bright); box-shadow: 0 0 60px rgba(16,185,129,0.5), 0 0 100px rgba(16,185,129,0.3); }}
+}}
+
+@keyframes pulse-border-red {{
+    0%, 100% {{ border-color: var(--danger); box-shadow: var(--shadow-glow-red); }}
+    50% {{ border-color: var(--danger-bright); box-shadow: 0 0 60px rgba(239,68,68,0.5), 0 0 100px rgba(239,68,68,0.3); }}
+}}
+
+@keyframes slide-up {{
+    from {{ opacity: 0; transform: translateY(20px); }}
+    to {{ opacity: 1; transform: translateY(0); }}
+}}
+
+@keyframes fade-in {{
+    from {{ opacity: 0; }}
+    to {{ opacity: 1; }}
 }}
 
 @keyframes shimmer {{
@@ -2078,20 +2151,36 @@ def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_sc
     100% {{ background-position: 200% 0; }}
 }}
 
-@keyframes border-glow {{
-    0%, 100% {{ box-shadow: 0 0 20px var(--success-glow); }}
-    50% {{ box-shadow: 0 0 40px var(--success-glow), 0 0 60px var(--success-glow); }}
+@keyframes float {{
+    0%, 100% {{ transform: translateY(0); }}
+    50% {{ transform: translateY(-8px); }}
 }}
 
-@keyframes border-glow-red {{
-    0%, 100% {{ box-shadow: 0 0 20px var(--danger-glow); }}
-    50% {{ box-shadow: 0 0 40px var(--danger-glow), 0 0 60px var(--danger-glow); }}
+@keyframes gradient-flow {{
+    0% {{ background-position: 0% 50%; }}
+    50% {{ background-position: 100% 50%; }}
+    100% {{ background-position: 0% 50%; }}
 }}
 
-.animate-pulse {{ animation: pulse-glow 2s ease-in-out infinite; }}
-.animate-float {{ animation: float 3s ease-in-out infinite; }}
-.glow-green {{ animation: border-glow 2s ease-in-out infinite; }}
-.glow-red {{ animation: border-glow-red 2s ease-in-out infinite; }}
+@keyframes shine {{
+    0% {{ left: -100%; }}
+    100% {{ left: 200%; }}
+}}
+
+@keyframes breathe {{
+    0%, 100% {{ transform: scale(1); opacity: 1; }}
+    50% {{ transform: scale(1.02); opacity: 0.95; }}
+}}
+
+.animate-slide-up {{ animation: slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1); }}
+.animate-fade-in {{ animation: fade-in 0.4s ease-out; }}
+.animate-pulse {{ animation: pulse-glow 2.5s ease-in-out infinite; }}
+.animate-float {{ animation: float 4s ease-in-out infinite; }}
+.animate-breathe {{ animation: breathe 3s ease-in-out infinite; }}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BASE STYLES
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 *, *::before, *::after {{ 
     margin: 0; 
@@ -2103,428 +2192,357 @@ html {{
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
 }}
 
 body {{
     font-family: var(--font-sans);
     background: var(--bg-base);
     color: var(--text-primary);
-    line-height: 1.5;
+    line-height: 1.6;
     min-height: 100vh;
+    /* Subtle gradient background */
+    background-image: 
+        radial-gradient(ellipse 80% 50% at 50% -20%, {"rgba(139,92,246,0.08)" if theme == "dark" else "rgba(139,92,246,0.03)"}, transparent),
+        radial-gradient(ellipse 60% 40% at 100% 100%, {"rgba(16,185,129,0.05)" if theme == "dark" else "rgba(16,185,129,0.02)"}, transparent);
+    background-attachment: fixed;
 }}
 
-/* ─────────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════
    LAYOUT
-   ───────────────────────────────────────────────────────────────── */
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-.dashboard {{
-    max-width: 1440px;
+.dashboard-container {{
+    max-width: 1600px;
     margin: 0 auto;
-    padding: var(--space-6);
+    padding: var(--space-6) var(--space-8);
+    animation: fade-in 0.6s ease-out;
 }}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER - Premium Floating Glass
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 .header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding-bottom: var(--space-5);
-    margin-bottom: var(--space-6);
-    border-bottom: 1px solid var(--border);
+    padding: var(--space-5) var(--space-6);
+    margin-bottom: var(--space-8);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--shadow-float);
+    position: relative;
+    overflow: hidden;
 }}
 
-.logo {{
+.header::before {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+}}
+
+.header::after {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
+    animation: shine 8s ease-in-out infinite;
+}}
+
+.logo-section {{
     display: flex;
     align-items: center;
     gap: var(--space-4);
 }}
 
-.logo-mark {{
-    width: 56px;
-    height: 56px;
-    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
-    border-radius: var(--radius-lg);
-    display: grid;
-    place-items: center;
-    font-family: var(--font-mono);
-    font-size: 15px;
-    font-weight: 700;
-    color: white;
-    letter-spacing: -0.5px;
-    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
-    animation: float 4s ease-in-out infinite;
+.logo-icon {{
+    font-size: 36px;
+    filter: drop-shadow(0 4px 8px rgba(139,92,246,0.3));
 }}
 
 .logo-text {{
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}}
-
-.logo-title {{
     font-size: 28px;
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: -0.5px;
-    line-height: 1.1;
-    background: linear-gradient(135deg, var(--text-primary) 0%, #a78bfa 100%);
+    font-weight: 800;
+    letter-spacing: -1px;
+    background: var(--gradient-premium);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    text-shadow: 0 0 40px rgba(139,92,246,0.3);
 }}
 
 .logo-subtitle {{
-    font-size: 14px;
-    color: var(--text-secondary);
+    font-size: 11px;
     font-weight: 500;
-    letter-spacing: 0.5px;
-    font-style: italic;
+    color: var(--text-tertiary);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 2px;
 }}
 
 .header-meta {{
     display: flex;
     align-items: center;
-    gap: var(--space-8);
+    gap: var(--space-6);
 }}
 
 .meta-group {{
     display: flex;
-    gap: var(--space-5);
-}}
-
-.meta-item {{
-    text-align: right;
-}}
-
-.meta-label {{
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}}
-
-.meta-value {{
-    font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-top: 2px;
-}}
-
-.clock {{
-    font-family: var(--font-mono);
-    font-size: 24px;
-    font-weight: 500;
-    color: var(--text-primary);
-    letter-spacing: -1px;
-}}
-
-/* ─────────────────────────────────────────────────────────────────
-   SIGNAL HERO - The main decision display
-   ───────────────────────────────────────────────────────────────── */
-
-.signal-hero {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    padding: var(--space-6);
-    margin-bottom: var(--space-5);
-    display: grid;
-    grid-template-columns: 1fr 280px;
-    gap: var(--space-6);
-}}
-
-.signal-main {{
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-}}
-
-.signal-direction {{
-    display: flex;
-    align-items: center;
     gap: var(--space-4);
 }}
 
-.direction-badge {{
+.meta-item {{
+    text-align: center;
+    padding: var(--space-3) var(--space-5);
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    transition: all 0.3s ease;
+}}
+
+.meta-item:hover {{
+    border-color: var(--glass-border-bright);
+    transform: translateY(-2px);
+}}
+
+.meta-label {{
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 4px;
+}}
+
+.meta-value {{
+    font-size: 18px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+}}
+
+.clock {{
+    font-size: 36px;
+    font-weight: 300;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    letter-spacing: -2px;
+    padding: var(--space-3) var(--space-5);
+    background: var(--bg-surface);
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--glass-border);
+}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SIGNAL HERO CARD - THE MAIN EVENT (Dramatic, Glowing)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.signal-hero {{
+    position: relative;
+    border-radius: var(--radius-2xl);
+    padding: var(--space-10) var(--space-8);
+    margin-bottom: var(--space-8);
+    overflow: hidden;
+    animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}}
+
+.signal-hero.calls {{
+    background: linear-gradient(135deg, 
+        rgba(16,185,129,0.15) 0%, 
+        rgba(16,185,129,0.05) 40%,
+        rgba(16,185,129,0.08) 100%);
+    border: 2px solid var(--success);
+    box-shadow: var(--shadow-glow-green);
+    animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1), pulse-border 3s ease-in-out infinite;
+}}
+
+.signal-hero.puts {{
+    background: linear-gradient(135deg, 
+        rgba(239,68,68,0.15) 0%, 
+        rgba(239,68,68,0.05) 40%,
+        rgba(239,68,68,0.08) 100%);
+    border: 2px solid var(--danger);
+    box-shadow: var(--shadow-glow-red);
+    animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1), pulse-border-red 3s ease-in-out infinite;
+}}
+
+.signal-hero.wait {{
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 2px solid var(--border-strong);
+    box-shadow: var(--shadow-card);
+}}
+
+.signal-hero.notrade {{
+    background: linear-gradient(135deg, 
+        rgba(239,68,68,0.1) 0%, 
+        rgba(239,68,68,0.03) 100%);
+    border: 2px solid var(--danger);
+}}
+
+/* Shine effect on hero */
+.signal-hero::before {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+}}
+
+/* Gradient overlay */
+.signal-hero::after {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--gradient-obsidian);
+    pointer-events: none;
+}}
+
+.signal-content {{
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}}
+
+.signal-badge {{
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-4);
-    border-radius: var(--radius-md);
-    font-size: 13px;
+    background: rgba(0,0,0,0.3);
+    border-radius: var(--radius-full);
+    font-size: 11px;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-4);
+    border: 1px solid var(--glass-border);
 }}
 
-.direction-badge.calls {{
-    background: var(--success-soft);
-    color: var(--success);
+.signal-direction {{
+    font-size: 72px;
+    font-weight: 800;
+    letter-spacing: -3px;
+    line-height: 1;
+    margin-bottom: var(--space-2);
+    text-shadow: 0 4px 30px currentColor;
 }}
 
-.direction-badge.puts {{
-    background: var(--danger-soft);
-    color: var(--danger);
-}}
-
-.direction-badge.wait {{
-    background: var(--bg-surface-2);
-    color: var(--text-tertiary);
-}}
-
-.signal-title {{
-    font-size: 32px;
-    font-weight: 700;
-    letter-spacing: -1px;
-    line-height: 1.1;
-}}
-
-.signal-title.calls {{ color: var(--success); }}
-.signal-title.puts {{ color: var(--danger); }}
-.signal-title.wait {{ color: var(--text-tertiary); }}
+.signal-hero.calls .signal-direction {{ color: var(--success-bright); }}
+.signal-hero.puts .signal-direction {{ color: var(--danger-bright); }}
+.signal-hero.wait .signal-direction {{ color: var(--text-secondary); font-size: 48px; }}
+.signal-hero.notrade .signal-direction {{ color: var(--danger); font-size: 48px; }}
 
 .signal-subtitle {{
-    font-size: 14px;
-    color: var(--text-secondary);
-    margin-top: var(--space-1);
-}}
-
-.signal-confluence {{
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-md);
-    width: fit-content;
-}}
-
-.confluence-dot {{
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-}}
-
-.confluence-dot.strong {{ background: var(--success); }}
-.confluence-dot.moderate {{ background: var(--info); }}
-.confluence-dot.weak {{ background: var(--text-tertiary); }}
-.confluence-dot.conflict {{ background: var(--danger); }}
-
-.confluence-text {{
-    font-size: 12px;
+    font-size: 16px;
     font-weight: 500;
     color: var(--text-secondary);
+    margin-bottom: var(--space-6);
 }}
 
-.signal-metrics {{
+.signal-stats {{
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: var(--space-3);
+    gap: var(--space-4);
+    width: 100%;
+    max-width: 800px;
+    margin-top: var(--space-4);
 }}
 
-.metric {{
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-md);
-    padding: var(--space-3);
+.signal-stat {{
     text-align: center;
-}}
-
-.metric-value {{
-    font-family: var(--font-mono);
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--text-primary);
-}}
-
-.metric-value.success {{ color: var(--success); }}
-.metric-value.danger {{ color: var(--danger); }}
-
-.metric-label {{
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    margin-top: var(--space-1);
-}}
-
-/* Score Ring */
-.signal-score {{
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-3);
-}}
-
-.score-ring {{
-    position: relative;
-    width: 140px;
-    height: 140px;
-}}
-
-.score-ring svg {{
-    transform: rotate(-90deg);
-}}
-
-.score-ring-bg {{
-    fill: none;
-    stroke: var(--bg-surface-2);
-    stroke-width: 8;
-}}
-
-.score-ring-fill {{
-    fill: none;
-    stroke-width: 8;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 0.5s ease;
-}}
-
-.score-ring-fill.a {{ stroke: var(--success); }}
-.score-ring-fill.b {{ stroke: var(--info); }}
-.score-ring-fill.c {{ stroke: var(--warning); }}
-.score-ring-fill.d {{ stroke: var(--danger); }}
-
-.score-center {{
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-}}
-
-.score-value {{
-    font-family: var(--font-mono);
-    font-size: 36px;
-    font-weight: 700;
-    letter-spacing: -2px;
-}}
-
-.score-grade {{
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}}
-
-.score-label {{
-    font-size: 12px;
-    color: var(--text-tertiary);
-    font-weight: 500;
-}}
-
-/* ─────────────────────────────────────────────────────────────────
-   VIX METER
-   ───────────────────────────────────────────────────────────────── */
-
-.vix-section {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
     padding: var(--space-5);
-    margin-bottom: var(--space-5);
+    background: rgba(0,0,0,0.2);
+    backdrop-filter: blur(10px);
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--glass-border);
+    transition: all 0.3s ease;
 }}
 
-.section-header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--space-4);
+.signal-stat:hover {{
+    transform: translateY(-4px);
+    border-color: var(--glass-border-bright);
+    box-shadow: var(--shadow-md);
 }}
 
-.section-title {{
-    font-size: 12px;
+.stat-label {{
+    font-size: 10px;
     font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}}
-
-.vix-display {{
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: var(--space-5);
-    align-items: center;
-}}
-
-.vix-meter-track {{
-    height: 6px;
-    background: linear-gradient(90deg, var(--success) 0%, var(--warning) 50%, var(--danger) 100%);
-    border-radius: 3px;
-    position: relative;
-}}
-
-.vix-meter-thumb {{
-    position: absolute;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 14px;
-    height: 14px;
-    background: var(--bg-surface);
-    border: 2px solid var(--text-primary);
-    border-radius: 50%;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}}
-
-.vix-meter-labels {{
-    display: flex;
-    justify-content: space-between;
-    margin-top: var(--space-2);
-}}
-
-.vix-meter-label {{
-    font-family: var(--font-mono);
-    font-size: 11px;
     color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: var(--space-2);
 }}
 
-.vix-current {{
-    text-align: right;
-}}
-
-.vix-current-value {{
-    font-family: var(--font-mono);
+.stat-value {{
     font-size: 28px;
-    font-weight: 600;
+    font-weight: 700;
+    font-family: var(--font-mono);
     color: var(--text-primary);
     letter-spacing: -1px;
 }}
 
-.vix-current-label {{
-    font-size: 10px;
+.stat-value.highlight {{ color: var(--success); }}
+.stat-value.danger {{ color: var(--danger); }}
+
+.stat-detail {{
+    font-size: 11px;
     color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    margin-top: var(--space-1);
 }}
 
-/* ─────────────────────────────────────────────────────────────────
-   INDICATOR CARDS - MA Bias, Gap, etc.
-   ───────────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   INDICATOR CARDS - Floating Glass Panels
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 .indicators-grid {{
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--space-4);
-    margin-bottom: var(--space-5);
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-5);
+    margin-bottom: var(--space-8);
 }}
 
 .indicator-card {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-    transition: all 0.3s ease;
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
     position: relative;
     overflow: hidden;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: var(--shadow-card);
 }}
 
 .indicator-card:hover {{
-    transform: translateY(-2px);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
-    border-color: var(--border-strong);
+    transform: translateY(-6px);
+    border-color: var(--glass-border-bright);
+    box-shadow: var(--shadow-float);
 }}
 
+/* Top accent bar */
 .indicator-card::before {{
     content: '';
     position: absolute;
@@ -2532,81 +2550,290 @@ body {{
     left: 0;
     right: 0;
     height: 3px;
-    background: var(--gradient-premium);
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    transition: all 0.3s ease;
 }}
 
-.indicator-card:hover::before {{
-    opacity: 1;
+.indicator-card.long::before {{ 
+    background: linear-gradient(90deg, var(--success), var(--success-bright)); 
+    box-shadow: 0 0 20px var(--success-glow);
+}}
+.indicator-card.short::before {{ 
+    background: linear-gradient(90deg, var(--danger), var(--danger-bright)); 
+    box-shadow: 0 0 20px var(--danger-glow);
+}}
+.indicator-card.neutral::before {{ background: var(--text-tertiary); }}
+
+/* Shine effect */
+.indicator-card::after {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--gradient-obsidian);
+    pointer-events: none;
 }}
 
 .indicator-header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--space-3);
+    margin-bottom: var(--space-4);
+    position: relative;
+    z-index: 1;
 }}
 
 .indicator-title {{
     font-size: 10px;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--text-tertiary);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 1.5px;
 }}
 
 .indicator-status {{
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    animation: pulse-glow 2s ease-in-out infinite;
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-full);
+    box-shadow: 0 0 10px currentColor;
 }}
 
-.indicator-status.long {{ 
-    background: var(--success); 
-    box-shadow: 0 0 8px var(--success), 0 0 16px var(--success-glow);
-}}
-.indicator-status.short {{ 
-    background: var(--danger); 
-    box-shadow: 0 0 8px var(--danger), 0 0 16px var(--danger-glow);
-}}
-.indicator-status.neutral {{ background: var(--text-tertiary); }}
+.indicator-status.active {{ background: var(--success); color: var(--success); }}
+.indicator-status.danger {{ background: var(--danger); color: var(--danger); }}
+.indicator-status.neutral {{ background: var(--text-tertiary); color: var(--text-tertiary); }}
 
 .indicator-value {{
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-    margin-bottom: var(--space-1);
+    font-size: 32px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    letter-spacing: -1px;
+    margin-bottom: var(--space-2);
+    position: relative;
+    z-index: 1;
 }}
 
-.indicator-value.long {{ color: var(--success); }}
-.indicator-value.short {{ color: var(--danger); }}
-.indicator-value.neutral {{ color: var(--text-tertiary); }}
+.indicator-card.long .indicator-value {{ color: var(--success); }}
+.indicator-card.short .indicator-value {{ color: var(--danger); }}
+.indicator-card.neutral .indicator-value {{ color: var(--text-secondary); }}
 
 .indicator-detail {{
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
+    position: relative;
+    z-index: 1;
+    line-height: 1.5;
 }}
 
-/* ─────────────────────────────────────────────────────────────────
-   SETUP CARDS
-   ───────────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   YOUR TRADE CARD - Premium Glass Panel
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.trade-card {{
+    background: var(--glass-bg-heavy);
+    backdrop-filter: var(--glass-blur-heavy);
+    -webkit-backdrop-filter: var(--glass-blur-heavy);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-2xl);
+    padding: var(--space-8);
+    margin-bottom: var(--space-8);
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-float);
+    animation: slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}}
+
+.trade-card::before {{
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+}}
+
+.trade-card-header {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-6);
+    padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--glass-border);
+}}
+
+.trade-card-icon {{
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}}
+
+.trade-card-icon.calls {{
+    background: var(--success-soft);
+    border: 1px solid var(--success-muted);
+}}
+
+.trade-card-icon.puts {{
+    background: var(--danger-soft);
+    border: 1px solid var(--danger-muted);
+}}
+
+.trade-card-title {{
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}}
+
+.trade-card-subtitle {{
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONFLUENCE SCORE - Radial Gauge
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.confluence-card {{
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-2xl);
+    padding: var(--space-6);
+    text-align: center;
+    box-shadow: var(--shadow-card);
+}}
+
+.score-ring {{
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    margin: 0 auto var(--space-4);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}}
+
+.score-ring::before {{
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    padding: 4px;
+    background: conic-gradient(from 0deg, var(--success) 0%, var(--success) var(--score-pct, 0%), var(--bg-surface-3) var(--score-pct, 0%));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+}}
+
+.score-value {{
+    font-size: 42px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    letter-spacing: -2px;
+}}
+
+.score-label {{
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VIX ZONE BAR - Premium Styled
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.vix-zone-bar {{
+    background: var(--bg-surface-2);
+    border-radius: var(--radius-full);
+    height: 16px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+}}
+
+.vix-zone-fill {{
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    border-radius: var(--radius-full);
+    transition: width 0.5s ease;
+}}
+
+.vix-zone-marker {{
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 3px solid var(--bg-base);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    transition: left 0.5s ease;
+}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DAY STRUCTURE SECTION - Glass Card
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.day-structure {{
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    padding: var(--space-5);
+    margin-bottom: var(--space-6);
+    box-shadow: var(--shadow-card);
+}}
+
+.day-structure.bullish {{
+    border-color: var(--success-muted);
+    background: linear-gradient(135deg, var(--success-soft), var(--glass-bg));
+}}
+
+.day-structure.bearish {{
+    border-color: var(--danger-muted);
+    background: linear-gradient(135deg, var(--danger-soft), var(--glass-bg));
+}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SETUPS SECTION - Collapsible Premium Cards
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 .setups-section {{
-    margin-bottom: var(--space-5);
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-4);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+    transition: all 0.3s ease;
+}}
+
+.setups-section:hover {{
+    border-color: var(--glass-border-bright);
 }}
 
 .setups-header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-3) var(--space-4);
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding: var(--space-4) var(--space-5);
     cursor: pointer;
-    transition: background 0.15s;
+    user-select: none;
+    transition: background 0.2s;
 }}
 
 .setups-header:hover {{
@@ -2614,260 +2841,91 @@ body {{
 }}
 
 .setups-title {{
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }}
 
 .setups-title.calls {{ color: var(--success); }}
 .setups-title.puts {{ color: var(--danger); }}
 
-.setups-count {{
-    font-size: 11px;
-    font-weight: 500;
-    padding: 2px 8px;
-    border-radius: 10px;
-}}
-
-.setups-count.calls {{ background: var(--success-soft); color: var(--success); }}
-.setups-count.puts {{ background: var(--danger-soft); color: var(--danger); }}
-
 .setups-chevron {{
-    font-size: 10px;
     color: var(--text-tertiary);
-    transition: transform 0.2s;
-}}
-
-.setups-body {{
-    background: var(--bg-surface-2);
-    border: 1px solid var(--border);
-    border-top: none;
-    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-    padding: var(--space-4);
-}}
-
-.setups-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--space-3);
-}}
-
-.setup-card {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-    position: relative;
-    overflow: hidden;
-}}
-
-.setup-card::before {{
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-}}
-
-.setup-card.calls::before {{ background: var(--success); }}
-.setup-card.puts::before {{ background: var(--danger); }}
-.setup-card.active {{ border-color: var(--success); }}
-.setup-card.active.puts {{ border-color: var(--danger); }}
-.setup-card.grey {{ opacity: 0.5; }}
-
-.setup-header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--space-3);
-}}
-
-.setup-name {{
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
-}}
-
-.setup-status {{
-    font-size: 9px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 3px 8px;
-    border-radius: 4px;
-}}
-
-.setup-status.active {{ background: var(--success-soft); color: var(--success); }}
-.setup-status.wait {{ background: var(--warning-soft); color: var(--warning); }}
-.setup-status.grey {{ background: var(--bg-surface-2); color: var(--text-tertiary); }}
-
-.setup-entry {{
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-sm);
-    padding: var(--space-3);
-    text-align: center;
-    margin-bottom: var(--space-3);
-}}
-
-.setup-entry-label {{
-    font-size: 9px;
-    font-weight: 500;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}}
-
-.setup-entry-price {{
-    font-family: var(--font-mono);
-    font-size: 22px;
-    font-weight: 600;
-    margin-top: 2px;
-}}
-
-.setup-entry-price.calls {{ color: var(--success); }}
-.setup-entry-price.puts {{ color: var(--danger); }}
-
-.setup-entry-distance {{
-    font-size: 10px;
-    color: var(--text-tertiary);
-    margin-top: 2px;
-}}
-
-.setup-contract {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-2);
-    margin-bottom: var(--space-3);
-}}
-
-.contract-item {{
-    background: var(--bg-surface-2);
-    border-radius: var(--radius-sm);
-    padding: var(--space-2);
-    text-align: center;
-}}
-
-.contract-label {{
-    font-size: 9px;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-}}
-
-.contract-value {{
-    font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 600;
-    margin-top: 1px;
-}}
-
-.contract-value.calls {{ color: var(--success); }}
-.contract-value.puts {{ color: var(--danger); }}
-
-.setup-targets {{
-    margin-bottom: var(--space-3);
-}}
-
-.targets-row {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
-}}
-
-.target-item {{
-    background: var(--bg-surface-2);
-    border-radius: 4px;
-    padding: 6px 4px;
-    text-align: center;
-}}
-
-.target-pct {{
-    font-size: 9px;
-    color: var(--text-tertiary);
-    font-weight: 500;
-}}
-
-.target-profit {{
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--success);
-    margin-top: 1px;
-}}
-
-.setup-risk {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: var(--danger-soft);
-    border-radius: var(--radius-sm);
-    padding: var(--space-2) var(--space-3);
-}}
-
-.risk-label {{
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--danger);
-}}
-
-.risk-value {{
-    font-family: var(--font-mono);
+    transition: transform 0.3s ease;
     font-size: 12px;
-    font-weight: 600;
-    color: var(--danger);
 }}
 
-/* Collapsed state */
 .setups-section.collapsed .setups-body {{ display: none; }}
 .setups-section.collapsed .setups-chevron {{ transform: rotate(-90deg); }}
 
-/* ─────────────────────────────────────────────────────────────────
-   DATA TABLE
-   ───────────────────────────────────────────────────────────────── */
-
-.table-section {{
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    margin-bottom: var(--space-5);
-    transition: all 0.3s ease;
+.setups-body {{
+    border-top: 1px solid var(--glass-border);
 }}
 
-.table-section:hover {{
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+.setup-row {{
+    display: grid;
+    grid-template-columns: 1fr 2fr repeat(5, 1fr);
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-5);
+    border-bottom: 1px solid var(--glass-border);
+    align-items: center;
+    transition: background 0.2s;
+}}
+
+.setup-row:hover {{
+    background: var(--bg-surface-2);
+}}
+
+.setup-row:last-child {{
+    border-bottom: none;
+}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TABLE SECTIONS - Collapsible Glass
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.table-section {{
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-4);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
 }}
 
 .table-header {{
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border);
+    padding: var(--space-4) var(--space-5);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background 0.2s;
 }}
 
 .table-header:hover {{
     background: var(--bg-surface-2);
 }}
 
+.table-title {{
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}}
+
 .collapse-icon {{
     transition: transform 0.3s ease;
-    color: var(--text-muted);
+    color: var(--text-tertiary);
+    font-size: 12px;
 }}
 
-.table-section.collapsed .collapse-icon {{
-    transform: rotate(-90deg);
-}}
-
-.table-title {{
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-secondary);
-}}
+.table-section.collapsed .data-table {{ display: none; }}
+.table-section.collapsed .table-content {{ display: none; }}
+.table-section.collapsed .table-header {{ border-bottom: none; }}
+.table-section.collapsed .collapse-icon {{ transform: rotate(-90deg); }}
 
 .data-table {{
     width: 100%;
@@ -2876,80 +2934,186 @@ body {{
 
 .data-table th {{
     font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
+    font-weight: 700;
     color: var(--text-tertiary);
-    padding: var(--space-3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: var(--space-3) var(--space-4);
     text-align: left;
+    border-bottom: 1px solid var(--glass-border);
     background: var(--bg-surface-2);
-    border-bottom: 1px solid var(--border);
 }}
 
 .data-table td {{
-    font-size: 12px;
-    padding: var(--space-3);
-    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--glass-border);
+    color: var(--text-secondary);
 }}
 
 .data-table tr:last-child td {{
     border-bottom: none;
 }}
 
-.data-table tr:hover {{
+.data-table tr:hover td {{
     background: var(--bg-surface-2);
 }}
 
-.table-section.collapsed .data-table {{ display: none; }}
-.table-section.collapsed .table-content {{ display: none; }}
-.table-section.collapsed .table-header {{ border-bottom: none; }}
-.table-section.collapsed .collapse-icon {{ transform: rotate(-90deg); }}
+/* ═══════════════════════════════════════════════════════════════════════════
+   RULE WARNINGS - Alert Banners
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ─────────────────────────────────────────────────────────────────
-   FOOTER
-   ───────────────────────────────────────────────────────────────── */
+.rule-warning {{
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--space-3);
+    border: 1px solid;
+    animation: slide-up 0.3s ease-out;
+}}
+
+.rule-warning.danger {{
+    background: var(--danger-soft);
+    border-color: var(--danger-muted);
+}}
+
+.rule-warning.warning {{
+    background: var(--warning-soft);
+    border-color: var(--warning);
+}}
+
+.rule-warning-icon {{
+    font-size: 18px;
+}}
+
+.rule-warning-text {{
+    font-size: 13px;
+}}
+
+.rule-warning-text strong {{
+    color: var(--text-primary);
+    font-weight: 700;
+}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FOOTER - Minimal, Elegant
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 .footer {{
-    text-align: center;
-    padding: var(--space-5);
-    border-top: 1px solid var(--border);
-    margin-top: var(--space-6);
+    margin-top: var(--space-12);
+    padding: var(--space-6) 0;
+    border-top: 1px solid var(--glass-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }}
 
 .footer-brand {{
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: var(--space-1);
+    font-size: 14px;
+    font-weight: 700;
+    background: var(--gradient-premium);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }}
 
 .footer-meta {{
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-tertiary);
 }}
 
-/* ─────────────────────────────────────────────────────────────────
-   UTILITIES
-   ───────────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   UTILITY CLASSES
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.text-success {{ color: var(--success) !important; }}
+.text-danger {{ color: var(--danger) !important; }}
+.text-warning {{ color: var(--warning) !important; }}
+.text-info {{ color: var(--info) !important; }}
+.text-muted {{ color: var(--text-tertiary) !important; }}
 
 .mono {{ font-family: var(--font-mono); }}
-.text-success {{ color: var(--success); }}
-.text-danger {{ color: var(--danger); }}
-.text-warning {{ color: var(--warning); }}
-.text-muted {{ color: var(--text-tertiary); }}
 
+.badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+
+.badge-success {{
+    background: var(--success-soft);
+    color: var(--success);
+    border: 1px solid var(--success-muted);
+}}
+
+.badge-danger {{
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid var(--danger-muted);
+}}
+
+.badge-warning {{
+    background: var(--warning-soft);
+    color: var(--warning);
+}}
+
+.badge-neutral {{
+    background: var(--bg-surface-3);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1200px) {{
+    .indicators-grid {{
+        grid-template-columns: repeat(2, 1fr);
+    }}
+    .signal-stats {{
+        grid-template-columns: repeat(2, 1fr);
+    }}
+}}
+
+@media (max-width: 768px) {{
+    .dashboard-container {{
+        padding: var(--space-4);
+    }}
+    .header {{
+        flex-direction: column;
+        gap: var(--space-4);
+        text-align: center;
+    }}
+    .indicators-grid {{
+        grid-template-columns: 1fr;
+    }}
+    .signal-direction {{
+        font-size: 48px;
+    }}
+    .signal-stats {{
+        grid-template-columns: 1fr;
+    }}
+}}
 </style>
 </head>
 <body>
-<div class="dashboard">
+<div class="dashboard-container">
 
-<!-- HEADER -->
 <header class="header">
-    <div class="logo">
-        <div class="logo-mark">SPX</div>
-        <div class="logo-text">
-            <div class="logo-title">SPX Prophet</div>
-            <div class="logo-subtitle">Where Structure Becomes Foresight</div>
+    <div class="logo-section">
+        <span class="logo-icon">📈</span>
+        <div>
+            <div class="logo-text">SPX Prophet</div>
+            <div class="logo-subtitle">WHERE STRUCTURE BECOMES FORESIGHT</div>
         </div>
     </div>
     <div class="header-meta">
@@ -3422,21 +3586,18 @@ body {{
                 </div>
             </div>'''
         
-        # Determine glow class based on direction
-        glow_class = "glow-green" if trade_direction == "CALLS" else "glow-red"
-        
         html += f'''
 <!-- YOUR TRADE - PRIMARY ACTION -->
-<div class="{glow_class}" style="background:{trade_bg};border:2px solid {trade_color};border-radius:var(--radius-xl);padding:var(--space-5);margin-bottom:var(--space-4);">
+<div style="background:{trade_bg};border:2px solid {trade_color};border-radius:var(--radius-xl);padding:var(--space-5);margin-bottom:var(--space-4);box-shadow:0 4px 20px rgba(0,0,0,0.2);">
     <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3);">
-        <div style="width:56px;height:56px;background:{trade_color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px;color:white;font-weight:700;box-shadow:0 4px 20px {trade_color}40;">{trade_icon}</div>
+        <div style="width:48px;height:48px;background:{trade_color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;color:white;font-weight:700;">{trade_icon}</div>
         <div>
-            <div style="font-size:11px;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase;">Your Trade</div>
-            <div style="font-size:36px;font-weight:800;color:{trade_color};letter-spacing:-1px;">{trade_direction}</div>
+            <div style="font-size:12px;color:var(--text-muted);letter-spacing:1px;">YOUR TRADE</div>
+            <div style="font-size:28px;font-weight:700;color:{trade_color};">{trade_direction}</div>
         </div>
         <div style="margin-left:auto;text-align:right;">
-            <div style="font-size:10px;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;">Entry Level</div>
-            <div style="font-size:40px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);letter-spacing:-2px;">{trade_entry_spx:,.0f}</div>
+            <div style="font-size:11px;color:var(--text-muted);">ENTRY LEVEL</div>
+            <div style="font-size:32px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{trade_entry_spx:,.0f}</div>
             <div style="font-size:12px;color:var(--text-secondary);">{confluence_text}</div>
         </div>
     </div>
@@ -4173,7 +4334,7 @@ body {{
     html += f'''
 <!-- FOOTER -->
 <footer class="footer">
-    <div class="footer-brand">SPX Prophet v9.0 — Legendary Edition</div>
+    <div class="footer-brand">SPX Prophet v9.0</div>
     <div class="footer-meta">Where Structure Becomes Foresight | {trading_date.strftime("%B %d, %Y")}</div>
 </footer>
 
@@ -4236,7 +4397,6 @@ def main():
         'close_price': 0.0, 
         'trading_date': None, 
         'last_refresh': None,
-        'overnight_spx': 0.0,  # Current SPX/ES price for proximity analysis
         # Day Structure - Session pivots for trendlines
         'asia_high': 0.0, 'asia_high_time': "21:00", 
         'asia_low': 0.0, 'asia_low_time': "23:00",
@@ -4351,68 +4511,6 @@ def main():
         
         st.divider()
         
-        # OVERNIGHT SPX PRICE INPUT
-        st.markdown("### 📍 Overnight SPX Price")
-        st.caption("Enter current SPX/ES price for proximity analysis")
-        
-        # Initialize session state for overnight price
-        if "overnight_spx" not in st.session_state:
-            st.session_state.overnight_spx = 0.0
-        
-        st.session_state.overnight_spx = st.number_input(
-            "Current SPX Price", 
-            value=st.session_state.overnight_spx, 
-            step=1.0, 
-            format="%.2f",
-            help="Enter the current overnight SPX futures price to see distance to entries"
-        )
-        
-        if st.session_state.overnight_spx > 0:
-            st.success(f"📊 Price tracking: {st.session_state.overnight_spx:,.2f}")
-        else:
-            st.caption("💡 Optional: Shows distance to entry rails")
-        
-        # STRUCTURE BROKEN CHECKBOXES - Direction-specific (Prior session only)
-        broken_keys = [
-            "broken_prior_high_calls", "broken_prior_high_puts",
-            "broken_prior_low_calls", "broken_prior_low_puts", 
-            "broken_prior_close_calls", "broken_prior_close_puts"
-        ]
-        for key in broken_keys:
-            if key not in st.session_state:
-                st.session_state[key] = False
-        
-        st.caption("🚫 Mark broken (30-min close through rail):")
-        st.caption("↓ = Descending (CALLS) | ↑ = Ascending (PUTS)")
-        
-        # Prior High
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.markdown("<small style='color:#888;'>Prior High</small>", unsafe_allow_html=True)
-        with col2:
-            st.session_state.broken_prior_high_calls = st.checkbox("↓", value=st.session_state.broken_prior_high_calls, key="chk_ph_c", help="CALLS entry broken")
-        with col3:
-            st.session_state.broken_prior_high_puts = st.checkbox("↑", value=st.session_state.broken_prior_high_puts, key="chk_ph_p", help="PUTS entry broken")
-        
-        # Prior Low
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.markdown("<small style='color:#888;'>Prior Low</small>", unsafe_allow_html=True)
-        with col2:
-            st.session_state.broken_prior_low_calls = st.checkbox("↓", value=st.session_state.broken_prior_low_calls, key="chk_pl_c", help="CALLS entry broken")
-        with col3:
-            st.session_state.broken_prior_low_puts = st.checkbox("↑", value=st.session_state.broken_prior_low_puts, key="chk_pl_p", help="PUTS entry broken")
-        
-        # Prior Close
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            st.markdown("<small style='color:#888;'>Prior Close</small>", unsafe_allow_html=True)
-        with col2:
-            st.session_state.broken_prior_close_calls = st.checkbox("↓", value=st.session_state.broken_prior_close_calls, key="chk_pc_c", help="CALLS entry broken")
-        with col3:
-            st.session_state.broken_prior_close_puts = st.checkbox("↑", value=st.session_state.broken_prior_close_puts, key="chk_pc_p", help="PUTS entry broken")
-        
-        st.divider()
         st.markdown("### ⏰ Entry Time")
         st.caption("Target entry time for projections")
         st.session_state.entry_time_mins = st.slider(
@@ -4668,12 +4766,6 @@ def main():
     spx_price = polygon_get_index_price("I:SPX") or prior_session.get("close", 0)
     is_after_cutoff = (trading_date == now.date() and now.time() > CUTOFF_TIME) or is_historical
     
-    # Analyze price proximity if overnight SPX price provided
-    overnight_price = st.session_state.get("overnight_spx", 0.0)
-    price_proximity = None
-    if overnight_price > 0 and cones:
-        price_proximity = analyze_price_proximity(overnight_price, cones, vix_zone)
-    
     # Calculate MA Bias using ES futures from Yahoo Finance (23 hrs/day = more bars)
     ma_bias = fetch_es_ma_bias()
     
@@ -4690,15 +4782,11 @@ def main():
         if confluence:
             conf_emoji = "✅" if confluence.is_aligned else "⚠️" if confluence.signal_strength == "CONFLICT" else "◐"
             st.caption(f"{conf_emoji} Confluence: {confluence.signal_strength}")
-        if price_proximity and price_proximity.position != "UNKNOWN":
-            st.caption(f"📍 {price_proximity.position_detail}")
     
     # Pass VIX and entry time for accurate option pricing
     vix_for_pricing = st.session_state.vix_current if st.session_state.vix_current > 0 else 16
     mins_after_open = st.session_state.entry_time_mins
-    
-    # Use overnight price for setup status if provided, otherwise use SPX from Polygon
-    price_for_setups = overnight_price if overnight_price > 0 else spx_price
+    price_for_setups = spx_price  # Use current SPX price from Polygon
     
     # Get broken structure states (manually marked) - direction-specific
     broken_structures = {
@@ -4754,7 +4842,7 @@ def main():
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, price_proximity, day_structure)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, None, day_structure)
     components.html(html, height=4500, scrolling=True)
 
 if __name__ == "__main__":
