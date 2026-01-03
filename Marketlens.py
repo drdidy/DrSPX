@@ -1811,12 +1811,20 @@ def generate_day_structure_setups(day_structure, current_price, vix_current=16, 
     # ═══════════════════════════════════════════════════════════════════════
     # DAY STRUCTURE PUT SETUP  
     # Normal: Entry at High Line (resistance) | Target at Low Line
-    # If Low Line broken: This becomes the FLIP trade - THE BIG ONE
+    # If Low Line broken: FLIP trade - Entry at Low Line (broken support = resistance)
     # If High Line broken: This setup is INVALIDATED - don't show it
     # ═══════════════════════════════════════════════════════════════════════
     
     if not high_line_broken:  # Only show PUT if High Line is intact
-        entry_p = high_line
+        
+        # ENTRY POINT LOGIC:
+        if low_line_broken:
+            # FLIP: Entry at LOW LINE (broken support becomes resistance on retest)
+            entry_p = low_line
+        else:
+            # Normal: Entry at HIGH LINE (resistance)
+            entry_p = high_line
+        
         dist_p = abs(current_price - entry_p)
         
         # Use Day Structure contract pricing if available, else estimate
@@ -1830,27 +1838,19 @@ def generate_day_structure_setups(day_structure, current_price, vix_current=16, 
         
         # STRIKE LOGIC FOR PUTS:
         # ═══════════════════════════════════════════════════════════════════
-        # CRITICAL FIX: When Low Line is BROKEN, this is the FLIP trade
-        # Strike should be AT or NEAR the LONDON LOW (the actual break level)
-        # Example: London Low 6874.9 → Strike = 6875P or 6880P
-        # This way, as price drops through, the contract goes deep ITM
+        # When Low Line is BROKEN: Strike = LONDON LOW (the break level)
+        # Normal: Strike = Entry + 10-15 (slightly ITM at entry)
         # ═══════════════════════════════════════════════════════════════════
         
         if low_line_broken:
-            # FLIP TRADE: Strike = London Low (where support actually was)
+            # FLIP TRADE: Strike = London Low (where support broke)
             break_level = day_structure.london_low if day_structure.london_low > 0 else low_line
             put_strike = int(round(break_level / 5) * 5)
-            # If premium is tiny, we're already deep OTM - adjust strike higher
-            if put_premium > 0 and put_premium < 1.0:
-                # Contract too cheap, strike too far OTM
-                # Move strike closer to current price
-                put_strike = int(round(current_price / 5) * 5) - 5
         elif day_structure.put_strike > 0:
             put_strike = day_structure.put_strike
         else:
-            # Normal: Strike = Entry + 15 to 20 (slightly ITM at entry)
-            # As price falls to Low Line target, contract goes deeper ITM
-            put_strike = int((entry_p // 5) * 5) + 15
+            # Normal: Strike = Entry + 10-15 (slightly ITM at entry)
+            put_strike = int((entry_p // 5) * 5) + 10
         
         # Determine status
         if is_after_cutoff:
@@ -1872,6 +1872,15 @@ def generate_day_structure_setups(day_structure, current_price, vix_current=16, 
             in_sweet_spot=(PREMIUM_SWEET_LOW <= put_premium <= PREMIUM_SWEET_HIGH) if put_premium > 0 else False
         )
         
+        # Calculate target based on whether it's a FLIP or normal trade
+        if low_line_broken:
+            # FLIP: Target is extension below (Asia Low or structure width down)
+            asia_low = day_structure.asia_low if day_structure.asia_low > 0 else low_line - structure_width
+            target_100 = min(asia_low, low_line - structure_width)  # Whichever is lower
+        else:
+            # Normal: Target is Low Line
+            target_100 = low_line
+        
         setups.append(TradeSetup(
             direction="PUTS",
             cone_name="Day Structure" + (" ⚡FLIP" if low_line_broken else ""),
@@ -1881,7 +1890,7 @@ def generate_day_structure_setups(day_structure, current_price, vix_current=16, 
             target_25=round(entry_p - structure_width * 0.25, 2),
             target_50=round(entry_p - structure_width * 0.50, 2),
             target_75=round(entry_p - structure_width * 0.75, 2),
-            target_100=round(low_line, 2),
+            target_100=round(target_100, 2),
             distance=round(dist_p, 1),
             option=put_option,
             profit_25=round(structure_width * 0.25 * delta_p * 100, 0),
@@ -3755,14 +3764,18 @@ body {{
             # This is bearish - support broke, expect continuation down
             has_flip_signal = True
             trade_direction = "PUTS"  # Override to PUTS regardless of VIX/MA
-            trade_entry_spx = day_structure.high_line_at_entry  # Enter at high line
-            trade_target_spx = day_structure.low_line_at_entry  # Target = broken low
-            trade_ds_line = "High Line + Day Structure"
+            # FLIP ENTRY LOGIC:
+            # When Low Line BREAKS, price is BELOW the structure
+            # Entry = Low Line (broken support, now resistance on retest)
+            # Target = Further down (could be Asia Low or extension)
+            # This catches the continuation move after the break
+            trade_entry_spx = day_structure.low_line_at_entry  # Enter at broken low line (retest)
+            trade_target_spx = day_structure.low_line_at_entry - (day_structure.high_line_at_entry - day_structure.low_line_at_entry)  # Target = extension down
+            trade_ds_line = "Low Line (Broken)"
             trade_cone = "Day Structure ⚡FLIP"
             
-            # CRITICAL FIX: Strike = The LONDON LOW (where support actually was)
-            # NOT the projected line at entry time
-            # Example: London Low 6874.9 → Strike = 6875P or 6880P
+            # STRIKE = The LONDON LOW (where support broke)
+            # Example: London Low 6874.9 → Strike = 6875P
             break_level = day_structure.london_low if day_structure.london_low > 0 else day_structure.low_line_at_entry
             trade_strike = int(round(break_level / 5) * 5)
             trade_contract = f"{trade_strike}P"
@@ -3773,23 +3786,25 @@ body {{
             
             trade_stop = trade_entry_spx + dynamic_stop
             
-            # Show what to watch for
+            # Show what to watch for (CALL price returning = confirmation to enter PUTS)
             if day_structure.call_price_at_entry > 0:
-                flip_watch_contract = f"{trade_strike - 5}C"
+                flip_watch_contract = f"{trade_strike}C"
                 flip_watch_price = day_structure.call_price_at_entry
                 flip_enter_direction = "PUTS"  # When CALL returns to this price, enter PUTS
         
         elif day_structure.high_line_broken:
             # HIGH LINE BROKEN = FLIP TO CALLS
-            # This is bullish - resistance broke, expect continuation up
+            # When High Line BREAKS, price is ABOVE the structure
+            # Entry = High Line (broken resistance, now support on retest)
+            # Target = Further up (extension)
             has_flip_signal = True
             trade_direction = "CALLS"  # Override to CALLS regardless of VIX/MA
-            trade_entry_spx = day_structure.low_line_at_entry  # Enter at low line
-            trade_target_spx = day_structure.high_line_at_entry  # Target = broken high
-            trade_ds_line = "Low Line + Day Structure"
+            trade_entry_spx = day_structure.high_line_at_entry  # Enter at broken high line (retest)
+            trade_target_spx = day_structure.high_line_at_entry + (day_structure.high_line_at_entry - day_structure.low_line_at_entry)  # Target = extension up
+            trade_ds_line = "High Line (Broken)"
             trade_cone = "Day Structure ⚡FLIP"
             
-            # CRITICAL FIX: Strike = The LONDON HIGH (where resistance actually was)
+            # STRIKE = The LONDON HIGH (where resistance broke)
             break_level = day_structure.london_high if day_structure.london_high > 0 else day_structure.high_line_at_entry
             trade_strike = int(round(break_level / 5) * 5)
             trade_contract = f"{trade_strike}C"
