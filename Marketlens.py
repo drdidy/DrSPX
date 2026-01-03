@@ -1647,6 +1647,157 @@ def generate_setups(cones, current_price, vix_current=16, mins_after_open=30, is
         ))
     return setups
 
+def generate_day_structure_setups(day_structure, current_price, vix_current=16, mins_after_open=30, is_after_cutoff=False, dynamic_stop=6.0):
+    """Generate CALL and PUT setups from Day Structure lines
+    
+    DAY STRUCTURE SETUP:
+    - CALL: Entry at Low Line, Target at High Line
+    - PUT: Entry at High Line, Target at Low Line
+    - Strike = Target - 20 (20 ITM at exit)
+    - Uses Day Structure contract pricing if available
+    """
+    setups = []
+    
+    if not day_structure:
+        return setups
+    
+    # Both lines required for proper setup
+    if not (day_structure.high_line_valid and day_structure.low_line_valid):
+        return setups
+    
+    low_line = day_structure.low_line_at_entry
+    high_line = day_structure.high_line_at_entry
+    
+    if low_line <= 0 or high_line <= 0:
+        return setups
+    
+    # Structure width = potential profit
+    structure_width = abs(high_line - low_line)
+    
+    if structure_width < 5:  # Too narrow
+        return setups
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # DAY STRUCTURE CALL SETUP
+    # Entry: Low Line (support) | Target: High Line (resistance)
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    entry_c = low_line
+    dist_c = abs(current_price - entry_c)
+    
+    # Use Day Structure contract pricing if available, else estimate
+    if day_structure.call_price_at_entry > 0:
+        call_premium = day_structure.call_price_at_entry
+        # Estimate delta from premium (rough: premium / 10 for 0DTE)
+        delta_c = min(0.50, max(0.15, call_premium / 12))
+    else:
+        opt_c = get_option_data_for_entry(entry_c, "C", vix_current, mins_after_open)
+        call_premium = opt_c.spx_price_est if opt_c else 0
+        delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
+    
+    # Strike = Target - 20 (will be 20 ITM at High Line)
+    call_strike = day_structure.call_strike if day_structure.call_strike > 0 else int(round(high_line / 5) * 5) - 20
+    
+    # Determine status
+    if is_after_cutoff:
+        calls_status = "GREY"
+    elif day_structure.low_line_broken:
+        calls_status = "BROKEN"
+    elif dist_c <= RAIL_PROXIMITY:
+        calls_status = "ACTIVE"
+    else:
+        calls_status = "WAIT"
+    
+    # Create option data for display
+    call_option = OptionData(
+        spx_strike=call_strike,
+        spx_price_est=call_premium,
+        spy_delta=delta_c,
+        otm_distance=abs(entry_c - call_strike),
+        in_sweet_spot=(PREMIUM_SWEET_LOW <= call_premium <= PREMIUM_SWEET_HIGH) if call_premium > 0 else False
+    )
+    
+    setups.append(TradeSetup(
+        direction="CALLS",
+        cone_name="Day Structure",
+        cone_width=structure_width,
+        entry=round(entry_c, 2),
+        stop=round(entry_c - dynamic_stop, 2),
+        target_25=round(entry_c + structure_width * 0.25, 2),
+        target_50=round(entry_c + structure_width * 0.50, 2),
+        target_75=round(entry_c + structure_width * 0.75, 2),
+        target_100=round(high_line, 2),  # Full target = High Line
+        distance=round(dist_c, 1),
+        option=call_option,
+        profit_25=round(structure_width * 0.25 * delta_c * 100, 0),
+        profit_50=round(structure_width * 0.50 * delta_c * 100, 0),
+        profit_75=round(structure_width * 0.75 * delta_c * 100, 0),
+        profit_100=round(structure_width * delta_c * 100, 0),
+        risk_dollars=round(dynamic_stop * delta_c * 100, 0),
+        status=calls_status
+    ))
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # DAY STRUCTURE PUT SETUP
+    # Entry: High Line (resistance) | Target: Low Line (support)
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    entry_p = high_line
+    dist_p = abs(current_price - entry_p)
+    
+    # Use Day Structure contract pricing if available, else estimate
+    if day_structure.put_price_at_entry > 0:
+        put_premium = day_structure.put_price_at_entry
+        delta_p = min(0.50, max(0.15, put_premium / 12))
+    else:
+        opt_p = get_option_data_for_entry(entry_p, "P", vix_current, mins_after_open)
+        put_premium = opt_p.spx_price_est if opt_p else 0
+        delta_p = abs(opt_p.spy_delta) if opt_p else DELTA_IDEAL
+    
+    # Strike = Target + 20 (will be 20 ITM at Low Line)
+    put_strike = day_structure.put_strike if day_structure.put_strike > 0 else int(round(low_line / 5) * 5) + 20
+    
+    # Determine status
+    if is_after_cutoff:
+        puts_status = "GREY"
+    elif day_structure.high_line_broken:
+        puts_status = "BROKEN"
+    elif dist_p <= RAIL_PROXIMITY:
+        puts_status = "ACTIVE"
+    else:
+        puts_status = "WAIT"
+    
+    # Create option data for display
+    put_option = OptionData(
+        spx_strike=put_strike,
+        spx_price_est=put_premium,
+        spy_delta=delta_p,
+        otm_distance=abs(entry_p - put_strike),
+        in_sweet_spot=(PREMIUM_SWEET_LOW <= put_premium <= PREMIUM_SWEET_HIGH) if put_premium > 0 else False
+    )
+    
+    setups.append(TradeSetup(
+        direction="PUTS",
+        cone_name="Day Structure",
+        cone_width=structure_width,
+        entry=round(entry_p, 2),
+        stop=round(entry_p + dynamic_stop, 2),
+        target_25=round(entry_p - structure_width * 0.25, 2),
+        target_50=round(entry_p - structure_width * 0.50, 2),
+        target_75=round(entry_p - structure_width * 0.75, 2),
+        target_100=round(low_line, 2),  # Full target = Low Line
+        distance=round(dist_p, 1),
+        option=put_option,
+        profit_25=round(structure_width * 0.25 * delta_p * 100, 0),
+        profit_50=round(structure_width * 0.50 * delta_p * 100, 0),
+        profit_75=round(structure_width * 0.75 * delta_p * 100, 0),
+        profit_100=round(structure_width * delta_p * 100, 0),
+        risk_dollars=round(dynamic_stop * delta_p * 100, 0),
+        status=puts_status
+    ))
+    
+    return setups
+
 def calculate_day_score(vix_zone, cones, setups, confluence=None, market_ctx=None):
     """
     Calculate trading day score.
@@ -4976,6 +5127,20 @@ def main():
         high_line_broken=st.session_state.get("high_line_broken", False),
         low_line_broken=st.session_state.get("low_line_broken", False)
     )
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # ADD DAY STRUCTURE SETUPS (4th setup in each direction)
+    # ═══════════════════════════════════════════════════════════════════════
+    dynamic_stop = market_ctx.recommended_stop if market_ctx else STOP_LOSS_PTS
+    ds_setups = generate_day_structure_setups(
+        day_structure, 
+        price_for_setups, 
+        vix_for_pricing, 
+        mins_after_open, 
+        is_after_cutoff,
+        dynamic_stop
+    )
+    setups.extend(ds_setups)  # Add DS setups to the main setups list
     
     # Debug: Show day structure info in sidebar
     if day_structure.has_confluence:
