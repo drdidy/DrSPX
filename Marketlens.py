@@ -686,33 +686,45 @@ class SchwabAPI:
             "london_high_time": "",
             "london_low": 0.0,
             "london_low_time": "",
-            "es_spx_offset": es_spx_offset
+            "es_spx_offset": es_spx_offset,
+            "symbol_used": ""
         }
         
         try:
-            # Fetch ES futures - /ES or ES=F
-            # Try different symbol formats
-            candles = self.get_price_history(
-                symbol="/ES",
-                period_type="day",
-                period=2,  # Get 2 days to cover overnight
-                frequency_type="minute",
-                frequency=5
-            )
+            # Try multiple symbol formats for ES futures
+            # Schwab uses different formats than other brokers
+            symbols_to_try = [
+                ("/ESH25", es_spx_offset),      # ES March 2025 futures
+                ("/ESZ24", es_spx_offset),      # ES Dec 2024 futures  
+                ("/ES", es_spx_offset),         # Generic ES
+                ("$SPX", 0),                    # SPX index (no offset needed)
+                ("SPY", -485),                  # SPY ETF (need to multiply by ~10 and adjust)
+            ]
             
-            if not candles:
-                # Try alternative symbol
+            candles = None
+            actual_offset = es_spx_offset
+            symbol_used = ""
+            
+            for symbol, offset in symbols_to_try:
                 candles = self.get_price_history(
-                    symbol="ES",
+                    symbol=symbol,
                     period_type="day",
                     period=2,
                     frequency_type="minute",
                     frequency=5
                 )
+                if candles:
+                    actual_offset = offset
+                    symbol_used = symbol
+                    result["symbol_used"] = symbol
+                    break
             
             if not candles:
-                result["error"] = "Could not fetch ES data"
+                result["error"] = "Could not fetch data. Tried: /ESH25, /ES, $SPX, SPY"
                 return result
+            
+            # If SPY, convert to SPX equivalent (SPY * 10 roughly)
+            multiply_factor = 10 if symbol_used == "SPY" else 1
             
             # Parse candles into session buckets
             asia_candles = []  # 5pm - midnight CT
@@ -750,9 +762,11 @@ class SchwabAPI:
                 asia_high_candle = max(asia_candles, key=lambda c: c["high"])
                 asia_low_candle = min(asia_candles, key=lambda c: c["low"])
                 
-                result["asia_high"] = round(asia_high_candle["high"] - es_spx_offset, 2)
+                raw_high = asia_high_candle["high"] * multiply_factor
+                raw_low = asia_low_candle["low"] * multiply_factor
+                result["asia_high"] = round(raw_high - actual_offset, 2)
                 result["asia_high_time"] = asia_high_candle["time_str"]
-                result["asia_low"] = round(asia_low_candle["low"] - es_spx_offset, 2)
+                result["asia_low"] = round(raw_low - actual_offset, 2)
                 result["asia_low_time"] = asia_low_candle["time_str"]
             
             # Find London high/low
@@ -760,16 +774,18 @@ class SchwabAPI:
                 london_high_candle = max(london_candles, key=lambda c: c["high"])
                 london_low_candle = min(london_candles, key=lambda c: c["low"])
                 
-                result["london_high"] = round(london_high_candle["high"] - es_spx_offset, 2)
+                raw_high = london_high_candle["high"] * multiply_factor
+                raw_low = london_low_candle["low"] * multiply_factor
+                result["london_high"] = round(raw_high - actual_offset, 2)
                 result["london_high_time"] = london_high_candle["time_str"]
-                result["london_low"] = round(london_low_candle["low"] - es_spx_offset, 2)
+                result["london_low"] = round(raw_low - actual_offset, 2)
                 result["london_low_time"] = london_low_candle["time_str"]
             
             # Check if we got data
             if result["asia_high"] > 0 or result["london_high"] > 0:
                 result["success"] = True
             else:
-                result["error"] = "No overnight session data found"
+                result["error"] = f"No overnight data in candles from {symbol_used}"
             
             return result
             
@@ -4892,7 +4908,8 @@ def main():
                             st.session_state.london_low = ds_data["london_low"]
                             st.session_state.london_low_time = ds_data["london_low_time"]
                         
-                        st.success(f"✅ Day Structure loaded (offset: {st.session_state.es_spx_offset})")
+                        symbol_used = ds_data.get("symbol_used", "ES")
+                        st.success(f"✅ Loaded from {symbol_used}")
                         st.caption(f"Asia: {ds_data['asia_high']:.0f}/{ds_data['asia_low']:.0f} | London: {ds_data['london_high']:.0f}/{ds_data['london_low']:.0f}")
                         st.rerun()
                     else:
