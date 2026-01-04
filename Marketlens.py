@@ -4774,7 +4774,7 @@ body {{
         
         <div style="margin-bottom:var(--space-4);">
             <h3 style="color:var(--accent);margin-bottom:var(--space-2);font-size:15px;">PART 3: DAY STRUCTURE</h3>
-            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.1:</strong> Build Day Structure from 5pm-7am CT (Asia High/Low → London High/Low).</p>
+            <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.1:</strong> Build Day Structure from 5pm-6:30am CT (Asia High/Low → London High/Low). Cutoff before US economic releases.</p>
             <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.2:</strong> <span style="color:var(--warning);">BOTH</span> lines required for proper strike calculation.</p>
             <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.3:</strong> Low Line = CALL buy zone (cheapest). High Line = PUT buy zone (cheapest).</p>
             <p style="color:var(--text-secondary);margin-bottom:var(--space-2);"><strong style="color:var(--text-primary);">Rule 3.4:</strong> Break & Retest:</p>
@@ -4888,8 +4888,8 @@ def main():
         # Day Structure - Session pivots for trendlines
         'asia_high': 0.0, 'asia_high_time': "21:00", 
         'asia_low': 0.0, 'asia_low_time': "23:00",
-        'london_high': 0.0, 'london_high_time': "03:00", 
-        'london_low': 0.0, 'london_low_time': "05:00",
+        'london_high': 0.0, 'london_high_time': "05:00", 
+        'london_low': 0.0, 'london_low_time': "06:00",
         # Contract Slopes - PUT (tracks high line)
         'put_price_asia': 0.0,  # PUT price at Asia High
         'put_price_london': 0.0,  # PUT price at London High
@@ -5131,7 +5131,7 @@ def main():
         
         # DAY STRUCTURE - INTEGRATED with Contract Pricing
         st.markdown("### 📐 Day Structure")
-        st.caption("Session trendlines (5pm-7am CT)")
+        st.caption("Session trendlines (5pm-6:30am CT)")
         
         with st.expander("HIGH LINE (PUTS)", expanded=False):
             st.markdown("**SPX Price Points**")
