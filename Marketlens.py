@@ -4059,9 +4059,14 @@ body {{
                 position_text = f"IN CHANNEL ({pct_through:.0f}% from bottom)"
                 position_color = "var(--success)"
         
-        # Call contract info at each level
-        call_at_low = f"${day_structure.call_price_at_entry:.2f}" if day_structure.call_price_at_entry > 0 else "—"
-        put_at_high = f"${day_structure.put_price_at_entry:.2f}" if day_structure.put_price_at_entry > 0 else "—"
+        # Contract info - USE LONDON PRICES (most recent known), not projections
+        # The projected prices are unreliable due to 0DTE theta/gamma dynamics
+        call_at_low = f"${day_structure.call_price_london:.2f}" if day_structure.call_price_london > 0 else (f"${day_structure.call_price_asia:.2f}" if day_structure.call_price_asia > 0 else "—")
+        put_at_high = f"${day_structure.put_price_london:.2f}" if day_structure.put_price_london > 0 else (f"${day_structure.put_price_asia:.2f}" if day_structure.put_price_asia > 0 else "—")
+        
+        # Show broken status
+        low_broken_badge = "<div style='font-size:10px;color:var(--warning);font-weight:600;margin-top:4px;'>⚡ BROKEN</div>" if day_structure.low_line_broken else ""
+        high_broken_badge = "<div style='font-size:10px;color:var(--warning);font-weight:600;margin-top:4px;'>⚡ BROKEN</div>" if day_structure.high_line_broken else ""
         
         html += f'''
 <!-- DAY STRUCTURE ZONES -->
@@ -4075,11 +4080,11 @@ body {{
     <div style="display:flex;justify-content:space-between;align-items:stretch;gap:var(--space-3);">
         <!-- LOW LINE = CALL BUY ZONE -->
         {"" if calls_entry == 0 else f'''
-        <div style="flex:1;padding:var(--space-3);background:var(--success-soft);border-radius:var(--radius-sm);border-left:3px solid var(--success);">
+        <div style="flex:1;padding:var(--space-3);background:var(--success-soft);border-radius:var(--radius-sm);border-left:3px solid var(--success);{"opacity:0.5;" if day_structure.low_line_broken else ""}">
             <div style="font-size:10px;color:var(--success);font-weight:600;margin-bottom:4px;">📥 CALL BUY ZONE</div>
             <div style="font-size:20px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{calls_entry:,.0f}</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">CALL cheapest here: {call_at_low}</div>
-            <div style="font-size:11px;color:var(--text-muted);">PUT exhausted here</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">CALL @ London: {call_at_low}</div>
+            {low_broken_badge}
             <div style="font-size:12px;font-weight:600;color:{"var(--success)" if abs(calls_dist) <= 15 else "var(--text-secondary)"};margin-top:8px;">{calls_dist:+.0f} pts away</div>
         </div>
         '''}
@@ -4093,11 +4098,11 @@ body {{
         
         <!-- HIGH LINE = PUT BUY ZONE -->
         {"" if puts_entry == 0 else f'''
-        <div style="flex:1;padding:var(--space-3);background:var(--danger-soft);border-radius:var(--radius-sm);border-right:3px solid var(--danger);">
+        <div style="flex:1;padding:var(--space-3);background:var(--danger-soft);border-radius:var(--radius-sm);border-right:3px solid var(--danger);{"opacity:0.5;" if day_structure.high_line_broken else ""}">
             <div style="font-size:10px;color:var(--danger);font-weight:600;margin-bottom:4px;">📥 PUT BUY ZONE</div>
             <div style="font-size:20px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{puts_entry:,.0f}</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">PUT cheapest here: {put_at_high}</div>
-            <div style="font-size:11px;color:var(--text-muted);">CALL exhausted here</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">PUT @ London: {put_at_high}</div>
+            {high_broken_badge}
             <div style="font-size:12px;font-weight:600;color:{"var(--success)" if abs(puts_dist) <= 15 else "var(--text-secondary)"};margin-top:8px;">{puts_dist:+.0f} pts away</div>
         </div>
         '''}
@@ -4105,138 +4110,84 @@ body {{
 </div>
 '''
 
-    # DAY STRUCTURE SECTION
-    if day_structure and (day_structure.high_line_valid or day_structure.low_line_valid):
-        ds_bg = "linear-gradient(135deg, rgba(139,92,246,0.15) 0%, rgba(139,92,246,0.05) 100%)" if day_structure.has_confluence else "var(--bg-surface)"
-        ds_border = "var(--accent)" if day_structure.has_confluence else "var(--border)"
+    # DAY STRUCTURE SECTION - Simplified to just show the trade setup
+    # REMOVED: Complex "Day Structure Details" that showed confusing projections
+    # The Day Structure Zones above already shows the key info
+    
+    # Show FLIP signal prominently if applicable
+    if day_structure and day_structure.low_line_broken and day_structure.high_line_valid and day_structure.low_line_valid:
+        # Low line broken = FLIP to PUTS
+        flip_strike = int(round(day_structure.london_low / 5) * 5) if day_structure.london_low > 0 else int(round(day_structure.low_line_at_entry / 5) * 5)
+        # Use London PUT price as reference (most recent known price)
+        put_ref_price = day_structure.put_price_london if day_structure.put_price_london > 0 else day_structure.put_price_asia
         
-        # Build HIGH LINE info (for PUTS)
-        high_line_html = ""
-        if day_structure.high_line_valid:
-            h_dir_icon = "↗" if day_structure.high_line_direction == "ASCENDING" else "↘" if day_structure.high_line_direction == "DESCENDING" else "→"
-            h_confl = f"<span style='color:var(--success);font-weight:600;'> ✓ {day_structure.high_confluence_cone}</span>" if day_structure.high_confluence_cone else ""
-            h_broken = "<span style='color:var(--warning);font-weight:600;'> ⚡BROKEN</span>" if day_structure.high_line_broken else ""
-            
-            # Contract pricing for PUTS
-            put_price_html = ""
-            if day_structure.put_price_at_entry > 0:
-                put_price_html = f'''
-                <div style="margin-top:8px;padding:8px;background:var(--bg-surface);border-radius:4px;border-left:3px solid var(--danger);">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <div>
-                            <span style="color:var(--danger);font-weight:600;">{day_structure.put_strike}P</span>
-                            <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">20 ITM @ target</span>
-                        </div>
-                        <div style="text-align:right;">
-                            <span style="font-family:var(--font-mono);font-weight:700;color:var(--text-primary);font-size:16px;">${day_structure.put_price_at_entry:.2f}</span>
-                            <span style="color:var(--text-muted);font-size:10px;display:block;">{day_structure.put_slope_per_hour:+.2f}/hr</span>
-                        </div>
-                    </div>
-                </div>'''
-            
-            # Flip signal if broken
-            flip_html = ""
-            if day_structure.high_line_broken and day_structure.put_price_at_entry > 0:
-                flip_html = f'''
-                <div style="margin-top:8px;padding:8px;background:var(--warning-soft);border-radius:4px;">
-                    <div style="color:var(--warning);font-size:11px;font-weight:600;">⚡ FLIP SIGNAL</div>
-                    <div style="color:var(--text-primary);font-size:12px;margin-top:4px;">
-                        Watch {day_structure.put_strike}P return to <strong>${day_structure.put_price_at_entry:.2f}</strong> → Enter CALLS
-                    </div>
-                </div>'''
-            
-            high_line_html = f'''
-            <div style="padding:var(--space-3);background:var(--bg-elevated);border-radius:var(--radius-sm);margin-bottom:var(--space-2);border-left:3px solid var(--danger);">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div>
-                        <span style="color:var(--danger);font-weight:700;font-size:14px;">{h_dir_icon} HIGH LINE</span>
-                        <span style="color:var(--text-secondary);font-size:11px;margin-left:8px;">PUTS</span>
-                        {h_confl}{h_broken}
-                    </div>
-                    <div style="text-align:right;">
-                        <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);font-size:16px;">{day_structure.high_line_at_entry:,.0f}</span>
-                        <span style="color:var(--text-muted);font-size:10px;display:block;">SPX @ entry</span>
-                    </div>
-                </div>
-                {put_price_html}
-                {flip_html}
-            </div>'''
-        
-        # Build LOW LINE info (for CALLS)
-        low_line_html = ""
-        if day_structure.low_line_valid:
-            l_dir_icon = "↗" if day_structure.low_line_direction == "ASCENDING" else "↘" if day_structure.low_line_direction == "DESCENDING" else "→"
-            l_confl = f"<span style='color:var(--success);font-weight:600;'> ✓ {day_structure.low_confluence_cone}</span>" if day_structure.low_confluence_cone else ""
-            l_broken = "<span style='color:var(--warning);font-weight:600;'> ⚡BROKEN</span>" if day_structure.low_line_broken else ""
-            
-            # Contract pricing for CALLS
-            call_price_html = ""
-            if day_structure.call_price_at_entry > 0:
-                call_price_html = f'''
-                <div style="margin-top:8px;padding:8px;background:var(--bg-surface);border-radius:4px;border-left:3px solid var(--success);">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <div>
-                            <span style="color:var(--success);font-weight:600;">{day_structure.call_strike}C</span>
-                            <span style="color:var(--text-muted);font-size:11px;margin-left:4px;">20 ITM @ target</span>
-                        </div>
-                        <div style="text-align:right;">
-                            <span style="font-family:var(--font-mono);font-weight:700;color:var(--text-primary);font-size:16px;">${day_structure.call_price_at_entry:.2f}</span>
-                            <span style="color:var(--text-muted);font-size:10px;display:block;">{day_structure.call_slope_per_hour:+.2f}/hr</span>
-                        </div>
-                    </div>
-                </div>'''
-            
-            # Flip signal if broken
-            flip_html = ""
-            if day_structure.low_line_broken and day_structure.call_price_at_entry > 0:
-                flip_html = f'''
-                <div style="margin-top:8px;padding:8px;background:var(--warning-soft);border-radius:4px;">
-                    <div style="color:var(--warning);font-size:11px;font-weight:600;">⚡ FLIP SIGNAL</div>
-                    <div style="color:var(--text-primary);font-size:12px;margin-top:4px;">
-                        Watch {day_structure.call_strike}C return to <strong>${day_structure.call_price_at_entry:.2f}</strong> → Enter PUTS
-                    </div>
-                </div>'''
-            
-            low_line_html = f'''
-            <div style="padding:var(--space-3);background:var(--bg-elevated);border-radius:var(--radius-sm);margin-bottom:var(--space-2);border-left:3px solid var(--success);">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div>
-                        <span style="color:var(--success);font-weight:700;font-size:14px;">{l_dir_icon} LOW LINE</span>
-                        <span style="color:var(--text-secondary);font-size:11px;margin-left:8px;">CALLS</span>
-                        {l_confl}{l_broken}
-                    </div>
-                    <div style="text-align:right;">
-                        <span style="font-family:var(--font-mono);font-weight:600;color:var(--text-primary);font-size:16px;">{day_structure.low_line_at_entry:,.0f}</span>
-                        <span style="color:var(--text-muted);font-size:10px;display:block;">SPX @ entry</span>
-                    </div>
-                </div>
-                {call_price_html}
-                {flip_html}
-            </div>'''
-        
-        confluence_badge = ""
-        if day_structure.has_confluence:
-            confluence_badge = f'''
-            <div style="background:var(--success-soft);color:var(--success);padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);font-size:12px;font-weight:600;margin-top:var(--space-2);">
-                ✨ CONFLUENCE: {day_structure.best_confluence_detail}
-            </div>'''
-        
-        # Simplified Day Structure - just shows both lines with contract info
         html += f'''
-<!-- DAY STRUCTURE DETAILS (Collapsible) -->
-<div class="table-section collapsed" style="margin-bottom:var(--space-4);">
-    <div class="table-header" style="cursor:pointer;padding:var(--space-3);background:{ds_bg};border:1px solid {ds_border};border-radius:var(--radius-lg);">
-        <div style="display:flex;align-items:center;gap:var(--space-2);">
-            <span style="font-size:16px;">📐</span>
-            <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Day Structure Details</span>
-            <span style="font-size:11px;color:var(--text-secondary);margin-left:8px;">{day_structure.structure_shape}</span>
-        </div>
-        <span class="table-chevron" style="color:var(--text-muted);">▾</span>
+<!-- FLIP SIGNAL - Low Line Broken -->
+<div style="background:linear-gradient(135deg, rgba(234,179,8,0.2) 0%, rgba(234,179,8,0.05) 100%);border:2px solid var(--warning);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
+        <span style="font-size:20px;">⚡</span>
+        <span style="font-size:16px;font-weight:700;color:var(--warning);">FLIP SIGNAL - LOW LINE BROKEN</span>
     </div>
-    <div class="table-body" style="padding:var(--space-3);background:var(--bg-surface);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-lg) var(--radius-lg);">
-        {high_line_html}
-        {low_line_html}
-        {confluence_badge}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);">
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">DIRECTION</div>
+            <div style="font-size:24px;font-weight:700;color:var(--danger);">PUTS</div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">STRIKE</div>
+            <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{flip_strike}P</div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">ENTRY LEVEL</div>
+            <div style="font-size:18px;font-weight:600;color:var(--text-primary);font-family:var(--font-mono);">{day_structure.low_line_at_entry:,.0f}</div>
+            <div style="font-size:10px;color:var(--text-muted);">Low Line (broken support)</div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">REFERENCE PRICE</div>
+            <div style="font-size:18px;font-weight:600;color:var(--text-primary);font-family:var(--font-mono);">{f"${put_ref_price:.2f}" if put_ref_price > 0 else "—"}</div>
+            <div style="font-size:10px;color:var(--text-muted);">@ London High (last known)</div>
+        </div>
+    </div>
+    <div style="margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--warning);font-size:12px;color:var(--text-secondary);">
+        💡 When CALL returns to entry price → confirms PUT entry
+    </div>
+</div>
+'''
+    
+    elif day_structure and day_structure.high_line_broken and day_structure.high_line_valid and day_structure.low_line_valid:
+        # High line broken = FLIP to CALLS
+        flip_strike = int(round(day_structure.london_high / 5) * 5) if day_structure.london_high > 0 else int(round(day_structure.high_line_at_entry / 5) * 5)
+        call_ref_price = day_structure.call_price_london if day_structure.call_price_london > 0 else day_structure.call_price_asia
+        
+        html += f'''
+<!-- FLIP SIGNAL - High Line Broken -->
+<div style="background:linear-gradient(135deg, rgba(234,179,8,0.2) 0%, rgba(234,179,8,0.05) 100%);border:2px solid var(--warning);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
+        <span style="font-size:20px;">⚡</span>
+        <span style="font-size:16px;font-weight:700;color:var(--warning);">FLIP SIGNAL - HIGH LINE BROKEN</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);">
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">DIRECTION</div>
+            <div style="font-size:24px;font-weight:700;color:var(--success);">CALLS</div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">STRIKE</div>
+            <div style="font-size:24px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{flip_strike}C</div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">ENTRY LEVEL</div>
+            <div style="font-size:18px;font-weight:600;color:var(--text-primary);font-family:var(--font-mono);">{day_structure.high_line_at_entry:,.0f}</div>
+            <div style="font-size:10px;color:var(--text-muted);">High Line (broken resistance)</div>
+        </div>
+        <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">REFERENCE PRICE</div>
+            <div style="font-size:18px;font-weight:600;color:var(--text-primary);font-family:var(--font-mono);">{f"${call_ref_price:.2f}" if call_ref_price > 0 else "—"}</div>
+            <div style="font-size:10px;color:var(--text-muted);">@ London Low (last known)</div>
+        </div>
+    </div>
+    <div style="margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--warning);font-size:12px;color:var(--text-secondary);">
+        💡 When PUT returns to entry price → confirms CALL entry
     </div>
 </div>
 '''
