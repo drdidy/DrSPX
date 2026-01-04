@@ -48,6 +48,98 @@ INST_WINDOW_START = time(9, 0)
 INST_WINDOW_END = time(9, 30)
 ENTRY_TARGET = time(9, 10)
 CUTOFF_TIME = time(11, 30)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ECONOMIC CALENDAR - High Impact Events for 0DTE Trading
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# 2025-2026 FOMC Meeting Dates (announcement at 2:00 PM ET / 1:00 PM CT)
+FOMC_DATES_2025_2026 = [
+    # 2025
+    "2025-01-29", "2025-03-19", "2025-05-07", "2025-06-18",
+    "2025-07-30", "2025-09-17", "2025-11-05", "2025-12-17",
+    # 2026
+    "2026-01-28", "2026-03-18", "2026-04-29", "2026-06-10",
+    "2026-07-29", "2026-09-16", "2026-11-04", "2026-12-16"
+]
+
+# Known high-impact recurring events
+# Format: (name, typical_time_ct, recurring_rule)
+HIGH_IMPACT_RECURRING = {
+    "NFP": ("Nonfarm Payrolls", "07:30", "first_friday"),  # First Friday of month
+    "CPI": ("Consumer Price Index", "07:30", "mid_month"),  # ~13th of month
+    "PPI": ("Producer Price Index", "07:30", "mid_month"),  # ~14th of month
+    "RETAIL": ("Retail Sales", "07:30", "mid_month"),  # ~15th of month
+    "JOBLESS": ("Initial Jobless Claims", "07:30", "thursday"),  # Every Thursday
+}
+
+def get_economic_events(target_date):
+    """
+    Get economic events for a given date.
+    Returns list of (event_name, time_ct, impact_level) tuples.
+    
+    Impact levels: "HIGH", "MEDIUM", "LOW"
+    """
+    events = []
+    date_str = target_date.strftime("%Y-%m-%d")
+    day_of_week = target_date.weekday()  # 0=Monday, 4=Friday
+    day_of_month = target_date.day
+    
+    # Check FOMC
+    if date_str in FOMC_DATES_2025_2026:
+        events.append(("🏛️ FOMC Rate Decision", "13:00", "HIGH"))
+    
+    # Check day before FOMC (often volatile)
+    tomorrow = target_date + timedelta(days=1)
+    if tomorrow.strftime("%Y-%m-%d") in FOMC_DATES_2025_2026:
+        events.append(("🏛️ FOMC Eve (Pre-Announcement)", "—", "MEDIUM"))
+    
+    # NFP - First Friday of month
+    if day_of_week == 4 and day_of_month <= 7:  # Friday in first week
+        events.append(("📊 Nonfarm Payrolls (NFP)", "07:30", "HIGH"))
+    
+    # Initial Jobless Claims - Every Thursday
+    if day_of_week == 3:  # Thursday
+        events.append(("📋 Initial Jobless Claims", "07:30", "MEDIUM"))
+    
+    # CPI - Usually around 13th of month (approximate)
+    if 10 <= day_of_month <= 15:
+        # CPI is typically released mid-month
+        if day_of_week not in [5, 6]:  # Not weekend
+            # Check if this might be CPI day (rough heuristic)
+            if day_of_month in [12, 13, 14]:
+                events.append(("📈 CPI (Potential)", "07:30", "HIGH"))
+    
+    # Quad Witching - Third Friday of March, June, September, December
+    if day_of_week == 4 and 15 <= day_of_month <= 21:  # Third Friday
+        if target_date.month in [3, 6, 9, 12]:
+            events.append(("🔮 Quad Witching Expiry", "08:30-15:00", "MEDIUM"))
+    
+    # Monthly Options Expiry - Third Friday
+    if day_of_week == 4 and 15 <= day_of_month <= 21:
+        events.append(("📅 Monthly Options Expiry", "15:00", "LOW"))
+    
+    return events
+
+def get_event_warning(events):
+    """
+    Generate warning message based on events.
+    Returns (warning_text, should_warn_entry, warning_level)
+    """
+    if not events:
+        return None, False, None
+    
+    high_impact = [e for e in events if e[2] == "HIGH"]
+    medium_impact = [e for e in events if e[2] == "MEDIUM"]
+    
+    if high_impact:
+        event_names = ", ".join([e[0] for e in high_impact])
+        return f"⚠️ HIGH IMPACT: {event_names}", True, "HIGH"
+    elif medium_impact:
+        event_names = ", ".join([e[0] for e in medium_impact])
+        return f"📌 Notable: {event_names}", True, "MEDIUM"
+    
+    return None, False, None
 REGULAR_CLOSE = time(16, 0)
 HALF_DAY_CLOSE = time(12, 0)
 
@@ -3469,6 +3561,54 @@ body {{
     if is_historical:
         html += f'<div style="background:var(--bg-surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-4);font-size:12px;color:var(--text-secondary);">📅 Historical Mode: {trading_date.strftime("%A, %B %d, %Y")}</div>'
     
+    # Economic Event Warning Banner
+    econ_events = get_economic_events(trading_date)
+    event_warning, should_warn, warning_level = get_event_warning(econ_events)
+    
+    # Also check for manual event
+    manual_event = st.session_state.get("manual_event", "")
+    manual_event_time = st.session_state.get("manual_event_time", "")
+    
+    if econ_events or manual_event:
+        # Build event list HTML
+        event_items = []
+        for event_name, event_time, impact in econ_events:
+            icon = "🔴" if impact == "HIGH" else "🟡" if impact == "MEDIUM" else "🔵"
+            event_items.append(f"{icon} {event_name} @ {event_time}")
+        
+        if manual_event:
+            event_items.append(f"📌 {manual_event} @ {manual_event_time or 'TBD'}")
+        
+        # Determine banner style based on highest impact
+        if warning_level == "HIGH":
+            banner_bg = "linear-gradient(135deg, rgba(239,68,68,0.2) 0%, rgba(239,68,68,0.05) 100%)"
+            banner_border = "var(--danger)"
+            banner_icon = "⚠️"
+            banner_title = "HIGH IMPACT EVENT"
+        elif warning_level == "MEDIUM" or manual_event:
+            banner_bg = "linear-gradient(135deg, rgba(234,179,8,0.2) 0%, rgba(234,179,8,0.05) 100%)"
+            banner_border = "var(--warning)"
+            banner_icon = "📌"
+            banner_title = "NOTABLE EVENT"
+        else:
+            banner_bg = "var(--bg-surface)"
+            banner_border = "var(--border)"
+            banner_icon = "📅"
+            banner_title = "TODAY'S EVENTS"
+        
+        events_html = " | ".join(event_items)
+        
+        html += f'''
+<div style="background:{banner_bg};border:1px solid {banner_border};border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:center;gap:var(--space-2);">
+        <span style="font-size:16px;">{banner_icon}</span>
+        <span style="font-size:12px;font-weight:600;color:var(--text-primary);">{banner_title}</span>
+    </div>
+    <div style="font-size:12px;color:var(--text-secondary);margin-top:var(--space-2);">{events_html}</div>
+    {"<div style='font-size:11px;color:var(--danger);margin-top:var(--space-2);font-weight:600;'>⚡ Avoid entries 30 min before/after HIGH impact events</div>" if warning_level == "HIGH" else ""}
+</div>
+'''
+    
     # Check for NO TRADE conditions
     # TRUE NO TRADE = signal conflict only. Low score = warning, not no-trade
     has_conflict = confluence and confluence.no_trade
@@ -4936,6 +5076,42 @@ def main():
             st.session_state.broken_prior_close_calls = st.checkbox("↓", value=st.session_state.broken_prior_close_calls, key="chk_pc_c", help="CALLS entry broken")
         with col3:
             st.session_state.broken_prior_close_puts = st.checkbox("↑", value=st.session_state.broken_prior_close_puts, key="chk_pc_p", help="PUTS entry broken")
+        
+        st.divider()
+        
+        # ECONOMIC CALENDAR
+        st.markdown("### 📅 Economic Calendar")
+        
+        # Get today's events
+        trading_date = st.session_state.get("trading_date", date.today())
+        if isinstance(trading_date, str):
+            trading_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
+        
+        econ_events = get_economic_events(trading_date)
+        event_warning, should_warn, warning_level = get_event_warning(econ_events)
+        
+        if econ_events:
+            for event_name, event_time, impact in econ_events:
+                if impact == "HIGH":
+                    st.error(f"**{event_name}**  \n⏰ {event_time} CT")
+                elif impact == "MEDIUM":
+                    st.warning(f"**{event_name}**  \n⏰ {event_time} CT")
+                else:
+                    st.info(f"**{event_name}**  \n⏰ {event_time} CT")
+        else:
+            st.success("✅ No major events today")
+        
+        # Manual event override
+        if "manual_event" not in st.session_state:
+            st.session_state.manual_event = ""
+        if "manual_event_time" not in st.session_state:
+            st.session_state.manual_event_time = ""
+        
+        with st.expander("➕ Add Custom Event", expanded=False):
+            st.session_state.manual_event = st.text_input("Event Name", value=st.session_state.manual_event, placeholder="e.g., Fed Chair Speech")
+            st.session_state.manual_event_time = st.text_input("Time (CT)", value=st.session_state.manual_event_time, placeholder="e.g., 10:00")
+            if st.session_state.manual_event:
+                st.warning(f"📌 {st.session_state.manual_event} @ {st.session_state.manual_event_time or 'TBD'}")
         
         st.divider()
         st.markdown("### ⏰ Entry Time")
