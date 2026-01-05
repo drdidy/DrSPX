@@ -12,7 +12,7 @@ THREE PILLARS:
 KEY FEATURES:
 ✓ VIX Zone scaling (1% of VIX, rounded to 0.05 ticks)
 ✓ Dynamic stops based on VIX level (4-10 pts)
-✓ Strike = Target - 20 (20 pts ITM at exit zone)
+✓ Strike = Entry ± 10 (OTM at entry, ITM at target)
 ✓ Day Structure = Buy Zone / Exit Zone with contract pricing
 ✓ Flip signals when structure breaks
 ✓ Trading Rules Reference (collapsible)
@@ -377,14 +377,14 @@ class DayStructure:
     put_price_london: float = 0.0  # PUT contract price at London High
     put_price_at_entry: float = 0.0  # Projected PUT price at entry time
     put_slope_per_hour: float = 0.0  # PUT decay rate $/hour
-    put_strike: int = 0  # Strike = Entry (High Line) + 10-15 (slightly ITM at entry)
+    put_strike: int = 0  # Strike = Entry (High Line) - 10 (slightly OTM at entry)
     
     # CONTRACT PRICING - CALL (tracks low line for support)
     call_price_asia: float = 0.0  # CALL contract price at Asia Low
     call_price_london: float = 0.0  # CALL contract price at London Low
     call_price_at_entry: float = 0.0  # Projected CALL price at entry time
     call_slope_per_hour: float = 0.0  # CALL decay rate $/hour
-    call_strike: int = 0  # Strike = Entry (Low Line) - 10-15 (slightly ITM at entry)
+    call_strike: int = 0  # Strike = Entry (Low Line) + 10 (slightly OTM at entry)
     
     # BREAK & RETEST signals
     high_line_broken: bool = False  # SPX broke above high line → FLIP to CALLS
@@ -934,8 +934,10 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
     # Strike should be AT or NEAR the ENTRY point (slightly ITM at entry)
     # As price moves to target, contract goes deeper ITM = bigger gains
     #
-    # PUT: Entry at High Line → Strike = High Line + 10-15 (slightly ITM at entry)
-    # CALL: Entry at Low Line → Strike = Low Line - 10-15 (slightly ITM at entry)
+    # PUT: Entry at High Line → Strike = High Line - 10 (slightly OTM at entry)
+    #      When price drops to target, PUT goes ITM
+    # CALL: Entry at Low Line → Strike = Low Line + 10 (slightly OTM at entry)
+    #      When price rises to target, CALL goes ITM
     #
     # WHEN LINE IS BROKEN (FLIP TRADE):
     # Strike = The LONDON value (where support/resistance actually was)
@@ -946,19 +948,19 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
             break_level = ds.london_low if ds.london_low > 0 else ds.low_line_at_entry
             ds.put_strike = int(round(break_level / 5) * 5)
             # CALL is invalidated when low breaks, but set a placeholder
-            ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) - 15
+            ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) + 10
         elif ds.high_line_broken:
             # FLIP to CALLS: Strike = London High (where resistance broke)
             break_level = ds.london_high if ds.london_high > 0 else ds.high_line_at_entry
             ds.call_strike = int(round(break_level / 5) * 5)
             # PUT is invalidated when high breaks, but set a placeholder
-            ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) + 15
+            ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) - 10
         else:
-            # Normal: Strike near entry point
-            # PUT: Entry at High Line → Strike slightly above High Line
-            ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) + 10
-            # CALL: Entry at Low Line → Strike slightly below Low Line
-            ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) - 10
+            # Normal: Strike slightly OTM at entry
+            # PUT: Entry at High Line → Strike BELOW High Line (OTM)
+            ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) - 10
+            # CALL: Entry at Low Line → Strike ABOVE Low Line (OTM)
+            ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) + 10
     
     # FIND CONFLUENCE WITH CONE RAILS
     if cones:
@@ -1852,14 +1854,15 @@ def generate_day_structure_setups(day_structure, current_price, vix_current=16, 
             delta_c = abs(opt_c.spy_delta) if opt_c else DELTA_IDEAL
         
         # STRIKE LOGIC FOR CALLS:
-        # Strike should be AT or BELOW entry (slightly ITM at entry)
-        # As price rises to High Line target, contract goes deeper ITM
-        # Use Entry - 15 to 20 points, rounded to nearest 5
+        # Strike should be ABOVE entry (slightly OTM at entry)
+        # As price rises to High Line target, contract goes ITM
+        # Use Entry + 10 points, rounded to nearest 5
         if day_structure.call_strike > 0:
             call_strike = day_structure.call_strike
         else:
-            # Strike = Entry rounded down to nearest 5, minus 15
-            call_strike = int((entry_c // 5) * 5) - 15
+            # Strike = Entry rounded up to nearest 5, plus 10
+            # CALL strike ABOVE entry = OTM, becomes ITM as price rises
+            call_strike = int((entry_c // 5) * 5) + 10
         
         # Determine status
         if is_after_cutoff:
@@ -1931,7 +1934,7 @@ def generate_day_structure_setups(day_structure, current_price, vix_current=16, 
         # STRIKE LOGIC FOR PUTS:
         # ═══════════════════════════════════════════════════════════════════
         # When Low Line is BROKEN: Strike = LONDON LOW (the break level)
-        # Normal: Strike = Entry + 10-15 (slightly ITM at entry)
+        # Normal: Strike = Entry - 10 (slightly OTM at entry, ITM at target)
         # ═══════════════════════════════════════════════════════════════════
         
         if low_line_broken:
@@ -1941,8 +1944,9 @@ def generate_day_structure_setups(day_structure, current_price, vix_current=16, 
         elif day_structure.put_strike > 0:
             put_strike = day_structure.put_strike
         else:
-            # Normal: Strike = Entry + 10-15 (slightly ITM at entry)
-            put_strike = int((entry_p // 5) * 5) + 10
+            # Normal: Strike = Entry - 10 (slightly OTM at entry)
+            # PUT strike BELOW entry = OTM, becomes ITM as price drops
+            put_strike = int((entry_p // 5) * 5) - 10
         
         # Determine status
         if is_after_cutoff:
@@ -3973,8 +3977,9 @@ body {{
             if day_structure.call_price_at_entry > 0:
                 trade_contract_price = day_structure.call_price_at_entry
             
-            # Strike = Entry - 10-15 (slightly ITM at entry, deeper ITM at target)
-            trade_strike = int(round(trade_entry_spx / 5) * 5) - 15
+            # Strike = Entry + 10 (slightly OTM at entry, ITM at target)
+            # CALL strike ABOVE entry = OTM
+            trade_strike = int(round(trade_entry_spx / 5) * 5) + 10
             trade_contract = f"{trade_strike}C"
             
             trade_stop = trade_entry_spx - dynamic_stop
@@ -3989,8 +3994,9 @@ body {{
             if day_structure.put_price_at_entry > 0:
                 trade_contract_price = day_structure.put_price_at_entry
             
-            # Strike = Entry + 10-15 (slightly ITM at entry, deeper ITM at target)
-            trade_strike = int(round(trade_entry_spx / 5) * 5) + 15
+            # Strike = Entry - 10 (slightly OTM at entry, ITM at target)
+            # PUT strike BELOW entry = OTM
+            trade_strike = int(round(trade_entry_spx / 5) * 5) - 10
             trade_contract = f"{trade_strike}P"
             
             trade_stop = trade_entry_spx + dynamic_stop
@@ -4070,7 +4076,7 @@ body {{
                     <div>
                         <div style="font-size:11px;color:var(--text-muted);">CONTRACT</div>
                         <div style="font-size:20px;font-weight:700;color:{trade_color};font-family:var(--font-mono);">{trade_contract}</div>
-                        <div style="font-size:10px;color:var(--text-muted);">20 ITM at target</div>
+                        <div style="font-size:10px;color:var(--text-muted);">OTM at entry → ITM at target</div>
                     </div>
                     {price_html}
                     {target_html}
