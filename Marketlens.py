@@ -338,23 +338,49 @@ class DayStructure:
     Includes contract price projections for integrated entry planning.
     """
     
-    # High trendline (Asia High → London High) - for PUTS
+    # High trendline - for PUTS (resistance)
     high_line_valid: bool = False
-    high_line_slope: float = 0.0  # SPX $/minute
+    high_line_slope: float = 0.0  # SPX $/minute (active line slope)
     high_line_at_entry: float = 0.0  # Projected SPX price at entry time
     high_line_direction: str = ""  # "ASCENDING", "DESCENDING", "FLAT"
     
-    # Low trendline (Asia Low → London Low) - for CALLS
+    # Low trendline - for CALLS (support)
     low_line_valid: bool = False
-    low_line_slope: float = 0.0  # SPX $/minute
+    low_line_slope: float = 0.0  # SPX $/minute (active line slope)
     low_line_at_entry: float = 0.0  # Projected SPX price at entry time
     low_line_direction: str = ""  # "ASCENDING", "DESCENDING", "FLAT"
     
-    # Original anchor points (for strike calculation when lines break)
-    asia_high: float = 0.0
-    asia_low: float = 0.0
+    # Original anchor points - ALL 3 SESSIONS
+    sydney_high: float = 0.0
+    sydney_low: float = 0.0
+    tokyo_high: float = 0.0
+    tokyo_low: float = 0.0
     london_high: float = 0.0
     london_low: float = 0.0
+    
+    # Legacy aliases (for backward compatibility)
+    asia_high: float = 0.0  # Now maps to tokyo_high
+    asia_low: float = 0.0   # Now maps to tokyo_low
+    
+    # 3-POINT TRENDLINE ANALYSIS
+    # High Line: Sydney High → Tokyo High → London High
+    high_syd_tok_slope: float = 0.0  # Sydney → Tokyo slope
+    high_tok_lon_slope: float = 0.0  # Tokyo → London slope
+    high_line_pivot: bool = False     # True if slopes conflict (V or Λ shape)
+    high_line_pivot_type: str = ""    # "V_BOTTOM", "INVERTED_V", "ALIGNED"
+    high_line_active_segment: str = "" # "SYD_TOK_LON" (3-point) or "TOK_LON" (pivot)
+    high_line_quality: str = ""       # "STRONG", "MODERATE", "WEAK"
+    
+    # Low Line: Sydney Low → Tokyo Low → London Low
+    low_syd_tok_slope: float = 0.0   # Sydney → Tokyo slope
+    low_tok_lon_slope: float = 0.0   # Tokyo → London slope
+    low_line_pivot: bool = False      # True if slopes conflict (V or Λ shape)
+    low_line_pivot_type: str = ""     # "V_BOTTOM", "INVERTED_V", "ALIGNED"
+    low_line_active_segment: str = "" # "SYD_TOK_LON" (3-point) or "TOK_LON" (pivot)
+    low_line_quality: str = ""        # "STRONG", "MODERATE", "WEAK"
+    
+    # Overall structure quality
+    structure_quality: str = ""  # "STRONG", "MODERATE", "WEAK"
     
     # Overall structure shape
     structure_shape: str = ""  # "EXPANDING", "CONTRACTING", "PARALLEL_UP", "PARALLEL_DOWN", "MIXED"
@@ -373,15 +399,19 @@ class DayStructure:
     best_confluence_detail: str = ""
     
     # CONTRACT PRICING - PUT (tracks high line for resistance)
-    put_price_asia: float = 0.0  # PUT contract price at Asia High
+    put_price_sydney: float = 0.0  # PUT contract price at Sydney High
+    put_price_tokyo: float = 0.0   # PUT contract price at Tokyo High
     put_price_london: float = 0.0  # PUT contract price at London High
+    put_price_asia: float = 0.0    # Legacy alias for tokyo
     put_price_at_entry: float = 0.0  # Projected PUT price at entry time
     put_slope_per_hour: float = 0.0  # PUT decay rate $/hour
     put_strike: int = 0  # Strike = Entry (High Line) - 10 (slightly OTM at entry)
     
     # CONTRACT PRICING - CALL (tracks low line for support)
-    call_price_asia: float = 0.0  # CALL contract price at Asia Low
+    call_price_sydney: float = 0.0  # CALL contract price at Sydney Low
+    call_price_tokyo: float = 0.0   # CALL contract price at Tokyo Low
     call_price_london: float = 0.0  # CALL contract price at London Low
+    call_price_asia: float = 0.0    # Legacy alias for tokyo
     call_price_at_entry: float = 0.0  # Projected CALL price at entry time
     call_slope_per_hour: float = 0.0  # CALL decay rate $/hour
     call_strike: int = 0  # Strike = Entry (Low Line) + 10 (slightly OTM at entry)
@@ -787,29 +817,36 @@ def analyze_market_context(prior_session, vix_current, current_time_ct):
     
     return ctx
 
-def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
+def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_low_time,
+                            tokyo_high, tokyo_high_time, tokyo_low, tokyo_low_time,
                             london_high, london_high_time, london_low, london_low_time,
                             entry_time_mins, cones, trading_date,
-                            put_price_asia=0, put_price_london=0,
-                            call_price_asia=0, call_price_london=0,
+                            put_price_sydney=0, put_price_tokyo=0, put_price_london=0,
+                            call_price_sydney=0, call_price_tokyo=0, call_price_london=0,
                             high_line_broken=False, low_line_broken=False):
     """
-    Calculate day structure trendlines from Asian to London session pivots.
-    Project them into RTH and find confluence with cone rails.
-    
-    Also calculates contract price projections for integrated entry planning.
+    Calculate day structure trendlines from 3 sessions: Sydney → Tokyo → London.
+    Detects pivot points (V-shape or inverted-V) when slopes conflict.
+    Uses the ACTIVE line (most recent segment if pivoted) for RTH projection.
     
     Times are in CT (Central Time).
+    Session times: Sydney 4pm-6pm, Tokyo 6pm-2am, London 2am-6:30am
     """
     ds = DayStructure()
     ds.high_line_broken = high_line_broken
     ds.low_line_broken = low_line_broken
     
-    # Store original anchor points for strike calculation
-    ds.asia_high = asia_high
-    ds.asia_low = asia_low
+    # Store original anchor points
+    ds.sydney_high = sydney_high
+    ds.sydney_low = sydney_low
+    ds.tokyo_high = tokyo_high
+    ds.tokyo_low = tokyo_low
     ds.london_high = london_high
     ds.london_low = london_low
+    
+    # Legacy aliases (for backward compatibility)
+    ds.asia_high = tokyo_high
+    ds.asia_low = tokyo_low
     
     def parse_time_to_mins_from_midnight(t_str):
         """Parse time string to minutes from midnight"""
@@ -822,94 +859,192 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
         except:
             return 0
     
+    def calc_slope(price1, time1_mins, price2, time2_mins):
+        """Calculate slope between two points, handling overnight"""
+        t2 = time2_mins
+        if t2 < time1_mins:
+            t2 += 24 * 60  # Overnight adjustment
+        time_diff = t2 - time1_mins
+        if time_diff > 0:
+            return (price2 - price1) / time_diff, time_diff
+        return 0, 0
+    
+    def slopes_aligned(slope1, slope2, threshold=0.0005):
+        """Check if two slopes are in same direction (both up or both down)"""
+        if abs(slope1) < threshold and abs(slope2) < threshold:
+            return True  # Both flat = aligned
+        return (slope1 > threshold and slope2 > threshold) or (slope1 < -threshold and slope2 < -threshold)
+    
     # Entry time in minutes from midnight (8:30 AM + entry_time_mins)
     entry_mins = 8 * 60 + 30 + entry_time_mins
     
-    # HIGH TRENDLINE: Asia High → London High (for PUTS)
-    if asia_high > 0 and london_high > 0:
-        asia_h_mins = parse_time_to_mins_from_midnight(asia_high_time)
-        london_h_mins = parse_time_to_mins_from_midnight(london_high_time)
-        
-        # Handle overnight (London time is next day if < Asia time)
-        if london_h_mins < asia_h_mins:
-            london_h_mins += 24 * 60
-        
-        time_diff = london_h_mins - asia_h_mins
-        if time_diff > 0:
-            ds.high_line_valid = True
-            ds.high_line_slope = (london_high - asia_high) / time_diff  # SPX $/minute
-            
-            # Project SPX to entry time
-            entry_mins_adj = entry_mins
-            if entry_mins < asia_h_mins:
-                entry_mins_adj += 24 * 60  # Next day
-            
-            mins_from_asia = entry_mins_adj - asia_h_mins
-            ds.high_line_at_entry = asia_high + (ds.high_line_slope * mins_from_asia)
-            
-            # Determine direction
-            if ds.high_line_slope > 0.001:
-                ds.high_line_direction = "ASCENDING"
-            elif ds.high_line_slope < -0.001:
-                ds.high_line_direction = "DESCENDING"
-            else:
-                ds.high_line_direction = "FLAT"
-            
-            # PUT CONTRACT PRICING
-            ds.put_price_asia = put_price_asia
-            ds.put_price_london = put_price_london
-            if put_price_asia > 0 and put_price_london > 0:
-                time_diff_hours = time_diff / 60
-                ds.put_slope_per_hour = (put_price_london - put_price_asia) / time_diff_hours if time_diff_hours > 0 else 0
-                
-                # Project PUT price to entry time
-                hours_from_asia = mins_from_asia / 60
-                ds.put_price_at_entry = put_price_asia + (ds.put_slope_per_hour * hours_from_asia)
-                ds.put_price_at_entry = max(0.10, ds.put_price_at_entry)  # Floor at $0.10
-                # Note: PUT strike calculated after both lines are known
+    # ═══════════════════════════════════════════════════════════════════════
+    # HIGH LINE ANALYSIS (Sydney High → Tokyo High → London High) - for PUTS
+    # ═══════════════════════════════════════════════════════════════════════
     
-    # LOW TRENDLINE: Asia Low → London Low (for CALLS)
-    if asia_low > 0 and london_low > 0:
-        asia_l_mins = parse_time_to_mins_from_midnight(asia_low_time)
-        london_l_mins = parse_time_to_mins_from_midnight(london_low_time)
-        
-        # Handle overnight
-        if london_l_mins < asia_l_mins:
-            london_l_mins += 24 * 60
-        
-        time_diff = london_l_mins - asia_l_mins
-        if time_diff > 0:
-            ds.low_line_valid = True
-            ds.low_line_slope = (london_low - asia_low) / time_diff  # SPX $/minute
+    syd_h_mins = parse_time_to_mins_from_midnight(sydney_high_time) if sydney_high > 0 else 0
+    tok_h_mins = parse_time_to_mins_from_midnight(tokyo_high_time) if tokyo_high > 0 else 0
+    lon_h_mins = parse_time_to_mins_from_midnight(london_high_time) if london_high > 0 else 0
+    
+    # Calculate segment slopes
+    if sydney_high > 0 and tokyo_high > 0:
+        ds.high_syd_tok_slope, _ = calc_slope(sydney_high, syd_h_mins, tokyo_high, tok_h_mins)
+    if tokyo_high > 0 and london_high > 0:
+        ds.high_tok_lon_slope, _ = calc_slope(tokyo_high, tok_h_mins, london_high, lon_h_mins)
+    
+    # Determine if we have valid 3-point or 2-point line
+    has_3pt_high = sydney_high > 0 and tokyo_high > 0 and london_high > 0
+    has_2pt_high = tokyo_high > 0 and london_high > 0
+    
+    if has_3pt_high:
+        # Check for pivot (slopes conflict)
+        if slopes_aligned(ds.high_syd_tok_slope, ds.high_tok_lon_slope):
+            # All 3 points aligned - use full line
+            ds.high_line_pivot = False
+            ds.high_line_pivot_type = "ALIGNED"
+            ds.high_line_active_segment = "SYD_TOK_LON"
+            ds.high_line_quality = "STRONG"
+            # Use Sydney → London for projection (but slope from Tok→Lon for accuracy)
+            ds.high_line_slope = ds.high_tok_lon_slope  # Most recent slope
+        else:
+            # Pivot detected at Tokyo
+            ds.high_line_pivot = True
+            ds.high_line_active_segment = "TOK_LON"
+            ds.high_line_quality = "MODERATE"
+            ds.high_line_slope = ds.high_tok_lon_slope  # Use Tokyo → London
             
-            # Project SPX to entry time
-            entry_mins_adj = entry_mins
-            if entry_mins < asia_l_mins:
-                entry_mins_adj += 24 * 60
-            
-            mins_from_asia = entry_mins_adj - asia_l_mins
-            ds.low_line_at_entry = asia_low + (ds.low_line_slope * mins_from_asia)
-            
-            # Determine direction
-            if ds.low_line_slope > 0.001:
-                ds.low_line_direction = "ASCENDING"
-            elif ds.low_line_slope < -0.001:
-                ds.low_line_direction = "DESCENDING"
+            # Determine pivot type
+            if ds.high_syd_tok_slope < 0 and ds.high_tok_lon_slope > 0:
+                ds.high_line_pivot_type = "V_BOTTOM"  # Descended then ascended
+            elif ds.high_syd_tok_slope > 0 and ds.high_tok_lon_slope < 0:
+                ds.high_line_pivot_type = "INVERTED_V"  # Ascended then descended
             else:
-                ds.low_line_direction = "FLAT"
+                ds.high_line_pivot_type = "MIXED"
+        
+        ds.high_line_valid = True
+        
+    elif has_2pt_high:
+        # Only Tokyo → London available
+        ds.high_line_pivot = False
+        ds.high_line_pivot_type = "2PT_ONLY"
+        ds.high_line_active_segment = "TOK_LON"
+        ds.high_line_quality = "MODERATE"
+        ds.high_line_slope = ds.high_tok_lon_slope
+        ds.high_line_valid = True
+    
+    # Project high line to entry time (always use Tokyo as base for projection)
+    if ds.high_line_valid and tokyo_high > 0:
+        tok_h_adj = tok_h_mins
+        entry_mins_adj = entry_mins
+        if entry_mins < tok_h_mins:
+            entry_mins_adj += 24 * 60
+        
+        mins_from_tokyo = entry_mins_adj - tok_h_adj
+        ds.high_line_at_entry = tokyo_high + (ds.high_line_slope * mins_from_tokyo)
+        
+        # Direction from active slope
+        if ds.high_line_slope > 0.001:
+            ds.high_line_direction = "ASCENDING"
+        elif ds.high_line_slope < -0.001:
+            ds.high_line_direction = "DESCENDING"
+        else:
+            ds.high_line_direction = "FLAT"
+    
+    # PUT CONTRACT PRICING (use Tokyo and London prices)
+    ds.put_price_sydney = put_price_sydney
+    ds.put_price_tokyo = put_price_tokyo
+    ds.put_price_london = put_price_london
+    ds.put_price_asia = put_price_tokyo  # Legacy alias
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # LOW LINE ANALYSIS (Sydney Low → Tokyo Low → London Low) - for CALLS
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    syd_l_mins = parse_time_to_mins_from_midnight(sydney_low_time) if sydney_low > 0 else 0
+    tok_l_mins = parse_time_to_mins_from_midnight(tokyo_low_time) if tokyo_low > 0 else 0
+    lon_l_mins = parse_time_to_mins_from_midnight(london_low_time) if london_low > 0 else 0
+    
+    # Calculate segment slopes
+    if sydney_low > 0 and tokyo_low > 0:
+        ds.low_syd_tok_slope, _ = calc_slope(sydney_low, syd_l_mins, tokyo_low, tok_l_mins)
+    if tokyo_low > 0 and london_low > 0:
+        ds.low_tok_lon_slope, _ = calc_slope(tokyo_low, tok_l_mins, london_low, lon_l_mins)
+    
+    # Determine if we have valid 3-point or 2-point line
+    has_3pt_low = sydney_low > 0 and tokyo_low > 0 and london_low > 0
+    has_2pt_low = tokyo_low > 0 and london_low > 0
+    
+    if has_3pt_low:
+        # Check for pivot (slopes conflict)
+        if slopes_aligned(ds.low_syd_tok_slope, ds.low_tok_lon_slope):
+            # All 3 points aligned - strong structure
+            ds.low_line_pivot = False
+            ds.low_line_pivot_type = "ALIGNED"
+            ds.low_line_active_segment = "SYD_TOK_LON"
+            ds.low_line_quality = "STRONG"
+            ds.low_line_slope = ds.low_tok_lon_slope  # Most recent slope
+        else:
+            # Pivot detected at Tokyo
+            ds.low_line_pivot = True
+            ds.low_line_active_segment = "TOK_LON"
+            ds.low_line_quality = "MODERATE"
+            ds.low_line_slope = ds.low_tok_lon_slope  # Use Tokyo → London
             
-            # CALL CONTRACT PRICING
-            ds.call_price_asia = call_price_asia
-            ds.call_price_london = call_price_london
-            if call_price_asia > 0 and call_price_london > 0:
-                time_diff_hours = time_diff / 60
-                ds.call_slope_per_hour = (call_price_london - call_price_asia) / time_diff_hours if time_diff_hours > 0 else 0
-                
-                # Project CALL price to entry time
-                hours_from_asia = mins_from_asia / 60
-                ds.call_price_at_entry = call_price_asia + (ds.call_slope_per_hour * hours_from_asia)
-                ds.call_price_at_entry = max(0.10, ds.call_price_at_entry)  # Floor at $0.10
-                # Note: CALL strike calculated after both lines are known
+            # Determine pivot type
+            if ds.low_syd_tok_slope < 0 and ds.low_tok_lon_slope > 0:
+                ds.low_line_pivot_type = "V_BOTTOM"  # Descended then ascended (bullish)
+            elif ds.low_syd_tok_slope > 0 and ds.low_tok_lon_slope < 0:
+                ds.low_line_pivot_type = "INVERTED_V"  # Ascended then descended (bearish)
+            else:
+                ds.low_line_pivot_type = "MIXED"
+        
+        ds.low_line_valid = True
+        
+    elif has_2pt_low:
+        # Only Tokyo → London available
+        ds.low_line_pivot = False
+        ds.low_line_pivot_type = "2PT_ONLY"
+        ds.low_line_active_segment = "TOK_LON"
+        ds.low_line_quality = "MODERATE"
+        ds.low_line_slope = ds.low_tok_lon_slope
+        ds.low_line_valid = True
+    
+    # Project low line to entry time
+    if ds.low_line_valid and tokyo_low > 0:
+        tok_l_adj = tok_l_mins
+        entry_mins_adj = entry_mins
+        if entry_mins < tok_l_mins:
+            entry_mins_adj += 24 * 60
+        
+        mins_from_tokyo = entry_mins_adj - tok_l_adj
+        ds.low_line_at_entry = tokyo_low + (ds.low_line_slope * mins_from_tokyo)
+        
+        # Direction from active slope
+        if ds.low_line_slope > 0.001:
+            ds.low_line_direction = "ASCENDING"
+        elif ds.low_line_slope < -0.001:
+            ds.low_line_direction = "DESCENDING"
+        else:
+            ds.low_line_direction = "FLAT"
+    
+    # CALL CONTRACT PRICING
+    ds.call_price_sydney = call_price_sydney
+    ds.call_price_tokyo = call_price_tokyo
+    ds.call_price_london = call_price_london
+    ds.call_price_asia = call_price_tokyo  # Legacy alias
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # OVERALL STRUCTURE QUALITY
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    if ds.high_line_quality == "STRONG" and ds.low_line_quality == "STRONG":
+        ds.structure_quality = "STRONG"
+    elif ds.high_line_quality == "STRONG" or ds.low_line_quality == "STRONG":
+        ds.structure_quality = "MODERATE"
+    elif ds.high_line_valid or ds.low_line_valid:
+        ds.structure_quality = "WEAK"
+    else:
+        ds.structure_quality = ""
     
     # STRUCTURE SHAPE
     if ds.high_line_valid and ds.low_line_valid:
@@ -928,38 +1063,23 @@ def calculate_day_structure(asia_high, asia_high_time, asia_low, asia_low_time,
     elif ds.low_line_valid:
         ds.structure_shape = "LOW_ONLY"
     
-    # CALCULATE STRIKES (requires both lines for proper target)
     # ═══════════════════════════════════════════════════════════════════════
-    # CORRECTED STRIKE LOGIC:
-    # Strike should be AT or NEAR the ENTRY point (slightly ITM at entry)
-    # As price moves to target, contract goes deeper ITM = bigger gains
-    #
-    # PUT: Entry at High Line → Strike = High Line - 10 (slightly OTM at entry)
-    #      When price drops to target, PUT goes ITM
-    # CALL: Entry at Low Line → Strike = Low Line + 10 (slightly OTM at entry)
-    #      When price rises to target, CALL goes ITM
-    #
-    # WHEN LINE IS BROKEN (FLIP TRADE):
-    # Strike = The LONDON value (where support/resistance actually was)
+    # CALCULATE STRIKES
     # ═══════════════════════════════════════════════════════════════════════
     if ds.high_line_valid and ds.low_line_valid:
         if ds.low_line_broken:
             # FLIP to PUTS: Strike = London Low (where support broke)
             break_level = ds.london_low if ds.london_low > 0 else ds.low_line_at_entry
             ds.put_strike = int(round(break_level / 5) * 5)
-            # CALL is invalidated when low breaks, but set a placeholder
             ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) + 10
         elif ds.high_line_broken:
             # FLIP to CALLS: Strike = London High (where resistance broke)
             break_level = ds.london_high if ds.london_high > 0 else ds.high_line_at_entry
             ds.call_strike = int(round(break_level / 5) * 5)
-            # PUT is invalidated when high breaks, but set a placeholder
             ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) - 10
         else:
             # Normal: Strike slightly OTM at entry
-            # PUT: Entry at High Line → Strike BELOW High Line (OTM)
             ds.put_strike = int(round(ds.high_line_at_entry / 5) * 5) - 10
-            # CALL: Entry at Low Line → Strike ABOVE Low Line (OTM)
             ds.call_strike = int(round(ds.low_line_at_entry / 5) * 5) + 10
     
     # FIND CONFLUENCE WITH CONE RAILS
@@ -4214,21 +4334,42 @@ body {{
         low_broken_badge = "<div style='font-size:10px;color:var(--warning);font-weight:600;margin-top:4px;'>⚡ BROKEN</div>" if day_structure.low_line_broken else ""
         high_broken_badge = "<div style='font-size:10px;color:var(--warning);font-weight:600;margin-top:4px;'>⚡ BROKEN</div>" if day_structure.high_line_broken else ""
         
+        # Structure quality and pivot info
+        quality_color = "var(--success)" if day_structure.structure_quality == "STRONG" else "var(--warning)" if day_structure.structure_quality == "MODERATE" else "var(--text-muted)"
+        quality_icon = "✅" if day_structure.structure_quality == "STRONG" else "⚠️" if day_structure.structure_quality == "MODERATE" else "○"
+        
+        # Build pivot info text
+        pivot_info = ""
+        if day_structure.low_line_pivot or day_structure.high_line_pivot:
+            pivot_parts = []
+            if day_structure.low_line_pivot:
+                pivot_parts.append(f"Low: {day_structure.low_line_pivot_type.replace('_', ' ')}")
+            if day_structure.high_line_pivot:
+                pivot_parts.append(f"High: {day_structure.high_line_pivot_type.replace('_', ' ')}")
+            pivot_info = f"<div style='font-size:10px;color:var(--warning);'>Pivot: {' | '.join(pivot_parts)}</div>"
+        
+        # Build line segment info
+        low_segment = f"({day_structure.low_line_active_segment.replace('_', '→')})" if day_structure.low_line_active_segment else ""
+        high_segment = f"({day_structure.high_line_active_segment.replace('_', '→')})" if day_structure.high_line_active_segment else ""
+        
         html += f'''
 <!-- DAY STRUCTURE ZONES -->
 <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
     <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
         <span style="font-size:16px;">📐</span>
-        <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Day Structure Zones</span>
+        <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Day Structure</span>
+        <span style="font-size:11px;color:{quality_color};margin-left:8px;">{quality_icon} {day_structure.structure_quality}</span>
         {"" if channel_width == 0 else f'<span style="font-size:11px;color:var(--text-muted);margin-left:auto;">Channel: {channel_width:.0f} pts</span>'}
     </div>
+    {pivot_info}
     
-    <div style="display:flex;justify-content:space-between;align-items:stretch;gap:var(--space-3);">
+    <div style="display:flex;justify-content:space-between;align-items:stretch;gap:var(--space-3);margin-top:var(--space-2);">
         <!-- LOW LINE = CALL BUY ZONE -->
         {"" if calls_entry == 0 else f'''
         <div style="flex:1;padding:var(--space-3);background:var(--success-soft);border-radius:var(--radius-sm);border-left:3px solid var(--success);{"opacity:0.5;" if day_structure.low_line_broken else ""}">
-            <div style="font-size:10px;color:var(--success);font-weight:600;margin-bottom:4px;">📥 CALL BUY ZONE</div>
+            <div style="font-size:10px;color:var(--success);font-weight:600;margin-bottom:4px;">📥 CALL ZONE {low_segment}</div>
             <div style="font-size:20px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{calls_entry:,.0f}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">{day_structure.low_line_direction} {day_structure.low_line_quality}</div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">CALL @ London: {call_at_low}</div>
             {low_broken_badge}
             <div style="font-size:12px;font-weight:600;color:{"var(--success)" if abs(calls_dist) <= 15 else "var(--text-secondary)"};margin-top:8px;">{calls_dist:+.0f} pts away</div>
@@ -4245,8 +4386,9 @@ body {{
         <!-- HIGH LINE = PUT BUY ZONE -->
         {"" if puts_entry == 0 else f'''
         <div style="flex:1;padding:var(--space-3);background:var(--danger-soft);border-radius:var(--radius-sm);border-right:3px solid var(--danger);{"opacity:0.5;" if day_structure.high_line_broken else ""}">
-            <div style="font-size:10px;color:var(--danger);font-weight:600;margin-bottom:4px;">📥 PUT BUY ZONE</div>
+            <div style="font-size:10px;color:var(--danger);font-weight:600;margin-bottom:4px;">📥 PUT ZONE {high_segment}</div>
             <div style="font-size:20px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono);">{puts_entry:,.0f}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">{day_structure.high_line_direction} {day_structure.high_line_quality}</div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">PUT @ London: {put_at_high}</div>
             {high_broken_badge}
             <div style="font-size:12px;font-weight:600;color:{"var(--success)" if abs(puts_dist) <= 15 else "var(--text-secondary)"};margin-top:8px;">{puts_dist:+.0f} pts away</div>
@@ -4891,17 +5033,22 @@ def main():
         'trading_date': None, 
         'last_refresh': None,
         'overnight_spx': 0.0,  # Current SPX/ES price for proximity analysis
-        # Day Structure - Session pivots for trendlines
-        'asia_high': 0.0, 'asia_high_time': "21:00", 
-        'asia_low': 0.0, 'asia_low_time': "23:00",
+        # Day Structure - 3 Session pivots for trendlines (Sydney → Tokyo → London)
+        # Session times (CT): Sydney 4pm-6pm, Tokyo 6pm-2am, London 2am-6:30am
+        'sydney_high': 0.0, 'sydney_high_time': "17:00",
+        'sydney_low': 0.0, 'sydney_low_time': "17:30",
+        'tokyo_high': 0.0, 'tokyo_high_time': "21:00", 
+        'tokyo_low': 0.0, 'tokyo_low_time': "23:00",
         'london_high': 0.0, 'london_high_time': "05:00", 
         'london_low': 0.0, 'london_low_time': "06:00",
-        # Contract Slopes - PUT (tracks high line)
-        'put_price_asia': 0.0,  # PUT price at Asia High
-        'put_price_london': 0.0,  # PUT price at London High
-        # Contract Slopes - CALL (tracks low line)
-        'call_price_asia': 0.0,  # CALL price at Asia Low
-        'call_price_london': 0.0,  # CALL price at London Low
+        # Contract Prices - PUT (tracks high line)
+        'put_price_sydney': 0.0,
+        'put_price_tokyo': 0.0,
+        'put_price_london': 0.0,
+        # Contract Prices - CALL (tracks low line)
+        'call_price_sydney': 0.0,
+        'call_price_tokyo': 0.0,
+        'call_price_london': 0.0,
         # Structure broken flags
         'high_line_broken': False,
         'low_line_broken': False
@@ -5135,78 +5282,100 @@ def main():
         st.caption(f"📍 Pricing at **{entry_hour}:{entry_min:02d} AM CT**")
         st.divider()
         
-        # DAY STRUCTURE - INTEGRATED with Contract Pricing
+        # DAY STRUCTURE - 3 Session Trendlines
         st.markdown("### 📐 Day Structure")
-        st.caption("Session trendlines (5pm-6:30am CT)")
+        st.caption("3-Session trendlines (Sydney → Tokyo → London)")
         
         with st.expander("HIGH LINE (PUTS)", expanded=False):
-            st.markdown("**SPX Price Points**")
+            st.markdown("**Sydney High** (4pm-6pm CT)")
             c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.asia_high = st.number_input("Asia High SPX", value=st.session_state.asia_high, step=0.01, format="%.2f", key="asia_h")
+                st.session_state.sydney_high = st.number_input("SPX", value=st.session_state.sydney_high, step=0.01, format="%.2f", key="syd_h")
             with c2:
-                st.session_state.asia_high_time = st.text_input("Time", value=st.session_state.asia_high_time, key="asia_ht", help="CT, e.g. 21:00")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.session_state.london_high = st.number_input("London High SPX", value=st.session_state.london_high, step=0.01, format="%.2f", key="london_h")
-            with c2:
-                st.session_state.london_high_time = st.text_input("Time", value=st.session_state.london_high_time, key="london_ht")
+                st.session_state.sydney_high_time = st.text_input("Time", value=st.session_state.sydney_high_time, key="syd_ht", help="CT, e.g. 17:00")
             
-            st.markdown("**PUT Contract Price** (15 OTM)")
-            c1, c2 = st.columns(2)
+            st.markdown("**Tokyo High** (6pm-2am CT)")
+            c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.put_price_asia = st.number_input("PUT @ Asia High", value=st.session_state.put_price_asia, step=0.10, format="%.2f", key="put_asia")
+                st.session_state.tokyo_high = st.number_input("SPX", value=st.session_state.tokyo_high, step=0.01, format="%.2f", key="tok_h")
             with c2:
-                st.session_state.put_price_london = st.number_input("PUT @ London High", value=st.session_state.put_price_london, step=0.10, format="%.2f", key="put_london")
+                st.session_state.tokyo_high_time = st.text_input("Time", value=st.session_state.tokyo_high_time, key="tok_ht", help="CT, e.g. 21:00")
+            
+            st.markdown("**London High** (2am-6:30am CT)")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.london_high = st.number_input("SPX", value=st.session_state.london_high, step=0.01, format="%.2f", key="lon_h")
+            with c2:
+                st.session_state.london_high_time = st.text_input("Time", value=st.session_state.london_high_time, key="lon_ht")
+            
+            st.markdown("**PUT Contract Prices** (10 OTM)")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.session_state.put_price_sydney = st.number_input("@ Syd", value=st.session_state.put_price_sydney, step=0.10, format="%.2f", key="put_syd")
+            with c2:
+                st.session_state.put_price_tokyo = st.number_input("@ Tok", value=st.session_state.put_price_tokyo, step=0.10, format="%.2f", key="put_tok")
+            with c3:
+                st.session_state.put_price_london = st.number_input("@ Lon", value=st.session_state.put_price_london, step=0.10, format="%.2f", key="put_lon")
             
             # High line broken checkbox
             st.session_state.high_line_broken = st.checkbox("⚡ High line BROKEN (SPX broke above)", value=st.session_state.get("high_line_broken", False), key="high_broken")
         
         with st.expander("LOW LINE (CALLS)", expanded=False):
-            st.markdown("**SPX Price Points**")
+            st.markdown("**Sydney Low** (4pm-6pm CT)")
             c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.asia_low = st.number_input("Asia Low SPX", value=st.session_state.asia_low, step=0.01, format="%.2f", key="asia_l")
+                st.session_state.sydney_low = st.number_input("SPX", value=st.session_state.sydney_low, step=0.01, format="%.2f", key="syd_l")
             with c2:
-                st.session_state.asia_low_time = st.text_input("Time", value=st.session_state.asia_low_time, key="asia_lt", help="CT, e.g. 23:00")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.session_state.london_low = st.number_input("London Low SPX", value=st.session_state.london_low, step=0.01, format="%.2f", key="london_l")
-            with c2:
-                st.session_state.london_low_time = st.text_input("Time", value=st.session_state.london_low_time, key="london_lt")
+                st.session_state.sydney_low_time = st.text_input("Time", value=st.session_state.sydney_low_time, key="syd_lt", help="CT, e.g. 17:30")
             
-            st.markdown("**CALL Contract Price** (15 OTM)")
-            c1, c2 = st.columns(2)
+            st.markdown("**Tokyo Low** (6pm-2am CT)")
+            c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.call_price_asia = st.number_input("CALL @ Asia Low", value=st.session_state.call_price_asia, step=0.10, format="%.2f", key="call_asia")
+                st.session_state.tokyo_low = st.number_input("SPX", value=st.session_state.tokyo_low, step=0.01, format="%.2f", key="tok_l")
             with c2:
-                st.session_state.call_price_london = st.number_input("CALL @ London Low", value=st.session_state.call_price_london, step=0.10, format="%.2f", key="call_london")
+                st.session_state.tokyo_low_time = st.text_input("Time", value=st.session_state.tokyo_low_time, key="tok_lt", help="CT, e.g. 23:00")
+            
+            st.markdown("**London Low** (2am-6:30am CT)")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.london_low = st.number_input("SPX", value=st.session_state.london_low, step=0.01, format="%.2f", key="lon_l")
+            with c2:
+                st.session_state.london_low_time = st.text_input("Time", value=st.session_state.london_low_time, key="lon_lt")
+            
+            st.markdown("**CALL Contract Prices** (10 OTM)")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.session_state.call_price_sydney = st.number_input("@ Syd", value=st.session_state.call_price_sydney, step=0.10, format="%.2f", key="call_syd")
+            with c2:
+                st.session_state.call_price_tokyo = st.number_input("@ Tok", value=st.session_state.call_price_tokyo, step=0.10, format="%.2f", key="call_tok")
+            with c3:
+                st.session_state.call_price_london = st.number_input("@ Lon", value=st.session_state.call_price_london, step=0.10, format="%.2f", key="call_lon")
             
             # Low line broken checkbox
             st.session_state.low_line_broken = st.checkbox("⚡ Low line BROKEN (SPX broke below)", value=st.session_state.get("low_line_broken", False), key="low_broken")
         
         # Show day structure status
-        has_high_line = st.session_state.asia_high > 0 and st.session_state.london_high > 0
-        has_low_line = st.session_state.asia_low > 0 and st.session_state.london_low > 0
-        has_put_prices = st.session_state.put_price_asia > 0 and st.session_state.put_price_london > 0
-        has_call_prices = st.session_state.call_price_asia > 0 and st.session_state.call_price_london > 0
+        has_high_line = st.session_state.tokyo_high > 0 and st.session_state.london_high > 0
+        has_low_line = st.session_state.tokyo_low > 0 and st.session_state.london_low > 0
+        has_sydney_high = st.session_state.sydney_high > 0
+        has_sydney_low = st.session_state.sydney_low > 0
         
         if has_high_line or has_low_line:
             status_parts = []
-            if has_high_line:
-                status_parts.append("High ✓")
-            if has_low_line:
-                status_parts.append("Low ✓")
-            if has_put_prices:
-                status_parts.append("PUT$ ✓")
-            if has_call_prices:
-                status_parts.append("CALL$ ✓")
+            if has_sydney_high and has_high_line:
+                status_parts.append("High 3pt ✓")
+            elif has_high_line:
+                status_parts.append("High 2pt")
+            if has_sydney_low and has_low_line:
+                status_parts.append("Low 3pt ✓")
+            elif has_low_line:
+                status_parts.append("Low 2pt")
             st.success(f"📐 {' | '.join(status_parts)}")
             
             if st.session_state.high_line_broken:
-                st.warning("⚡ HIGH LINE BROKEN → Watch PUT return to entry price → Enter CALLS")
+                st.warning("⚡ HIGH LINE BROKEN → FLIP to CALLS")
             if st.session_state.low_line_broken:
-                st.warning("⚡ LOW LINE BROKEN → Watch CALL return to entry price → Enter PUTS")
+                st.warning("⚡ LOW LINE BROKEN → FLIP to PUTS")
         
         st.divider()
         
@@ -5425,22 +5594,28 @@ def main():
     
     setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures, tested_structures)
     
-    # Calculate Day Structure (session trendlines + contract pricing)
+    # Calculate Day Structure (3-session trendlines + contract pricing)
     day_structure = calculate_day_structure(
-        st.session_state.get("asia_high", 0.0),
-        st.session_state.get("asia_high_time", "21:00"),
-        st.session_state.get("asia_low", 0.0),
-        st.session_state.get("asia_low_time", "23:00"),
+        st.session_state.get("sydney_high", 0.0),
+        st.session_state.get("sydney_high_time", "17:00"),
+        st.session_state.get("sydney_low", 0.0),
+        st.session_state.get("sydney_low_time", "17:30"),
+        st.session_state.get("tokyo_high", 0.0),
+        st.session_state.get("tokyo_high_time", "21:00"),
+        st.session_state.get("tokyo_low", 0.0),
+        st.session_state.get("tokyo_low_time", "23:00"),
         st.session_state.get("london_high", 0.0),
-        st.session_state.get("london_high_time", "03:00"),
+        st.session_state.get("london_high_time", "05:00"),
         st.session_state.get("london_low", 0.0),
-        st.session_state.get("london_low_time", "05:00"),
+        st.session_state.get("london_low_time", "06:00"),
         mins_after_open,
         cones,
         trading_date,
-        put_price_asia=st.session_state.get("put_price_asia", 0.0),
+        put_price_sydney=st.session_state.get("put_price_sydney", 0.0),
+        put_price_tokyo=st.session_state.get("put_price_tokyo", 0.0),
         put_price_london=st.session_state.get("put_price_london", 0.0),
-        call_price_asia=st.session_state.get("call_price_asia", 0.0),
+        call_price_sydney=st.session_state.get("call_price_sydney", 0.0),
+        call_price_tokyo=st.session_state.get("call_price_tokyo", 0.0),
         call_price_london=st.session_state.get("call_price_london", 0.0),
         high_line_broken=st.session_state.get("high_line_broken", False),
         low_line_broken=st.session_state.get("low_line_broken", False)
