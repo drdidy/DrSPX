@@ -509,6 +509,155 @@ def polygon_get(endpoint, params=None):
         pass
     return None
 
+def fetch_spx_options_chain(expiration_date, strike_price=None, contract_type=None, limit=50):
+    """
+    Fetch SPX options chain from Polygon.io
+    
+    Args:
+        expiration_date: Date object for expiration (0DTE = today)
+        strike_price: Optional strike to filter by
+        contract_type: "call" or "put" or None for both
+        limit: Max contracts to return
+    
+    Returns:
+        List of option contracts with Greeks, IV, quotes
+    """
+    try:
+        # Build endpoint - use I:SPX for index options
+        endpoint = f"/v3/snapshot/options/I:SPX"
+        
+        params = {
+            "expiration_date": expiration_date.strftime("%Y-%m-%d"),
+            "limit": limit
+        }
+        
+        if strike_price:
+            params["strike_price"] = strike_price
+        
+        if contract_type:
+            params["contract_type"] = contract_type.lower()
+        
+        data = polygon_get(endpoint, params)
+        
+        if data and data.get("status") == "OK":
+            return data.get("results", [])
+        
+        return []
+    except Exception as e:
+        return []
+
+def get_spx_option_price(strike, contract_type, expiration_date):
+    """
+    Get price for a specific SPX option contract.
+    
+    Args:
+        strike: Strike price (e.g., 5900)
+        contract_type: "C" or "P"
+        expiration_date: Date object
+    
+    Returns:
+        Dict with bid, ask, last, delta, gamma, theta, vega, iv, or None
+    """
+    try:
+        # Build the option ticker symbol
+        # Format: O:SPX260107C05900000
+        # O: prefix + SPX + YYMMDD + C/P + strike*1000 (8 digits)
+        exp_str = expiration_date.strftime("%y%m%d")
+        opt_type = contract_type.upper()[0]  # C or P
+        strike_str = f"{int(strike * 1000):08d}"
+        
+        option_ticker = f"O:SPX{exp_str}{opt_type}{strike_str}"
+        
+        # Use single contract snapshot endpoint
+        endpoint = f"/v3/snapshot/options/I:SPX/{option_ticker}"
+        
+        data = polygon_get(endpoint)
+        
+        if data and data.get("status") == "OK":
+            result = data.get("results", {})
+            
+            # Extract Greeks
+            greeks = result.get("greeks", {})
+            
+            # Extract quote (bid/ask)
+            quote = result.get("last_quote", {})
+            
+            # Extract last trade
+            trade = result.get("last_trade", {})
+            
+            return {
+                "bid": quote.get("bid", 0),
+                "ask": quote.get("ask", 0),
+                "mid": (quote.get("bid", 0) + quote.get("ask", 0)) / 2 if quote.get("bid") and quote.get("ask") else 0,
+                "last": trade.get("price", 0),
+                "delta": greeks.get("delta", 0),
+                "gamma": greeks.get("gamma", 0),
+                "theta": greeks.get("theta", 0),
+                "vega": greeks.get("vega", 0),
+                "iv": result.get("implied_volatility", 0),
+                "open_interest": result.get("open_interest", 0),
+                "break_even": result.get("break_even_price", 0)
+            }
+        
+        return None
+    except Exception as e:
+        return None
+
+def get_spx_options_near_strike(target_strike, contract_type, expiration_date, range_pts=50):
+    """
+    Get SPX options near a target strike.
+    
+    Args:
+        target_strike: Center strike to search around
+        contract_type: "C" or "P"
+        expiration_date: Date object
+        range_pts: Points above/below to search
+    
+    Returns:
+        List of contracts sorted by distance from target
+    """
+    try:
+        contracts = fetch_spx_options_chain(
+            expiration_date=expiration_date,
+            contract_type="call" if contract_type.upper() == "C" else "put",
+            limit=100
+        )
+        
+        if not contracts:
+            return []
+        
+        # Filter to contracts within range
+        results = []
+        for contract in contracts:
+            details = contract.get("details", {})
+            strike = details.get("strike_price", 0)
+            
+            if abs(strike - target_strike) <= range_pts:
+                greeks = contract.get("greeks", {})
+                quote = contract.get("last_quote", {})
+                trade = contract.get("last_trade", {})
+                
+                results.append({
+                    "strike": strike,
+                    "type": details.get("contract_type", ""),
+                    "expiration": details.get("expiration_date", ""),
+                    "bid": quote.get("bid", 0),
+                    "ask": quote.get("ask", 0),
+                    "mid": (quote.get("bid", 0) + quote.get("ask", 0)) / 2 if quote.get("bid") and quote.get("ask") else 0,
+                    "last": trade.get("price", 0),
+                    "delta": greeks.get("delta", 0),
+                    "iv": contract.get("implied_volatility", 0),
+                    "open_interest": contract.get("open_interest", 0),
+                    "distance": abs(strike - target_strike)
+                })
+        
+        # Sort by distance from target
+        results.sort(key=lambda x: x["distance"])
+        
+        return results
+    except Exception as e:
+        return []
+
 def polygon_get_daily_bars(ticker, from_date, to_date):
     data = polygon_get(f"/v2/aggs/ticker/{ticker}/range/1/day/{from_date.strftime('%Y-%m-%d')}/{to_date.strftime('%Y-%m-%d')}", {"adjusted": "true", "sort": "asc"})
     return data.get("results", []) if data else []
@@ -5376,6 +5525,41 @@ def main():
                 st.warning("⚡ HIGH LINE BROKEN → FLIP to CALLS")
             if st.session_state.low_line_broken:
                 st.warning("⚡ LOW LINE BROKEN → FLIP to PUTS")
+        
+        st.divider()
+        
+        # SPX OPTIONS DATA TEST
+        st.markdown("### 🔗 SPX Options (Polygon)")
+        st.caption("Fetch live SPX options data")
+        
+        with st.expander("Test Options API", expanded=False):
+            test_strike = st.number_input("Strike", value=5900, step=5, key="test_strike")
+            test_type = st.radio("Type", ["PUT", "CALL"], horizontal=True, key="test_type")
+            
+            if st.button("🔍 Fetch Option", key="fetch_opt_btn"):
+                trading_date = st.session_state.get("trading_date", date.today())
+                if isinstance(trading_date, str):
+                    trading_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
+                
+                with st.spinner("Fetching from Polygon..."):
+                    opt_data = get_spx_option_price(
+                        strike=test_strike,
+                        contract_type=test_type[0],  # "P" or "C"
+                        expiration_date=trading_date
+                    )
+                    
+                    if opt_data:
+                        st.success("✅ Data received!")
+                        st.write(f"**Bid:** ${opt_data['bid']:.2f}")
+                        st.write(f"**Ask:** ${opt_data['ask']:.2f}")
+                        st.write(f"**Mid:** ${opt_data['mid']:.2f}")
+                        st.write(f"**Last:** ${opt_data['last']:.2f}")
+                        st.write(f"**Delta:** {opt_data['delta']:.3f}")
+                        st.write(f"**IV:** {opt_data['iv']:.1%}" if opt_data['iv'] else "IV: N/A")
+                        st.write(f"**OI:** {opt_data['open_interest']:,}")
+                    else:
+                        st.error("❌ No data returned. Check API key or plan.")
+                        st.caption("Options Starter plan required for SPX options")
         
         st.divider()
         
