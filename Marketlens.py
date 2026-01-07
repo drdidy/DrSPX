@@ -477,10 +477,11 @@ def get_0dte_expiration_date():
     - On weekends/holidays: You see next trading day's options
     
     Returns:
-        tuple: (expiration_date, label, is_preview)
+        tuple: (expiration_date, label, is_preview, price_reference_date)
         - expiration_date: The date to use for options chain
         - label: Human-readable description like "Today's 0DTE" or "Tomorrow's 0DTE"
         - is_preview: True if showing future date (prices may be stale/estimated)
+        - price_reference_date: Date to fetch prices from (today's contracts if after hours)
     """
     now = get_ct_now()
     today = now.date()
@@ -493,25 +494,26 @@ def get_0dte_expiration_date():
     if is_holiday(today) or today.weekday() >= 5:
         # Weekend or holiday - show next trading day
         next_trading = get_next_trading_day(today + timedelta(days=1))
+        prior_trading = get_prior_trading_day(today)  # Use last trading day for prices
         days_away = (next_trading - today).days
         if days_away == 1:
             label = f"Tomorrow's 0DTE ({next_trading.strftime('%b %d')})"
         else:
             label = f"{next_trading.strftime('%A, %b %d')} 0DTE"
-        return next_trading, label, True
+        return next_trading, label, True, prior_trading
     
     # Today is a trading day
     market_open = time(8, 30)  # RTH open
     
     if current_time < market_open:
         # Before market open - show today's options
-        return today, f"Today's 0DTE (Pre-Market)", False
+        return today, f"Today's 0DTE (Pre-Market)", False, today
     
     if current_time <= close_time:
         # During RTH - show today's options
-        return today, f"Today's 0DTE (Live)", False
+        return today, f"Today's 0DTE (Live)", False, today
     
-    # After market close - show NEXT trading day
+    # After market close - show NEXT trading day but use TODAY's prices as reference
     next_trading = get_next_trading_day(today + timedelta(days=1))
     days_away = (next_trading - today).days
     
@@ -522,7 +524,8 @@ def get_0dte_expiration_date():
     else:
         label = f"{next_trading.strftime('%A, %b %d')} 0DTE"
     
-    return next_trading, label, True
+    # Use TODAY's contracts for price reference (they have last traded prices)
+    return next_trading, label, True, today
 
 def get_prior_trading_day(from_date):
     prior = from_date - timedelta(days=1)
@@ -677,17 +680,36 @@ def get_spx_option_price(strike, contract_type, expiration_date):
             # Extract Greeks
             greeks = result.get("greeks", {})
             
-            # Extract quote (bid/ask)
+            # Extract quote (bid/ask) - may be empty after hours
             quote = result.get("last_quote", {})
             
-            # Extract last trade
+            # Extract last trade - may be empty for next-day options
             trade = result.get("last_trade", {})
             
+            # Extract day data (today's OHLC) - might have close price
+            day = result.get("day", {})
+            
+            # Get prices from multiple sources
+            bid = quote.get("bid", 0) or 0
+            ask = quote.get("ask", 0) or 0
+            last_trade = trade.get("price", 0) or 0
+            day_close = day.get("close", 0) or 0
+            day_open = day.get("open", 0) or 0
+            
+            # Calculate mid if we have bid/ask
+            mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0
+            
+            # Determine best available price (priority: last trade > day close > mid > day open)
+            best_price = last_trade or day_close or mid or day_open
+            
             return {
-                "bid": quote.get("bid", 0),
-                "ask": quote.get("ask", 0),
-                "mid": (quote.get("bid", 0) + quote.get("ask", 0)) / 2 if quote.get("bid") and quote.get("ask") else 0,
-                "last": trade.get("price", 0),
+                "bid": bid,
+                "ask": ask,
+                "mid": mid,
+                "last": last_trade,
+                "day_close": day_close,
+                "day_open": day_open,
+                "best_price": best_price,  # New field - best available price
                 "delta": greeks.get("delta", 0),
                 "gamma": greeks.get("gamma", 0),
                 "theta": greeks.get("theta", 0),
@@ -809,8 +831,8 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
             otm_dist = max(0, center_strike - strike)  # PUT is OTM if strike < SPX
             is_otm = strike < center_strike
             
-            # Get current price (use mid if available, else last)
-            current_price = put_data['mid'] if put_data['mid'] > 0 else put_data['last']
+            # Use best_price which tries multiple sources (last > day_close > mid > day_open)
+            current_price = put_data.get('best_price', 0) or put_data['mid'] or put_data['last']
             
             # Calculate expected 50% and 100% returns
             expected_50_return = current_price * 0.5 * 100  # 50% gain = +50% on premium
@@ -823,6 +845,8 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
                 'ask': put_data['ask'],
                 'mid': put_data['mid'],
                 'last': put_data['last'],
+                'day_close': put_data.get('day_close', 0),
+                'best_price': put_data.get('best_price', 0),
                 'current': current_price,
                 'delta': put_data['delta'],
                 'gamma': put_data['gamma'],
@@ -835,7 +859,7 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
                 'exp_50': expected_50_return,
                 'exp_100': expected_100_return,
                 'exp_200': expected_200_return,
-                'in_sweet_spot': 3.50 <= current_price <= 8.00
+                'in_sweet_spot': 3.50 <= current_price <= 8.00 if current_price > 0 else False
             })
         
         # Fetch CALL
@@ -845,7 +869,8 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
             otm_dist = max(0, strike - center_strike)  # CALL is OTM if strike > SPX
             is_otm = strike > center_strike
             
-            current_price = call_data['mid'] if call_data['mid'] > 0 else call_data['last']
+            # Use best_price
+            current_price = call_data.get('best_price', 0) or call_data['mid'] or call_data['last']
             
             expected_50_return = current_price * 0.5 * 100
             expected_100_return = current_price * 1.0 * 100
@@ -857,6 +882,8 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
                 'ask': call_data['ask'],
                 'mid': call_data['mid'],
                 'last': call_data['last'],
+                'day_close': call_data.get('day_close', 0),
+                'best_price': call_data.get('best_price', 0),
                 'current': current_price,
                 'delta': call_data['delta'],
                 'gamma': call_data['gamma'],
@@ -869,7 +896,7 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
                 'exp_50': expected_50_return,
                 'exp_100': expected_100_return,
                 'exp_200': expected_200_return,
-                'in_sweet_spot': 3.50 <= current_price <= 8.00
+                'in_sweet_spot': 3.50 <= current_price <= 8.00 if current_price > 0 else False
             })
     
     # Sort: PUTs descending by strike, CALLs ascending by strike
@@ -4983,11 +5010,22 @@ body {{
         sweet_spot_puts = [p for p in near_puts if p.get('in_sweet_spot', False)]
         sweet_spot_calls = [c for c in near_calls if c.get('in_sweet_spot', False)]
         
-        # Market status message
+        # Check for price data - use best_price or current field
+        any_has_price = any(p.get('best_price', 0) > 0 or p.get('current', 0) > 0 for p in near_puts + near_calls)
+        
+        # Get price source date if different from display date
+        price_source_date = options_chain.get('price_source_date')
+        display_exp_date = options_chain.get('display_expiration', exp_date)
+        
+        # Build info message based on data availability
         market_status = ""
-        any_has_price = any(p.get('last', 0) > 0 or p.get('mid', 0) > 0 for p in near_puts + near_calls)
+        price_source_note = ""
+        if price_source_date and price_source_date != display_exp_date:
+            # Showing tomorrow's contracts but prices from today
+            price_source_note = f'<div style="font-size:10px;color:var(--warning);">💰 Prices from {price_source_date.strftime("%b %d")} contracts (reference)</div>'
+        
         if not any_has_price:
-            market_status = '<div style="background:var(--warning-soft);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:var(--space-2);margin-bottom:var(--space-3);font-size:11px;color:var(--warning);text-align:center;">⚠️ Market Closed - Prices show $0 until 8:30am CT</div>'
+            market_status = '<div style="background:var(--warning-soft);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:var(--space-2);margin-bottom:var(--space-3);font-size:11px;color:var(--warning);text-align:center;">⚠️ No price data available - try reloading after market hours</div>'
         
         html += f'''
 <!-- OPTIONS CHAIN - TRADING FOCUSED -->
@@ -4999,6 +5037,7 @@ body {{
         </div>
         <div style="text-align:right;">
             <div style="font-size:12px;font-weight:500;color:var(--info);">{exp_label}</div>
+            {price_source_note}
             <div style="font-size:10px;color:var(--text-muted);">Updated {fetched_str}</div>
         </div>
     </div>
@@ -5023,13 +5062,11 @@ body {{
                 <span style="color:var(--success);">+200%</span>
             </div>
 '''
-        # PUT rows - show PRICE (last or mid), IV, and TARGET PRICES
+        # PUT rows - show PRICE (best available), IV, and TARGET PRICES
         for p in near_puts:
             strike = p['strike']
-            last_price = p.get('last', 0)
-            mid_price = p.get('mid', 0)
-            # Use last price if available, else mid
-            display_price = last_price if last_price > 0 else mid_price
+            # Use best_price (tries: last > day_close > mid > day_open) or current field
+            display_price = p.get('best_price', 0) or p.get('current', 0) or p.get('last', 0) or p.get('mid', 0)
             iv = p.get('iv', 0)
             in_sweet = p.get('in_sweet_spot', False)
             is_otm = p.get('is_otm', strike < filter_center)
@@ -5969,10 +6006,11 @@ def main():
         st.markdown("### 🔗 Options Chain")
         
         # Get smart 0DTE date
-        exp_date, exp_label, is_preview = get_0dte_expiration_date()
+        exp_date, exp_label, is_preview, price_ref_date = get_0dte_expiration_date()
         
         if is_preview:
             st.info(f"📅 {exp_label}")
+            st.caption(f"💰 Prices from {price_ref_date.strftime('%b %d')} (last traded)")
         else:
             st.success(f"📅 {exp_label}")
         
@@ -5980,6 +6018,7 @@ def main():
         st.session_state.options_exp_date = exp_date
         st.session_state.options_exp_label = exp_label
         st.session_state.options_is_preview = is_preview
+        st.session_state.options_price_ref_date = price_ref_date
         
         # Get current SPX price for reference
         current_spx = st.session_state.get("overnight_spx", 0)
@@ -6313,7 +6352,7 @@ def main():
     options_chain = None
     
     # Get smart 0DTE expiration date
-    exp_date, exp_label, is_preview = get_0dte_expiration_date()
+    exp_date, exp_label, is_preview, price_ref_date = get_0dte_expiration_date()
     
     # Check if user requested chain load from sidebar
     if st.session_state.get("load_options_chain", False):
@@ -6321,18 +6360,23 @@ def main():
             chain_center = st.session_state.get("chain_center", int(spx_price // 5) * 5)
             chain_range = st.session_state.get("chain_range", 50)
             
-            # Use the smart 0DTE date
+            # KEY FIX: Use price_ref_date for fetching prices (today's contracts when after hours)
+            # This gives us actual last-traded prices instead of empty data for tomorrow's contracts
             options_chain = fetch_options_chain_for_dashboard(
                 center_strike=chain_center,
-                expiration_date=exp_date,
+                expiration_date=price_ref_date,  # Use TODAY's contracts for prices
                 range_pts=chain_range,
                 vix_current=vix_for_pricing
             )
             
             if options_chain:
+                # Store the chain but note which expiration we're showing vs where prices came from
+                options_chain['display_expiration'] = exp_date  # Tomorrow's date for display
+                options_chain['price_source_date'] = price_ref_date  # Today's date where prices came from
                 st.session_state.dashboard_options_chain = options_chain
                 st.session_state.chain_exp_date = exp_date
                 st.session_state.chain_exp_label = exp_label
+                st.session_state.chain_price_source = price_ref_date
             
             # Reset the load flag
             st.session_state.load_options_chain = False
