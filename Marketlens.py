@@ -1,5 +1,5 @@
 """
-SPX PROPHET v9.0 - OBSIDIAN PREMIUM
+SPX PROPHET v10.0 - OBSIDIAN PREMIUM
 "Where Structure Becomes Foresight"
 
 DESIGN: Deep obsidian dark theme with glassmorphism, glowing accents, and premium typography.
@@ -17,6 +17,15 @@ KEY FEATURES:
 ✓ Flip signals when structure breaks
 ✓ Trading Rules Reference (collapsible)
 ✓ Contextual Rule Warnings
+
+v10.0 UPDATES:
+✓ Options Chain in MAIN DASHBOARD (not sidebar)
+✓ Full Greeks display (Delta, Gamma, Theta, Vega, IV)
+✓ Smart 0DTE date logic:
+  - After 3pm CT → Show next trading day options
+  - Midnight → Flip to new day
+✓ Live option prices in setup cards
+✓ Expected returns based on calibrated model
 """
 
 import streamlit as st
@@ -453,6 +462,68 @@ def get_next_trading_day(from_date=None):
         next_day += timedelta(days=1)
     return next_day
 
+def get_0dte_expiration_date():
+    """
+    Smart 0DTE expiration date logic:
+    
+    RULES:
+    - During RTH (8:30am-3pm CT): Show TODAY's 0DTE options
+    - After 3pm CT (market close): Show NEXT TRADING DAY options
+    - After midnight: Show that day's options (if trading day)
+    
+    This ensures:
+    - During trading: You see today's 0DTE that you're trading
+    - After close: You see tomorrow's 0DTE for preparation/analysis
+    - On weekends/holidays: You see next trading day's options
+    
+    Returns:
+        tuple: (expiration_date, label, is_preview)
+        - expiration_date: The date to use for options chain
+        - label: Human-readable description like "Today's 0DTE" or "Tomorrow's 0DTE"
+        - is_preview: True if showing future date (prices may be stale/estimated)
+    """
+    now = get_ct_now()
+    today = now.date()
+    current_time = now.time()
+    
+    # Market close time for today
+    close_time = get_market_close_time(today)
+    
+    # Check if today is even a trading day
+    if is_holiday(today) or today.weekday() >= 5:
+        # Weekend or holiday - show next trading day
+        next_trading = get_next_trading_day(today + timedelta(days=1))
+        days_away = (next_trading - today).days
+        if days_away == 1:
+            label = f"Tomorrow's 0DTE ({next_trading.strftime('%b %d')})"
+        else:
+            label = f"{next_trading.strftime('%A, %b %d')} 0DTE"
+        return next_trading, label, True
+    
+    # Today is a trading day
+    market_open = time(8, 30)  # RTH open
+    
+    if current_time < market_open:
+        # Before market open - show today's options
+        return today, f"Today's 0DTE (Pre-Market)", False
+    
+    if current_time <= close_time:
+        # During RTH - show today's options
+        return today, f"Today's 0DTE (Live)", False
+    
+    # After market close - show NEXT trading day
+    next_trading = get_next_trading_day(today + timedelta(days=1))
+    days_away = (next_trading - today).days
+    
+    if days_away == 1:
+        label = f"Tomorrow's 0DTE ({next_trading.strftime('%b %d')})"
+    elif days_away == 2:
+        label = f"Monday's 0DTE ({next_trading.strftime('%b %d')})"  # After Friday
+    else:
+        label = f"{next_trading.strftime('%A, %b %d')} 0DTE"
+    
+    return next_trading, label, True
+
 def get_prior_trading_day(from_date):
     prior = from_date - timedelta(days=1)
     while prior.weekday() >= 5 or is_holiday(prior):
@@ -696,6 +767,139 @@ def polygon_get_daily_bars(ticker, from_date, to_date):
 def polygon_get_intraday_bars(ticker, from_date, to_date, multiplier=30):
     data = polygon_get(f"/v2/aggs/ticker/{ticker}/range/{multiplier}/minute/{from_date.strftime('%Y-%m-%d')}/{to_date.strftime('%Y-%m-%d')}", {"adjusted": "true", "sort": "asc", "limit": 5000})
     return data.get("results", []) if data else []
+
+def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=50, vix_current=16):
+    """
+    Fetch comprehensive options chain for dashboard display.
+    
+    Fetches both PUTS and CALLS around center strike with full Greeks.
+    Also calculates expected returns based on calibrated model.
+    
+    Args:
+        center_strike: Center strike price (usually current SPX)
+        expiration_date: Date object for 0DTE
+        range_pts: Points above/below center to fetch (default 50 = +/- 50 pts)
+        vix_current: Current VIX for expected return calculations
+    
+    Returns:
+        dict: {
+            'puts': [...],  # List of PUT contracts
+            'calls': [...],  # List of CALL contracts
+            'expiration': date,
+            'center': strike,
+            'fetched_at': datetime
+        }
+    """
+    chain = {
+        'puts': [],
+        'calls': [],
+        'expiration': expiration_date,
+        'center': center_strike,
+        'fetched_at': get_ct_now()
+    }
+    
+    # Determine strikes to fetch (every 5 points)
+    strikes = list(range(int(center_strike) - range_pts, int(center_strike) + range_pts + 5, 5))
+    
+    for strike in strikes:
+        # Fetch PUT
+        put_data = get_spx_option_price(strike, "P", expiration_date)
+        if put_data:
+            # Calculate OTM distance and expected move
+            otm_dist = max(0, center_strike - strike)  # PUT is OTM if strike < SPX
+            is_otm = strike < center_strike
+            
+            # Get current price (use mid if available, else last)
+            current_price = put_data['mid'] if put_data['mid'] > 0 else put_data['last']
+            
+            # Calculate expected 50% and 100% returns
+            expected_50_return = current_price * 0.5 * 100  # 50% gain = +50% on premium
+            expected_100_return = current_price * 1.0 * 100  # 100% gain = double
+            expected_200_return = current_price * 2.0 * 100  # 200% gain = triple
+            
+            chain['puts'].append({
+                'strike': strike,
+                'bid': put_data['bid'],
+                'ask': put_data['ask'],
+                'mid': put_data['mid'],
+                'last': put_data['last'],
+                'current': current_price,
+                'delta': put_data['delta'],
+                'gamma': put_data['gamma'],
+                'theta': put_data['theta'],
+                'vega': put_data['vega'],
+                'iv': put_data['iv'],
+                'oi': put_data['open_interest'],
+                'otm_dist': otm_dist,
+                'is_otm': is_otm,
+                'exp_50': expected_50_return,
+                'exp_100': expected_100_return,
+                'exp_200': expected_200_return,
+                'in_sweet_spot': 3.50 <= current_price <= 8.00
+            })
+        
+        # Fetch CALL
+        call_data = get_spx_option_price(strike, "C", expiration_date)
+        if call_data:
+            # Calculate OTM distance
+            otm_dist = max(0, strike - center_strike)  # CALL is OTM if strike > SPX
+            is_otm = strike > center_strike
+            
+            current_price = call_data['mid'] if call_data['mid'] > 0 else call_data['last']
+            
+            expected_50_return = current_price * 0.5 * 100
+            expected_100_return = current_price * 1.0 * 100
+            expected_200_return = current_price * 2.0 * 100
+            
+            chain['calls'].append({
+                'strike': strike,
+                'bid': call_data['bid'],
+                'ask': call_data['ask'],
+                'mid': call_data['mid'],
+                'last': call_data['last'],
+                'current': current_price,
+                'delta': call_data['delta'],
+                'gamma': call_data['gamma'],
+                'theta': call_data['theta'],
+                'vega': call_data['vega'],
+                'iv': call_data['iv'],
+                'oi': call_data['open_interest'],
+                'otm_dist': otm_dist,
+                'is_otm': is_otm,
+                'exp_50': expected_50_return,
+                'exp_100': expected_100_return,
+                'exp_200': expected_200_return,
+                'in_sweet_spot': 3.50 <= current_price <= 8.00
+            })
+    
+    # Sort: PUTs descending by strike, CALLs ascending by strike
+    chain['puts'].sort(key=lambda x: x['strike'], reverse=True)
+    chain['calls'].sort(key=lambda x: x['strike'])
+    
+    return chain
+
+def get_option_from_chain(chain, strike, contract_type):
+    """
+    Get a specific option from the cached chain.
+    
+    Args:
+        chain: Options chain dict from fetch_options_chain_for_dashboard
+        strike: Strike price
+        contract_type: "C" or "P"
+    
+    Returns:
+        Option data dict or None
+    """
+    if not chain:
+        return None
+    
+    contracts = chain['calls'] if contract_type.upper() == 'C' else chain['puts']
+    
+    for c in contracts:
+        if c['strike'] == strike:
+            return c
+    
+    return None
 
 def fetch_es_ma_bias():
     """
@@ -2398,7 +2602,7 @@ def check_alerts(setups, vix_zone, current_time):
         alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window (9:00-9:30 CT)"})
     return alerts
 
-def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, market_ctx=None, price_proximity=None, day_structure=None):
+def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, market_ctx=None, price_proximity=None, day_structure=None, options_chain=None):
     # ═══════════════════════════════════════════════════════════════════════
     # OBSIDIAN PREMIUM DESIGN SYSTEM
     # ═══════════════════════════════════════════════════════════════════════
@@ -4740,78 +4944,178 @@ body {{
     
     html += '</div>'
     
-    # OPTIONS CHAIN DISPLAY (if loaded)
-    options_chain_puts = st.session_state.get("options_chain_puts", [])
-    options_chain_calls = st.session_state.get("options_chain_calls", [])
+    # ═══════════════════════════════════════════════════════════════════════
+    # OPTIONS CHAIN DISPLAY - Full chain with Greeks in dashboard
+    # ═══════════════════════════════════════════════════════════════════════
     
-    if options_chain_puts or options_chain_calls:
-        # Filter to show only contracts near current price
-        near_range = 30  # Show strikes within 30 pts of current
+    if options_chain and (options_chain.get('puts') or options_chain.get('calls')):
+        exp_date = options_chain.get('expiration', trading_date)
+        exp_label = st.session_state.get('chain_exp_label', f"{exp_date.strftime('%b %d')} 0DTE")
+        chain_center = options_chain.get('center', current_price)
+        fetched_at = options_chain.get('fetched_at')
+        fetched_str = fetched_at.strftime('%H:%M CT') if fetched_at else "—"
         
-        near_puts = [p for p in options_chain_puts if abs(p['Strike'] - current_price) <= near_range]
-        near_calls = [c for c in options_chain_calls if abs(c['Strike'] - current_price) <= near_range]
+        # Get all contracts
+        all_puts = options_chain.get('puts', [])
+        all_calls = options_chain.get('calls', [])
         
-        # Sort: PUTs descending, CALLs ascending
-        near_puts = sorted(near_puts, key=lambda x: x['Strike'], reverse=True)[:6]
-        near_calls = sorted(near_calls, key=lambda x: x['Strike'])[:6]
+        # Filter to show contracts near current price (within 40 pts)
+        near_range = 40
+        near_puts = [p for p in all_puts if abs(p['strike'] - current_price) <= near_range]
+        near_calls = [c for c in all_calls if abs(c['strike'] - current_price) <= near_range]
+        
+        # Sort: PUTs descending, CALLs ascending (for display)
+        near_puts = sorted(near_puts, key=lambda x: x['strike'], reverse=True)[:8]
+        near_calls = sorted(near_calls, key=lambda x: x['strike'])[:8]
+        
+        # Sweet spot contracts (highlighted)
+        sweet_spot_puts = [p for p in near_puts if p.get('in_sweet_spot', False)]
+        sweet_spot_calls = [c for c in near_calls if c.get('in_sweet_spot', False)]
         
         html += f'''
-<!-- OPTIONS CHAIN SNAPSHOT -->
+<!-- OPTIONS CHAIN - FULL DASHBOARD VIEW -->
 <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
-    <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
-        <span style="font-size:16px;">📊</span>
-        <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Live Options Chain</span>
-        <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">Near SPX {current_price:.0f}</span>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);">
+        <div style="display:flex;align-items:center;gap:var(--space-2);">
+            <span style="font-size:18px;">📊</span>
+            <span style="font-size:14px;font-weight:600;color:var(--text-primary);">SPX Options Chain</span>
+        </div>
+        <div style="text-align:right;">
+            <div style="font-size:12px;font-weight:500;color:var(--info);">{exp_label}</div>
+            <div style="font-size:10px;color:var(--text-muted);">Updated {fetched_str}</div>
+        </div>
     </div>
     
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);">
         <!-- PUTS Column -->
-        <div>
-            <div style="font-size:11px;font-weight:600;color:var(--danger);margin-bottom:var(--space-2);">🔴 PUTS</div>
-            <div style="font-family:var(--font-mono);font-size:11px;">
+        <div style="background:var(--bg-elevated);border-radius:var(--radius-md);padding:var(--space-3);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
+                <span style="font-size:12px;font-weight:700;color:var(--danger);">🔴 PUTS</span>
+                <span style="font-size:10px;color:var(--text-muted);">{len(all_puts)} contracts</span>
+            </div>
+            
+            <!-- Table Header -->
+            <div style="display:grid;grid-template-columns:50px 55px 35px 35px 35px 40px;gap:4px;font-size:9px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
+                <span>STRIKE</span>
+                <span>BID/ASK</span>
+                <span>Δ</span>
+                <span>Θ</span>
+                <span>IV</span>
+                <span>+50%</span>
+            </div>
 '''
+        # PUT rows
         for p in near_puts:
-            mid_price = p['Mid'] if p['Mid'] > 0 else p['Last']
-            delta_str = f"{abs(p['Delta']):.2f}" if p['Delta'] else "—"
-            highlight = "background:var(--danger-soft);border-radius:4px;padding:2px 4px;" if abs(p['Strike'] - current_price) <= 10 else ""
-            html += f'''                <div style="display:flex;justify-content:space-between;padding:2px 0;{highlight}">
-                    <span>{p['Strike']}P</span>
-                    <span>${mid_price:.2f}</span>
-                    <span style="color:var(--text-muted);">Δ{delta_str}</span>
-                </div>
+            strike = p['strike']
+            bid = p.get('bid', 0)
+            ask = p.get('ask', 0)
+            mid = p.get('mid', 0)
+            current = p.get('current', mid) or mid
+            delta = abs(p.get('delta', 0))
+            theta = abs(p.get('theta', 0))
+            iv = p.get('iv', 0)
+            exp_50 = p.get('exp_50', 0)
+            in_sweet = p.get('in_sweet_spot', False)
+            is_otm = p.get('is_otm', strike < current_price)
+            
+            # Highlight sweet spot and near-money contracts
+            row_bg = "background:var(--success-soft);border-radius:4px;" if in_sweet else ""
+            if abs(strike - current_price) <= 10:
+                row_bg = "background:linear-gradient(90deg, var(--danger-soft), transparent);border-radius:4px;"
+            
+            strike_color = "var(--text-primary)" if is_otm else "var(--danger)"
+            
+            html += f'''
+            <div style="display:grid;grid-template-columns:50px 55px 35px 35px 35px 40px;gap:4px;font-family:var(--font-mono);font-size:10px;padding:4px 0;{row_bg}">
+                <span style="font-weight:600;color:{strike_color};">{strike}P</span>
+                <span style="color:var(--text-secondary);">${bid:.2f}/{ask:.2f}</span>
+                <span style="color:var(--danger);">{delta:.2f}</span>
+                <span style="color:var(--text-muted);">{theta:.2f}</span>
+                <span style="color:var(--text-muted);">{iv:.0%}</span>
+                <span style="color:var(--success);">${exp_50:.0f}</span>
+            </div>
 '''
         
         if not near_puts:
-            html += '                <div style="color:var(--text-muted);">No data</div>'
+            html += '<div style="color:var(--text-muted);font-size:11px;padding:8px;text-align:center;">No PUT data loaded</div>'
         
-        html += '''            </div>
+        html += '''
         </div>
         
         <!-- CALLS Column -->
-        <div>
-            <div style="font-size:11px;font-weight:600;color:var(--success);margin-bottom:var(--space-2);">🟢 CALLS</div>
-            <div style="font-family:var(--font-mono);font-size:11px;">
+        <div style="background:var(--bg-elevated);border-radius:var(--radius-md);padding:var(--space-3);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
+                <span style="font-size:12px;font-weight:700;color:var(--success);">🟢 CALLS</span>
+                <span style="font-size:10px;color:var(--text-muted);">''' + str(len(all_calls)) + ''' contracts</span>
+            </div>
+            
+            <!-- Table Header -->
+            <div style="display:grid;grid-template-columns:50px 55px 35px 35px 35px 40px;gap:4px;font-size:9px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
+                <span>STRIKE</span>
+                <span>BID/ASK</span>
+                <span>Δ</span>
+                <span>Θ</span>
+                <span>IV</span>
+                <span>+50%</span>
+            </div>
 '''
+        # CALL rows
         for c in near_calls:
-            mid_price = c['Mid'] if c['Mid'] > 0 else c['Last']
-            delta_str = f"{c['Delta']:.2f}" if c['Delta'] else "—"
-            highlight = "background:var(--success-soft);border-radius:4px;padding:2px 4px;" if abs(c['Strike'] - current_price) <= 10 else ""
-            html += f'''                <div style="display:flex;justify-content:space-between;padding:2px 0;{highlight}">
-                    <span>{c['Strike']}C</span>
-                    <span>${mid_price:.2f}</span>
-                    <span style="color:var(--text-muted);">Δ{delta_str}</span>
-                </div>
+            strike = c['strike']
+            bid = c.get('bid', 0)
+            ask = c.get('ask', 0)
+            mid = c.get('mid', 0)
+            current = c.get('current', mid) or mid
+            delta = c.get('delta', 0)
+            theta = abs(c.get('theta', 0))
+            iv = c.get('iv', 0)
+            exp_50 = c.get('exp_50', 0)
+            in_sweet = c.get('in_sweet_spot', False)
+            is_otm = c.get('is_otm', strike > current_price)
+            
+            row_bg = "background:var(--success-soft);border-radius:4px;" if in_sweet else ""
+            if abs(strike - current_price) <= 10:
+                row_bg = "background:linear-gradient(90deg, transparent, var(--success-soft));border-radius:4px;"
+            
+            strike_color = "var(--text-primary)" if is_otm else "var(--success)"
+            
+            html += f'''
+            <div style="display:grid;grid-template-columns:50px 55px 35px 35px 35px 40px;gap:4px;font-family:var(--font-mono);font-size:10px;padding:4px 0;{row_bg}">
+                <span style="font-weight:600;color:{strike_color};">{strike}C</span>
+                <span style="color:var(--text-secondary);">${bid:.2f}/{ask:.2f}</span>
+                <span style="color:var(--success);">{delta:.2f}</span>
+                <span style="color:var(--text-muted);">{theta:.2f}</span>
+                <span style="color:var(--text-muted);">{iv:.0%}</span>
+                <span style="color:var(--success);">${exp_50:.0f}</span>
+            </div>
 '''
         
         if not near_calls:
-            html += '                <div style="color:var(--text-muted);">No data</div>'
+            html += '<div style="color:var(--text-muted);font-size:11px;padding:8px;text-align:center;">No CALL data loaded</div>'
         
-        html += '''            </div>
+        html += '''
         </div>
     </div>
-    <div style="font-size:10px;color:var(--text-muted);margin-top:var(--space-2);text-align:center;">
-        15-min delayed • Prices may be $0 after market close
+    
+    <!-- Legend -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-3);padding-top:var(--space-2);border-top:1px solid var(--border);">
+        <div style="font-size:10px;color:var(--text-muted);">
+            💡 <strong>Δ</strong>=Delta <strong>Θ</strong>=Theta <strong>+50%</strong>=Expected @ 50% profit
+        </div>
+        <div style="font-size:10px;color:var(--text-muted);">
+            15-min delayed • $3.50-$8 = Sweet Spot
+        </div>
     </div>
+</div>
+'''
+    else:
+        # No chain loaded - show prompt to load
+        html += f'''
+<!-- OPTIONS CHAIN - PROMPT TO LOAD -->
+<div style="background:var(--bg-surface);border:1px dashed var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);text-align:center;">
+    <span style="font-size:24px;">📊</span>
+    <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-top:var(--space-2);">Options Chain Not Loaded</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:var(--space-1);">Click "Load Chain to Dashboard" in sidebar</div>
 </div>
 '''
     
@@ -5634,132 +5938,54 @@ def main():
         
         st.divider()
         
-        # SPX OPTIONS CHAIN VIEWER
-        st.markdown("### 🔗 SPX Options Chain")
+        # SMART 0DTE EXPIRATION DATE - Now uses new logic
+        st.markdown("### 🔗 Options Chain")
         
-        # Determine 0DTE date: before midnight = tomorrow, after midnight = today
-        now_ct = get_ct_now()
-        if now_ct.hour < 12:  # Before noon = likely trading today's 0DTE
-            default_0dte = now_ct.date()
-        else:  # After noon = preparing for tomorrow's 0DTE
-            default_0dte = get_next_trading_day(now_ct.date())
+        # Get smart 0DTE date
+        exp_date, exp_label, is_preview = get_0dte_expiration_date()
         
-        # Use trading date from session or default
-        trading_date = st.session_state.get("trading_date", default_0dte)
-        if isinstance(trading_date, str):
-            trading_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
+        if is_preview:
+            st.info(f"📅 {exp_label}")
+        else:
+            st.success(f"📅 {exp_label}")
         
-        st.caption(f"0DTE Expiration: **{trading_date.strftime('%b %d, %Y')}**")
+        # Store for use in dashboard
+        st.session_state.options_exp_date = exp_date
+        st.session_state.options_exp_label = exp_label
+        st.session_state.options_is_preview = is_preview
         
         # Get current SPX price for reference
         current_spx = st.session_state.get("overnight_spx", 0)
         if current_spx == 0:
             current_spx = 5900  # Default fallback
         
-        # Options chain controls
-        col1, col2 = st.columns(2)
-        with col1:
-            chain_center = st.number_input("Center Strike", value=int(current_spx // 5) * 5, step=5, key="chain_center")
-        with col2:
-            chain_range = st.selectbox("Range", [25, 50, 100], index=1, key="chain_range")
+        st.caption(f"Center: **{int(current_spx):,}** SPX")
         
-        if st.button("📊 Load Options Chain", key="load_chain_btn", use_container_width=True):
-            with st.spinner("Fetching options chain..."):
-                # Fetch PUT chain
-                puts_data = []
-                calls_data = []
-                
-                strikes_to_fetch = list(range(chain_center - chain_range, chain_center + chain_range + 5, 5))
-                
-                progress_bar = st.progress(0)
-                total = len(strikes_to_fetch) * 2
-                
-                for i, strike in enumerate(strikes_to_fetch):
-                    # Fetch PUT
-                    put = get_spx_option_price(strike, "P", trading_date)
-                    if put:
-                        puts_data.append({
-                            "Strike": strike,
-                            "Bid": put['bid'],
-                            "Ask": put['ask'],
-                            "Last": put['last'],
-                            "Delta": put['delta'],
-                            "IV": put['iv'],
-                            "OI": put['open_interest']
-                        })
-                    
-                    # Fetch CALL
-                    call = get_spx_option_price(strike, "C", trading_date)
-                    if call:
-                        calls_data.append({
-                            "Strike": strike,
-                            "Bid": call['bid'],
-                            "Ask": call['ask'],
-                            "Last": call['last'],
-                            "Delta": call['delta'],
-                            "IV": call['iv'],
-                            "OI": call['open_interest']
-                        })
-                    
-                    progress_bar.progress((i + 1) / len(strikes_to_fetch))
-                
-                progress_bar.empty()
-                
-                # Store in session state
-                st.session_state.options_chain_puts = puts_data
-                st.session_state.options_chain_calls = calls_data
-                st.session_state.options_chain_loaded = True
-                st.success(f"✅ Loaded {len(puts_data)} PUTs, {len(calls_data)} CALLs")
+        # Quick fetch button for dashboard
+        if st.button("📊 Load Chain to Dashboard", key="load_chain_btn", use_container_width=True, type="primary"):
+            st.session_state.load_options_chain = True
+            st.session_state.chain_center = int(current_spx // 5) * 5
+            st.session_state.chain_range = 50
+            st.rerun()
         
-        # Display chain if loaded
-        if st.session_state.get("options_chain_loaded", False):
-            tab1, tab2 = st.tabs(["🔴 PUTS", "🟢 CALLS"])
-            
-            with tab1:
-                puts = st.session_state.get("options_chain_puts", [])
-                if puts:
-                    for p in sorted(puts, key=lambda x: x['Strike'], reverse=True):
-                        otm = "OTM" if p['Strike'] < current_spx else "ITM"
-                        delta_str = f"{p['Delta']:.2f}" if p['Delta'] else "—"
-                        iv_str = f"{p['IV']:.0%}" if p['IV'] else "—"
-                        
-                        # Highlight strikes near current price
-                        highlight = "→ " if abs(p['Strike'] - current_spx) <= 15 else "  "
-                        
-                        st.text(f"{highlight}{p['Strike']}P | ${p['Bid']:.2f}/${p['Ask']:.2f} | Δ{delta_str} | IV:{iv_str} | OI:{p['OI']:,}")
-                else:
-                    st.info("No PUT data loaded")
-            
-            with tab2:
-                calls = st.session_state.get("options_chain_calls", [])
-                if calls:
-                    for c in sorted(calls, key=lambda x: x['Strike']):
-                        otm = "OTM" if c['Strike'] > current_spx else "ITM"
-                        delta_str = f"{c['Delta']:.2f}" if c['Delta'] else "—"
-                        iv_str = f"{c['IV']:.0%}" if c['IV'] else "—"
-                        
-                        highlight = "→ " if abs(c['Strike'] - current_spx) <= 15 else "  "
-                        
-                        st.text(f"{highlight}{c['Strike']}C | ${c['Bid']:.2f}/${c['Ask']:.2f} | Δ{delta_str} | IV:{iv_str} | OI:{c['OI']:,}")
-                else:
-                    st.info("No CALL data loaded")
+        st.caption("💡 Full chain with Greeks shown in main dashboard")
         
         st.divider()
         
-        # AUTO-FETCH FOR DAY STRUCTURE
-        st.markdown("### 🔄 Auto-Fetch Prices")
+        # AUTO-FETCH FOR DAY STRUCTURE (keep this)
+        st.markdown("### 🔄 Quick Price Fetch")
         st.caption("Fetch contract prices for Day Structure")
         
         col1, col2 = st.columns(2)
         with col1:
-            auto_put_strike = st.number_input("PUT Strike", value=int(current_spx // 5) * 5 - 10, step=5, key="auto_put_strike")
+            auto_put_strike = st.number_input("PUT", value=int(current_spx // 5) * 5 - 10, step=5, key="auto_put_strike")
         with col2:
-            auto_call_strike = st.number_input("CALL Strike", value=int(current_spx // 5) * 5 + 10, step=5, key="auto_call_strike")
+            auto_call_strike = st.number_input("CALL", value=int(current_spx // 5) * 5 + 10, step=5, key="auto_call_strike")
         
-        if st.button("⬇️ Fetch & Apply to Day Structure", key="auto_fetch_btn", use_container_width=True):
-            with st.spinner("Fetching prices..."):
-                put_data = get_spx_option_price(auto_put_strike, "P", trading_date)
-                call_data = get_spx_option_price(auto_call_strike, "C", trading_date)
+        if st.button("⬇️ Apply to Day Structure", key="auto_fetch_btn", use_container_width=True):
+            with st.spinner("Fetching..."):
+                put_data = get_spx_option_price(auto_put_strike, "P", exp_date)
+                call_data = get_spx_option_price(auto_call_strike, "C", exp_date)
                 
                 results = []
                 
@@ -5776,9 +6002,9 @@ def main():
                         results.append(f"CALL {auto_call_strike}C: ${call_price:.2f}")
                 
                 if results:
-                    st.success("✅ Applied to Day Structure:\n" + "\n".join(results))
+                    st.success("✅ " + " | ".join(results))
                 else:
-                    st.warning("⚠️ No prices available (market may be closed)")
+                    st.warning("⚠️ No prices (market closed)")
         
         st.divider()
         
@@ -6053,8 +6279,43 @@ def main():
     day_score = calculate_day_score(vix_zone, cones, setups, confluence, market_ctx)
     pivot_table = build_pivot_table(pivots, trading_date)
     alerts = check_alerts(setups, vix_zone, now.time()) if not is_historical else []
-    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, price_proximity, day_structure)
-    components.html(html, height=4500, scrolling=True)
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # OPTIONS CHAIN LOADING - Load on request from sidebar
+    # ═══════════════════════════════════════════════════════════════════════
+    options_chain = None
+    
+    # Get smart 0DTE expiration date
+    exp_date, exp_label, is_preview = get_0dte_expiration_date()
+    
+    # Check if user requested chain load from sidebar
+    if st.session_state.get("load_options_chain", False):
+        with st.spinner("Loading options chain..."):
+            chain_center = st.session_state.get("chain_center", int(spx_price // 5) * 5)
+            chain_range = st.session_state.get("chain_range", 50)
+            
+            # Use the smart 0DTE date
+            options_chain = fetch_options_chain_for_dashboard(
+                center_strike=chain_center,
+                expiration_date=exp_date,
+                range_pts=chain_range,
+                vix_current=vix_for_pricing
+            )
+            
+            if options_chain:
+                st.session_state.dashboard_options_chain = options_chain
+                st.session_state.chain_exp_date = exp_date
+                st.session_state.chain_exp_label = exp_label
+            
+            # Reset the load flag
+            st.session_state.load_options_chain = False
+    
+    # Use cached chain if available
+    if 'dashboard_options_chain' in st.session_state:
+        options_chain = st.session_state.dashboard_options_chain
+    
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, price_proximity, day_structure, options_chain)
+    components.html(html, height=5500, scrolling=True)
 
 if __name__ == "__main__":
     main()
