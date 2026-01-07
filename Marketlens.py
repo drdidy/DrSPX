@@ -4388,7 +4388,15 @@ body {{
     flip_watch_price = 0
     flip_enter_direction = ""
     has_flip_signal = False
-    current_price = price_proximity.current_price if price_proximity else 0
+    
+    # Get current price from multiple sources (fallback chain)
+    current_price = 0
+    if price_proximity and price_proximity.current_price > 0:
+        current_price = price_proximity.current_price
+    elif spx_price > 0:
+        current_price = spx_price
+    elif options_chain and options_chain.get('center', 0) > 0:
+        current_price = options_chain.get('center')
     
     # Get direction from VIX/MA confluence
     if not has_conflict:
@@ -4959,10 +4967,13 @@ body {{
         all_puts = options_chain.get('puts', [])
         all_calls = options_chain.get('calls', [])
         
+        # Use chain center if current_price is not available
+        filter_center = current_price if current_price > 0 else chain_center
+        
         # Filter to show contracts near current price (within 40 pts)
         near_range = 40
-        near_puts = [p for p in all_puts if abs(p['strike'] - current_price) <= near_range]
-        near_calls = [c for c in all_calls if abs(c['strike'] - current_price) <= near_range]
+        near_puts = [p for p in all_puts if abs(p['strike'] - filter_center) <= near_range]
+        near_calls = [c for c in all_calls if abs(c['strike'] - filter_center) <= near_range]
         
         # Sort: PUTs descending, CALLs ascending (for display)
         near_puts = sorted(near_puts, key=lambda x: x['strike'], reverse=True)[:8]
@@ -4972,8 +4983,14 @@ body {{
         sweet_spot_puts = [p for p in near_puts if p.get('in_sweet_spot', False)]
         sweet_spot_calls = [c for c in near_calls if c.get('in_sweet_spot', False)]
         
+        # Market status message
+        market_status = ""
+        any_has_price = any(p.get('last', 0) > 0 or p.get('mid', 0) > 0 for p in near_puts + near_calls)
+        if not any_has_price:
+            market_status = '<div style="background:var(--warning-soft);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:var(--space-2);margin-bottom:var(--space-3);font-size:11px;color:var(--warning);text-align:center;">⚠️ Market Closed - Prices show $0 until 8:30am CT</div>'
+        
         html += f'''
-<!-- OPTIONS CHAIN - FULL DASHBOARD VIEW -->
+<!-- OPTIONS CHAIN - TRADING FOCUSED -->
 <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);">
         <div style="display:flex;align-items:center;gap:var(--space-2);">
@@ -4986,53 +5003,60 @@ body {{
         </div>
     </div>
     
+    {market_status}
+    
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);">
         <!-- PUTS Column -->
         <div style="background:var(--bg-elevated);border-radius:var(--radius-md);padding:var(--space-3);">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
                 <span style="font-size:12px;font-weight:700;color:var(--danger);">🔴 PUTS</span>
-                <span style="font-size:10px;color:var(--text-muted);">{len(all_puts)} contracts</span>
+                <span style="font-size:10px;color:var(--text-muted);">{len(all_puts)} loaded</span>
             </div>
             
             <!-- Table Header -->
-            <div style="display:grid;grid-template-columns:50px 55px 35px 35px 35px 40px;gap:4px;font-size:9px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
+            <div style="display:grid;grid-template-columns:55px 50px 40px 50px 50px 50px;gap:2px;font-size:9px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
                 <span>STRIKE</span>
-                <span>BID/ASK</span>
-                <span>Δ</span>
-                <span>Θ</span>
+                <span>PRICE</span>
                 <span>IV</span>
-                <span>+50%</span>
+                <span style="color:var(--success);">+50%</span>
+                <span style="color:var(--success);">+100%</span>
+                <span style="color:var(--success);">+200%</span>
             </div>
 '''
-        # PUT rows
+        # PUT rows - show PRICE (last or mid), IV, and TARGET PRICES
         for p in near_puts:
             strike = p['strike']
-            bid = p.get('bid', 0)
-            ask = p.get('ask', 0)
-            mid = p.get('mid', 0)
-            current = p.get('current', mid) or mid
-            delta = abs(p.get('delta', 0))
-            theta = abs(p.get('theta', 0))
+            last_price = p.get('last', 0)
+            mid_price = p.get('mid', 0)
+            # Use last price if available, else mid
+            display_price = last_price if last_price > 0 else mid_price
             iv = p.get('iv', 0)
-            exp_50 = p.get('exp_50', 0)
             in_sweet = p.get('in_sweet_spot', False)
-            is_otm = p.get('is_otm', strike < current_price)
+            is_otm = p.get('is_otm', strike < filter_center)
             
-            # Highlight sweet spot and near-money contracts
-            row_bg = "background:var(--success-soft);border-radius:4px;" if in_sweet else ""
-            if abs(strike - current_price) <= 10:
+            # Calculate target sell prices
+            target_50 = display_price * 1.5 if display_price > 0 else 0
+            target_100 = display_price * 2.0 if display_price > 0 else 0
+            target_200 = display_price * 3.0 if display_price > 0 else 0
+            
+            # Highlight: green for sweet spot, gradient for near-money
+            row_bg = ""
+            if in_sweet and display_price > 0:
+                row_bg = "background:var(--success-soft);border-radius:4px;"
+            elif abs(strike - filter_center) <= 10:
                 row_bg = "background:linear-gradient(90deg, var(--danger-soft), transparent);border-radius:4px;"
             
             strike_color = "var(--text-primary)" if is_otm else "var(--danger)"
+            price_display = f"${display_price:.2f}" if display_price > 0 else "—"
             
             html += f'''
-            <div style="display:grid;grid-template-columns:50px 55px 35px 35px 35px 40px;gap:4px;font-family:var(--font-mono);font-size:10px;padding:4px 0;{row_bg}">
+            <div style="display:grid;grid-template-columns:55px 50px 40px 50px 50px 50px;gap:2px;font-family:var(--font-mono);font-size:11px;padding:5px 2px;{row_bg}">
                 <span style="font-weight:600;color:{strike_color};">{strike}P</span>
-                <span style="color:var(--text-secondary);">${bid:.2f}/{ask:.2f}</span>
-                <span style="color:var(--danger);">{delta:.2f}</span>
-                <span style="color:var(--text-muted);">{theta:.2f}</span>
+                <span style="color:var(--text-primary);font-weight:500;">{price_display}</span>
                 <span style="color:var(--text-muted);">{iv:.0%}</span>
-                <span style="color:var(--success);">${exp_50:.0f}</span>
+                <span style="color:var(--success);">{f"${target_50:.2f}" if target_50 > 0 else "—"}</span>
+                <span style="color:var(--success);">{f"${target_100:.2f}" if target_100 > 0 else "—"}</span>
+                <span style="color:var(--success);font-weight:600;">{f"${target_200:.2f}" if target_200 > 0 else "—"}</span>
             </div>
 '''
         
@@ -5046,47 +5070,50 @@ body {{
         <div style="background:var(--bg-elevated);border-radius:var(--radius-md);padding:var(--space-3);">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-2);">
                 <span style="font-size:12px;font-weight:700;color:var(--success);">🟢 CALLS</span>
-                <span style="font-size:10px;color:var(--text-muted);">''' + str(len(all_calls)) + ''' contracts</span>
+                <span style="font-size:10px;color:var(--text-muted);">''' + str(len(all_calls)) + ''' loaded</span>
             </div>
             
             <!-- Table Header -->
-            <div style="display:grid;grid-template-columns:50px 55px 35px 35px 35px 40px;gap:4px;font-size:9px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
+            <div style="display:grid;grid-template-columns:55px 50px 40px 50px 50px 50px;gap:2px;font-size:9px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
                 <span>STRIKE</span>
-                <span>BID/ASK</span>
-                <span>Δ</span>
-                <span>Θ</span>
+                <span>PRICE</span>
                 <span>IV</span>
-                <span>+50%</span>
+                <span style="color:var(--success);">+50%</span>
+                <span style="color:var(--success);">+100%</span>
+                <span style="color:var(--success);">+200%</span>
             </div>
 '''
         # CALL rows
         for c in near_calls:
             strike = c['strike']
-            bid = c.get('bid', 0)
-            ask = c.get('ask', 0)
-            mid = c.get('mid', 0)
-            current = c.get('current', mid) or mid
-            delta = c.get('delta', 0)
-            theta = abs(c.get('theta', 0))
+            last_price = c.get('last', 0)
+            mid_price = c.get('mid', 0)
+            display_price = last_price if last_price > 0 else mid_price
             iv = c.get('iv', 0)
-            exp_50 = c.get('exp_50', 0)
             in_sweet = c.get('in_sweet_spot', False)
-            is_otm = c.get('is_otm', strike > current_price)
+            is_otm = c.get('is_otm', strike > filter_center)
             
-            row_bg = "background:var(--success-soft);border-radius:4px;" if in_sweet else ""
-            if abs(strike - current_price) <= 10:
+            target_50 = display_price * 1.5 if display_price > 0 else 0
+            target_100 = display_price * 2.0 if display_price > 0 else 0
+            target_200 = display_price * 3.0 if display_price > 0 else 0
+            
+            row_bg = ""
+            if in_sweet and display_price > 0:
+                row_bg = "background:var(--success-soft);border-radius:4px;"
+            elif abs(strike - filter_center) <= 10:
                 row_bg = "background:linear-gradient(90deg, transparent, var(--success-soft));border-radius:4px;"
             
             strike_color = "var(--text-primary)" if is_otm else "var(--success)"
+            price_display = f"${display_price:.2f}" if display_price > 0 else "—"
             
             html += f'''
-            <div style="display:grid;grid-template-columns:50px 55px 35px 35px 35px 40px;gap:4px;font-family:var(--font-mono);font-size:10px;padding:4px 0;{row_bg}">
+            <div style="display:grid;grid-template-columns:55px 50px 40px 50px 50px 50px;gap:2px;font-family:var(--font-mono);font-size:11px;padding:5px 2px;{row_bg}">
                 <span style="font-weight:600;color:{strike_color};">{strike}C</span>
-                <span style="color:var(--text-secondary);">${bid:.2f}/{ask:.2f}</span>
-                <span style="color:var(--success);">{delta:.2f}</span>
-                <span style="color:var(--text-muted);">{theta:.2f}</span>
+                <span style="color:var(--text-primary);font-weight:500;">{price_display}</span>
                 <span style="color:var(--text-muted);">{iv:.0%}</span>
-                <span style="color:var(--success);">${exp_50:.0f}</span>
+                <span style="color:var(--success);">{f"${target_50:.2f}" if target_50 > 0 else "—"}</span>
+                <span style="color:var(--success);">{f"${target_100:.2f}" if target_100 > 0 else "—"}</span>
+                <span style="color:var(--success);font-weight:600;">{f"${target_200:.2f}" if target_200 > 0 else "—"}</span>
             </div>
 '''
         
@@ -5100,10 +5127,10 @@ body {{
     <!-- Legend -->
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-3);padding-top:var(--space-2);border-top:1px solid var(--border);">
         <div style="font-size:10px;color:var(--text-muted);">
-            💡 <strong>Δ</strong>=Delta <strong>Θ</strong>=Theta <strong>+50%</strong>=Expected @ 50% profit
+            💡 <strong>+50/100/200%</strong> = Sell price at that profit level
         </div>
         <div style="font-size:10px;color:var(--text-muted);">
-            15-min delayed • $3.50-$8 = Sweet Spot
+            Green highlight = Sweet Spot ($3.50-$8)
         </div>
     </div>
 </div>
