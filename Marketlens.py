@@ -4740,6 +4740,81 @@ body {{
     
     html += '</div>'
     
+    # OPTIONS CHAIN DISPLAY (if loaded)
+    options_chain_puts = st.session_state.get("options_chain_puts", [])
+    options_chain_calls = st.session_state.get("options_chain_calls", [])
+    
+    if options_chain_puts or options_chain_calls:
+        # Filter to show only contracts near current price
+        near_range = 30  # Show strikes within 30 pts of current
+        
+        near_puts = [p for p in options_chain_puts if abs(p['Strike'] - current_price) <= near_range]
+        near_calls = [c for c in options_chain_calls if abs(c['Strike'] - current_price) <= near_range]
+        
+        # Sort: PUTs descending, CALLs ascending
+        near_puts = sorted(near_puts, key=lambda x: x['Strike'], reverse=True)[:6]
+        near_calls = sorted(near_calls, key=lambda x: x['Strike'])[:6]
+        
+        html += f'''
+<!-- OPTIONS CHAIN SNAPSHOT -->
+<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3);">
+        <span style="font-size:16px;">📊</span>
+        <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Live Options Chain</span>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">Near SPX {current_price:.0f}</span>
+    </div>
+    
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);">
+        <!-- PUTS Column -->
+        <div>
+            <div style="font-size:11px;font-weight:600;color:var(--danger);margin-bottom:var(--space-2);">🔴 PUTS</div>
+            <div style="font-family:var(--font-mono);font-size:11px;">
+'''
+        for p in near_puts:
+            mid_price = p['Mid'] if p['Mid'] > 0 else p['Last']
+            delta_str = f"{abs(p['Delta']):.2f}" if p['Delta'] else "—"
+            highlight = "background:var(--danger-soft);border-radius:4px;padding:2px 4px;" if abs(p['Strike'] - current_price) <= 10 else ""
+            html += f'''                <div style="display:flex;justify-content:space-between;padding:2px 0;{highlight}">
+                    <span>{p['Strike']}P</span>
+                    <span>${mid_price:.2f}</span>
+                    <span style="color:var(--text-muted);">Δ{delta_str}</span>
+                </div>
+'''
+        
+        if not near_puts:
+            html += '                <div style="color:var(--text-muted);">No data</div>'
+        
+        html += '''            </div>
+        </div>
+        
+        <!-- CALLS Column -->
+        <div>
+            <div style="font-size:11px;font-weight:600;color:var(--success);margin-bottom:var(--space-2);">🟢 CALLS</div>
+            <div style="font-family:var(--font-mono);font-size:11px;">
+'''
+        for c in near_calls:
+            mid_price = c['Mid'] if c['Mid'] > 0 else c['Last']
+            delta_str = f"{c['Delta']:.2f}" if c['Delta'] else "—"
+            highlight = "background:var(--success-soft);border-radius:4px;padding:2px 4px;" if abs(c['Strike'] - current_price) <= 10 else ""
+            html += f'''                <div style="display:flex;justify-content:space-between;padding:2px 0;{highlight}">
+                    <span>{c['Strike']}C</span>
+                    <span>${mid_price:.2f}</span>
+                    <span style="color:var(--text-muted);">Δ{delta_str}</span>
+                </div>
+'''
+        
+        if not near_calls:
+            html += '                <div style="color:var(--text-muted);">No data</div>'
+        
+        html += '''            </div>
+        </div>
+    </div>
+    <div style="font-size:10px;color:var(--text-muted);margin-top:var(--space-2);text-align:center;">
+        15-min delayed • Prices may be $0 after market close
+    </div>
+</div>
+'''
+    
     # CALLS Setups Section
     html += f'''
 <!-- CALLS SETUPS -->
@@ -5559,58 +5634,151 @@ def main():
         
         st.divider()
         
-        # SPX OPTIONS DATA TEST
-        st.markdown("### 🔗 SPX Options (Polygon)")
-        st.caption("Fetch live SPX options data")
+        # SPX OPTIONS CHAIN VIEWER
+        st.markdown("### 🔗 SPX Options Chain")
         
-        with st.expander("Test Options API", expanded=False):
-            test_strike = st.number_input("Strike", value=5900, step=5, key="test_strike")
-            test_type = st.radio("Type", ["PUT", "CALL"], horizontal=True, key="test_type")
-            
-            if st.button("🔍 Fetch Option", key="fetch_opt_btn"):
-                trading_date = st.session_state.get("trading_date", date.today())
-                if isinstance(trading_date, str):
-                    trading_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
+        # Determine 0DTE date: before midnight = tomorrow, after midnight = today
+        now_ct = get_ct_now()
+        if now_ct.hour < 12:  # Before noon = likely trading today's 0DTE
+            default_0dte = now_ct.date()
+        else:  # After noon = preparing for tomorrow's 0DTE
+            default_0dte = get_next_trading_day(now_ct.date())
+        
+        # Use trading date from session or default
+        trading_date = st.session_state.get("trading_date", default_0dte)
+        if isinstance(trading_date, str):
+            trading_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
+        
+        st.caption(f"0DTE Expiration: **{trading_date.strftime('%b %d, %Y')}**")
+        
+        # Get current SPX price for reference
+        current_spx = st.session_state.get("overnight_spx", 0)
+        if current_spx == 0:
+            current_spx = 5900  # Default fallback
+        
+        # Options chain controls
+        col1, col2 = st.columns(2)
+        with col1:
+            chain_center = st.number_input("Center Strike", value=int(current_spx // 5) * 5, step=5, key="chain_center")
+        with col2:
+            chain_range = st.selectbox("Range", [25, 50, 100], index=1, key="chain_range")
+        
+        if st.button("📊 Load Options Chain", key="load_chain_btn", use_container_width=True):
+            with st.spinner("Fetching options chain..."):
+                # Fetch PUT chain
+                puts_data = []
+                calls_data = []
                 
-                with st.spinner("Fetching from Polygon..."):
-                    opt_data = get_spx_option_price(
-                        strike=test_strike,
-                        contract_type=test_type[0],  # "P" or "C"
-                        expiration_date=trading_date
-                    )
+                strikes_to_fetch = list(range(chain_center - chain_range, chain_center + chain_range + 5, 5))
+                
+                progress_bar = st.progress(0)
+                total = len(strikes_to_fetch) * 2
+                
+                for i, strike in enumerate(strikes_to_fetch):
+                    # Fetch PUT
+                    put = get_spx_option_price(strike, "P", trading_date)
+                    if put:
+                        puts_data.append({
+                            "Strike": strike,
+                            "Bid": put['bid'],
+                            "Ask": put['ask'],
+                            "Last": put['last'],
+                            "Delta": put['delta'],
+                            "IV": put['iv'],
+                            "OI": put['open_interest']
+                        })
                     
-                    if opt_data:
-                        st.success("✅ Data received!")
-                        st.write(f"**Ticker:** {opt_data.get('ticker', 'N/A')}")
-                        st.write(f"**Bid:** ${opt_data['bid']:.2f}")
-                        st.write(f"**Ask:** ${opt_data['ask']:.2f}")
-                        st.write(f"**Mid:** ${opt_data['mid']:.2f}")
-                        st.write(f"**Last:** ${opt_data['last']:.2f}")
-                        st.write(f"**Delta:** {opt_data['delta']:.3f}")
-                        st.write(f"**IV:** {opt_data['iv']:.1%}" if opt_data['iv'] else "IV: N/A")
-                        st.write(f"**OI:** {opt_data['open_interest']:,}")
-                    else:
-                        st.error("❌ No data returned")
+                    # Fetch CALL
+                    call = get_spx_option_price(strike, "C", trading_date)
+                    if call:
+                        calls_data.append({
+                            "Strike": strike,
+                            "Bid": call['bid'],
+                            "Ask": call['ask'],
+                            "Last": call['last'],
+                            "Delta": call['delta'],
+                            "IV": call['iv'],
+                            "OI": call['open_interest']
+                        })
+                    
+                    progress_bar.progress((i + 1) / len(strikes_to_fetch))
+                
+                progress_bar.empty()
+                
+                # Store in session state
+                st.session_state.options_chain_puts = puts_data
+                st.session_state.options_chain_calls = calls_data
+                st.session_state.options_chain_loaded = True
+                st.success(f"✅ Loaded {len(puts_data)} PUTs, {len(calls_data)} CALLs")
+        
+        # Display chain if loaded
+        if st.session_state.get("options_chain_loaded", False):
+            tab1, tab2 = st.tabs(["🔴 PUTS", "🟢 CALLS"])
+            
+            with tab1:
+                puts = st.session_state.get("options_chain_puts", [])
+                if puts:
+                    for p in sorted(puts, key=lambda x: x['Strike'], reverse=True):
+                        otm = "OTM" if p['Strike'] < current_spx else "ITM"
+                        delta_str = f"{p['Delta']:.2f}" if p['Delta'] else "—"
+                        iv_str = f"{p['IV']:.0%}" if p['IV'] else "—"
                         
-                        # Show debug info
-                        debug = st.session_state.get('debug_info', {})
-                        if debug:
-                            st.markdown("**Debug Info:**")
-                            if 'tried_tickers' in debug:
-                                st.code(f"Tried tickers: {debug['tried_tickers']}")
-                            if 'last_url' in debug:
-                                # Hide API key in display
-                                url_display = debug['last_url'].replace(POLYGON_API_KEY, "***API_KEY***")
-                                st.code(f"Last URL: {url_display}")
-                            if 'last_status' in debug:
-                                st.write(f"Status: {debug['last_status']}")
-                            if 'last_error' in debug:
-                                st.error(f"Error: {debug['last_error'][:200]}")
+                        # Highlight strikes near current price
+                        highlight = "→ " if abs(p['Strike'] - current_spx) <= 15 else "  "
                         
-                        st.caption("Possible issues:")
-                        st.caption("• Options Starter plan may not include SPX index options")
-                        st.caption("• Market may be closed (no current quotes)")
-                        st.caption("• Strike/expiration may not exist")
+                        st.text(f"{highlight}{p['Strike']}P | ${p['Bid']:.2f}/${p['Ask']:.2f} | Δ{delta_str} | IV:{iv_str} | OI:{p['OI']:,}")
+                else:
+                    st.info("No PUT data loaded")
+            
+            with tab2:
+                calls = st.session_state.get("options_chain_calls", [])
+                if calls:
+                    for c in sorted(calls, key=lambda x: x['Strike']):
+                        otm = "OTM" if c['Strike'] > current_spx else "ITM"
+                        delta_str = f"{c['Delta']:.2f}" if c['Delta'] else "—"
+                        iv_str = f"{c['IV']:.0%}" if c['IV'] else "—"
+                        
+                        highlight = "→ " if abs(c['Strike'] - current_spx) <= 15 else "  "
+                        
+                        st.text(f"{highlight}{c['Strike']}C | ${c['Bid']:.2f}/${c['Ask']:.2f} | Δ{delta_str} | IV:{iv_str} | OI:{c['OI']:,}")
+                else:
+                    st.info("No CALL data loaded")
+        
+        st.divider()
+        
+        # AUTO-FETCH FOR DAY STRUCTURE
+        st.markdown("### 🔄 Auto-Fetch Prices")
+        st.caption("Fetch contract prices for Day Structure")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            auto_put_strike = st.number_input("PUT Strike", value=int(current_spx // 5) * 5 - 10, step=5, key="auto_put_strike")
+        with col2:
+            auto_call_strike = st.number_input("CALL Strike", value=int(current_spx // 5) * 5 + 10, step=5, key="auto_call_strike")
+        
+        if st.button("⬇️ Fetch & Apply to Day Structure", key="auto_fetch_btn", use_container_width=True):
+            with st.spinner("Fetching prices..."):
+                put_data = get_spx_option_price(auto_put_strike, "P", trading_date)
+                call_data = get_spx_option_price(auto_call_strike, "C", trading_date)
+                
+                results = []
+                
+                if put_data:
+                    put_price = put_data['mid'] if put_data['mid'] > 0 else put_data['last']
+                    if put_price > 0:
+                        st.session_state.put_price_london = put_price
+                        results.append(f"PUT {auto_put_strike}P: ${put_price:.2f}")
+                
+                if call_data:
+                    call_price = call_data['mid'] if call_data['mid'] > 0 else call_data['last']
+                    if call_price > 0:
+                        st.session_state.call_price_london = call_price
+                        results.append(f"CALL {auto_call_strike}C: ${call_price:.2f}")
+                
+                if results:
+                    st.success("✅ Applied to Day Structure:\n" + "\n".join(results))
+                else:
+                    st.warning("⚠️ No prices available (market may be closed)")
         
         st.divider()
         
