@@ -498,16 +498,30 @@ def format_countdown(td):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def polygon_get(endpoint, params=None):
+    """Make a request to Polygon API and return JSON response"""
     try:
         if params is None:
             params = {}
         params["apiKey"] = POLYGON_API_KEY
-        resp = requests.get(f"{POLYGON_BASE}{endpoint}", params=params, timeout=15)
+        url = f"{POLYGON_BASE}{endpoint}"
+        resp = requests.get(url, params=params, timeout=15)
+        
+        # Store last request info for debugging
+        if 'debug_info' not in st.session_state:
+            st.session_state.debug_info = {}
+        st.session_state.debug_info['last_url'] = resp.url
+        st.session_state.debug_info['last_status'] = resp.status_code
+        
         if resp.status_code == 200:
             return resp.json()
-    except:
-        pass
-    return None
+        else:
+            st.session_state.debug_info['last_error'] = resp.text[:500]
+            return None
+    except Exception as e:
+        if 'debug_info' not in st.session_state:
+            st.session_state.debug_info = {}
+        st.session_state.debug_info['last_error'] = str(e)
+        return None
 
 def fetch_spx_options_chain(expiration_date, strike_price=None, contract_type=None, limit=50):
     """
@@ -550,6 +564,8 @@ def get_spx_option_price(strike, contract_type, expiration_date):
     """
     Get price for a specific SPX option contract.
     
+    Tries both SPXW (weekly) and SPX (standard) formats.
+    
     Args:
         strike: Strike price (e.g., 5900)
         contract_type: "C" or "P"
@@ -559,19 +575,30 @@ def get_spx_option_price(strike, contract_type, expiration_date):
         Dict with bid, ask, last, delta, gamma, theta, vega, iv, or None
     """
     try:
-        # Build the option ticker symbol
-        # Format: O:SPX260107C05900000
-        # O: prefix + SPX + YYMMDD + C/P + strike*1000 (8 digits)
         exp_str = expiration_date.strftime("%y%m%d")
         opt_type = contract_type.upper()[0]  # C or P
         strike_str = f"{int(strike * 1000):08d}"
         
-        option_ticker = f"O:SPX{exp_str}{opt_type}{strike_str}"
+        # Try SPXW (weekly) first - most common for 0DTE
+        # Format: O:SPXW260107C05900000
+        option_ticker_weekly = f"O:SPXW{exp_str}{opt_type}{strike_str}"
         
-        # Use single contract snapshot endpoint
-        endpoint = f"/v3/snapshot/options/I:SPX/{option_ticker}"
+        # Also try standard SPX
+        option_ticker_standard = f"O:SPX{exp_str}{opt_type}{strike_str}"
         
+        # Store the tickers we're trying for debugging
+        if 'debug_info' not in st.session_state:
+            st.session_state.debug_info = {}
+        st.session_state.debug_info['tried_tickers'] = [option_ticker_weekly, option_ticker_standard]
+        
+        # Try weekly first
+        endpoint = f"/v3/snapshot/options/I:SPX/{option_ticker_weekly}"
         data = polygon_get(endpoint)
+        
+        # If weekly fails, try standard
+        if not data or data.get("status") != "OK":
+            endpoint = f"/v3/snapshot/options/I:SPX/{option_ticker_standard}"
+            data = polygon_get(endpoint)
         
         if data and data.get("status") == "OK":
             result = data.get("results", {})
@@ -596,11 +623,15 @@ def get_spx_option_price(strike, contract_type, expiration_date):
                 "vega": greeks.get("vega", 0),
                 "iv": result.get("implied_volatility", 0),
                 "open_interest": result.get("open_interest", 0),
-                "break_even": result.get("break_even_price", 0)
+                "break_even": result.get("break_even_price", 0),
+                "ticker": result.get("details", {}).get("ticker", "")
             }
         
         return None
     except Exception as e:
+        if 'debug_info' not in st.session_state:
+            st.session_state.debug_info = {}
+        st.session_state.debug_info['exception'] = str(e)
         return None
 
 def get_spx_options_near_strike(target_strike, contract_type, expiration_date, range_pts=50):
@@ -5550,6 +5581,7 @@ def main():
                     
                     if opt_data:
                         st.success("✅ Data received!")
+                        st.write(f"**Ticker:** {opt_data.get('ticker', 'N/A')}")
                         st.write(f"**Bid:** ${opt_data['bid']:.2f}")
                         st.write(f"**Ask:** ${opt_data['ask']:.2f}")
                         st.write(f"**Mid:** ${opt_data['mid']:.2f}")
@@ -5558,8 +5590,27 @@ def main():
                         st.write(f"**IV:** {opt_data['iv']:.1%}" if opt_data['iv'] else "IV: N/A")
                         st.write(f"**OI:** {opt_data['open_interest']:,}")
                     else:
-                        st.error("❌ No data returned. Check API key or plan.")
-                        st.caption("Options Starter plan required for SPX options")
+                        st.error("❌ No data returned")
+                        
+                        # Show debug info
+                        debug = st.session_state.get('debug_info', {})
+                        if debug:
+                            st.markdown("**Debug Info:**")
+                            if 'tried_tickers' in debug:
+                                st.code(f"Tried tickers: {debug['tried_tickers']}")
+                            if 'last_url' in debug:
+                                # Hide API key in display
+                                url_display = debug['last_url'].replace(POLYGON_API_KEY, "***API_KEY***")
+                                st.code(f"Last URL: {url_display}")
+                            if 'last_status' in debug:
+                                st.write(f"Status: {debug['last_status']}")
+                            if 'last_error' in debug:
+                                st.error(f"Error: {debug['last_error'][:200]}")
+                        
+                        st.caption("Possible issues:")
+                        st.caption("• Options Starter plan may not include SPX index options")
+                        st.caption("• Market may be closed (no current quotes)")
+                        st.caption("• Strike/expiration may not exist")
         
         st.divider()
         
