@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════════════════════════════════╗
 ║                                                                                          ║
@@ -11,7 +13,7 @@
 ║                          "Where Structure Becomes Foresight"                             ║
 ║                                                                                          ║
 ║                                    Version 11.0                                          ║
-║                                  PREMIUM EDITION                                         ║
+║                              OBSIDIAN PREMIUM EDITION                                    ║
 ║                                                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -8908,8 +8910,6 @@ def main():
                     try:
                         # Use Yahoo Finance for ES futures overnight data
                         import yfinance as yf
-                        from datetime import datetime, timedelta
-                        import pytz
                         
                         # Get user-defined offset
                         spx_adj = st.session_state.get('es_spx_offset', 12.0)
