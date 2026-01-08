@@ -6036,6 +6036,36 @@ def main():
         
         st.caption("💡 Full chain with Greeks shown in main dashboard")
         
+        # DEBUG: Test single option fetch
+        with st.expander("🔧 Debug API", expanded=False):
+            test_strike = st.number_input("Test Strike", value=int(current_spx // 5) * 5, step=5, key="test_strike")
+            test_type = st.selectbox("Type", ["P", "C"], key="test_type")
+            if st.button("🧪 Test Fetch", key="test_fetch"):
+                # Build the ticker manually to show
+                exp_str = exp_date.strftime("%y%m%d")
+                strike_str = f"{int(test_strike * 1000):08d}"
+                ticker = f"O:SPXW{exp_str}{test_type}{strike_str}"
+                st.code(f"Ticker: {ticker}")
+                st.write(f"Expiration: {exp_date}")
+                
+                # Fetch and show raw response
+                result = get_spx_option_price(test_strike, test_type, exp_date)
+                if result:
+                    st.success("✅ Got data!")
+                    st.json({
+                        "bid": result.get('bid'),
+                        "ask": result.get('ask'),
+                        "last": result.get('last'),
+                        "day_close": result.get('day_close'),
+                        "best_price": result.get('best_price'),
+                        "iv": result.get('iv'),
+                        "delta": result.get('delta')
+                    })
+                else:
+                    st.error("❌ No data returned")
+                    if 'debug_info' in st.session_state:
+                        st.json(st.session_state.debug_info)
+        
         st.divider()
         
         # AUTO-FETCH FOR DAY STRUCTURE (keep this)
@@ -6360,23 +6390,18 @@ def main():
             chain_center = st.session_state.get("chain_center", int(spx_price // 5) * 5)
             chain_range = st.session_state.get("chain_range", 50)
             
-            # KEY FIX: Use price_ref_date for fetching prices (today's contracts when after hours)
-            # This gives us actual last-traded prices instead of empty data for tomorrow's contracts
+            # Use the ACTUAL expiration date (tomorrow's contracts ARE tradeable and have prices)
             options_chain = fetch_options_chain_for_dashboard(
                 center_strike=chain_center,
-                expiration_date=price_ref_date,  # Use TODAY's contracts for prices
+                expiration_date=exp_date,  # Use tomorrow's date - those contracts exist!
                 range_pts=chain_range,
                 vix_current=vix_for_pricing
             )
             
             if options_chain:
-                # Store the chain but note which expiration we're showing vs where prices came from
-                options_chain['display_expiration'] = exp_date  # Tomorrow's date for display
-                options_chain['price_source_date'] = price_ref_date  # Today's date where prices came from
                 st.session_state.dashboard_options_chain = options_chain
                 st.session_state.chain_exp_date = exp_date
                 st.session_state.chain_exp_label = exp_label
-                st.session_state.chain_price_source = price_ref_date
             
             # Reset the load flag
             st.session_state.load_options_chain = False
