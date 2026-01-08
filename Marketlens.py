@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════════════════════════════════╗
 ║                                                                                          ║
@@ -13,7 +11,7 @@
 ║                          "Where Structure Becomes Foresight"                             ║
 ║                                                                                          ║
 ║                                    Version 11.0                                          ║
-║                              OBSIDIAN PREMIUM EDITION                                    ║
+║                                  PREMIUM EDITION                                         ║
 ║                                                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════════════════╝
 
@@ -3376,6 +3374,206 @@ def analyze_market_context(prior_session, vix_current, current_time_ct):
     
     return ctx
 
+def calculate_day_structure_simple(high_line, high_line_time, low_line, low_line_time,
+                                   entry_time_mins, high_line_broken=False, low_line_broken=False,
+                                   sydney_high=0, tokyo_high=0, london_high=0,
+                                   sydney_low=0, tokyo_low=0, london_low=0):
+    """
+    SIMPLIFIED Day Structure calculation (v11).
+    
+    Can work with:
+    1. Just high_line and low_line (simplest - uses ±0.475 slope)
+    2. Session pivots (sydney/tokyo/london) to create proper trendlines
+    
+    When session pivots are provided, connects them to project to entry time.
+    """
+    ds = DayStructure()
+    ds.high_line_broken = high_line_broken
+    ds.low_line_broken = low_line_broken
+    
+    # Store session pivots
+    ds.sydney_high = sydney_high
+    ds.sydney_low = sydney_low
+    ds.tokyo_high = tokyo_high
+    ds.tokyo_low = tokyo_low
+    ds.london_high = london_high
+    ds.london_low = london_low
+    
+    # Entry time in minutes from midnight (8:30 AM + entry_time_mins)
+    entry_mins = 8 * 60 + 30 + entry_time_mins
+    
+    def parse_time_to_mins(t_str):
+        """Parse time string to minutes from midnight"""
+        if not t_str:
+            return 0
+        try:
+            t_str = t_str.strip().replace(" ", "")
+            parts = t_str.split(":")
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            return h * 60 + m
+        except:
+            return 0
+    
+    def calc_slope(price1, time1_mins, price2, time2_mins):
+        """Calculate slope between two points, handling overnight"""
+        t2 = time2_mins
+        if t2 < time1_mins:
+            t2 += 24 * 60  # Overnight adjustment
+        time_diff = t2 - time1_mins
+        if time_diff > 0:
+            return (price2 - price1) / time_diff
+        return 0
+    
+    # Session times in minutes from midnight (approximate midpoints)
+    SYDNEY_TIME = 18 * 60  # 6pm CT
+    TOKYO_TIME = 23 * 60   # 11pm CT  
+    LONDON_TIME = 4 * 60   # 4am CT
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # HIGH LINE (for PUTS) - Connect session highs
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    high_points = []
+    if sydney_high > 0:
+        high_points.append((sydney_high, SYDNEY_TIME, "Sydney"))
+    if tokyo_high > 0:
+        high_points.append((tokyo_high, TOKYO_TIME, "Tokyo"))
+    if london_high > 0:
+        high_points.append((london_high, LONDON_TIME, "London"))
+    
+    if len(high_points) >= 2:
+        # Use last two points to calculate slope and project
+        p1 = high_points[-2]  # Second to last
+        p2 = high_points[-1]  # Last (most recent)
+        
+        slope = calc_slope(p1[0], p1[1], p2[0], p2[1])
+        ds.high_line_slope = slope
+        
+        # Project from last point to entry time
+        entry_mins_adj = entry_mins
+        if entry_mins < p2[1]:
+            entry_mins_adj += 24 * 60
+        mins_to_entry = entry_mins_adj - p2[1]
+        
+        ds.high_line_at_entry = p2[0] + (slope * mins_to_entry)
+        ds.high_line_valid = True
+        ds.high_line_quality = "STRONG" if len(high_points) == 3 else "MODERATE"
+        ds.high_line_active_segment = f"{p1[2]}_{p2[2]}"
+        
+        if slope > 0.001:
+            ds.high_line_direction = "ASCENDING"
+        elif slope < -0.001:
+            ds.high_line_direction = "DESCENDING"
+        else:
+            ds.high_line_direction = "FLAT"
+            
+    elif len(high_points) == 1 or high_line > 0:
+        # Single point - use standard slope or flat
+        anchor = high_points[0][0] if high_points else high_line
+        anchor_time = high_points[0][1] if high_points else parse_time_to_mins(high_line_time) or LONDON_TIME
+        
+        # Use descending slope for high line (resistance tends to drop)
+        ds.high_line_slope = -DAY_STRUCTURE_SLOPE_PER_MIN
+        
+        entry_mins_adj = entry_mins
+        if entry_mins < anchor_time:
+            entry_mins_adj += 24 * 60
+        mins_to_entry = entry_mins_adj - anchor_time
+        
+        ds.high_line_at_entry = anchor + (ds.high_line_slope * mins_to_entry)
+        ds.high_line_valid = True
+        ds.high_line_quality = "WEAK"
+        ds.high_line_direction = "DESCENDING"
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # LOW LINE (for CALLS) - Connect session lows
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    low_points = []
+    if sydney_low > 0:
+        low_points.append((sydney_low, SYDNEY_TIME, "Sydney"))
+    if tokyo_low > 0:
+        low_points.append((tokyo_low, TOKYO_TIME, "Tokyo"))
+    if london_low > 0:
+        low_points.append((london_low, LONDON_TIME, "London"))
+    
+    if len(low_points) >= 2:
+        # Use last two points to calculate slope and project
+        p1 = low_points[-2]  # Second to last
+        p2 = low_points[-1]  # Last (most recent)
+        
+        slope = calc_slope(p1[0], p1[1], p2[0], p2[1])
+        ds.low_line_slope = slope
+        
+        # Project from last point to entry time
+        entry_mins_adj = entry_mins
+        if entry_mins < p2[1]:
+            entry_mins_adj += 24 * 60
+        mins_to_entry = entry_mins_adj - p2[1]
+        
+        ds.low_line_at_entry = p2[0] + (slope * mins_to_entry)
+        ds.low_line_valid = True
+        ds.low_line_quality = "STRONG" if len(low_points) == 3 else "MODERATE"
+        ds.low_line_active_segment = f"{p1[2]}_{p2[2]}"
+        
+        if slope > 0.001:
+            ds.low_line_direction = "ASCENDING"
+        elif slope < -0.001:
+            ds.low_line_direction = "DESCENDING"
+        else:
+            ds.low_line_direction = "FLAT"
+            
+    elif len(low_points) == 1 or low_line > 0:
+        # Single point - use standard slope or flat
+        anchor = low_points[0][0] if low_points else low_line
+        anchor_time = low_points[0][1] if low_points else parse_time_to_mins(low_line_time) or LONDON_TIME
+        
+        # Use ascending slope for low line (support tends to rise)
+        ds.low_line_slope = DAY_STRUCTURE_SLOPE_PER_MIN
+        
+        entry_mins_adj = entry_mins
+        if entry_mins < anchor_time:
+            entry_mins_adj += 24 * 60
+        mins_to_entry = entry_mins_adj - anchor_time
+        
+        ds.low_line_at_entry = anchor + (ds.low_line_slope * mins_to_entry)
+        ds.low_line_valid = True
+        ds.low_line_quality = "WEAK"
+        ds.low_line_direction = "ASCENDING"
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # OVERALL STRUCTURE
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    if ds.high_line_valid and ds.low_line_valid:
+        if ds.high_line_quality == "STRONG" and ds.low_line_quality == "STRONG":
+            ds.structure_quality = "STRONG"
+        elif ds.high_line_quality == "STRONG" or ds.low_line_quality == "STRONG":
+            ds.structure_quality = "MODERATE"
+        else:
+            ds.structure_quality = "WEAK"
+        
+        # Determine shape
+        if ds.high_line_slope > 0 and ds.low_line_slope > 0:
+            ds.structure_shape = "PARALLEL_UP"
+        elif ds.high_line_slope < 0 and ds.low_line_slope < 0:
+            ds.structure_shape = "PARALLEL_DOWN"
+        elif ds.high_line_slope > ds.low_line_slope:
+            ds.structure_shape = "EXPANDING"
+        elif ds.high_line_slope < ds.low_line_slope:
+            ds.structure_shape = "CONTRACTING"
+        else:
+            ds.structure_shape = "PARALLEL"
+    elif ds.high_line_valid:
+        ds.structure_quality = "WEAK"
+        ds.structure_shape = "HIGH_ONLY"
+    elif ds.low_line_valid:
+        ds.structure_quality = "WEAK"
+        ds.structure_shape = "LOW_ONLY"
+    
+    return ds
+
 def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_low_time,
                             tokyo_high, tokyo_high_time, tokyo_low, tokyo_low_time,
                             london_high, london_high_time, london_low, london_low_time,
@@ -6617,25 +6815,30 @@ body {{
 </div>
 '''
 
-    html += '''
+    entry_window_countdown = format_countdown(get_time_until(ENTRY_TARGET))
+    cutoff_countdown = format_countdown(get_time_until(CUTOFF_TIME))
+    current_time_str = now.strftime("%H:%M")
+    current_date_str = trading_date.strftime("%b %d")
+    
+    html += f'''
 <!-- HEADER (Info Bar) -->
 <header class="header">
     <div class="meta-group">
         <div class="meta-item">
             <div class="meta-label">Entry Window</div>
-            <div class="meta-value">{format_countdown(get_time_until(ENTRY_TARGET))}</div>
+            <div class="meta-value">{entry_window_countdown}</div>
         </div>
         <div class="meta-item">
             <div class="meta-label">Cutoff</div>
-            <div class="meta-value">{format_countdown(get_time_until(CUTOFF_TIME))}</div>
+            <div class="meta-value">{cutoff_countdown}</div>
         </div>
         <div class="meta-item">
             <div class="meta-label">Time CT</div>
-            <div class="meta-value">{now.strftime("%H:%M")}</div>
+            <div class="meta-value">{current_time_str}</div>
         </div>
         <div class="meta-item">
             <div class="meta-label">Date</div>
-            <div class="meta-value">{trading_date.strftime("%b %d")}</div>
+            <div class="meta-value">{current_date_str}</div>
         </div>
     </div>
 </header>
@@ -8377,25 +8580,23 @@ def main():
         'trading_date': None, 
         'last_refresh': None,
         'overnight_spx': 0.0,  # Current SPX/ES price for proximity analysis
-        # Day Structure - 3 Session pivots for trendlines (Sydney → Tokyo → London)
-        # Session times (CT): Sydney 5pm-8:30pm, Tokyo 9pm-1:30am, London 2am-6:30am
-        'sydney_high': 0.0, 'sydney_high_time': "17:00",
-        'sydney_low': 0.0, 'sydney_low_time': "17:30",
-        'tokyo_high': 0.0, 'tokyo_high_time': "21:00", 
-        'tokyo_low': 0.0, 'tokyo_low_time': "23:00",
-        'london_high': 0.0, 'london_high_time': "05:00", 
-        'london_low': 0.0, 'london_low_time': "06:00",
-        # Contract Prices - PUT (tracks high line)
-        'put_price_sydney': 0.0,
-        'put_price_tokyo': 0.0,
-        'put_price_london': 0.0,
-        # Contract Prices - CALL (tracks low line)
-        'call_price_sydney': 0.0,
-        'call_price_tokyo': 0.0,
-        'call_price_london': 0.0,
-        # Structure broken flags
-        'high_line_broken': False,
-        'low_line_broken': False,
+        
+        # ═══════════════════════════════════════════════════════════════════════
+        # SIMPLIFIED DAY STRUCTURE (v11) - Just High Line and Low Line
+        # ═══════════════════════════════════════════════════════════════════════
+        'high_line': 0.0,           # Overnight high - entry for PUTS
+        'high_line_time': '',       # When high was made (CT)
+        'low_line': 0.0,            # Overnight low - entry for CALLS
+        'low_line_time': '',        # When low was made (CT)
+        'high_line_broken': False,  # SPX broke above high → FLIP to CALLS
+        'low_line_broken': False,   # SPX broke below low → FLIP to PUTS
+        'es_spx_offset': 12.0,      # ES to SPX conversion offset (ES - offset = SPX)
+        
+        # Advanced: Individual session pivots (optional, collapsed by default)
+        'sydney_high': 0.0, 'sydney_low': 0.0,
+        'tokyo_high': 0.0, 'tokyo_low': 0.0,
+        'london_high': 0.0, 'london_low': 0.0,
+        
         # v11 NEW: Trade Logging
         'trades': [],  # List of Trade dicts
         'active_trade': None,  # Current open trade
@@ -8639,100 +8840,282 @@ def main():
         st.caption(f"📍 Pricing at **{entry_hour}:{entry_min:02d} AM CT**")
         st.divider()
         
-        # DAY STRUCTURE - 3 Session Trendlines
+        # ═══════════════════════════════════════════════════════════════════════
+        # SIMPLIFIED DAY STRUCTURE - Just High Line and Low Line
+        # ═══════════════════════════════════════════════════════════════════════
         st.markdown("### 📐 Day Structure")
-        st.caption("3-Session trendlines (Sydney → Tokyo → London)")
+        st.caption("Overnight High/Low for entry levels")
         
-        with st.expander("HIGH LINE (PUTS)", expanded=False):
-            st.markdown("**Sydney High** (5pm-8:30pm CT)")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.session_state.sydney_high = st.number_input("SPX", value=st.session_state.sydney_high, step=0.01, format="%.2f", key="syd_h")
-            with c2:
-                st.session_state.sydney_high_time = st.text_input("Time", value=st.session_state.sydney_high_time, key="syd_ht", help="CT, e.g. 17:00")
-            
-            st.markdown("**Tokyo High** (9pm-1:30am CT)")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.session_state.tokyo_high = st.number_input("SPX", value=st.session_state.tokyo_high, step=0.01, format="%.2f", key="tok_h")
-            with c2:
-                st.session_state.tokyo_high_time = st.text_input("Time", value=st.session_state.tokyo_high_time, key="tok_ht", help="CT, e.g. 21:00")
-            
-            st.markdown("**London High** (2am-6:30am CT)")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.session_state.london_high = st.number_input("SPX", value=st.session_state.london_high, step=0.01, format="%.2f", key="lon_h")
-            with c2:
-                st.session_state.london_high_time = st.text_input("Time", value=st.session_state.london_high_time, key="lon_ht")
-            
-            st.markdown("**PUT Contract Prices** (10 OTM)")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.session_state.put_price_sydney = st.number_input("@ Syd", value=st.session_state.put_price_sydney, step=0.10, format="%.2f", key="put_syd")
-            with c2:
-                st.session_state.put_price_tokyo = st.number_input("@ Tok", value=st.session_state.put_price_tokyo, step=0.10, format="%.2f", key="put_tok")
-            with c3:
-                st.session_state.put_price_london = st.number_input("@ Lon", value=st.session_state.put_price_london, step=0.10, format="%.2f", key="put_lon")
-            
-            # High line broken checkbox
-            st.session_state.high_line_broken = st.checkbox("⚡ High line BROKEN (SPX broke above)", value=st.session_state.get("high_line_broken", False), key="high_broken")
+        # HIGH LINE (for PUTS)
+        st.markdown("**🔴 HIGH LINE** (Resistance → PUTS)")
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.session_state.high_line = st.number_input(
+                "SPX Price", 
+                value=st.session_state.get('high_line', 0.0), 
+                step=0.25, 
+                format="%.2f", 
+                key="high_line_input",
+                help="Overnight high - entry point for PUTS"
+            )
+        with c2:
+            st.session_state.high_line_time = st.text_input(
+                "Time (CT)", 
+                value=st.session_state.get('high_line_time', ''), 
+                key="high_line_time_input",
+                help="When high was made, e.g. 05:30"
+            )
         
-        with st.expander("LOW LINE (CALLS)", expanded=False):
-            st.markdown("**Sydney Low** (5pm-8:30pm CT)")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.session_state.sydney_low = st.number_input("SPX", value=st.session_state.sydney_low, step=0.01, format="%.2f", key="syd_l")
-            with c2:
-                st.session_state.sydney_low_time = st.text_input("Time", value=st.session_state.sydney_low_time, key="syd_lt", help="CT, e.g. 17:30")
-            
-            st.markdown("**Tokyo Low** (9pm-1:30am CT)")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.session_state.tokyo_low = st.number_input("SPX", value=st.session_state.tokyo_low, step=0.01, format="%.2f", key="tok_l")
-            with c2:
-                st.session_state.tokyo_low_time = st.text_input("Time", value=st.session_state.tokyo_low_time, key="tok_lt", help="CT, e.g. 23:00")
-            
-            st.markdown("**London Low** (2am-6:30am CT)")
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                st.session_state.london_low = st.number_input("SPX", value=st.session_state.london_low, step=0.01, format="%.2f", key="lon_l")
-            with c2:
-                st.session_state.london_low_time = st.text_input("Time", value=st.session_state.london_low_time, key="lon_lt")
-            
-            st.markdown("**CALL Contract Prices** (10 OTM)")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.session_state.call_price_sydney = st.number_input("@ Syd", value=st.session_state.call_price_sydney, step=0.10, format="%.2f", key="call_syd")
-            with c2:
-                st.session_state.call_price_tokyo = st.number_input("@ Tok", value=st.session_state.call_price_tokyo, step=0.10, format="%.2f", key="call_tok")
-            with c3:
-                st.session_state.call_price_london = st.number_input("@ Lon", value=st.session_state.call_price_london, step=0.10, format="%.2f", key="call_lon")
-            
-            # Low line broken checkbox
-            st.session_state.low_line_broken = st.checkbox("⚡ Low line BROKEN (SPX broke below)", value=st.session_state.get("low_line_broken", False), key="low_broken")
+        # LOW LINE (for CALLS)
+        st.markdown("**🟢 LOW LINE** (Support → CALLS)")
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.session_state.low_line = st.number_input(
+                "SPX Price", 
+                value=st.session_state.get('low_line', 0.0), 
+                step=0.25, 
+                format="%.2f", 
+                key="low_line_input",
+                help="Overnight low - entry point for CALLS"
+            )
+        with c2:
+            st.session_state.low_line_time = st.text_input(
+                "Time (CT)", 
+                value=st.session_state.get('low_line_time', ''), 
+                key="low_line_time_input",
+                help="When low was made, e.g. 02:15"
+            )
         
-        # Show day structure status
-        has_high_line = st.session_state.tokyo_high > 0 and st.session_state.london_high > 0
-        has_low_line = st.session_state.tokyo_low > 0 and st.session_state.london_low > 0
-        has_sydney_high = st.session_state.sydney_high > 0
-        has_sydney_low = st.session_state.sydney_low > 0
+        # ES to SPX Offset
+        st.markdown("**⚙️ ES → SPX Offset**")
+        st.session_state.es_spx_offset = st.number_input(
+            "Subtract from ES", 
+            value=st.session_state.get('es_spx_offset', 12.0), 
+            min_value=-50.0,
+            max_value=50.0,
+            step=0.5, 
+            format="%.1f", 
+            key="es_offset_input",
+            help="ES typically trades 10-15 pts above SPX. Adjust based on current spread."
+        )
+        st.caption(f"ES 6000 → SPX {6000 - st.session_state.es_spx_offset:.0f}")
         
-        if has_high_line or has_low_line:
-            status_parts = []
-            if has_sydney_high and has_high_line:
-                status_parts.append("High 3pt ✓")
-            elif has_high_line:
-                status_parts.append("High 2pt")
-            if has_sydney_low and has_low_line:
-                status_parts.append("Low 3pt ✓")
-            elif has_low_line:
-                status_parts.append("Low 2pt")
-            st.success(f"📐 {' | '.join(status_parts)}")
+        # Quick action buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📊 From ES Futures", key="fetch_es_structure", use_container_width=True):
+                with st.spinner("Fetching ES session pivots..."):
+                    try:
+                        # Use Yahoo Finance for ES futures overnight data
+                        import yfinance as yf
+                        from datetime import datetime, timedelta
+                        import pytz
+                        
+                        # Get user-defined offset
+                        spx_adj = st.session_state.get('es_spx_offset', 12.0)
+                        
+                        es = yf.Ticker("ES=F")
+                        # Get 3 days of 30m data to cover overnight sessions
+                        hist = es.history(period="3d", interval="30m")
+                        
+                        if not hist.empty:
+                            # Convert index to CT timezone
+                            ct_tz = pytz.timezone('America/Chicago')
+                            hist.index = hist.index.tz_convert(ct_tz)
+                            
+                            # Get current time in CT
+                            now_ct = datetime.now(ct_tz)
+                            today = now_ct.date()
+                            yesterday = today - timedelta(days=1)
+                            
+                            # Define session windows for TODAY's structure
+                            # Sydney: 5pm - 8:30pm CT (yesterday)
+                            # Tokyo: 9pm - 1:30am CT (yesterday to today)  
+                            # London: 2am - 6:30am CT (today)
+                            
+                            sydney_start = ct_tz.localize(datetime.combine(yesterday, time(17, 0)))
+                            sydney_end = ct_tz.localize(datetime.combine(yesterday, time(20, 30)))
+                            tokyo_start = ct_tz.localize(datetime.combine(yesterday, time(21, 0)))
+                            tokyo_end = ct_tz.localize(datetime.combine(today, time(1, 30)))
+                            london_start = ct_tz.localize(datetime.combine(today, time(2, 0)))
+                            london_end = ct_tz.localize(datetime.combine(today, time(6, 30)))
+                            
+                            # Filter data for each session
+                            sydney_data = hist[(hist.index >= sydney_start) & (hist.index <= sydney_end)]
+                            tokyo_data = hist[(hist.index >= tokyo_start) & (hist.index <= tokyo_end)]
+                            london_data = hist[(hist.index >= london_start) & (hist.index <= london_end)]
+                            
+                            # ES to SPX adjustment - uses user-defined offset
+                            # spx_adj already set from session_state above
+                            
+                            # Get HIGH and LOW of EACH SESSION (for trendlines)
+                            results = []
+                            
+                            # Sydney session pivot
+                            if not sydney_data.empty:
+                                syd_high = sydney_data['High'].max() - spx_adj
+                                syd_low = sydney_data['Low'].min() - spx_adj
+                                syd_high_time = sydney_data['High'].idxmax().strftime("%H:%M")
+                                syd_low_time = sydney_data['Low'].idxmin().strftime("%H:%M")
+                                st.session_state.sydney_high = round(syd_high, 2)
+                                st.session_state.sydney_low = round(syd_low, 2)
+                                results.append(f"🌙 Syd: H {syd_high:.0f} @ {syd_high_time} | L {syd_low:.0f} @ {syd_low_time}")
+                            
+                            # Tokyo session pivot
+                            if not tokyo_data.empty:
+                                tok_high = tokyo_data['High'].max() - spx_adj
+                                tok_low = tokyo_data['Low'].min() - spx_adj
+                                tok_high_time = tokyo_data['High'].idxmax().strftime("%H:%M")
+                                tok_low_time = tokyo_data['Low'].idxmin().strftime("%H:%M")
+                                st.session_state.tokyo_high = round(tok_high, 2)
+                                st.session_state.tokyo_low = round(tok_low, 2)
+                                results.append(f"🗼 Tok: H {tok_high:.0f} @ {tok_high_time} | L {tok_low:.0f} @ {tok_low_time}")
+                            
+                            # London session pivot
+                            if not london_data.empty:
+                                lon_high = london_data['High'].max() - spx_adj
+                                lon_low = london_data['Low'].min() - spx_adj
+                                lon_high_time = london_data['High'].idxmax().strftime("%H:%M")
+                                lon_low_time = london_data['Low'].idxmin().strftime("%H:%M")
+                                st.session_state.london_high = round(lon_high, 2)
+                                st.session_state.london_low = round(lon_low, 2)
+                                results.append(f"🏛️ Lon: H {lon_high:.0f} @ {lon_high_time} | L {lon_low:.0f} @ {lon_low_time}")
+                            
+                            # Now calculate the projected HIGH LINE and LOW LINE at entry
+                            # HIGH LINE = Connect session highs
+                            # LOW LINE = Connect session lows
+                            
+                            highs = []
+                            lows = []
+                            
+                            if st.session_state.get('sydney_high', 0) > 0:
+                                highs.append(st.session_state.sydney_high)
+                            if st.session_state.get('tokyo_high', 0) > 0:
+                                highs.append(st.session_state.tokyo_high)
+                            if st.session_state.get('london_high', 0) > 0:
+                                highs.append(st.session_state.london_high)
+                                
+                            if st.session_state.get('sydney_low', 0) > 0:
+                                lows.append(st.session_state.sydney_low)
+                            if st.session_state.get('tokyo_low', 0) > 0:
+                                lows.append(st.session_state.tokyo_low)
+                            if st.session_state.get('london_low', 0) > 0:
+                                lows.append(st.session_state.london_low)
+                            
+                            # Use the most recent session's value as the anchor
+                            # and project with standard slope
+                            if len(highs) >= 2:
+                                # Use last two highs to calculate slope, project to entry
+                                # For simplicity, use London high as the main HIGH LINE
+                                st.session_state.high_line = st.session_state.get('london_high', 0) or st.session_state.get('tokyo_high', 0)
+                                st.session_state.high_line_time = lon_high_time if not london_data.empty else tok_high_time if not tokyo_data.empty else ""
+                            elif len(highs) == 1:
+                                st.session_state.high_line = highs[0]
+                            
+                            if len(lows) >= 2:
+                                st.session_state.low_line = st.session_state.get('london_low', 0) or st.session_state.get('tokyo_low', 0)
+                                st.session_state.low_line_time = lon_low_time if not london_data.empty else tok_low_time if not tokyo_data.empty else ""
+                            elif len(lows) == 1:
+                                st.session_state.low_line = lows[0]
+                            
+                            # Show results
+                            for r in results:
+                                st.success(r)
+                            
+                            if len(highs) >= 2 and len(lows) >= 2:
+                                st.info(f"📐 Structure: {len(highs)}-pt High Line, {len(lows)}-pt Low Line")
+                            
+                            st.rerun()
+                        else:
+                            st.error("No ES data available")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)[:80]}")
+        
+        with col2:
+            if st.button("📋 From Prior Day", key="use_prior_day", use_container_width=True):
+                # Use prior session high/low if available
+                prior_high = st.session_state.get('prior_high', 0)
+                prior_low = st.session_state.get('prior_low', 0)
+                if prior_high > 0 and prior_low > 0:
+                    st.session_state.high_line = prior_high
+                    st.session_state.low_line = prior_low
+                    st.success(f"✓ Using prior day range")
+                    st.rerun()
+                else:
+                    st.warning("Enter prior session H/L first")
+        
+        # Structure status
+        has_high = st.session_state.get('high_line', 0) > 0
+        has_low = st.session_state.get('low_line', 0) > 0
+        
+        if has_high and has_low:
+            high_val = st.session_state.high_line
+            low_val = st.session_state.low_line
+            range_size = high_val - low_val
+            st.success(f"📐 Range: {range_size:.0f} pts ({low_val:.0f} - {high_val:.0f})")
+        elif has_high:
+            st.info(f"🔴 High Line set: {st.session_state.high_line:.0f}")
+        elif has_low:
+            st.info(f"🟢 Low Line set: {st.session_state.low_line:.0f}")
+        
+        # Line break indicators
+        with st.expander("⚡ Line Breaks", expanded=False):
+            st.session_state.high_line_broken = st.checkbox(
+                "High Line BROKEN (price above)", 
+                value=st.session_state.get("high_line_broken", False), 
+                key="high_broken",
+                help="Check if SPX broke above high line → FLIP to CALLS"
+            )
+            st.session_state.low_line_broken = st.checkbox(
+                "Low Line BROKEN (price below)", 
+                value=st.session_state.get("low_line_broken", False), 
+                key="low_broken",
+                help="Check if SPX broke below low line → FLIP to PUTS"
+            )
             
-            if st.session_state.high_line_broken:
-                st.warning("⚡ HIGH LINE BROKEN → FLIP to CALLS")
-            if st.session_state.low_line_broken:
-                st.warning("⚡ LOW LINE BROKEN → FLIP to PUTS")
+            if st.session_state.get('high_line_broken'):
+                st.warning("⚡ HIGH BROKEN → FLIP to CALLS")
+            if st.session_state.get('low_line_broken'):
+                st.warning("⚡ LOW BROKEN → FLIP to PUTS")
+        
+        # Advanced: Show individual session inputs (collapsed by default)
+        with st.expander("🔧 Advanced: Session Details", expanded=False):
+            st.caption("Optional: Track individual session pivots")
+            
+            st.markdown("**Sydney** (5pm-8:30pm)")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.session_state.sydney_high = st.number_input("High", value=st.session_state.get('sydney_high', 0.0), step=0.25, format="%.2f", key="adv_syd_h")
+            with c2:
+                st.session_state.sydney_low = st.number_input("Low", value=st.session_state.get('sydney_low', 0.0), step=0.25, format="%.2f", key="adv_syd_l")
+            
+            st.markdown("**Tokyo** (9pm-1:30am)")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.session_state.tokyo_high = st.number_input("High", value=st.session_state.get('tokyo_high', 0.0), step=0.25, format="%.2f", key="adv_tok_h")
+            with c2:
+                st.session_state.tokyo_low = st.number_input("Low", value=st.session_state.get('tokyo_low', 0.0), step=0.25, format="%.2f", key="adv_tok_l")
+            
+            st.markdown("**London** (2am-6:30am)")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.session_state.london_high = st.number_input("High", value=st.session_state.get('london_high', 0.0), step=0.25, format="%.2f", key="adv_lon_h")
+            with c2:
+                st.session_state.london_low = st.number_input("Low", value=st.session_state.get('london_low', 0.0), step=0.25, format="%.2f", key="adv_lon_l")
+            
+            # Sync button
+            if st.button("↑ Sync to Main", key="sync_sessions", use_container_width=True):
+                # Use highest high and lowest low from all sessions
+                highs = [st.session_state.get('sydney_high', 0), st.session_state.get('tokyo_high', 0), st.session_state.get('london_high', 0)]
+                lows = [st.session_state.get('sydney_low', 0), st.session_state.get('tokyo_low', 0), st.session_state.get('london_low', 0)]
+                highs = [h for h in highs if h > 0]
+                lows = [l for l in lows if l > 0]
+                if highs:
+                    st.session_state.high_line = max(highs)
+                if lows:
+                    st.session_state.low_line = min(lows)
+                st.success("✓ Synced")
+                st.rerun()
         
         st.divider()
         
@@ -9208,31 +9591,22 @@ def main():
     
     setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures, tested_structures)
     
-    # Calculate Day Structure (3-session trendlines + contract pricing)
-    day_structure = calculate_day_structure(
-        st.session_state.get("sydney_high", 0.0),
-        st.session_state.get("sydney_high_time", "17:00"),
-        st.session_state.get("sydney_low", 0.0),
-        st.session_state.get("sydney_low_time", "17:30"),
-        st.session_state.get("tokyo_high", 0.0),
-        st.session_state.get("tokyo_high_time", "21:00"),
-        st.session_state.get("tokyo_low", 0.0),
-        st.session_state.get("tokyo_low_time", "23:00"),
-        st.session_state.get("london_high", 0.0),
-        st.session_state.get("london_high_time", "05:00"),
-        st.session_state.get("london_low", 0.0),
-        st.session_state.get("london_low_time", "06:00"),
-        mins_after_open,
-        cones,
-        trading_date,
-        put_price_sydney=st.session_state.get("put_price_sydney", 0.0),
-        put_price_tokyo=st.session_state.get("put_price_tokyo", 0.0),
-        put_price_london=st.session_state.get("put_price_london", 0.0),
-        call_price_sydney=st.session_state.get("call_price_sydney", 0.0),
-        call_price_tokyo=st.session_state.get("call_price_tokyo", 0.0),
-        call_price_london=st.session_state.get("call_price_london", 0.0),
+    # Calculate Day Structure - Uses session pivots to create trendlines
+    day_structure = calculate_day_structure_simple(
+        high_line=st.session_state.get("high_line", 0.0),
+        high_line_time=st.session_state.get("high_line_time", ""),
+        low_line=st.session_state.get("low_line", 0.0),
+        low_line_time=st.session_state.get("low_line_time", ""),
+        entry_time_mins=mins_after_open,
         high_line_broken=st.session_state.get("high_line_broken", False),
-        low_line_broken=st.session_state.get("low_line_broken", False)
+        low_line_broken=st.session_state.get("low_line_broken", False),
+        # Session pivots for proper trendlines
+        sydney_high=st.session_state.get("sydney_high", 0.0),
+        tokyo_high=st.session_state.get("tokyo_high", 0.0),
+        london_high=st.session_state.get("london_high", 0.0),
+        sydney_low=st.session_state.get("sydney_low", 0.0),
+        tokyo_low=st.session_state.get("tokyo_low", 0.0),
+        london_low=st.session_state.get("london_low", 0.0),
     )
     
     # ═══════════════════════════════════════════════════════════════════════
