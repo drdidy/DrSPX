@@ -41,11 +41,14 @@ The system is built on THREE PILLARS that must align for high-confidence trades:
     ┌─────────────────────────────────────────────────────────────────────────────┐
     │  PILLAR 2: ES FUTURES MA BIAS → CONFIRMATION                                │
     │  ─────────────────────────────────────────────────────────────────────────  │
-    │  • Uses 5 EMA and 9 EMA on 30-minute ES futures chart                       │
-    │  • 5 EMA > 9 EMA = LONG bias → Confirms CALLS                               │
-    │  • 5 EMA < 9 EMA = SHORT bias → Confirms PUTS                               │
-    │  • Crossover signals indicate potential trend changes                       │
-    │  • Best setups have VIX and MA alignment                                    │
+    │  • Uses 50 EMA and 200 SMA on 30-minute ES futures chart for BIAS           │
+    │  • Price > 200 SMA = LONG bias → Trade CALLS only                           │
+    │  • Price < 200 SMA = SHORT bias → Trade PUTS only                           │
+    │  • 50 EMA > 200 SMA = Bullish trend health                                  │
+    │  • Uses 8 EMA and 21 EMA for CONFIRMATION of entries                        │
+    │  • 8 EMA > 21 EMA = Bullish momentum → Confirms CALL entries                │
+    │  • 8 EMA < 21 EMA = Bearish momentum → Confirms PUT entries                 │
+    │  • Best setups have all MAs aligned with VIX direction                      │
     └─────────────────────────────────────────────────────────────────────────────┘
 
     ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -62,9 +65,9 @@ DAY STRUCTURE SYSTEM:
 =====================
 In addition to the cones, the system tracks "Day Structure" based on overnight session:
 
-    Sydney Session (5pm-12am CT):   First price prints set initial structure
-    Tokyo Session (12am-3am CT):    Asian session can break/confirm structure
-    London Session (3am-8:30am CT): European session often sets the day's range
+    Sydney Session (5pm-8:30pm CT):  First price prints set initial structure
+    Tokyo Session (9pm-1:30am CT):   Asian session can break/confirm structure
+    London Session (2am-6:30am CT):  European session often sets the day's range
     
     HIGH LINE = Overnight high → Entry point for PUTS
     LOW LINE  = Overnight low  → Entry point for CALLS
@@ -184,6 +187,11 @@ ET_TZ = pytz.timezone('America/New_York')     # Eastern Time - Market timezone
 SLOPE_PER_30MIN = 0.45        # SPX points the cone rails expand per 30-minute block
 MIN_CONE_WIDTH = 18.0         # Minimum width between ascending and descending rails
 RAIL_PROXIMITY = 5.0          # Points from rail to trigger "ACTIVE" status
+
+# Day Structure slope (slightly steeper than cones)
+# Used when only one session pivot exists (e.g., London only)
+DAY_STRUCTURE_SLOPE_PER_30MIN = 0.475  # ±0.475 SPX points per 30-minute block
+DAY_STRUCTURE_SLOPE_PER_MIN = DAY_STRUCTURE_SLOPE_PER_30MIN / 30  # Per minute for calculations
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 # Options Trading Parameters
@@ -410,11 +418,15 @@ class Confluence:
     VIX + MA Bias Confluence Scoring.
     
     Confluence occurs when both VIX zone and ES futures MA agree on direction.
+    - VIX bias from zone position
+    - MA bias from 50 EMA / 200 SMA (directional permission)
+    - MA confirmation from 8 EMA / 21 EMA (entry timing)
+    
     Higher confluence = higher probability setup.
     
     Attributes:
         vix_bias: Direction from VIX analysis
-        ma_bias: Direction from ES futures 5/9 EMA
+        ma_bias: Direction from ES futures 50 EMA / 200 SMA
         is_aligned: True if both point same direction
         alignment_score: 0-40 points for scoring
         signal_strength: Qualitative strength rating
@@ -510,20 +522,45 @@ class TradeSetup:
 
 @dataclass
 class MABias:
-    """Moving Average Bias Filter - 30min timeframe"""
-    sma200: float = 0.0           # 200-period SMA
-    ema50: float = 0.0            # 50-period EMA
+    """
+    Moving Average Bias Filter - 30min ES futures timeframe
+    
+    BIAS (Directional Permission):
+    - 50 EMA and 200 SMA determine overall trend direction
+    - Price > 200 SMA = LONG bias (trade CALLS only)
+    - Price < 200 SMA = SHORT bias (trade PUTS only)
+    
+    CONFIRMATION (Entry Timing):
+    - 8 EMA and 21 EMA determine momentum for entries
+    - 8 EMA > 21 EMA = Bullish momentum → Confirm CALL entries
+    - 8 EMA < 21 EMA = Bearish momentum → Confirm PUT entries
+    """
+    # BIAS MAs (50 EMA / 200 SMA)
+    sma200: float = 0.0           # 200-period SMA - Primary trend filter
+    ema50: float = 0.0            # 50-period EMA - Trend health
     current_close: float = 0.0    # Latest 30-min close
     
-    # Directional permission
+    # CONFIRMATION MAs (8 EMA / 21 EMA) - NEW in v11
+    ema8: float = 0.0             # 8-period EMA - Fast momentum
+    ema21: float = 0.0            # 21-period EMA - Slow momentum
+    
+    # Directional permission (from 200 SMA)
     price_vs_sma200: str = "NEUTRAL"  # "ABOVE" = long-only, "BELOW" = short-only, "NEUTRAL" = ranging
     
-    # Trend health
+    # Trend health (from 50 EMA vs 200 SMA)
     ema_vs_sma: str = "NEUTRAL"   # "BULLISH" (EMA50 > SMA200), "BEARISH" (EMA50 < SMA200)
+    
+    # Momentum confirmation (from 8 EMA vs 21 EMA) - NEW in v11
+    ema8_vs_ema21: str = "NEUTRAL"  # "BULLISH" (8 > 21), "BEARISH" (8 < 21)
+    momentum_aligned: bool = False   # True if momentum matches bias direction
     
     # Final bias
     bias: str = "NEUTRAL"         # "LONG", "SHORT", "NEUTRAL"
     bias_reason: str = ""
+    
+    # Confirmation status - NEW in v11
+    confirmation: str = "NONE"    # "CONFIRMED", "PENDING", "CONFLICT", "NONE"
+    confirmation_reason: str = ""
     
     # Regime warning
     regime_warning: str = ""      # Warning about recent MA crosses
@@ -659,9 +696,11 @@ class DayStructure:
 
 # ╔══════════════════════════════════════════════════════════════════════════════════════════╗
 # ║                                                                                          ║
-# ║                     v11 IMPROVEMENTS: NEW UNIFIED TRADING SYSTEM                         ║
+# ║                     v11 IMPROVEMENTS: UNIFIED TRADING SYSTEM                             ║
 # ║                                                                                          ║
-# ║  11 Major Improvements:                                                                  ║
+# ║  Original 11 Improvements + 10 New Cohesion Improvements:                                ║
+# ║                                                                                          ║
+# ║  ORIGINAL:                                                                               ║
 # ║  1. Unified Price Source (PriceManager)                                                  ║
 # ║  2. Unified Strike Selector                                                              ║
 # ║  3. Entry Level Abstraction                                                              ║
@@ -674,7 +713,224 @@ class DayStructure:
 # ║  10. Backtesting Module                                                                  ║
 # ║  11. Alert System                                                                        ║
 # ║                                                                                          ║
+# ║  NEW COHESION IMPROVEMENTS:                                                              ║
+# ║  12. Cone + Day Structure Confluence Detection                                           ║
+# ║  13. Dynamic Stop Based on Structure                                                     ║
+# ║  14. Entry Validation Checklist                                                          ║
+# ║  15. Session Awareness in UI                                                             ║
+# ║  16. Best Trade Card                                                                     ║
+# ║  17. Price Action Context                                                                ║
+# ║  18. Contract Decay Tracking                                                             ║
+# ║  19. State Persistence (localStorage)                                                    ║
+# ║  20. Quick Reset Buttons                                                                 ║
+# ║  21. Export/Import Functionality                                                         ║
+# ║                                                                                          ║
 # ╚══════════════════════════════════════════════════════════════════════════════════════════╝
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #12: CONE + DAY STRUCTURE CONFLUENCE
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class StructureConfluence:
+    """
+    Detects when cone rails align with Day Structure lines.
+    This is a HIGH PROBABILITY setup indicator.
+    """
+    has_confluence: bool = False
+    confluence_type: str = ""      # "CALLS_CONFLUENCE", "PUTS_CONFLUENCE", "BOTH", "NONE"
+    
+    # CALLS confluence (ascending rail + low line)
+    calls_cone: str = ""           # Which cone: "C1", "C2", "C3"
+    calls_cone_rail: float = 0.0   # Cone ascending rail price
+    calls_ds_line: float = 0.0     # Day Structure low line price
+    calls_distance: float = 0.0    # Points between them
+    calls_aligned: bool = False    # Within 10 points
+    
+    # PUTS confluence (descending rail + high line)
+    puts_cone: str = ""            # Which cone: "C1", "C2", "C3"
+    puts_cone_rail: float = 0.0    # Cone descending rail price
+    puts_ds_line: float = 0.0      # Day Structure high line price
+    puts_distance: float = 0.0     # Points between them
+    puts_aligned: bool = False     # Within 10 points
+    
+    # Best confluence
+    best_direction: str = ""       # "CALLS" or "PUTS"
+    best_entry_price: float = 0.0  # Average of aligned levels
+    confidence_boost: int = 0      # Extra points for confluence (0-25)
+    description: str = ""          # Human readable
+
+@dataclass
+class EntryValidation:
+    """
+    IMPROVEMENT #14: Entry validation checklist.
+    All conditions that must be met before taking a trade.
+    """
+    # Individual checks
+    vix_agrees: bool = False
+    vix_detail: str = ""
+    
+    ma_permits: bool = False
+    ma_detail: str = ""
+    
+    price_at_level: bool = False
+    price_detail: str = ""
+    
+    no_event_conflict: bool = False
+    event_detail: str = ""
+    
+    within_window: bool = False
+    window_detail: str = ""
+    
+    premium_valid: bool = False
+    premium_detail: str = ""
+    
+    structure_intact: bool = False
+    structure_detail: str = ""
+    
+    # Overall
+    checks_passed: int = 0
+    checks_total: int = 7
+    all_passed: bool = False
+    ready_to_trade: bool = False
+    block_reason: str = ""
+
+@dataclass
+class SessionStatus:
+    """
+    IMPROVEMENT #15: Current session awareness.
+    """
+    current_session: str = ""      # "SYDNEY", "TOKYO", "LONDON", "NEW_YORK", "CLOSED"
+    session_emoji: str = ""        # 🌙 🗼 🏛️ 🗽
+    session_label: str = ""        # "Sydney Session"
+    time_remaining: str = ""       # "2h 15m remaining"
+    next_session: str = ""         # "Tokyo in 45m"
+    
+    # Pivot status per session
+    sydney_high_set: bool = False
+    sydney_low_set: bool = False
+    tokyo_high_set: bool = False
+    tokyo_low_set: bool = False
+    london_high_set: bool = False
+    london_low_set: bool = False
+    
+    # Structure readiness
+    structure_complete: bool = False
+    missing_pivots: str = ""       # "Tokyo High, London Low"
+
+@dataclass
+class BestTrade:
+    """
+    IMPROVEMENT #16: Single best trade recommendation.
+    """
+    has_trade: bool = False
+    direction: str = ""            # "CALLS" or "PUTS"
+    entry_price: float = 0.0       # SPX level
+    entry_source: str = ""         # "Low Line + C1 Ascending"
+    
+    strike: int = 0
+    contract_type: str = ""        # "C" or "P"
+    premium: float = 0.0
+    target_50: float = 0.0
+    target_100: float = 0.0
+    stop_spx: float = 0.0
+    stop_premium: float = 0.0
+    
+    confidence: int = 0            # 0-100
+    validation: EntryValidation = None
+    
+    reasons: str = ""              # Why this is the best trade
+    warnings: str = ""             # Any cautions
+
+@dataclass
+class PriceContext:
+    """
+    IMPROVEMENT #17: Price action context relative to structure.
+    """
+    current_price: float = 0.0
+    
+    # Relative to Day Structure
+    vs_high_line: str = ""         # "BELOW", "AT", "ABOVE", "BROKEN"
+    high_line_dist: float = 0.0
+    vs_low_line: str = ""          # "BELOW", "AT", "ABOVE", "BROKEN"
+    low_line_dist: float = 0.0
+    
+    # Relative to nearest cone
+    nearest_cone: str = ""         # "C1", "C2", "C3"
+    nearest_rail: str = ""         # "ASCENDING", "DESCENDING"
+    nearest_rail_price: float = 0.0
+    nearest_rail_dist: float = 0.0
+    
+    # Action description
+    action: str = ""               # "Testing High Line from below"
+    action_emoji: str = ""         # 📈 📉 🎯 ⚠️
+    
+    # Momentum
+    direction: str = ""            # "RISING", "FALLING", "FLAT"
+    momentum: str = ""             # "STRONG", "WEAK", "NEUTRAL"
+
+@dataclass
+class ContractDecay:
+    """
+    IMPROVEMENT #18: Contract decay tracking across sessions.
+    """
+    contract_type: str = ""        # "PUT" or "CALL"
+    strike: int = 0
+    
+    # Prices at each session
+    price_sydney: float = 0.0
+    time_sydney: str = ""
+    price_tokyo: float = 0.0
+    time_tokyo: str = ""
+    price_london: float = 0.0
+    time_london: str = ""
+    price_at_entry: float = 0.0    # Projected
+    
+    # Decay rates
+    decay_syd_tok: float = 0.0     # $/hour
+    decay_tok_lon: float = 0.0     # $/hour
+    decay_avg: float = 0.0         # $/hour average
+    
+    # Status
+    in_sweet_spot: bool = False    # $3.50-$8.00 at entry
+    decay_concern: bool = False    # Decaying too fast
+
+@dataclass
+class ExportData:
+    """
+    IMPROVEMENT #21: Data structure for export/import.
+    """
+    export_date: str = ""
+    export_time: str = ""
+    
+    # Day Structure
+    sydney_high: float = 0.0
+    sydney_high_time: str = ""
+    sydney_low: float = 0.0
+    sydney_low_time: str = ""
+    tokyo_high: float = 0.0
+    tokyo_high_time: str = ""
+    tokyo_low: float = 0.0
+    tokyo_low_time: str = ""
+    london_high: float = 0.0
+    london_high_time: str = ""
+    london_low: float = 0.0
+    london_low_time: str = ""
+    
+    # Contract prices
+    put_price_sydney: float = 0.0
+    put_price_tokyo: float = 0.0
+    put_price_london: float = 0.0
+    call_price_sydney: float = 0.0
+    call_price_tokyo: float = 0.0
+    call_price_london: float = 0.0
+    
+    # VIX
+    vix_bottom: float = 0.0
+    vix_top: float = 0.0
+    
+    # Trades
+    trades: str = ""               # JSON string of trades
 
 @dataclass
 class EntryLevel:
@@ -1437,6 +1693,757 @@ def get_alert_sound_html() -> str:
     </script>
     '''
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #12: CONE + DAY STRUCTURE CONFLUENCE DETECTION
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def detect_structure_confluence(cones: list, day_structure, entry_time_mins: int = 30) -> StructureConfluence:
+    """
+    Detect when cone rails align with Day Structure lines.
+    Alignment within 10 points = HIGH PROBABILITY setup.
+    
+    CALLS Confluence: Cone Ascending Rail ≈ Day Structure Low Line
+    PUTS Confluence: Cone Descending Rail ≈ Day Structure High Line
+    """
+    conf = StructureConfluence()
+    ALIGNMENT_THRESHOLD = 10.0  # Points
+    
+    if not cones or not day_structure:
+        return conf
+    
+    # Get Day Structure projected prices at entry
+    ds_high = day_structure.high_line_at_entry if day_structure.high_line_valid else 0
+    ds_low = day_structure.low_line_at_entry if day_structure.low_line_valid else 0
+    
+    best_calls_dist = 999
+    best_puts_dist = 999
+    
+    for cone in cones:
+        # Check CALLS confluence: Ascending rail vs Low Line
+        if ds_low > 0 and cone.ascending_rail > 0:
+            dist = abs(cone.ascending_rail - ds_low)
+            if dist < best_calls_dist:
+                best_calls_dist = dist
+                conf.calls_cone = cone.name
+                conf.calls_cone_rail = cone.ascending_rail
+                conf.calls_ds_line = ds_low
+                conf.calls_distance = dist
+                conf.calls_aligned = dist <= ALIGNMENT_THRESHOLD
+        
+        # Check PUTS confluence: Descending rail vs High Line
+        if ds_high > 0 and cone.descending_rail > 0:
+            dist = abs(cone.descending_rail - ds_high)
+            if dist < best_puts_dist:
+                best_puts_dist = dist
+                conf.puts_cone = cone.name
+                conf.puts_cone_rail = cone.descending_rail
+                conf.puts_ds_line = ds_high
+                conf.puts_distance = dist
+                conf.puts_aligned = dist <= ALIGNMENT_THRESHOLD
+    
+    # Determine overall confluence
+    if conf.calls_aligned and conf.puts_aligned:
+        conf.has_confluence = True
+        conf.confluence_type = "BOTH"
+        conf.confidence_boost = 25
+        # Pick the tighter alignment as best
+        if conf.calls_distance <= conf.puts_distance:
+            conf.best_direction = "CALLS"
+            conf.best_entry_price = (conf.calls_cone_rail + conf.calls_ds_line) / 2
+        else:
+            conf.best_direction = "PUTS"
+            conf.best_entry_price = (conf.puts_cone_rail + conf.puts_ds_line) / 2
+        conf.description = f"🎯 DUAL CONFLUENCE: CALLS ({conf.calls_cone} + Low Line), PUTS ({conf.puts_cone} + High Line)"
+        
+    elif conf.calls_aligned:
+        conf.has_confluence = True
+        conf.confluence_type = "CALLS_CONFLUENCE"
+        conf.best_direction = "CALLS"
+        conf.best_entry_price = (conf.calls_cone_rail + conf.calls_ds_line) / 2
+        conf.confidence_boost = 20
+        conf.description = f"🎯 CALLS CONFLUENCE: {conf.calls_cone} Ascending ({conf.calls_cone_rail:.0f}) + Low Line ({conf.calls_ds_line:.0f}) = {conf.calls_distance:.1f} pts apart"
+        
+    elif conf.puts_aligned:
+        conf.has_confluence = True
+        conf.confluence_type = "PUTS_CONFLUENCE"
+        conf.best_direction = "PUTS"
+        conf.best_entry_price = (conf.puts_cone_rail + conf.puts_ds_line) / 2
+        conf.confidence_boost = 20
+        conf.description = f"🎯 PUTS CONFLUENCE: {conf.puts_cone} Descending ({conf.puts_cone_rail:.0f}) + High Line ({conf.puts_ds_line:.0f}) = {conf.puts_distance:.1f} pts apart"
+    else:
+        conf.confluence_type = "NONE"
+        conf.description = "No cone/structure confluence detected"
+    
+    return conf
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #13: DYNAMIC STOP BASED ON STRUCTURE
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def calculate_dynamic_stop(direction: str, entry_price: float, 
+                           day_structure, cones: list,
+                           default_stop_pts: float = 6.0) -> tuple:
+    """
+    Calculate stop loss based on structure rather than fixed points.
+    
+    For CALLS: Stop below the support (Low Line or Ascending Rail)
+    For PUTS: Stop above the resistance (High Line or Descending Rail)
+    
+    Returns: (stop_price, stop_source, stop_distance)
+    """
+    stop_price = 0.0
+    stop_source = "DEFAULT"
+    buffer = 2.0  # Points beyond structure
+    
+    if direction == "CALLS":
+        # Stop should be BELOW the entry support
+        candidates = []
+        
+        # Day Structure Low Line
+        if day_structure and day_structure.low_line_valid and day_structure.low_line_at_entry > 0:
+            candidates.append((day_structure.low_line_at_entry - buffer, "Low Line"))
+        
+        # Cone ascending rails (below entry)
+        for cone in cones:
+            if cone.ascending_rail > 0 and cone.ascending_rail < entry_price:
+                candidates.append((cone.ascending_rail - buffer, f"{cone.name} Ascending"))
+        
+        if candidates:
+            # Use the highest support (tightest stop)
+            stop_price, stop_source = max(candidates, key=lambda x: x[0])
+        else:
+            stop_price = entry_price - default_stop_pts
+            stop_source = "DEFAULT"
+            
+    else:  # PUTS
+        # Stop should be ABOVE the entry resistance
+        candidates = []
+        
+        # Day Structure High Line
+        if day_structure and day_structure.high_line_valid and day_structure.high_line_at_entry > 0:
+            candidates.append((day_structure.high_line_at_entry + buffer, "High Line"))
+        
+        # Cone descending rails (above entry)
+        for cone in cones:
+            if cone.descending_rail > 0 and cone.descending_rail > entry_price:
+                candidates.append((cone.descending_rail + buffer, f"{cone.name} Descending"))
+        
+        if candidates:
+            # Use the lowest resistance (tightest stop)
+            stop_price, stop_source = min(candidates, key=lambda x: x[0])
+        else:
+            stop_price = entry_price + default_stop_pts
+            stop_source = "DEFAULT"
+    
+    stop_distance = abs(entry_price - stop_price)
+    return (stop_price, stop_source, stop_distance)
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #14: ENTRY VALIDATION CHECKLIST
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def validate_entry(direction: str, entry_price: float, premium: float,
+                   vix_zone, ma_bias, day_structure, current_spx: float,
+                   trading_date, economic_events: list = None) -> EntryValidation:
+    """
+    Validate all conditions before taking a trade.
+    Returns checklist of what's passing/failing.
+    """
+    v = EntryValidation()
+    now = get_ct_now()
+    
+    # 1. VIX Zone agrees with direction
+    if vix_zone:
+        if direction == "CALLS" and vix_zone.bias in ["CALLS", "STRONG_CALLS"]:
+            v.vix_agrees = True
+            v.vix_detail = f"✅ VIX in lower zone → {vix_zone.bias}"
+        elif direction == "PUTS" and vix_zone.bias in ["PUTS", "STRONG_PUTS"]:
+            v.vix_agrees = True
+            v.vix_detail = f"✅ VIX in upper zone → {vix_zone.bias}"
+        elif vix_zone.bias == "WAIT":
+            v.vix_agrees = False
+            v.vix_detail = "⚠️ VIX in mid-zone → WAIT"
+        else:
+            v.vix_agrees = False
+            v.vix_detail = f"❌ VIX says {vix_zone.bias}, not {direction}"
+    else:
+        v.vix_detail = "⚠️ VIX data not available"
+    
+    # 2. MA Bias permits direction
+    if ma_bias:
+        if direction == "CALLS" and ma_bias.bias == "LONG":
+            v.ma_permits = True
+            v.ma_detail = f"✅ Price above 200 SMA → LONG permitted"
+        elif direction == "PUTS" and ma_bias.bias == "SHORT":
+            v.ma_permits = True
+            v.ma_detail = f"✅ Price below 200 SMA → SHORT permitted"
+        elif ma_bias.bias == "NEUTRAL":
+            v.ma_permits = True  # Neutral allows both with caution
+            v.ma_detail = f"⚠️ MA Neutral → Proceed with caution"
+        else:
+            v.ma_permits = False
+            v.ma_detail = f"❌ MA says {ma_bias.bias}, want {direction}"
+    else:
+        v.ma_permits = True  # Default allow if no MA data
+        v.ma_detail = "⚠️ MA data not available"
+    
+    # 3. Price at or near entry level
+    distance = abs(current_spx - entry_price)
+    if distance <= 5:
+        v.price_at_level = True
+        v.price_detail = f"✅ Price within {distance:.1f} pts of entry"
+    elif distance <= 15:
+        v.price_at_level = True
+        v.price_detail = f"⚠️ Price {distance:.1f} pts from entry"
+    else:
+        v.price_at_level = False
+        v.price_detail = f"❌ Price {distance:.1f} pts away - too far"
+    
+    # 4. No high-impact economic event within 30 min
+    v.no_event_conflict = True
+    v.event_detail = "✅ No conflicting events"
+    if economic_events:
+        for event_name, event_time, impact in economic_events:
+            if impact == "HIGH":
+                # Parse event time and check if within 30 min
+                try:
+                    evt_hour, evt_min = int(event_time.split(":")[0]), int(event_time.split(":")[1].replace("am","").replace("pm",""))
+                    if "pm" in event_time.lower() and evt_hour != 12:
+                        evt_hour += 12
+                    evt_mins_from_midnight = evt_hour * 60 + evt_min
+                    now_mins = now.hour * 60 + now.minute
+                    if abs(evt_mins_from_midnight - now_mins) <= 30:
+                        v.no_event_conflict = False
+                        v.event_detail = f"❌ {event_name} in ~{abs(evt_mins_from_midnight - now_mins)} min"
+                        break
+                except:
+                    pass
+    
+    # 5. Within trading window (8:30am - 11:30am CT ideal, hard stop at 2pm)
+    if time(8, 30) <= now.time() <= time(11, 30):
+        v.within_window = True
+        v.window_detail = "✅ Prime trading window"
+    elif time(11, 30) < now.time() <= time(14, 0):
+        v.within_window = True
+        v.window_detail = "⚠️ Late window - reduced size"
+    else:
+        v.within_window = False
+        if now.time() < time(8, 30):
+            v.window_detail = "❌ Before market open"
+        else:
+            v.window_detail = "❌ After 2pm cutoff"
+    
+    # 6. Premium in sweet spot ($3.50 - $8.00)
+    if 3.50 <= premium <= 8.00:
+        v.premium_valid = True
+        v.premium_detail = f"✅ ${premium:.2f} in sweet spot"
+    elif 2.00 <= premium <= 12.00:
+        v.premium_valid = True
+        v.premium_detail = f"⚠️ ${premium:.2f} acceptable but not ideal"
+    else:
+        v.premium_valid = False
+        if premium < 2.00:
+            v.premium_detail = f"❌ ${premium:.2f} too cheap (lottery)"
+        else:
+            v.premium_detail = f"❌ ${premium:.2f} too expensive"
+    
+    # 7. Structure intact (not broken)
+    v.structure_intact = True
+    v.structure_detail = "✅ Structure intact"
+    if day_structure:
+        if direction == "CALLS" and day_structure.low_line_broken:
+            v.structure_intact = False
+            v.structure_detail = "❌ Low Line broken - structure invalid"
+        elif direction == "PUTS" and day_structure.high_line_broken:
+            v.structure_intact = False
+            v.structure_detail = "❌ High Line broken - structure invalid"
+    
+    # Calculate totals
+    checks = [v.vix_agrees, v.ma_permits, v.price_at_level, v.no_event_conflict,
+              v.within_window, v.premium_valid, v.structure_intact]
+    v.checks_passed = sum(checks)
+    v.checks_total = len(checks)
+    v.all_passed = all(checks)
+    
+    # Ready to trade if at least 5/7 pass and critical ones pass
+    critical = v.within_window and v.structure_intact and v.price_at_level
+    v.ready_to_trade = v.checks_passed >= 5 and critical
+    
+    if not v.ready_to_trade:
+        if not v.within_window:
+            v.block_reason = "Outside trading window"
+        elif not v.structure_intact:
+            v.block_reason = "Structure broken"
+        elif not v.price_at_level:
+            v.block_reason = "Price not at entry level"
+        elif v.checks_passed < 5:
+            v.block_reason = f"Only {v.checks_passed}/7 checks passed"
+    
+    return v
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #15: SESSION AWARENESS
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def get_session_status(day_structure=None) -> SessionStatus:
+    """
+    Determine current trading session and pivot status.
+    
+    Session Times (CT):
+    - Sydney:   5:00pm - 8:30pm
+    - Tokyo:    9:00pm - 1:30am
+    - London:   2:00am - 6:30am
+    - New York: 8:30am - 3:00pm
+    """
+    ss = SessionStatus()
+    now = get_ct_now()
+    current_time = now.time()
+    
+    # Determine current session
+    if time(17, 0) <= current_time <= time(20, 30):
+        ss.current_session = "SYDNEY"
+        ss.session_emoji = "🌙"
+        ss.session_label = "Sydney Session"
+        end_time = time(20, 30)
+        ss.next_session = "Tokyo"
+    elif time(21, 0) <= current_time or current_time <= time(1, 30):
+        ss.current_session = "TOKYO"
+        ss.session_emoji = "🗼"
+        ss.session_label = "Tokyo Session"
+        ss.next_session = "London"
+    elif time(2, 0) <= current_time <= time(6, 30):
+        ss.current_session = "LONDON"
+        ss.session_emoji = "🏛️"
+        ss.session_label = "London Session"
+        ss.next_session = "New York"
+    elif time(8, 30) <= current_time <= time(15, 0):
+        ss.current_session = "NEW_YORK"
+        ss.session_emoji = "🗽"
+        ss.session_label = "New York Session"
+        ss.next_session = "Market Close"
+    else:
+        ss.current_session = "BETWEEN"
+        ss.session_emoji = "⏳"
+        ss.session_label = "Between Sessions"
+        if time(6, 30) < current_time < time(8, 30):
+            ss.next_session = "New York in " + str(int((8*60+30 - (current_time.hour*60 + current_time.minute)))) + "m"
+        elif time(15, 0) < current_time < time(17, 0):
+            ss.next_session = "Sydney in " + str(int((17*60 - (current_time.hour*60 + current_time.minute)))) + "m"
+    
+    # Check pivot status
+    if day_structure:
+        ss.sydney_high_set = day_structure.sydney_high > 0
+        ss.sydney_low_set = day_structure.sydney_low > 0
+        ss.tokyo_high_set = day_structure.tokyo_high > 0
+        ss.tokyo_low_set = day_structure.tokyo_low > 0
+        ss.london_high_set = day_structure.london_high > 0
+        ss.london_low_set = day_structure.london_low > 0
+        
+        # Check structure completeness
+        missing = []
+        if not ss.sydney_high_set: missing.append("Syd H")
+        if not ss.sydney_low_set: missing.append("Syd L")
+        if not ss.tokyo_high_set: missing.append("Tok H")
+        if not ss.tokyo_low_set: missing.append("Tok L")
+        if not ss.london_high_set: missing.append("Lon H")
+        if not ss.london_low_set: missing.append("Lon L")
+        
+        ss.missing_pivots = ", ".join(missing) if missing else ""
+        ss.structure_complete = len(missing) == 0
+    
+    return ss
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #16: BEST TRADE RECOMMENDATION
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def get_best_trade(entry_levels: list, vix_zone, ma_bias, day_structure,
+                   current_spx: float, trading_date, confluence: StructureConfluence = None,
+                   options_chain: dict = None) -> BestTrade:
+    """
+    Analyze all entry levels and return the single best trade recommendation.
+    """
+    bt = BestTrade()
+    
+    if not entry_levels:
+        return bt
+    
+    best_score = 0
+    best_entry = None
+    
+    for entry in entry_levels:
+        score = entry.confluence_score
+        
+        # Boost for structure confluence
+        if confluence and confluence.has_confluence:
+            if entry.direction == confluence.best_direction:
+                score += confluence.confidence_boost
+        
+        # Boost for VIX alignment
+        if vix_zone:
+            if entry.direction == "CALLS" and vix_zone.bias in ["CALLS", "STRONG_CALLS"]:
+                score += 15
+            elif entry.direction == "PUTS" and vix_zone.bias in ["PUTS", "STRONG_PUTS"]:
+                score += 15
+        
+        # Boost for MA alignment
+        if ma_bias:
+            if entry.direction == "CALLS" and ma_bias.bias == "LONG":
+                score += 10
+            elif entry.direction == "PUTS" and ma_bias.bias == "SHORT":
+                score += 10
+        
+        # Boost for proximity to current price
+        distance = abs(current_spx - entry.price)
+        if distance <= 5:
+            score += 15
+        elif distance <= 10:
+            score += 10
+        elif distance <= 20:
+            score += 5
+        
+        if score > best_score:
+            best_score = score
+            best_entry = entry
+    
+    if best_entry:
+        bt.has_trade = True
+        bt.direction = best_entry.direction
+        bt.entry_price = best_entry.price
+        bt.entry_source = best_entry.source_name
+        bt.strike = best_entry.recommended_strike
+        bt.contract_type = "C" if best_entry.direction == "CALLS" else "P"
+        bt.premium = best_entry.expected_premium if best_entry.expected_premium > 0 else best_entry.current_premium
+        bt.target_50 = bt.premium * 1.5 if bt.premium > 0 else 0
+        bt.target_100 = bt.premium * 2.0 if bt.premium > 0 else 0
+        bt.confidence = min(100, best_score)
+        
+        # Calculate dynamic stop
+        stop_price, stop_source, stop_dist = calculate_dynamic_stop(
+            bt.direction, bt.entry_price, day_structure, [], STOP_LOSS_PTS
+        )
+        bt.stop_spx = stop_price
+        
+        # Validate entry
+        bt.validation = validate_entry(
+            bt.direction, bt.entry_price, bt.premium,
+            vix_zone, ma_bias, day_structure, current_spx, trading_date
+        )
+        
+        # Build reasons
+        reasons = []
+        if confluence and confluence.has_confluence and bt.direction == confluence.best_direction:
+            reasons.append("Cone + Day Structure aligned")
+        if vix_zone and ((bt.direction == "CALLS" and vix_zone.bias in ["CALLS", "STRONG_CALLS"]) or 
+                         (bt.direction == "PUTS" and vix_zone.bias in ["PUTS", "STRONG_PUTS"])):
+            reasons.append("VIX confirms direction")
+        if ma_bias and ((bt.direction == "CALLS" and ma_bias.bias == "LONG") or
+                        (bt.direction == "PUTS" and ma_bias.bias == "SHORT")):
+            reasons.append("MA permits direction")
+        bt.reasons = " | ".join(reasons) if reasons else "Best available setup"
+        
+        # Warnings
+        warnings = []
+        if bt.validation and not bt.validation.all_passed:
+            warnings.append(f"{bt.validation.checks_passed}/{bt.validation.checks_total} checks")
+        if bt.confidence < 60:
+            warnings.append("Low confidence")
+        bt.warnings = " | ".join(warnings) if warnings else ""
+    
+    return bt
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #17: PRICE ACTION CONTEXT
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def get_price_context(current_spx: float, day_structure, cones: list) -> PriceContext:
+    """
+    Describe what price is doing relative to structure.
+    """
+    pc = PriceContext()
+    pc.current_price = current_spx
+    
+    # Relative to Day Structure High Line
+    if day_structure and day_structure.high_line_valid and day_structure.high_line_at_entry > 0:
+        high_line = day_structure.high_line_at_entry
+        pc.high_line_dist = current_spx - high_line
+        
+        if day_structure.high_line_broken:
+            pc.vs_high_line = "BROKEN"
+        elif pc.high_line_dist > 5:
+            pc.vs_high_line = "ABOVE"
+        elif pc.high_line_dist < -5:
+            pc.vs_high_line = "BELOW"
+        else:
+            pc.vs_high_line = "AT"
+    
+    # Relative to Day Structure Low Line
+    if day_structure and day_structure.low_line_valid and day_structure.low_line_at_entry > 0:
+        low_line = day_structure.low_line_at_entry
+        pc.low_line_dist = current_spx - low_line
+        
+        if day_structure.low_line_broken:
+            pc.vs_low_line = "BROKEN"
+        elif pc.low_line_dist > 5:
+            pc.vs_low_line = "ABOVE"
+        elif pc.low_line_dist < -5:
+            pc.vs_low_line = "BELOW"
+        else:
+            pc.vs_low_line = "AT"
+    
+    # Find nearest cone rail
+    min_dist = 9999
+    for cone in cones:
+        if cone.ascending_rail > 0:
+            dist = abs(current_spx - cone.ascending_rail)
+            if dist < min_dist:
+                min_dist = dist
+                pc.nearest_cone = cone.name
+                pc.nearest_rail = "ASCENDING"
+                pc.nearest_rail_price = cone.ascending_rail
+                pc.nearest_rail_dist = current_spx - cone.ascending_rail
+        
+        if cone.descending_rail > 0:
+            dist = abs(current_spx - cone.descending_rail)
+            if dist < min_dist:
+                min_dist = dist
+                pc.nearest_cone = cone.name
+                pc.nearest_rail = "DESCENDING"
+                pc.nearest_rail_price = cone.descending_rail
+                pc.nearest_rail_dist = current_spx - cone.descending_rail
+    
+    # Generate action description
+    if pc.vs_high_line == "AT":
+        pc.action = "Testing High Line (resistance)"
+        pc.action_emoji = "🎯"
+    elif pc.vs_low_line == "AT":
+        pc.action = "Testing Low Line (support)"
+        pc.action_emoji = "🎯"
+    elif pc.vs_high_line == "BROKEN":
+        pc.action = "Broke above High Line → Watch for retest"
+        pc.action_emoji = "🚀"
+    elif pc.vs_low_line == "BROKEN":
+        pc.action = "Broke below Low Line → Watch for retest"
+        pc.action_emoji = "📉"
+    elif pc.vs_high_line == "BELOW" and pc.vs_low_line == "ABOVE":
+        pc.action = "Inside structure → Wait for level test"
+        pc.action_emoji = "⏳"
+    elif abs(pc.nearest_rail_dist) <= 5:
+        pc.action = f"Near {pc.nearest_cone} {pc.nearest_rail.lower()} rail"
+        pc.action_emoji = "📍"
+    else:
+        pc.action = "Between levels"
+        pc.action_emoji = "↔️"
+    
+    return pc
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #18: CONTRACT DECAY TRACKING
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def calculate_contract_decay(contract_type: str, day_structure, entry_time_mins: int = 30) -> ContractDecay:
+    """
+    Calculate contract decay rate across sessions.
+    """
+    cd = ContractDecay()
+    cd.contract_type = contract_type
+    
+    if not day_structure:
+        return cd
+    
+    if contract_type == "PUT":
+        cd.price_sydney = day_structure.put_price_sydney
+        cd.price_tokyo = day_structure.put_price_tokyo
+        cd.price_london = day_structure.put_price_london
+        cd.strike = day_structure.put_strike
+    else:
+        cd.price_sydney = day_structure.call_price_sydney
+        cd.price_tokyo = day_structure.call_price_tokyo
+        cd.price_london = day_structure.call_price_london
+        cd.strike = day_structure.call_strike
+    
+    # Calculate decay rates (approximate hours between sessions)
+    # Sydney to Tokyo: ~4 hours
+    # Tokyo to London: ~5 hours
+    
+    if cd.price_sydney > 0 and cd.price_tokyo > 0:
+        cd.decay_syd_tok = (cd.price_sydney - cd.price_tokyo) / 4.0  # $/hour
+    
+    if cd.price_tokyo > 0 and cd.price_london > 0:
+        cd.decay_tok_lon = (cd.price_tokyo - cd.price_london) / 5.0  # $/hour
+    
+    # Average decay
+    decays = [d for d in [cd.decay_syd_tok, cd.decay_tok_lon] if d > 0]
+    cd.decay_avg = sum(decays) / len(decays) if decays else 0
+    
+    # Project to entry (London to Entry: ~3 hours)
+    if cd.price_london > 0 and cd.decay_avg > 0:
+        cd.price_at_entry = cd.price_london - (cd.decay_avg * 3.0)
+        cd.price_at_entry = max(0.50, cd.price_at_entry)  # Floor
+    elif cd.price_london > 0:
+        cd.price_at_entry = cd.price_london * 0.85  # Estimate 15% decay
+    
+    # Check sweet spot
+    cd.in_sweet_spot = 3.50 <= cd.price_at_entry <= 8.00
+    
+    # Decay concern if losing more than $0.50/hour
+    cd.decay_concern = cd.decay_avg > 0.50
+    
+    return cd
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# IMPROVEMENT #19 & 21: STATE PERSISTENCE & EXPORT/IMPORT
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def export_state_to_json(session_state) -> str:
+    """
+    Export current state to JSON string for saving/sharing.
+    """
+    import json
+    
+    data = {
+        "export_date": get_ct_now().strftime("%Y-%m-%d"),
+        "export_time": get_ct_now().strftime("%H:%M:%S"),
+        "day_structure": {
+            "sydney_high": session_state.get("sydney_high", 0),
+            "sydney_high_time": session_state.get("sydney_high_time", ""),
+            "sydney_low": session_state.get("sydney_low", 0),
+            "sydney_low_time": session_state.get("sydney_low_time", ""),
+            "tokyo_high": session_state.get("tokyo_high", 0),
+            "tokyo_high_time": session_state.get("tokyo_high_time", ""),
+            "tokyo_low": session_state.get("tokyo_low", 0),
+            "tokyo_low_time": session_state.get("tokyo_low_time", ""),
+            "london_high": session_state.get("london_high", 0),
+            "london_high_time": session_state.get("london_high_time", ""),
+            "london_low": session_state.get("london_low", 0),
+            "london_low_time": session_state.get("london_low_time", ""),
+        },
+        "contract_prices": {
+            "put_price_sydney": session_state.get("put_price_sydney", 0),
+            "put_price_tokyo": session_state.get("put_price_tokyo", 0),
+            "put_price_london": session_state.get("put_price_london", 0),
+            "call_price_sydney": session_state.get("call_price_sydney", 0),
+            "call_price_tokyo": session_state.get("call_price_tokyo", 0),
+            "call_price_london": session_state.get("call_price_london", 0),
+        },
+        "vix": {
+            "vix_bottom": session_state.get("vix_bottom", 0),
+            "vix_top": session_state.get("vix_top", 0),
+        },
+        "trades": []
+    }
+    
+    # Export trades
+    trades = session_state.get("trades", [])
+    for t in trades:
+        if hasattr(t, '__dict__'):
+            data["trades"].append(t.__dict__)
+        elif isinstance(t, dict):
+            data["trades"].append(t)
+    
+    return json.dumps(data, indent=2)
+
+def import_state_from_json(json_str: str) -> dict:
+    """
+    Import state from JSON string.
+    Returns dict of values to set in session_state.
+    """
+    import json
+    
+    try:
+        data = json.loads(json_str)
+        
+        result = {}
+        
+        # Day Structure
+        ds = data.get("day_structure", {})
+        result["sydney_high"] = ds.get("sydney_high", 0)
+        result["sydney_high_time"] = ds.get("sydney_high_time", "17:00")
+        result["sydney_low"] = ds.get("sydney_low", 0)
+        result["sydney_low_time"] = ds.get("sydney_low_time", "17:30")
+        result["tokyo_high"] = ds.get("tokyo_high", 0)
+        result["tokyo_high_time"] = ds.get("tokyo_high_time", "21:00")
+        result["tokyo_low"] = ds.get("tokyo_low", 0)
+        result["tokyo_low_time"] = ds.get("tokyo_low_time", "23:00")
+        result["london_high"] = ds.get("london_high", 0)
+        result["london_high_time"] = ds.get("london_high_time", "05:00")
+        result["london_low"] = ds.get("london_low", 0)
+        result["london_low_time"] = ds.get("london_low_time", "06:00")
+        
+        # Contract prices
+        cp = data.get("contract_prices", {})
+        result["put_price_sydney"] = cp.get("put_price_sydney", 0)
+        result["put_price_tokyo"] = cp.get("put_price_tokyo", 0)
+        result["put_price_london"] = cp.get("put_price_london", 0)
+        result["call_price_sydney"] = cp.get("call_price_sydney", 0)
+        result["call_price_tokyo"] = cp.get("call_price_tokyo", 0)
+        result["call_price_london"] = cp.get("call_price_london", 0)
+        
+        # VIX
+        vix = data.get("vix", {})
+        result["vix_bottom"] = vix.get("vix_bottom", 0)
+        result["vix_top"] = vix.get("vix_top", 0)
+        
+        return result
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_localstorage_js() -> str:
+    """
+    IMPROVEMENT #19: JavaScript for localStorage persistence.
+    """
+    return '''
+    <script>
+    // Save state to localStorage
+    function saveToLocalStorage(key, value) {
+        try {
+            localStorage.setItem('spx_prophet_' + key, JSON.stringify(value));
+            return true;
+        } catch (e) {
+            console.error('localStorage save failed:', e);
+            return false;
+        }
+    }
+    
+    // Load state from localStorage
+    function loadFromLocalStorage(key) {
+        try {
+            const value = localStorage.getItem('spx_prophet_' + key);
+            return value ? JSON.parse(value) : null;
+        } catch (e) {
+            console.error('localStorage load failed:', e);
+            return null;
+        }
+    }
+    
+    // Clear all SPX Prophet data
+    function clearLocalStorage() {
+        try {
+            const keys = Object.keys(localStorage);
+            keys.forEach(key => {
+                if (key.startsWith('spx_prophet_')) {
+                    localStorage.removeItem(key);
+                }
+            });
+            return true;
+        } catch (e) {
+            console.error('localStorage clear failed:', e);
+            return false;
+        }
+    }
+    
+    // Export to clipboard
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            alert('Copied to clipboard!');
+        }).catch(err => {
+            console.error('Copy failed:', err);
+        });
+    }
+    </script>
+    '''
+
 # ╔══════════════════════════════════════════════════════════════════════════════════════════╗
 # ║                                                                                          ║
 # ║                              SECTION 6: UTILITY FUNCTIONS                                ║
@@ -2049,17 +3056,45 @@ def fetch_es_ma_bias():
         current_close = recent_closes[-1]
         ma_bias.current_close = current_close
         
+        # ═══════════════════════════════════════════════════════════════════════
+        # BIAS CALCULATION (50 EMA / 200 SMA)
+        # ═══════════════════════════════════════════════════════════════════════
+        
         # Calculate SMA200 using last 200 bars
         sma200_bars = recent_closes[-200:]
         ma_bias.sma200 = sum(sma200_bars) / 200
         
         # Calculate EMA50 properly (need to start from beginning for accuracy)
         ema50_seed = recent_closes[-100:]  # Use 100 bars to seed EMA
-        multiplier = 2 / (50 + 1)
+        multiplier_50 = 2 / (50 + 1)
         ema = sum(ema50_seed[:50]) / 50  # Start with SMA of first 50
         for price in ema50_seed[50:]:
-            ema = (price - ema) * multiplier + ema
+            ema = (price - ema) * multiplier_50 + ema
         ma_bias.ema50 = ema
+        
+        # ═══════════════════════════════════════════════════════════════════════
+        # CONFIRMATION CALCULATION (8 EMA / 21 EMA) - NEW in v11
+        # ═══════════════════════════════════════════════════════════════════════
+        
+        # Calculate EMA8
+        ema8_seed = recent_closes[-30:]  # Use 30 bars to seed
+        multiplier_8 = 2 / (8 + 1)
+        ema8 = sum(ema8_seed[:8]) / 8  # Start with SMA of first 8
+        for price in ema8_seed[8:]:
+            ema8 = (price - ema8) * multiplier_8 + ema8
+        ma_bias.ema8 = ema8
+        
+        # Calculate EMA21
+        ema21_seed = recent_closes[-50:]  # Use 50 bars to seed
+        multiplier_21 = 2 / (21 + 1)
+        ema21 = sum(ema21_seed[:21]) / 21  # Start with SMA of first 21
+        for price in ema21_seed[21:]:
+            ema21 = (price - ema21) * multiplier_21 + ema21
+        ma_bias.ema21 = ema21
+        
+        # ═══════════════════════════════════════════════════════════════════════
+        # DETERMINE BIAS AND CONFIRMATION STATUS
+        # ═══════════════════════════════════════════════════════════════════════
         
         # Calculate distances
         price_to_sma = ((current_close - ma_bias.sma200) / ma_bias.sma200) * 100
@@ -2080,6 +3115,15 @@ def fetch_es_ma_bias():
             ma_bias.ema_vs_sma = "BEARISH"
         else:
             ma_bias.ema_vs_sma = "NEUTRAL"
+        
+        # Determine momentum confirmation (8 EMA vs 21 EMA) - NEW in v11
+        ema8_vs_21_pct = ((ma_bias.ema8 - ma_bias.ema21) / ma_bias.ema21) * 100 if ma_bias.ema21 > 0 else 0
+        if ema8_vs_21_pct > 0.05:  # 8 EMA above 21 EMA
+            ma_bias.ema8_vs_ema21 = "BULLISH"
+        elif ema8_vs_21_pct < -0.05:  # 8 EMA below 21 EMA
+            ma_bias.ema8_vs_ema21 = "BEARISH"
+        else:
+            ma_bias.ema8_vs_ema21 = "NEUTRAL"
         
         # Check for recent SMA200 crosses (choppiness indicator)
         cross_count = 0
@@ -2112,6 +3156,38 @@ def fetch_es_ma_bias():
         else:
             ma_bias.bias = "NEUTRAL"
             ma_bias.bias_reason = "Ranging market"
+        
+        # Determine confirmation status - NEW in v11
+        if ma_bias.bias == "LONG":
+            if ma_bias.ema8_vs_ema21 == "BULLISH":
+                ma_bias.confirmation = "CONFIRMED"
+                ma_bias.confirmation_reason = "8 EMA > 21 EMA ✓"
+                ma_bias.momentum_aligned = True
+            elif ma_bias.ema8_vs_ema21 == "BEARISH":
+                ma_bias.confirmation = "CONFLICT"
+                ma_bias.confirmation_reason = "8 EMA < 21 EMA ⚠️"
+                ma_bias.momentum_aligned = False
+            else:
+                ma_bias.confirmation = "PENDING"
+                ma_bias.confirmation_reason = "Waiting for 8/21 cross"
+                ma_bias.momentum_aligned = False
+        elif ma_bias.bias == "SHORT":
+            if ma_bias.ema8_vs_ema21 == "BEARISH":
+                ma_bias.confirmation = "CONFIRMED"
+                ma_bias.confirmation_reason = "8 EMA < 21 EMA ✓"
+                ma_bias.momentum_aligned = True
+            elif ma_bias.ema8_vs_ema21 == "BULLISH":
+                ma_bias.confirmation = "CONFLICT"
+                ma_bias.confirmation_reason = "8 EMA > 21 EMA ⚠️"
+                ma_bias.momentum_aligned = False
+            else:
+                ma_bias.confirmation = "PENDING"
+                ma_bias.confirmation_reason = "Waiting for 8/21 cross"
+                ma_bias.momentum_aligned = False
+        else:
+            ma_bias.confirmation = "NONE"
+            ma_bias.confirmation_reason = "No bias established"
+            ma_bias.momentum_aligned = False
         
         return ma_bias
         
@@ -2313,7 +3389,7 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
     Uses the ACTIVE line (most recent segment if pivoted) for RTH projection.
     
     Times are in CT (Central Time).
-    Session times: Sydney 4pm-6pm, Tokyo 6pm-2am, London 2am-6:30am
+    Session times: Sydney 5pm-8:30pm, Tokyo 9pm-1:30am, London 2am-6:30am
     """
     ds = DayStructure()
     ds.high_line_broken = high_line_broken
@@ -2364,22 +3440,38 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
     # ═══════════════════════════════════════════════════════════════════════
     # HIGH LINE ANALYSIS (Sydney High → Tokyo High → London High) - for PUTS
     # ═══════════════════════════════════════════════════════════════════════
+    # 
+    # Valid combinations (in order of preference):
+    # 1. Sydney → Tokyo → London (3-point, strongest)
+    # 2. Tokyo → London (2-point, most recent)
+    # 3. Sydney → London (2-point, skip Tokyo)
+    # 4. Sydney → Tokyo (2-point, no London yet)
+    # 5. London only (1-point, flat projection)
+    # ═══════════════════════════════════════════════════════════════════════
     
     syd_h_mins = parse_time_to_mins_from_midnight(sydney_high_time) if sydney_high > 0 else 0
     tok_h_mins = parse_time_to_mins_from_midnight(tokyo_high_time) if tokyo_high > 0 else 0
     lon_h_mins = parse_time_to_mins_from_midnight(london_high_time) if london_high > 0 else 0
     
-    # Calculate segment slopes
+    # Calculate ALL possible segment slopes
     if sydney_high > 0 and tokyo_high > 0:
         ds.high_syd_tok_slope, _ = calc_slope(sydney_high, syd_h_mins, tokyo_high, tok_h_mins)
     if tokyo_high > 0 and london_high > 0:
         ds.high_tok_lon_slope, _ = calc_slope(tokyo_high, tok_h_mins, london_high, lon_h_mins)
     
-    # Determine if we have valid 3-point or 2-point line
-    has_3pt_high = sydney_high > 0 and tokyo_high > 0 and london_high > 0
-    has_2pt_high = tokyo_high > 0 and london_high > 0
+    # NEW: Sydney → London slope (skip Tokyo)
+    high_syd_lon_slope = 0.0
+    if sydney_high > 0 and london_high > 0:
+        high_syd_lon_slope, _ = calc_slope(sydney_high, syd_h_mins, london_high, lon_h_mins)
     
-    if has_3pt_high:
+    # Determine which combination we have
+    has_all_3_high = sydney_high > 0 and tokyo_high > 0 and london_high > 0
+    has_tok_lon_high = tokyo_high > 0 and london_high > 0
+    has_syd_lon_high = sydney_high > 0 and london_high > 0 and tokyo_high == 0  # Sydney to London, skip Tokyo
+    has_syd_tok_high = sydney_high > 0 and tokyo_high > 0 and london_high == 0  # Sydney to Tokyo only
+    has_lon_only_high = london_high > 0 and sydney_high == 0 and tokyo_high == 0
+    
+    if has_all_3_high:
         # Check for pivot (slopes conflict)
         if slopes_aligned(ds.high_syd_tok_slope, ds.high_tok_lon_slope):
             # All 3 points aligned - use full line
@@ -2387,43 +3479,89 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
             ds.high_line_pivot_type = "ALIGNED"
             ds.high_line_active_segment = "SYD_TOK_LON"
             ds.high_line_quality = "STRONG"
-            # Use Sydney → London for projection (but slope from Tok→Lon for accuracy)
             ds.high_line_slope = ds.high_tok_lon_slope  # Most recent slope
         else:
-            # Pivot detected at Tokyo
+            # Pivot detected at Tokyo - use Tokyo → London
             ds.high_line_pivot = True
             ds.high_line_active_segment = "TOK_LON"
             ds.high_line_quality = "MODERATE"
-            ds.high_line_slope = ds.high_tok_lon_slope  # Use Tokyo → London
+            ds.high_line_slope = ds.high_tok_lon_slope
             
-            # Determine pivot type
             if ds.high_syd_tok_slope < 0 and ds.high_tok_lon_slope > 0:
-                ds.high_line_pivot_type = "V_BOTTOM"  # Descended then ascended
+                ds.high_line_pivot_type = "V_BOTTOM"
             elif ds.high_syd_tok_slope > 0 and ds.high_tok_lon_slope < 0:
-                ds.high_line_pivot_type = "INVERTED_V"  # Ascended then descended
+                ds.high_line_pivot_type = "INVERTED_V"
             else:
                 ds.high_line_pivot_type = "MIXED"
-        
         ds.high_line_valid = True
         
-    elif has_2pt_high:
-        # Only Tokyo → London available
+    elif has_tok_lon_high:
+        # Tokyo → London (most common 2-point)
         ds.high_line_pivot = False
-        ds.high_line_pivot_type = "2PT_ONLY"
+        ds.high_line_pivot_type = "2PT_TOK_LON"
         ds.high_line_active_segment = "TOK_LON"
         ds.high_line_quality = "MODERATE"
         ds.high_line_slope = ds.high_tok_lon_slope
         ds.high_line_valid = True
+        
+    elif has_syd_lon_high:
+        # Sydney → London (skip Tokyo) - NEW
+        ds.high_line_pivot = False
+        ds.high_line_pivot_type = "2PT_SYD_LON"
+        ds.high_line_active_segment = "SYD_LON"
+        ds.high_line_quality = "MODERATE"
+        ds.high_line_slope = high_syd_lon_slope
+        ds.high_line_valid = True
+        
+    elif has_syd_tok_high:
+        # Sydney → Tokyo only (London not yet available) - NEW
+        ds.high_line_pivot = False
+        ds.high_line_pivot_type = "2PT_SYD_TOK"
+        ds.high_line_active_segment = "SYD_TOK"
+        ds.high_line_quality = "WEAK"  # Less reliable without London confirmation
+        ds.high_line_slope = ds.high_syd_tok_slope
+        ds.high_line_valid = True
+        
+    elif has_lon_only_high:
+        # London only - use standard Day Structure slope (descending from high)
+        # HIGH LINE descends at -0.475 per 30min (resistance drops over time)
+        ds.high_line_pivot = False
+        ds.high_line_pivot_type = "1PT_LON"
+        ds.high_line_active_segment = "LON_ONLY"
+        ds.high_line_quality = "WEAK"
+        ds.high_line_slope = -DAY_STRUCTURE_SLOPE_PER_MIN  # Descending slope for HIGH line
+        ds.high_line_valid = True
     
-    # Project high line to entry time (always use Tokyo as base for projection)
-    if ds.high_line_valid and tokyo_high > 0:
-        tok_h_adj = tok_h_mins
+    # Project high line to entry time
+    # Use the most recent valid anchor point for projection
+    if ds.high_line_valid:
+        if ds.high_line_active_segment in ["TOK_LON", "SYD_TOK_LON"] and tokyo_high > 0:
+            # Project from Tokyo
+            anchor_price = tokyo_high
+            anchor_mins = tok_h_mins
+        elif ds.high_line_active_segment == "SYD_LON" and london_high > 0:
+            # Project from London (more recent)
+            anchor_price = london_high
+            anchor_mins = lon_h_mins
+        elif ds.high_line_active_segment == "SYD_TOK" and tokyo_high > 0:
+            # Project from Tokyo
+            anchor_price = tokyo_high
+            anchor_mins = tok_h_mins
+        elif ds.high_line_active_segment == "LON_ONLY" and london_high > 0:
+            # Project from London (flat)
+            anchor_price = london_high
+            anchor_mins = lon_h_mins
+        else:
+            anchor_price = london_high if london_high > 0 else tokyo_high if tokyo_high > 0 else sydney_high
+            anchor_mins = lon_h_mins if london_high > 0 else tok_h_mins if tokyo_high > 0 else syd_h_mins
+        
+        anchor_mins_adj = anchor_mins
         entry_mins_adj = entry_mins
-        if entry_mins < tok_h_mins:
+        if entry_mins < anchor_mins:
             entry_mins_adj += 24 * 60
         
-        mins_from_tokyo = entry_mins_adj - tok_h_adj
-        ds.high_line_at_entry = tokyo_high + (ds.high_line_slope * mins_from_tokyo)
+        mins_from_anchor = entry_mins_adj - anchor_mins_adj
+        ds.high_line_at_entry = anchor_price + (ds.high_line_slope * mins_from_anchor)
         
         # Direction from active slope
         if ds.high_line_slope > 0.001:
@@ -2442,22 +3580,38 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
     # ═══════════════════════════════════════════════════════════════════════
     # LOW LINE ANALYSIS (Sydney Low → Tokyo Low → London Low) - for CALLS
     # ═══════════════════════════════════════════════════════════════════════
+    # 
+    # Valid combinations (in order of preference):
+    # 1. Sydney → Tokyo → London (3-point, strongest)
+    # 2. Tokyo → London (2-point, most recent)
+    # 3. Sydney → London (2-point, skip Tokyo)
+    # 4. Sydney → Tokyo (2-point, no London yet)
+    # 5. London only (1-point, flat projection)
+    # ═══════════════════════════════════════════════════════════════════════
     
     syd_l_mins = parse_time_to_mins_from_midnight(sydney_low_time) if sydney_low > 0 else 0
     tok_l_mins = parse_time_to_mins_from_midnight(tokyo_low_time) if tokyo_low > 0 else 0
     lon_l_mins = parse_time_to_mins_from_midnight(london_low_time) if london_low > 0 else 0
     
-    # Calculate segment slopes
+    # Calculate ALL possible segment slopes
     if sydney_low > 0 and tokyo_low > 0:
         ds.low_syd_tok_slope, _ = calc_slope(sydney_low, syd_l_mins, tokyo_low, tok_l_mins)
     if tokyo_low > 0 and london_low > 0:
         ds.low_tok_lon_slope, _ = calc_slope(tokyo_low, tok_l_mins, london_low, lon_l_mins)
     
-    # Determine if we have valid 3-point or 2-point line
-    has_3pt_low = sydney_low > 0 and tokyo_low > 0 and london_low > 0
-    has_2pt_low = tokyo_low > 0 and london_low > 0
+    # NEW: Sydney → London slope (skip Tokyo)
+    low_syd_lon_slope = 0.0
+    if sydney_low > 0 and london_low > 0:
+        low_syd_lon_slope, _ = calc_slope(sydney_low, syd_l_mins, london_low, lon_l_mins)
     
-    if has_3pt_low:
+    # Determine which combination we have
+    has_all_3_low = sydney_low > 0 and tokyo_low > 0 and london_low > 0
+    has_tok_lon_low = tokyo_low > 0 and london_low > 0
+    has_syd_lon_low = sydney_low > 0 and london_low > 0 and tokyo_low == 0  # Sydney to London, skip Tokyo
+    has_syd_tok_low = sydney_low > 0 and tokyo_low > 0 and london_low == 0  # Sydney to Tokyo only
+    has_lon_only_low = london_low > 0 and sydney_low == 0 and tokyo_low == 0
+    
+    if has_all_3_low:
         # Check for pivot (slopes conflict)
         if slopes_aligned(ds.low_syd_tok_slope, ds.low_tok_lon_slope):
             # All 3 points aligned - strong structure
@@ -2467,40 +3621,87 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
             ds.low_line_quality = "STRONG"
             ds.low_line_slope = ds.low_tok_lon_slope  # Most recent slope
         else:
-            # Pivot detected at Tokyo
+            # Pivot detected at Tokyo - use Tokyo → London
             ds.low_line_pivot = True
             ds.low_line_active_segment = "TOK_LON"
             ds.low_line_quality = "MODERATE"
-            ds.low_line_slope = ds.low_tok_lon_slope  # Use Tokyo → London
+            ds.low_line_slope = ds.low_tok_lon_slope
             
-            # Determine pivot type
             if ds.low_syd_tok_slope < 0 and ds.low_tok_lon_slope > 0:
-                ds.low_line_pivot_type = "V_BOTTOM"  # Descended then ascended (bullish)
+                ds.low_line_pivot_type = "V_BOTTOM"  # Bullish
             elif ds.low_syd_tok_slope > 0 and ds.low_tok_lon_slope < 0:
-                ds.low_line_pivot_type = "INVERTED_V"  # Ascended then descended (bearish)
+                ds.low_line_pivot_type = "INVERTED_V"  # Bearish
             else:
                 ds.low_line_pivot_type = "MIXED"
-        
         ds.low_line_valid = True
         
-    elif has_2pt_low:
-        # Only Tokyo → London available
+    elif has_tok_lon_low:
+        # Tokyo → London (most common 2-point)
         ds.low_line_pivot = False
-        ds.low_line_pivot_type = "2PT_ONLY"
+        ds.low_line_pivot_type = "2PT_TOK_LON"
         ds.low_line_active_segment = "TOK_LON"
         ds.low_line_quality = "MODERATE"
         ds.low_line_slope = ds.low_tok_lon_slope
         ds.low_line_valid = True
+        
+    elif has_syd_lon_low:
+        # Sydney → London (skip Tokyo) - NEW
+        ds.low_line_pivot = False
+        ds.low_line_pivot_type = "2PT_SYD_LON"
+        ds.low_line_active_segment = "SYD_LON"
+        ds.low_line_quality = "MODERATE"
+        ds.low_line_slope = low_syd_lon_slope
+        ds.low_line_valid = True
+        
+    elif has_syd_tok_low:
+        # Sydney → Tokyo only (London not yet available) - NEW
+        ds.low_line_pivot = False
+        ds.low_line_pivot_type = "2PT_SYD_TOK"
+        ds.low_line_active_segment = "SYD_TOK"
+        ds.low_line_quality = "WEAK"  # Less reliable without London confirmation
+        ds.low_line_slope = ds.low_syd_tok_slope
+        ds.low_line_valid = True
+        
+    elif has_lon_only_low:
+        # London only - use standard Day Structure slope (ascending from low)
+        # LOW LINE ascends at +0.475 per 30min (support rises over time)
+        ds.low_line_pivot = False
+        ds.low_line_pivot_type = "1PT_LON"
+        ds.low_line_active_segment = "LON_ONLY"
+        ds.low_line_quality = "WEAK"
+        ds.low_line_slope = DAY_STRUCTURE_SLOPE_PER_MIN  # Ascending slope for LOW line
+        ds.low_line_valid = True
     
     # Project low line to entry time
-    if ds.low_line_valid and tokyo_low > 0:
-        tok_l_adj = tok_l_mins
+    # Use the most recent valid anchor point for projection
+    if ds.low_line_valid:
+        if ds.low_line_active_segment in ["TOK_LON", "SYD_TOK_LON"] and tokyo_low > 0:
+            # Project from Tokyo
+            anchor_price = tokyo_low
+            anchor_mins = tok_l_mins
+        elif ds.low_line_active_segment == "SYD_LON" and london_low > 0:
+            # Project from London (more recent)
+            anchor_price = london_low
+            anchor_mins = lon_l_mins
+        elif ds.low_line_active_segment == "SYD_TOK" and tokyo_low > 0:
+            # Project from Tokyo
+            anchor_price = tokyo_low
+            anchor_mins = tok_l_mins
+        elif ds.low_line_active_segment == "LON_ONLY" and london_low > 0:
+            # Project from London (flat)
+            anchor_price = london_low
+            anchor_mins = lon_l_mins
+        else:
+            anchor_price = london_low if london_low > 0 else tokyo_low if tokyo_low > 0 else sydney_low
+            anchor_mins = lon_l_mins if london_low > 0 else tok_l_mins if tokyo_low > 0 else syd_l_mins
+        
+        anchor_mins_adj = anchor_mins
         entry_mins_adj = entry_mins
-        if entry_mins < tok_l_mins:
+        if entry_mins < anchor_mins:
             entry_mins_adj += 24 * 60
         
-        mins_from_tokyo = entry_mins_adj - tok_l_adj
-        ds.low_line_at_entry = tokyo_low + (ds.low_line_slope * mins_from_tokyo)
+        mins_from_anchor = entry_mins_adj - anchor_mins_adj
+        ds.low_line_at_entry = anchor_price + (ds.low_line_slope * mins_from_anchor)
         
         # Direction from active slope
         if ds.low_line_slope > 0.001:
@@ -5292,6 +6493,130 @@ body {{
 </div>
 '''
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # v11 IMPROVEMENT #15: SESSION STATUS BAR
+    # ═══════════════════════════════════════════════════════════════════════
+    session_status = get_session_status(day_structure)
+    
+    html += f'''
+<!-- SESSION STATUS BAR -->
+<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);margin-bottom:var(--space-3);display:flex;justify-content:space-between;align-items:center;">
+    <div style="display:flex;align-items:center;gap:var(--space-3);">
+        <span style="font-size:16px;">{session_status.session_emoji}</span>
+        <span style="font-size:12px;font-weight:600;color:var(--text-primary);">{session_status.session_label}</span>
+        <span style="font-size:10px;color:var(--text-muted);">{session_status.next_session}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-2);">
+        <span style="font-size:10px;color:var(--text-muted);">Pivots:</span>
+        <span style="font-size:11px;">{"🌙" if session_status.sydney_high_set else "○"}{"🌙" if session_status.sydney_low_set else "○"}</span>
+        <span style="font-size:11px;">{"🗼" if session_status.tokyo_high_set else "○"}{"🗼" if session_status.tokyo_low_set else "○"}</span>
+        <span style="font-size:11px;">{"🏛️" if session_status.london_high_set else "○"}{"🏛️" if session_status.london_low_set else "○"}</span>
+        <span style="font-size:10px;color:{'var(--success)' if session_status.structure_complete else 'var(--warning)'};">{"✓ Complete" if session_status.structure_complete else session_status.missing_pivots}</span>
+    </div>
+</div>
+'''
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # v11 IMPROVEMENT #12 & #16: CONFLUENCE + BEST TRADE CARD
+    # ═══════════════════════════════════════════════════════════════════════
+    structure_confluence = detect_structure_confluence(cones, day_structure, st.session_state.get('entry_time_mins', 30)) if cones and day_structure else None
+    best_trade = get_best_trade(entry_levels or [], vix_zone, ma_bias, day_structure, spx_price, trading_date, structure_confluence, options_chain) if entry_levels else None
+    
+    if best_trade and best_trade.has_trade:
+        bt_bg = "var(--success-soft)" if best_trade.direction == "CALLS" else "var(--danger-soft)"
+        bt_border = "var(--success)" if best_trade.direction == "CALLS" else "var(--danger)"
+        bt_icon = "↑" if best_trade.direction == "CALLS" else "↓"
+        conf_pct = best_trade.confidence
+        conf_color = "var(--success)" if conf_pct >= 70 else "var(--warning)" if conf_pct >= 50 else "var(--text-muted)"
+        
+        # Validation checklist
+        v = best_trade.validation
+        checks_html = ""
+        if v:
+            checks_html = f'''
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;margin-top:var(--space-2);">
+                <div>{v.vix_detail}</div>
+                <div>{v.ma_detail}</div>
+                <div>{v.price_detail}</div>
+                <div>{v.premium_detail}</div>
+                <div>{v.window_detail}</div>
+                <div>{v.structure_detail}</div>
+            </div>
+            '''
+        
+        html += f'''
+<!-- BEST TRADE CARD -->
+<div style="background:{bt_bg};border:2px solid {bt_border};border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+            <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2);">
+                <span style="font-size:20px;">{bt_icon}</span>
+                <span style="font-size:16px;font-weight:700;color:var(--text-primary);">BEST SETUP: {best_trade.direction}</span>
+                <span style="font-size:12px;padding:2px 8px;background:{conf_color};color:white;border-radius:10px;">{conf_pct}%</span>
+            </div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:var(--space-1);">
+                Entry: <strong>{best_trade.entry_price:,.0f}</strong> ({best_trade.entry_source})
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);">
+                Strike: <strong>{best_trade.strike}{"C" if best_trade.direction == "CALLS" else "P"}</strong> @ ${best_trade.premium:.2f} → Target ${best_trade.target_50:.2f} (+50%)
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:var(--space-1);">
+                Stop: {best_trade.stop_spx:,.0f} SPX
+            </div>
+        </div>
+        <div style="text-align:right;">
+            <div style="font-size:11px;color:var(--text-muted);">Confidence</div>
+            <div style="font-size:24px;font-weight:700;color:{conf_color};">{conf_pct}</div>
+        </div>
+    </div>
+    {checks_html}
+    <div style="font-size:10px;color:var(--text-muted);margin-top:var(--space-2);border-top:1px solid var(--border);padding-top:var(--space-2);">
+        {best_trade.reasons}
+        {f' | ⚠️ {best_trade.warnings}' if best_trade.warnings else ''}
+    </div>
+</div>
+'''
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # v11 IMPROVEMENT #12: CONFLUENCE BANNER (if detected)
+    # ═══════════════════════════════════════════════════════════════════════
+    if structure_confluence and structure_confluence.has_confluence:
+        conf_bg = "linear-gradient(135deg, rgba(234,179,8,0.2) 0%, rgba(234,179,8,0.05) 100%)"
+        html += f'''
+<!-- STRUCTURE CONFLUENCE ALERT -->
+<div style="background:{conf_bg};border:1px solid var(--warning);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-4);">
+    <div style="display:flex;align-items:center;gap:var(--space-2);">
+        <span style="font-size:18px;">🎯</span>
+        <span style="font-size:13px;font-weight:600;color:var(--text-primary);">STRUCTURE CONFLUENCE DETECTED</span>
+    </div>
+    <div style="font-size:12px;color:var(--text-secondary);margin-top:var(--space-1);">
+        {structure_confluence.description}
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:var(--space-1);">
+        Entry Zone: <strong>{structure_confluence.best_entry_price:,.0f}</strong> | Confidence Boost: <strong>+{structure_confluence.confidence_boost}</strong>
+    </div>
+</div>
+'''
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # v11 IMPROVEMENT #17: PRICE CONTEXT
+    # ═══════════════════════════════════════════════════════════════════════
+    price_ctx = get_price_context(spx_price, day_structure, cones) if cones else None
+    
+    if price_ctx and price_ctx.action:
+        html += f'''
+<!-- PRICE CONTEXT -->
+<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);margin-bottom:var(--space-3);display:flex;align-items:center;gap:var(--space-2);">
+    <span style="font-size:14px;">{price_ctx.action_emoji}</span>
+    <span style="font-size:12px;color:var(--text-secondary);">{price_ctx.action}</span>
+    <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">
+        SPX: <strong>{spx_price:,.0f}</strong>
+        {f' | High Line: {price_ctx.high_line_dist:+.0f}' if price_ctx.vs_high_line else ''}
+        {f' | Low Line: {price_ctx.low_line_dist:+.0f}' if price_ctx.vs_low_line else ''}
+    </span>
+</div>
+'''
+
     html += '''
 <!-- HEADER (Info Bar) -->
 <header class="header">
@@ -7053,7 +8378,7 @@ def main():
         'last_refresh': None,
         'overnight_spx': 0.0,  # Current SPX/ES price for proximity analysis
         # Day Structure - 3 Session pivots for trendlines (Sydney → Tokyo → London)
-        # Session times (CT): Sydney 4pm-6pm, Tokyo 6pm-2am, London 2am-6:30am
+        # Session times (CT): Sydney 5pm-8:30pm, Tokyo 9pm-1:30am, London 2am-6:30am
         'sydney_high': 0.0, 'sydney_high_time': "17:00",
         'sydney_low': 0.0, 'sydney_low_time': "17:30",
         'tokyo_high': 0.0, 'tokyo_high_time': "21:00", 
@@ -7319,14 +8644,14 @@ def main():
         st.caption("3-Session trendlines (Sydney → Tokyo → London)")
         
         with st.expander("HIGH LINE (PUTS)", expanded=False):
-            st.markdown("**Sydney High** (4pm-6pm CT)")
+            st.markdown("**Sydney High** (5pm-8:30pm CT)")
             c1, c2 = st.columns([2, 1])
             with c1:
                 st.session_state.sydney_high = st.number_input("SPX", value=st.session_state.sydney_high, step=0.01, format="%.2f", key="syd_h")
             with c2:
                 st.session_state.sydney_high_time = st.text_input("Time", value=st.session_state.sydney_high_time, key="syd_ht", help="CT, e.g. 17:00")
             
-            st.markdown("**Tokyo High** (6pm-2am CT)")
+            st.markdown("**Tokyo High** (9pm-1:30am CT)")
             c1, c2 = st.columns([2, 1])
             with c1:
                 st.session_state.tokyo_high = st.number_input("SPX", value=st.session_state.tokyo_high, step=0.01, format="%.2f", key="tok_h")
@@ -7353,14 +8678,14 @@ def main():
             st.session_state.high_line_broken = st.checkbox("⚡ High line BROKEN (SPX broke above)", value=st.session_state.get("high_line_broken", False), key="high_broken")
         
         with st.expander("LOW LINE (CALLS)", expanded=False):
-            st.markdown("**Sydney Low** (4pm-6pm CT)")
+            st.markdown("**Sydney Low** (5pm-8:30pm CT)")
             c1, c2 = st.columns([2, 1])
             with c1:
                 st.session_state.sydney_low = st.number_input("SPX", value=st.session_state.sydney_low, step=0.01, format="%.2f", key="syd_l")
             with c2:
                 st.session_state.sydney_low_time = st.text_input("Time", value=st.session_state.sydney_low_time, key="syd_lt", help="CT, e.g. 17:30")
             
-            st.markdown("**Tokyo Low** (6pm-2am CT)")
+            st.markdown("**Tokyo Low** (9pm-1:30am CT)")
             c1, c2 = st.columns([2, 1])
             with c1:
                 st.session_state.tokyo_low = st.number_input("SPX", value=st.session_state.tokyo_low, step=0.01, format="%.2f", key="tok_l")
@@ -7533,6 +8858,70 @@ def main():
         
         st.markdown("### 🔔 Alerts")
         st.session_state.alerts_enabled = st.checkbox("Entry Alerts", value=st.session_state.get('alerts_enabled', True), key="alerts_cb")
+        
+        st.divider()
+        
+        # ═══════════════════════════════════════════════════════════════════════
+        # v11 IMPROVEMENT #20: QUICK RESET BUTTONS
+        # ═══════════════════════════════════════════════════════════════════════
+        st.markdown("### 🔄 Reset")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🌙 Reset Day Struct", key="reset_ds_btn", use_container_width=True):
+                for key in ['sydney_high', 'sydney_low', 'tokyo_high', 'tokyo_low', 
+                           'london_high', 'london_low', 'put_price_sydney', 'put_price_tokyo',
+                           'put_price_london', 'call_price_sydney', 'call_price_tokyo', 'call_price_london']:
+                    st.session_state[key] = 0.0
+                st.success("✓ Day Structure reset")
+                st.rerun()
+        
+        with col2:
+            if st.button("📊 Reset VIX", key="reset_vix_btn", use_container_width=True):
+                st.session_state.vix_bottom = 0.0
+                st.session_state.vix_top = 0.0
+                st.session_state.vix_current = 0.0
+                st.success("✓ VIX reset")
+                st.rerun()
+        
+        if st.button("🆕 New Trading Day", key="new_day_btn", use_container_width=True):
+            # Reset everything except theme
+            keep_keys = ['theme']
+            current_theme = st.session_state.get('theme', 'dark')
+            for key in list(st.session_state.keys()):
+                if key not in keep_keys:
+                    del st.session_state[key]
+            st.session_state.theme = current_theme
+            st.success("✓ Fresh start!")
+            st.rerun()
+        
+        st.divider()
+        
+        # ═══════════════════════════════════════════════════════════════════════
+        # v11 IMPROVEMENT #21: EXPORT/IMPORT
+        # ═══════════════════════════════════════════════════════════════════════
+        st.markdown("### 💾 Export/Import")
+        
+        with st.expander("📤 Export Setup", expanded=False):
+            if st.button("Generate Export", key="export_btn", use_container_width=True):
+                export_json = export_state_to_json(st.session_state)
+                st.code(export_json, language="json")
+                st.caption("Copy the JSON above to save your setup")
+        
+        with st.expander("📥 Import Setup", expanded=False):
+            import_json = st.text_area("Paste JSON here", key="import_json", height=100)
+            if st.button("Apply Import", key="import_btn", use_container_width=True):
+                if import_json:
+                    result = import_state_from_json(import_json)
+                    if "error" in result:
+                        st.error(f"Import failed: {result['error']}")
+                    else:
+                        for key, value in result.items():
+                            st.session_state[key] = value
+                        st.success("✓ Import successful!")
+                        st.rerun()
+                else:
+                    st.warning("Paste JSON first")
         
         st.divider()
         
