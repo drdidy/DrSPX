@@ -1,158 +1,32 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-╔══════════════════════════════════════════════════════════════════════════════════════════╗
-║                                                                                          ║
-║   ███████╗██████╗ ██╗  ██╗    ██████╗ ██████╗  ██████╗ ██████╗ ██╗  ██╗███████╗████████╗ ║
-║   ██╔════╝██╔══██╗╚██╗██╔╝    ██╔══██╗██╔══██╗██╔═══██╗██╔══██╗██║  ██║██╔════╝╚══██╔══╝ ║
-║   ███████╗██████╔╝ ╚███╔╝     ██████╔╝██████╔╝██║   ██║██████╔╝███████║█████╗     ██║    ║
-║   ╚════██║██╔═══╝  ██╔██╗     ██╔═══╝ ██╔══██╗██║   ██║██╔═══╝ ██╔══██║██╔══╝     ██║    ║
-║   ███████║██║     ██╔╝ ██╗    ██║     ██║  ██║╚██████╔╝██║     ██║  ██║███████╗   ██║    ║
-║   ╚══════╝╚═╝     ╚═╝  ╚═╝    ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝   ╚═╝    ║
-║                                                                                          ║
-║                          "Where Structure Becomes Foresight"                             ║
-║                                                                                          ║
-║                                    Version 11.0                                          ║
-║                              OBSIDIAN PREMIUM EDITION                                    ║
-║                                                                                          ║
-╚══════════════════════════════════════════════════════════════════════════════════════════╝
+SPX PROPHET v10.0 - OBSIDIAN PREMIUM
+"Where Structure Becomes Foresight"
 
-DESCRIPTION:
-============
-SPX Prophet is a professional 0DTE (Zero Days to Expiration) SPX options trading system
-that combines multiple technical indicators to identify high-probability entry points.
-The system uses a proprietary "Structural Cone" methodology combined with VIX analysis
-and overnight futures data to generate actionable trade setups.
+DESIGN: Deep obsidian dark theme with glassmorphism, glowing accents, and premium typography.
 
-CORE TRADING PHILOSOPHY:
-========================
-The system is built on THREE PILLARS that must align for high-confidence trades:
+THREE PILLARS:
+1. VIX Zone → Direction (CALLS at bottom/below, PUTS at top/above)
+2. MA Bias → Confirmation (LONG/SHORT/NEUTRAL)
+3. Day Structure → Entry + Contract + Stop
 
-    ┌─────────────────────────────────────────────────────────────────────────────┐
-    │  PILLAR 1: VIX ZONE → DIRECTION                                             │
-    │  ─────────────────────────────────────────────────────────────────────────  │
-    │  • VIX in LOWER zone (bottom 50%) = BULLISH → Trade CALLS                   │
-    │  • VIX in UPPER zone (top 50%) = BEARISH → Trade PUTS                       │
-    │  • VIX BELOW entire range = Strong BULLISH → Aggressive CALLS               │
-    │  • VIX ABOVE entire range = Strong BEARISH → Aggressive PUTS                │
-    │  • Zone size = 1% of VIX value (adaptive to volatility)                     │
-    └─────────────────────────────────────────────────────────────────────────────┘
+KEY FEATURES:
+✓ VIX Zone scaling (1% of VIX, rounded to 0.05 ticks)
+✓ Dynamic stops based on VIX level (4-10 pts)
+✓ Strike = Entry ± 10 (OTM at entry, ITM at target)
+✓ Day Structure = Buy Zone / Exit Zone with contract pricing
+✓ Flip signals when structure breaks
+✓ Trading Rules Reference (collapsible)
+✓ Contextual Rule Warnings
 
-    ┌─────────────────────────────────────────────────────────────────────────────┐
-    │  PILLAR 2: ES FUTURES MA BIAS → CONFIRMATION                                │
-    │  ─────────────────────────────────────────────────────────────────────────  │
-    │  • Uses 50 EMA and 200 SMA on 30-minute ES futures chart for BIAS           │
-    │  • Price > 200 SMA = LONG bias → Trade CALLS only                           │
-    │  • Price < 200 SMA = SHORT bias → Trade PUTS only                           │
-    │  • 50 EMA > 200 SMA = Bullish trend health                                  │
-    │  • Uses 8 EMA and 21 EMA for CONFIRMATION of entries                        │
-    │  • 8 EMA > 21 EMA = Bullish momentum → Confirms CALL entries                │
-    │  • 8 EMA < 21 EMA = Bearish momentum → Confirms PUT entries                 │
-    │  • Best setups have all MAs aligned with VIX direction                      │
-    └─────────────────────────────────────────────────────────────────────────────┘
-
-    ┌─────────────────────────────────────────────────────────────────────────────┐
-    │  PILLAR 3: STRUCTURAL CONES → ENTRY PRECISION                               │
-    │  ─────────────────────────────────────────────────────────────────────────  │
-    │  • Cones project from prior session High, Low, and Close                    │
-    │  • Each cone has ASCENDING rail (calls entry) and DESCENDING rail (puts)    │
-    │  • Rails expand at ±0.475 SPX points per 30-minute block                    │
-    │  • Price touching a rail = entry signal in direction of VIX bias            │
-    │  • Cones create mathematical "zones of interest" throughout the day         │
-    └─────────────────────────────────────────────────────────────────────────────┘
-
-DAY STRUCTURE SYSTEM:
-=====================
-In addition to the cones, the system tracks "Day Structure" based on overnight session:
-
-    Sydney Session (5pm-8:30pm CT):  First price prints set initial structure
-    Tokyo Session (9pm-1:30am CT):   Asian session can break/confirm structure
-    London Session (2am-6:30am CT):  European session often sets the day's range
-    
-    HIGH LINE = Overnight high → Entry point for PUTS
-    LOW LINE  = Overnight low  → Entry point for CALLS
-    
-    When price reaches these lines during RTH, options are priced for entry.
-
-OPTION PRICING MODEL:
-=====================
-The system uses a calibrated pricing model based on real market data:
-
-    Base Price = 5.00 (sweet spot center)
-    
-    Adjustments:
-    • VIX adjustment: Higher VIX = higher premiums
-    • Distance adjustment: Further OTM = cheaper
-    • Time adjustment: Theta decay accelerates after 11:30 CT
-    • Delta targeting: Aim for 0.25-0.35 delta contracts
-    
-    Sweet Spot: $3.50 - $8.00 premium (optimal risk/reward)
-
-EXPECTED PRICE AT ENTRY:
-========================
-When options chain is loaded, the system calculates expected prices at entry rails:
-
-    @ENTRY = Current_Price + (SPX_Move × Delta)
-    
-    Example: 5900P currently $8.00, delta -0.35, SPX needs to rise 20 pts to reach entry
-    @ENTRY = $8.00 + (20 × 0.35) = $8.00 - $7.00 = $1.00 (PUT gets cheaper as SPX rises)
-
-PROFIT TARGETS:
-===============
-All targets are calculated from the EXPECTED ENTRY PRICE, not current price:
-
-    +50%  = @ENTRY × 1.50  (Conservative target)
-    +100% = @ENTRY × 2.00  (Standard target)  
-    +200% = @ENTRY × 3.00  (Aggressive target)
-
-RISK MANAGEMENT:
-================
-    • Dynamic stops based on VIX level (4-10 SPX points)
-    • Position sizing: 10 contracts default
-    • Max risk per trade: Entry × Contracts × 100
-    • Stop triggers when price breaks entry rail by stop distance
-
-API INTEGRATIONS:
-=================
-    • Polygon.io - Real-time options data, Greeks, SPX/VIX quotes
-    • Yahoo Finance - ES futures data for MA bias calculation
-    
-    Plans Required:
-    • Indices Starter ($49/mo) - SPX, VIX real-time
-    • Options Starter ($29/mo) - Options chain with Greeks
-    
-    Note: Options data has 15-minute delay on Starter plan
-
-VERSION HISTORY:
-================
-    v1.0  - Basic cone structure visualization
-    v2.0  - Added VIX zone analysis
-    v3.0  - Integrated options pricing model
-    v4.0  - Day Structure (High/Low/Close lines)
-    v5.0  - ES futures MA bias confirmation
-    v6.0  - Confluence detection (cone + day structure alignment)
-    v7.0  - Market context and dynamic stops
-    v8.0  - Price proximity analysis
-    v9.0  - Options chain in sidebar
-    v10.0 - Smart 0DTE dates, dashboard options chain, expected entry prices
-
-AUTHOR: David (with Claude AI assistance)
-DATE: January 2026
-LICENSE: Proprietary
-
-DISCLAIMER:
-===========
-This software is for educational and informational purposes only. Trading options
-involves substantial risk of loss and is not suitable for all investors. Past
-performance is not indicative of future results. Always do your own research and
-consult with a licensed financial advisor before making trading decisions.
+v10.0 UPDATES:
+✓ Options Chain in MAIN DASHBOARD (not sidebar)
+✓ Full Greeks display (Delta, Gamma, Theta, Vega, IV)
+✓ Smart 0DTE date logic:
+  - After 3pm CT → Show next trading day options
+  - Midnight → Flip to new day
+✓ Live option prices in setup cards
+✓ Expected returns based on calibrated model
 """
-
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 1: IMPORTS & DEPENDENCIES                           ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -163,66 +37,32 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
 import pytz
 
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 2: CONFIGURATION CONSTANTS                          ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
-
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-# API Configuration
-# ─────────────────────────────────────────────────────────────────────────────────────────────
+# Configuration
 POLYGON_API_KEY = "jrbBZ2y12cJAOp2Buqtlay0TdprcTDIm"
 POLYGON_BASE = "https://api.polygon.io"
+CT_TZ = pytz.timezone('America/Chicago')
+ET_TZ = pytz.timezone('America/New_York')
 
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-# Timezone Configuration
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-CT_TZ = pytz.timezone('America/Chicago')      # Central Time - Primary trading timezone
-ET_TZ = pytz.timezone('America/New_York')     # Eastern Time - Market timezone
+SLOPE_PER_30MIN = 0.45
+MIN_CONE_WIDTH = 18.0
+STOP_LOSS_PTS = 6.0
+RAIL_PROXIMITY = 5.0
+OTM_DISTANCE_PTS = 15
+PREMIUM_SWEET_LOW = 4.00
+PREMIUM_SWEET_HIGH = 8.00
+DELTA_IDEAL = 0.30
+VIX_TO_SPX_MULTIPLIER = 175
 
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-# Structural Cone Parameters
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-SLOPE_PER_30MIN = 0.45        # SPX points the cone rails expand per 30-minute block
-MIN_CONE_WIDTH = 18.0         # Minimum width between ascending and descending rails
-RAIL_PROXIMITY = 5.0          # Points from rail to trigger "ACTIVE" status
+INST_WINDOW_START = time(9, 0)
+INST_WINDOW_END = time(9, 30)
+ENTRY_TARGET = time(9, 10)
+CUTOFF_TIME = time(11, 30)
 
-# Day Structure slope (slightly steeper than cones)
-# Used when only one session pivot exists (e.g., London only)
-DAY_STRUCTURE_SLOPE_PER_30MIN = 0.475  # ±0.475 SPX points per 30-minute block
-DAY_STRUCTURE_SLOPE_PER_MIN = DAY_STRUCTURE_SLOPE_PER_30MIN / 30  # Per minute for calculations
+# ═══════════════════════════════════════════════════════════════════════════════
+# ECONOMIC CALENDAR - High Impact Events for 0DTE Trading
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-# Options Trading Parameters
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-STOP_LOSS_PTS = 6.0           # Default stop loss in SPX points
-OTM_DISTANCE_PTS = 15         # Target OTM distance for strike selection
-PREMIUM_SWEET_LOW = 4.00      # Lower bound of ideal premium range
-PREMIUM_SWEET_HIGH = 8.00     # Upper bound of ideal premium range
-DELTA_IDEAL = 0.30            # Target delta for option selection
-VIX_TO_SPX_MULTIPLIER = 175   # Conversion factor for VIX to SPX expected move
-
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-# Trading Time Windows (Central Time)
-# ─────────────────────────────────────────────────────────────────────────────────────────────
-INST_WINDOW_START = time(9, 0)    # Institutional window start (9:00 AM CT)
-INST_WINDOW_END = time(9, 30)     # Institutional window end (9:30 AM CT)
-ENTRY_TARGET = time(9, 10)        # Ideal entry time within institutional window
-CUTOFF_TIME = time(11, 30)        # After this time, theta decay accelerates significantly
-
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 3: ECONOMIC CALENDAR                                ║
-# ║                                                                                          ║
-# ║  High-impact economic events that affect 0DTE trading. These dates require extra        ║
-# ║  caution due to increased volatility around announcement times.                         ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
-
-# FOMC Meeting Dates (Federal Reserve interest rate decisions)
-# Announcement typically at 2:00 PM ET / 1:00 PM CT
-# These days often see massive volatility spikes - trade with caution or sit out
+# 2025-2026 FOMC Meeting Dates (announcement at 2:00 PM ET / 1:00 PM CT)
 FOMC_DATES_2025_2026 = [
     # 2025
     "2025-01-29", "2025-03-19", "2025-05-07", "2025-06-18",
@@ -232,7 +72,7 @@ FOMC_DATES_2025_2026 = [
     "2026-07-29", "2026-09-16", "2026-11-04", "2026-12-16"
 ]
 
-# High-Impact Recurring Economic Events
+# Known high-impact recurring events
 # Format: (name, typical_time_ct, recurring_rule)
 HIGH_IMPACT_RECURRING = {
     "NFP": ("Nonfarm Payrolls", "07:30", "first_friday"),  # First Friday of month
@@ -309,20 +149,9 @@ def get_event_warning(events):
         return f"📌 Notable: {event_names}", True, "MEDIUM"
     
     return None, False, None
+REGULAR_CLOSE = time(16, 0)
+HALF_DAY_CLOSE = time(12, 0)
 
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 4: MARKET CALENDAR & HOLIDAYS                       ║
-# ║                                                                                          ║
-# ║  Market hours, holidays, and half-days for 2025-2026. The system automatically          ║
-# ║  adjusts for early closes and skips non-trading days.                                   ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
-
-REGULAR_CLOSE = time(16, 0)   # Regular market close: 4:00 PM ET / 3:00 PM CT
-HALF_DAY_CLOSE = time(12, 0)  # Half-day close: 12:00 PM CT
-
-# 2025 Market Holidays (NYSE Closed)
 HOLIDAYS_2025 = {
     date(2025, 1, 1): "New Year's Day",
     date(2025, 1, 20): "MLK Day",
@@ -335,8 +164,6 @@ HOLIDAYS_2025 = {
     date(2025, 11, 27): "Thanksgiving",
     date(2025, 12, 25): "Christmas",  # Thursday Dec 25, 2025
 }
-
-# 2025 Half-Days (Market closes at 12:00 PM CT)
 HALF_DAYS_2025 = {
     date(2025, 7, 3): "Day before July 4th",
     date(2025, 11, 26): "Day before Thanksgiving",
@@ -344,7 +171,7 @@ HALF_DAYS_2025 = {
     date(2025, 12, 24): "Christmas Eve",  # Wednesday Dec 24, 2025 - closes 12pm CT
 }
 
-# 2026 Market Holidays (NYSE Closed)
+# 2026 Holidays and Half-Days
 HOLIDAYS_2026 = {
     date(2026, 1, 1): "New Year's Day",  # Thursday Jan 1, 2026
     date(2026, 1, 19): "MLK Day",
@@ -357,8 +184,6 @@ HOLIDAYS_2026 = {
     date(2026, 11, 26): "Thanksgiving",
     date(2026, 12, 25): "Christmas",  # Friday Dec 25, 2026
 }
-
-# 2026 Half-Days (Market closes at 12:00 PM CT)
 HALF_DAYS_2026 = {
     date(2025, 12, 31): "New Year's Eve",  # Wednesday Dec 31, 2025 - closes 12pm CT (for Jan 1, 2026)
     date(2026, 7, 2): "Day before July 4th (observed)",
@@ -367,34 +192,8 @@ HALF_DAYS_2026 = {
     date(2026, 12, 24): "Christmas Eve",  # Thursday Dec 24, 2026 - closes 12pm CT
 }
 
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 5: DATA CLASSES                                     ║
-# ║                                                                                          ║
-# ║  Core data structures that hold trading state. These dataclasses define the             ║
-# ║  structure of all major entities in the system.                                         ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
-
 @dataclass
 class VIXZone:
-    """
-    VIX Zone Analysis - Determines directional bias based on VIX position.
-    
-    The VIX zone is a dynamic range calculated as 1% of current VIX value.
-    Position within this zone determines whether to trade CALLS or PUTS.
-    
-    Attributes:
-        bottom: Lower boundary of the VIX zone
-        top: Upper boundary of the VIX zone
-        current: Current VIX value
-        zone_size: Width of the zone (top - bottom)
-        position_pct: Where VIX sits within the zone (0-100%)
-        zones_away: How many zone-widths outside the range (0 = inside)
-        expected_spx_move: Expected SPX daily range based on VIX
-        bias: Trading direction ("CALLS", "PUTS", "WAIT")
-        bias_reason: Human-readable explanation of the bias
-    """
     bottom: float = 0.0
     top: float = 0.0
     current: float = 0.0
@@ -414,24 +213,7 @@ class VIXZone:
 
 @dataclass
 class Confluence:
-    """
-    VIX + MA Bias Confluence Scoring.
-    
-    Confluence occurs when both VIX zone and ES futures MA agree on direction.
-    - VIX bias from zone position
-    - MA bias from 50 EMA / 200 SMA (directional permission)
-    - MA confirmation from 8 EMA / 21 EMA (entry timing)
-    
-    Higher confluence = higher probability setup.
-    
-    Attributes:
-        vix_bias: Direction from VIX analysis
-        ma_bias: Direction from ES futures 50 EMA / 200 SMA
-        is_aligned: True if both point same direction
-        alignment_score: 0-40 points for scoring
-        signal_strength: Qualitative strength rating
-        recommendation: Suggested action
-    """
+    """VIX + MA Bias confluence scoring"""
     vix_bias: str = "WAIT"
     ma_bias: str = "NEUTRAL"
     is_aligned: bool = False
@@ -443,19 +225,7 @@ class Confluence:
     
 @dataclass
 class MarketContext:
-    """
-    Overall Market Context for the Trading Day.
-    
-    Provides environmental information that affects trade management
-    including volatility levels, time-of-day factors, and range analysis.
-    
-    Attributes:
-        prior_day_range: Yesterday's high-low range
-        prior_day_type: Classification of yesterday's action
-        vix_level: Current volatility regime
-        recommended_stop: Dynamic stop based on VIX
-        is_prime_time: Whether we're in optimal trading window
-    """
+    """Overall market context for the day"""
     prior_day_range: float = 0.0
     avg_daily_range: float = 0.0  # 10-day ATR
     prior_day_type: str = "NORMAL"  # "TREND", "RANGE", "NORMAL"
@@ -466,12 +236,6 @@ class MarketContext:
 
 @dataclass
 class Pivot:
-    """
-    Price Pivot Point from prior session.
-    
-    Pivots are key price levels (High, Low, Close) that create
-    the anchor points for structural cones.
-    """
     name: str = ""
     price: float = 0.0
     pivot_time: datetime = None
@@ -522,45 +286,20 @@ class TradeSetup:
 
 @dataclass
 class MABias:
-    """
-    Moving Average Bias Filter - 30min ES futures timeframe
-    
-    BIAS (Directional Permission):
-    - 50 EMA and 200 SMA determine overall trend direction
-    - Price > 200 SMA = LONG bias (trade CALLS only)
-    - Price < 200 SMA = SHORT bias (trade PUTS only)
-    
-    CONFIRMATION (Entry Timing):
-    - 8 EMA and 21 EMA determine momentum for entries
-    - 8 EMA > 21 EMA = Bullish momentum → Confirm CALL entries
-    - 8 EMA < 21 EMA = Bearish momentum → Confirm PUT entries
-    """
-    # BIAS MAs (50 EMA / 200 SMA)
-    sma200: float = 0.0           # 200-period SMA - Primary trend filter
-    ema50: float = 0.0            # 50-period EMA - Trend health
+    """Moving Average Bias Filter - 30min timeframe"""
+    sma200: float = 0.0           # 200-period SMA
+    ema50: float = 0.0            # 50-period EMA
     current_close: float = 0.0    # Latest 30-min close
     
-    # CONFIRMATION MAs (8 EMA / 21 EMA) - NEW in v11
-    ema8: float = 0.0             # 8-period EMA - Fast momentum
-    ema21: float = 0.0            # 21-period EMA - Slow momentum
-    
-    # Directional permission (from 200 SMA)
+    # Directional permission
     price_vs_sma200: str = "NEUTRAL"  # "ABOVE" = long-only, "BELOW" = short-only, "NEUTRAL" = ranging
     
-    # Trend health (from 50 EMA vs 200 SMA)
+    # Trend health
     ema_vs_sma: str = "NEUTRAL"   # "BULLISH" (EMA50 > SMA200), "BEARISH" (EMA50 < SMA200)
-    
-    # Momentum confirmation (from 8 EMA vs 21 EMA) - NEW in v11
-    ema8_vs_ema21: str = "NEUTRAL"  # "BULLISH" (8 > 21), "BEARISH" (8 < 21)
-    momentum_aligned: bool = False   # True if momentum matches bias direction
     
     # Final bias
     bias: str = "NEUTRAL"         # "LONG", "SHORT", "NEUTRAL"
     bias_reason: str = ""
-    
-    # Confirmation status - NEW in v11
-    confirmation: str = "NONE"    # "CONFIRMED", "PENDING", "CONFLICT", "NONE"
-    confirmation_reason: str = ""
     
     # Regime warning
     regime_warning: str = ""      # Warning about recent MA crosses
@@ -694,1778 +433,16 @@ class DayStructure:
     # When low line breaks DOWN: Direction = PUTS, Strike = Broken Low Line
     # When high line breaks UP: Direction = CALLS, Strike = Broken High Line
 
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                     v11 IMPROVEMENTS: UNIFIED TRADING SYSTEM                             ║
-# ║                                                                                          ║
-# ║  Original 11 Improvements + 10 New Cohesion Improvements:                                ║
-# ║                                                                                          ║
-# ║  ORIGINAL:                                                                               ║
-# ║  1. Unified Price Source (PriceManager)                                                  ║
-# ║  2. Unified Strike Selector                                                              ║
-# ║  3. Entry Level Abstraction                                                              ║
-# ║  4. Real-Time Price Updates (Auto-refresh)                                               ║
-# ║  5. P&L Trade Tracking                                                                   ║
-# ║  6. Focus Mode Options Chain                                                             ║
-# ║  7. Centralized AppState                                                                 ║
-# ║  8. API Status & Error Handling                                                          ║
-# ║  9. Configuration System                                                                 ║
-# ║  10. Backtesting Module                                                                  ║
-# ║  11. Alert System                                                                        ║
-# ║                                                                                          ║
-# ║  NEW COHESION IMPROVEMENTS:                                                              ║
-# ║  12. Cone + Day Structure Confluence Detection                                           ║
-# ║  13. Dynamic Stop Based on Structure                                                     ║
-# ║  14. Entry Validation Checklist                                                          ║
-# ║  15. Session Awareness in UI                                                             ║
-# ║  16. Best Trade Card                                                                     ║
-# ║  17. Price Action Context                                                                ║
-# ║  18. Contract Decay Tracking                                                             ║
-# ║  19. State Persistence (localStorage)                                                    ║
-# ║  20. Quick Reset Buttons                                                                 ║
-# ║  21. Export/Import Functionality                                                         ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #12: CONE + DAY STRUCTURE CONFLUENCE
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-@dataclass
-class StructureConfluence:
-    """
-    Detects when cone rails align with Day Structure lines.
-    This is a HIGH PROBABILITY setup indicator.
-    """
-    has_confluence: bool = False
-    confluence_type: str = ""      # "CALLS_CONFLUENCE", "PUTS_CONFLUENCE", "BOTH", "NONE"
-    
-    # CALLS confluence (ascending rail + low line)
-    calls_cone: str = ""           # Which cone: "C1", "C2", "C3"
-    calls_cone_rail: float = 0.0   # Cone ascending rail price
-    calls_ds_line: float = 0.0     # Day Structure low line price
-    calls_distance: float = 0.0    # Points between them
-    calls_aligned: bool = False    # Within 10 points
-    
-    # PUTS confluence (descending rail + high line)
-    puts_cone: str = ""            # Which cone: "C1", "C2", "C3"
-    puts_cone_rail: float = 0.0    # Cone descending rail price
-    puts_ds_line: float = 0.0      # Day Structure high line price
-    puts_distance: float = 0.0     # Points between them
-    puts_aligned: bool = False     # Within 10 points
-    
-    # Best confluence
-    best_direction: str = ""       # "CALLS" or "PUTS"
-    best_entry_price: float = 0.0  # Average of aligned levels
-    confidence_boost: int = 0      # Extra points for confluence (0-25)
-    description: str = ""          # Human readable
-
-@dataclass
-class EntryValidation:
-    """
-    IMPROVEMENT #14: Entry validation checklist.
-    All conditions that must be met before taking a trade.
-    """
-    # Individual checks
-    vix_agrees: bool = False
-    vix_detail: str = ""
-    
-    ma_permits: bool = False
-    ma_detail: str = ""
-    
-    price_at_level: bool = False
-    price_detail: str = ""
-    
-    no_event_conflict: bool = False
-    event_detail: str = ""
-    
-    within_window: bool = False
-    window_detail: str = ""
-    
-    premium_valid: bool = False
-    premium_detail: str = ""
-    
-    structure_intact: bool = False
-    structure_detail: str = ""
-    
-    # Overall
-    checks_passed: int = 0
-    checks_total: int = 7
-    all_passed: bool = False
-    ready_to_trade: bool = False
-    block_reason: str = ""
-
-@dataclass
-class SessionStatus:
-    """
-    IMPROVEMENT #15: Current session awareness.
-    """
-    current_session: str = ""      # "SYDNEY", "TOKYO", "LONDON", "NEW_YORK", "CLOSED"
-    session_emoji: str = ""        # 🌙 🗼 🏛️ 🗽
-    session_label: str = ""        # "Sydney Session"
-    time_remaining: str = ""       # "2h 15m remaining"
-    next_session: str = ""         # "Tokyo in 45m"
-    
-    # Pivot status per session
-    sydney_high_set: bool = False
-    sydney_low_set: bool = False
-    tokyo_high_set: bool = False
-    tokyo_low_set: bool = False
-    london_high_set: bool = False
-    london_low_set: bool = False
-    
-    # Structure readiness
-    structure_complete: bool = False
-    missing_pivots: str = ""       # "Tokyo High, London Low"
-
-@dataclass
-class BestTrade:
-    """
-    IMPROVEMENT #16: Single best trade recommendation.
-    """
-    has_trade: bool = False
-    direction: str = ""            # "CALLS" or "PUTS"
-    entry_price: float = 0.0       # SPX level
-    entry_source: str = ""         # "Low Line + C1 Ascending"
-    
-    strike: int = 0
-    contract_type: str = ""        # "C" or "P"
-    premium: float = 0.0
-    target_50: float = 0.0
-    target_100: float = 0.0
-    stop_spx: float = 0.0
-    stop_premium: float = 0.0
-    
-    confidence: int = 0            # 0-100
-    validation: EntryValidation = None
-    
-    reasons: str = ""              # Why this is the best trade
-    warnings: str = ""             # Any cautions
-
-@dataclass
-class PriceContext:
-    """
-    IMPROVEMENT #17: Price action context relative to structure.
-    """
-    current_price: float = 0.0
-    
-    # Relative to Day Structure
-    vs_high_line: str = ""         # "BELOW", "AT", "ABOVE", "BROKEN"
-    high_line_dist: float = 0.0
-    vs_low_line: str = ""          # "BELOW", "AT", "ABOVE", "BROKEN"
-    low_line_dist: float = 0.0
-    
-    # Relative to nearest cone
-    nearest_cone: str = ""         # "C1", "C2", "C3"
-    nearest_rail: str = ""         # "ASCENDING", "DESCENDING"
-    nearest_rail_price: float = 0.0
-    nearest_rail_dist: float = 0.0
-    
-    # Action description
-    action: str = ""               # "Testing High Line from below"
-    action_emoji: str = ""         # 📈 📉 🎯 ⚠️
-    
-    # Momentum
-    direction: str = ""            # "RISING", "FALLING", "FLAT"
-    momentum: str = ""             # "STRONG", "WEAK", "NEUTRAL"
-
-@dataclass
-class ContractDecay:
-    """
-    IMPROVEMENT #18: Contract decay tracking across sessions.
-    """
-    contract_type: str = ""        # "PUT" or "CALL"
-    strike: int = 0
-    
-    # Prices at each session
-    price_sydney: float = 0.0
-    time_sydney: str = ""
-    price_tokyo: float = 0.0
-    time_tokyo: str = ""
-    price_london: float = 0.0
-    time_london: str = ""
-    price_at_entry: float = 0.0    # Projected
-    
-    # Decay rates
-    decay_syd_tok: float = 0.0     # $/hour
-    decay_tok_lon: float = 0.0     # $/hour
-    decay_avg: float = 0.0         # $/hour average
-    
-    # Status
-    in_sweet_spot: bool = False    # $3.50-$8.00 at entry
-    decay_concern: bool = False    # Decaying too fast
-
-@dataclass
-class ExportData:
-    """
-    IMPROVEMENT #21: Data structure for export/import.
-    """
-    export_date: str = ""
-    export_time: str = ""
-    
-    # Day Structure
-    sydney_high: float = 0.0
-    sydney_high_time: str = ""
-    sydney_low: float = 0.0
-    sydney_low_time: str = ""
-    tokyo_high: float = 0.0
-    tokyo_high_time: str = ""
-    tokyo_low: float = 0.0
-    tokyo_low_time: str = ""
-    london_high: float = 0.0
-    london_high_time: str = ""
-    london_low: float = 0.0
-    london_low_time: str = ""
-    
-    # Contract prices
-    put_price_sydney: float = 0.0
-    put_price_tokyo: float = 0.0
-    put_price_london: float = 0.0
-    call_price_sydney: float = 0.0
-    call_price_tokyo: float = 0.0
-    call_price_london: float = 0.0
-    
-    # VIX
-    vix_bottom: float = 0.0
-    vix_top: float = 0.0
-    
-    # Trades
-    trades: str = ""               # JSON string of trades
-
-@dataclass
-class EntryLevel:
-    """
-    IMPROVEMENT #3: Unified entry level that combines cones and day structure.
-    Each entry level represents a potential trade entry point.
-    """
-    price: float = 0.0
-    source: str = ""           # "C1_ASC", "C2_DESC", "DS_HIGH", "DS_LOW", etc.
-    source_name: str = ""      # Human readable: "C1 Ascending", "Day Structure High"
-    direction: str = ""        # "CALLS" or "PUTS"
-    confluence_score: int = 0  # 0-100, how many indicators agree
-    confluence_details: str = ""  # What's aligning
-    recommended_strike: int = 0
-    expected_premium: float = 0.0
-    current_premium: float = 0.0  # From options chain
-    distance_from_price: float = 0.0
-    is_active: bool = False    # Within entry range
-    is_broken: bool = False    # Price broke through
-    stop_price: float = 0.0
-    delta: float = 0.0
-
-@dataclass
-class Trade:
-    """
-    IMPROVEMENT #5: Trade log entry for tracking performance.
-    """
-    id: str = ""               # Unique trade ID
-    entry_time: str = ""       # ISO format string
-    exit_time: str = ""        # ISO format string
-    direction: str = ""        # "CALLS" or "PUTS"
-    strike: int = 0
-    contracts: int = 10
-    entry_price: float = 0.0
-    exit_price: float = 0.0
-    entry_spx: float = 0.0     # SPX price at entry
-    exit_spx: float = 0.0      # SPX price at exit
-    entry_source: str = ""     # Which setup triggered: "C1_ASC", "DS_LOW", etc.
-    stop_price: float = 0.0
-    target_50: float = 0.0
-    target_100: float = 0.0
-    target_200: float = 0.0
-    status: str = "OPEN"       # "OPEN", "WIN", "LOSS", "SCRATCH", "STOPPED"
-    pnl_dollars: float = 0.0
-    pnl_percent: float = 0.0
-    notes: str = ""
-
-@dataclass
-class APIStatus:
-    """
-    IMPROVEMENT #8: Track API connection status and data freshness.
-    """
-    is_connected: bool = False
-    last_successful_call: str = ""  # ISO format
-    last_error: str = ""
-    error_count: int = 0
-    spx_price: float = 0.0
-    spx_updated: str = ""
-    vix_price: float = 0.0
-    vix_updated: str = ""
-    chain_loaded: bool = False
-    chain_updated: str = ""
-    chain_contracts: int = 0
-
-@dataclass
-class StrikeRecommendation:
-    """
-    IMPROVEMENT #2: Unified strike recommendation based on all factors.
-    """
-    strike: int = 0
-    direction: str = ""        # "CALLS" or "PUTS"
-    contract_type: str = ""    # "C" or "P"
-    current_price: float = 0.0
-    expected_entry_price: float = 0.0
-    delta: float = 0.0
-    iv: float = 0.0
-    in_sweet_spot: bool = False
-    score: int = 0             # 0-100 recommendation score
-    reasons: str = ""          # Why this strike (comma separated)
-    entry_level: float = 0.0   # SPX level for entry
-    entry_source: str = ""     # What setup this is for
-
-@dataclass 
-class BacktestResult:
-    """
-    IMPROVEMENT #10: Backtesting result for a single trade.
-    """
-    date: str = ""
-    direction: str = ""
-    entry_time: str = ""
-    entry_price: float = 0.0
-    entry_spx: float = 0.0
-    exit_time: str = ""
-    exit_price: float = 0.0
-    exit_spx: float = 0.0
-    pnl_percent: float = 0.0
-    result: str = ""  # "WIN", "LOSS", "SCRATCH"
-    setup_source: str = ""
-
-@dataclass
-class BacktestSummary:
-    """
-    IMPROVEMENT #10: Summary statistics from backtesting.
-    """
-    total_trades: int = 0
-    wins: int = 0
-    losses: int = 0
-    scratches: int = 0
-    win_rate: float = 0.0
-    avg_win: float = 0.0
-    avg_loss: float = 0.0
-    profit_factor: float = 0.0
-    max_drawdown: float = 0.0
-    total_pnl: float = 0.0
-    best_trade: float = 0.0
-    worst_trade: float = 0.0
-
-@dataclass
-class Alert:
-    """
-    IMPROVEMENT #11: Alert for price approaching entry levels.
-    """
-    id: str = ""
-    timestamp: str = ""
-    alert_type: str = ""       # "ENTRY_NEAR", "ENTRY_HIT", "TARGET_HIT", "STOP_HIT"
-    direction: str = ""
-    entry_source: str = ""
-    price_level: float = 0.0
-    current_price: float = 0.0
-    distance: float = 0.0
-    message: str = ""
-    is_read: bool = False
-    sound_played: bool = False
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# v11 IMPROVEMENT #1: UNIFIED PRICE MANAGER
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-class PriceManager:
-    """
-    Centralized price management. All components get prices from here.
-    Priority: API > Cache > Calibrated Model
-    """
-    
-    def __init__(self):
-        self._cache = {}
-        self._cache_time = {}
-        self._cache_ttl = 60  # seconds
-        self._api_status = APIStatus()
-    
-    def get_option_price(self, strike: int, option_type: str, expiration_date, 
-                         entry_rail: float = 0, current_spx: float = 0, vix: float = 16) -> dict:
-        """
-        Get option price from best available source.
-        
-        Returns dict with: current_price, expected_entry_price, delta, iv, source
-        """
-        cache_key = f"{strike}{option_type}{expiration_date}"
-        now = get_ct_now()
-        
-        # Check cache first
-        if cache_key in self._cache:
-            cache_age = (now - self._cache_time.get(cache_key, now)).total_seconds()
-            if cache_age < self._cache_ttl:
-                cached = self._cache[cache_key].copy()
-                # Recalculate expected entry if entry_rail provided
-                if entry_rail > 0 and current_spx > 0:
-                    cached['expected_entry_price'] = self._calc_expected_entry(
-                        cached['current_price'], current_spx, entry_rail, 
-                        cached['delta'], option_type
-                    )
-                return cached
-        
-        # Try API
-        api_data = get_spx_option_price(strike, option_type, expiration_date)
-        if api_data and (api_data.get('best_price', 0) > 0 or api_data.get('mid', 0) > 0):
-            current_price = api_data.get('best_price', 0) or api_data.get('mid', 0)
-            delta = api_data.get('delta', 0.30)
-            iv = api_data.get('iv', 0.20)
-            
-            result = {
-                'current_price': current_price,
-                'expected_entry_price': current_price,
-                'delta': delta,
-                'iv': iv,
-                'bid': api_data.get('bid', 0),
-                'ask': api_data.get('ask', 0),
-                'source': 'API'
-            }
-            
-            # Calculate expected entry price if entry_rail provided
-            if entry_rail > 0 and current_spx > 0:
-                result['expected_entry_price'] = self._calc_expected_entry(
-                    current_price, current_spx, entry_rail, delta, option_type
-                )
-            
-            # Cache it
-            self._cache[cache_key] = result
-            self._cache_time[cache_key] = now
-            self._api_status.is_connected = True
-            self._api_status.last_successful_call = now.isoformat()
-            
-            return result
-        
-        # Fall back to calibrated model
-        calibrated = calculate_calibrated_option_price(
-            strike, current_spx or 5900, vix, 
-            "PUT" if option_type == "P" else "CALL"
-        )
-        
-        return {
-            'current_price': calibrated,
-            'expected_entry_price': calibrated,
-            'delta': 0.30,
-            'iv': vix / 100,
-            'bid': calibrated * 0.95,
-            'ask': calibrated * 1.05,
-            'source': 'MODEL'
-        }
-    
-    def _calc_expected_entry(self, current_price: float, current_spx: float, 
-                              entry_rail: float, delta: float, option_type: str) -> float:
-        """Calculate expected price when SPX reaches entry rail."""
-        spx_move = entry_rail - current_spx
-        
-        if option_type == "P":
-            # PUT: gains value as SPX drops
-            price_change = -spx_move * abs(delta)
-        else:
-            # CALL: gains value as SPX rises
-            price_change = spx_move * abs(delta)
-        
-        return max(0.10, current_price + price_change)
-    
-    def clear_cache(self):
-        """Clear price cache."""
-        self._cache.clear()
-        self._cache_time.clear()
-    
-    def get_api_status(self) -> APIStatus:
-        """Get current API status."""
-        return self._api_status
-
-# Global price manager instance
-_price_manager = None
-
-def get_price_manager() -> PriceManager:
-    """Get or create the global price manager."""
-    global _price_manager
-    if _price_manager is None:
-        _price_manager = PriceManager()
-    return _price_manager
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# v11 IMPROVEMENT #2: UNIFIED STRIKE SELECTOR
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def recommend_strike(direction: str, entry_rail: float, current_spx: float, 
-                     options_chain: dict = None, vix: float = 16,
-                     expiration_date = None) -> StrikeRecommendation:
-    """
-    Recommend the optimal strike based on all factors.
-    
-    Considers:
-    - Delta target (0.25-0.35)
-    - Sweet spot premium ($3.50-$8.00)
-    - OTM distance from entry
-    - IV and spread
-    
-    Returns StrikeRecommendation with score 0-100.
-    """
-    rec = StrikeRecommendation()
-    rec.direction = direction
-    rec.contract_type = "C" if direction == "CALLS" else "P"
-    rec.entry_level = entry_rail
-    
-    # Default strike calculation
-    if direction == "CALLS":
-        base_strike = int((entry_rail + 10) // 5) * 5  # Slightly OTM
-    else:
-        base_strike = int((entry_rail - 10) // 5) * 5  # Slightly OTM
-    
-    rec.strike = base_strike
-    rec.score = 50  # Base score
-    reasons = []
-    
-    # If we have options chain, find optimal strike
-    if options_chain:
-        contracts = options_chain.get('calls' if direction == "CALLS" else 'puts', [])
-        
-        best_score = 0
-        best_strike = base_strike
-        best_data = None
-        
-        for c in contracts:
-            strike = c.get('strike', 0)
-            price = c.get('expected_entry', 0) or c.get('current', 0) or c.get('best_price', 0)
-            delta = abs(c.get('delta', 0))
-            
-            if price <= 0:
-                continue
-            
-            score = 50  # Base
-            strike_reasons = []
-            
-            # Sweet spot bonus (+20)
-            if 3.50 <= price <= 8.00:
-                score += 20
-                strike_reasons.append("Sweet spot")
-            elif 2.00 <= price <= 12.00:
-                score += 10
-                strike_reasons.append("Good range")
-            
-            # Delta bonus (+20)
-            if 0.25 <= delta <= 0.35:
-                score += 20
-                strike_reasons.append(f"Ideal delta {delta:.2f}")
-            elif 0.20 <= delta <= 0.40:
-                score += 10
-                strike_reasons.append(f"Good delta {delta:.2f}")
-            
-            # OTM distance (+10)
-            if direction == "CALLS":
-                otm_dist = strike - entry_rail
-            else:
-                otm_dist = entry_rail - strike
-            
-            if 5 <= otm_dist <= 20:
-                score += 10
-                strike_reasons.append(f"Good OTM {otm_dist:.0f}")
-            
-            if score > best_score:
-                best_score = score
-                best_strike = strike
-                best_data = c
-                reasons = strike_reasons
-        
-        if best_data:
-            rec.strike = best_strike
-            rec.score = best_score
-            rec.current_price = best_data.get('current', 0) or best_data.get('best_price', 0)
-            rec.expected_entry_price = best_data.get('expected_entry', rec.current_price)
-            rec.delta = best_data.get('delta', 0)
-            rec.iv = best_data.get('iv', 0)
-            rec.in_sweet_spot = 3.50 <= rec.expected_entry_price <= 8.00
-    
-    rec.reasons = ", ".join(reasons) if reasons else "Default calculation"
-    return rec
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# v11 IMPROVEMENT #3: UNIFIED ENTRY LEVELS
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def get_all_entry_levels(cones: list, day_structure: DayStructure, 
-                         current_spx: float, options_chain: dict = None,
-                         vix_bias: str = "WAIT") -> List[EntryLevel]:
-    """
-    Get all entry levels from cones and day structure, unified and scored.
-    
-    Returns list of EntryLevel objects sorted by confluence score.
-    """
-    entries = []
-    
-    # Process cones
-    for cone in cones:
-        # Ascending rail (CALLS entry)
-        asc_entry = EntryLevel(
-            price=cone.ascending_rail,
-            source=f"{cone.name}_ASC",
-            source_name=f"{cone.name} Ascending",
-            direction="CALLS",
-            distance_from_price=current_spx - cone.ascending_rail,
-            stop_price=cone.ascending_rail - 6
-        )
-        
-        # Check if VIX agrees
-        if vix_bias == "CALLS":
-            asc_entry.confluence_score += 25
-            asc_entry.confluence_details = "VIX agrees"
-        
-        # Check distance
-        if abs(asc_entry.distance_from_price) <= 5:
-            asc_entry.is_active = True
-            asc_entry.confluence_score += 10
-        elif abs(asc_entry.distance_from_price) <= 15:
-            asc_entry.confluence_score += 5
-        
-        entries.append(asc_entry)
-        
-        # Descending rail (PUTS entry)
-        desc_entry = EntryLevel(
-            price=cone.descending_rail,
-            source=f"{cone.name}_DESC",
-            source_name=f"{cone.name} Descending",
-            direction="PUTS",
-            distance_from_price=cone.descending_rail - current_spx,
-            stop_price=cone.descending_rail + 6
-        )
-        
-        if vix_bias == "PUTS":
-            desc_entry.confluence_score += 25
-            desc_entry.confluence_details = "VIX agrees"
-        
-        if abs(desc_entry.distance_from_price) <= 5:
-            desc_entry.is_active = True
-            desc_entry.confluence_score += 10
-        elif abs(desc_entry.distance_from_price) <= 15:
-            desc_entry.confluence_score += 5
-        
-        entries.append(desc_entry)
-    
-    # Process Day Structure
-    if day_structure:
-        if day_structure.high_line_valid and day_structure.high_line_at_entry > 0:
-            ds_high = EntryLevel(
-                price=day_structure.high_line_at_entry,
-                source="DS_HIGH",
-                source_name="Day Structure High",
-                direction="PUTS",
-                distance_from_price=day_structure.high_line_at_entry - current_spx,
-                stop_price=day_structure.high_line_at_entry + 6,
-                expected_premium=day_structure.put_price_at_entry,
-                recommended_strike=day_structure.put_strike
-            )
-            
-            if vix_bias == "PUTS":
-                ds_high.confluence_score += 25
-            
-            # Check for cone confluence
-            for cone in cones:
-                if abs(day_structure.high_line_at_entry - cone.descending_rail) <= 10:
-                    ds_high.confluence_score += 20
-                    ds_high.confluence_details += f" +{cone.name}"
-            
-            entries.append(ds_high)
-        
-        if day_structure.low_line_valid and day_structure.low_line_at_entry > 0:
-            ds_low = EntryLevel(
-                price=day_structure.low_line_at_entry,
-                source="DS_LOW",
-                source_name="Day Structure Low",
-                direction="CALLS",
-                distance_from_price=current_spx - day_structure.low_line_at_entry,
-                stop_price=day_structure.low_line_at_entry - 6,
-                expected_premium=day_structure.call_price_at_entry,
-                recommended_strike=day_structure.call_strike
-            )
-            
-            if vix_bias == "CALLS":
-                ds_low.confluence_score += 25
-            
-            for cone in cones:
-                if abs(day_structure.low_line_at_entry - cone.ascending_rail) <= 10:
-                    ds_low.confluence_score += 20
-                    ds_low.confluence_details += f" +{cone.name}"
-            
-            entries.append(ds_low)
-    
-    # Get strike recommendations for each entry
-    if options_chain:
-        for entry in entries:
-            rec = recommend_strike(
-                entry.direction, entry.price, current_spx, options_chain
-            )
-            entry.recommended_strike = rec.strike
-            entry.expected_premium = rec.expected_entry_price
-            entry.current_premium = rec.current_price
-            entry.delta = rec.delta
-    
-    # Sort by confluence score
-    entries.sort(key=lambda x: x.confluence_score, reverse=True)
-    
-    return entries
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# v11 IMPROVEMENT #5: TRADE LOGGING SYSTEM
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def generate_trade_id() -> str:
-    """Generate unique trade ID."""
-    now = get_ct_now()
-    return f"T{now.strftime('%Y%m%d%H%M%S')}"
-
-def create_trade(direction: str, strike: int, entry_price: float, 
-                 entry_spx: float, entry_source: str, contracts: int = 10) -> Trade:
-    """Create a new trade entry."""
-    now = get_ct_now()
-    trade = Trade(
-        id=generate_trade_id(),
-        entry_time=now.isoformat(),
-        direction=direction,
-        strike=strike,
-        contracts=contracts,
-        entry_price=entry_price,
-        entry_spx=entry_spx,
-        entry_source=entry_source,
-        target_50=entry_price * 1.5,
-        target_100=entry_price * 2.0,
-        target_200=entry_price * 3.0,
-        status="OPEN"
-    )
-    return trade
-
-def close_trade(trade: Trade, exit_price: float, exit_spx: float, notes: str = "") -> Trade:
-    """Close a trade and calculate P&L."""
-    now = get_ct_now()
-    trade.exit_time = now.isoformat()
-    trade.exit_price = exit_price
-    trade.exit_spx = exit_spx
-    trade.notes = notes
-    
-    # Calculate P&L
-    trade.pnl_dollars = (exit_price - trade.entry_price) * trade.contracts * 100
-    trade.pnl_percent = ((exit_price - trade.entry_price) / trade.entry_price) * 100 if trade.entry_price > 0 else 0
-    
-    # Determine result
-    if trade.pnl_percent >= 45:
-        trade.status = "WIN"
-    elif trade.pnl_percent <= -40:
-        trade.status = "LOSS"
-    elif abs(trade.pnl_percent) < 10:
-        trade.status = "SCRATCH"
-    else:
-        trade.status = "LOSS" if trade.pnl_percent < 0 else "WIN"
-    
-    return trade
-
-def get_session_stats(trades: List[Trade]) -> dict:
-    """Calculate session statistics from trades."""
-    if not trades:
-        return {
-            'total': 0, 'wins': 0, 'losses': 0, 'scratches': 0, 'open': 0,
-            'win_rate': 0, 'total_pnl': 0, 'avg_pnl': 0, 'best': 0, 'worst': 0
-        }
-    
-    closed = [t for t in trades if t.status != "OPEN"]
-    wins = [t for t in closed if t.status == "WIN"]
-    losses = [t for t in closed if t.status in ["LOSS", "STOPPED"]]
-    scratches = [t for t in closed if t.status == "SCRATCH"]
-    open_trades = [t for t in trades if t.status == "OPEN"]
-    
-    total_pnl = sum(t.pnl_dollars for t in closed)
-    pnls = [t.pnl_dollars for t in closed if t.pnl_dollars != 0]
-    
-    return {
-        'total': len(trades),
-        'wins': len(wins),
-        'losses': len(losses),
-        'scratches': len(scratches),
-        'open': len(open_trades),
-        'win_rate': len(wins) / len(closed) * 100 if closed else 0,
-        'total_pnl': total_pnl,
-        'avg_pnl': total_pnl / len(closed) if closed else 0,
-        'best': max(pnls) if pnls else 0,
-        'worst': min(pnls) if pnls else 0
-    }
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# v11 IMPROVEMENT #8: API STATUS TRACKING
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def get_api_status_display(api_status: APIStatus) -> dict:
-    """Get display-ready API status information."""
-    now = get_ct_now()
-    
-    # Determine overall status
-    if not api_status.is_connected:
-        emoji = "🔴"
-        status = "Disconnected"
-        color = "var(--danger)"
-    elif api_status.last_successful_call:
-        try:
-            last_call = datetime.fromisoformat(api_status.last_successful_call)
-            if last_call.tzinfo is None:
-                last_call = CT_TZ.localize(last_call)
-            age = (now - last_call).total_seconds()
-            
-            if age < 60:
-                emoji = "🟢"
-                status = "Live"
-                color = "var(--success)"
-            elif age < 300:
-                emoji = "🟡"
-                status = f"Stale ({int(age)}s)"
-                color = "var(--warning)"
-            else:
-                emoji = "🔴"
-                status = f"Old ({int(age//60)}m)"
-                color = "var(--danger)"
-        except:
-            emoji = "🟡"
-            status = "Unknown"
-            color = "var(--warning)"
-    else:
-        emoji = "🟡"
-        status = "No data"
-        color = "var(--warning)"
-    
-    return {
-        'emoji': emoji,
-        'status': status,
-        'color': color,
-        'spx_price': api_status.spx_price,
-        'vix_price': api_status.vix_price,
-        'chain_loaded': api_status.chain_loaded,
-        'chain_contracts': api_status.chain_contracts,
-        'error': api_status.last_error
-    }
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# v11 IMPROVEMENT #10: BACKTESTING MODULE
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def run_backtest(historical_data: List[dict], setups: List[dict]) -> BacktestSummary:
-    """
-    Run backtest on historical data.
-    
-    Args:
-        historical_data: List of {date, open, high, low, close, vix_high, vix_low}
-        setups: List of setup configurations to test
-        
-    Returns:
-        BacktestSummary with performance statistics
-    """
-    summary = BacktestSummary()
-    results = []
-    
-    for day in historical_data:
-        # Simulate cone generation from prior day
-        # This is a simplified backtest - real implementation would
-        # use full cone calculations
-        
-        # Check if any setup would trigger
-        # Track entry, stop, target hit
-        pass
-    
-    # Calculate summary stats
-    if results:
-        summary.total_trades = len(results)
-        summary.wins = sum(1 for r in results if r.result == "WIN")
-        summary.losses = sum(1 for r in results if r.result == "LOSS")
-        summary.scratches = sum(1 for r in results if r.result == "SCRATCH")
-        summary.win_rate = summary.wins / summary.total_trades * 100 if summary.total_trades else 0
-        
-        win_pnls = [r.pnl_percent for r in results if r.result == "WIN"]
-        loss_pnls = [r.pnl_percent for r in results if r.result == "LOSS"]
-        
-        summary.avg_win = sum(win_pnls) / len(win_pnls) if win_pnls else 0
-        summary.avg_loss = sum(loss_pnls) / len(loss_pnls) if loss_pnls else 0
-        summary.profit_factor = abs(summary.avg_win * summary.wins / (summary.avg_loss * summary.losses)) if loss_pnls and summary.avg_loss != 0 else 0
-        
-        all_pnls = [r.pnl_percent for r in results]
-        summary.total_pnl = sum(all_pnls)
-        summary.best_trade = max(all_pnls) if all_pnls else 0
-        summary.worst_trade = min(all_pnls) if all_pnls else 0
-        
-        # Calculate max drawdown
-        running_pnl = 0
-        peak = 0
-        max_dd = 0
-        for pnl in all_pnls:
-            running_pnl += pnl
-            peak = max(peak, running_pnl)
-            dd = peak - running_pnl
-            max_dd = max(max_dd, dd)
-        summary.max_drawdown = max_dd
-    
-    return summary
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# v11 IMPROVEMENT #11: ALERT SYSTEM
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def check_price_alerts(current_spx: float, entry_levels: List[EntryLevel], 
-                       existing_alerts: List[Alert]) -> List[Alert]:
-    """
-    Check for new alerts based on price proximity to entry levels.
-    
-    Returns list of new alerts.
-    """
-    new_alerts = []
-    now = get_ct_now()
-    
-    existing_ids = {a.id for a in existing_alerts}
-    
-    for entry in entry_levels:
-        distance = abs(current_spx - entry.price)
-        
-        # Alert when within 5 points
-        if distance <= 5:
-            alert_id = f"NEAR_{entry.source}_{now.strftime('%Y%m%d')}"
-            if alert_id not in existing_ids:
-                alert = Alert(
-                    id=alert_id,
-                    timestamp=now.isoformat(),
-                    alert_type="ENTRY_NEAR",
-                    direction=entry.direction,
-                    entry_source=entry.source,
-                    price_level=entry.price,
-                    current_price=current_spx,
-                    distance=distance,
-                    message=f"🎯 {entry.direction} entry near! {entry.source_name} @ {entry.price:,.0f} ({distance:.1f} pts)"
-                )
-                new_alerts.append(alert)
-        
-        # Alert when price hits entry (within 2 points)
-        if distance <= 2:
-            alert_id = f"HIT_{entry.source}_{now.strftime('%Y%m%d')}"
-            if alert_id not in existing_ids:
-                alert = Alert(
-                    id=alert_id,
-                    timestamp=now.isoformat(),
-                    alert_type="ENTRY_HIT",
-                    direction=entry.direction,
-                    entry_source=entry.source,
-                    price_level=entry.price,
-                    current_price=current_spx,
-                    distance=distance,
-                    message=f"🚨 {entry.direction} ENTRY HIT! {entry.source_name} @ {entry.price:,.0f}"
-                )
-                new_alerts.append(alert)
-    
-    return new_alerts
-
-def get_alert_sound_html() -> str:
-    """Return HTML for alert sound (browser notification)."""
-    return '''
-    <script>
-    function playAlertSound() {
-        try {
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const oscillator = audioContext.createOscillator();
-            const gainNode = audioContext.createGain();
-            
-            oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            
-            oscillator.frequency.value = 800;
-            oscillator.type = 'sine';
-            gainNode.gain.value = 0.3;
-            
-            oscillator.start();
-            setTimeout(() => oscillator.stop(), 200);
-        } catch (e) {
-            console.log('Audio not supported');
-        }
-    }
-    
-    function showNotification(title, body) {
-        if (Notification.permission === 'granted') {
-            new Notification(title, { body: body });
-        } else if (Notification.permission !== 'denied') {
-            Notification.requestPermission().then(permission => {
-                if (permission === 'granted') {
-                    new Notification(title, { body: body });
-                }
-            });
-        }
-    }
-    </script>
-    '''
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #12: CONE + DAY STRUCTURE CONFLUENCE DETECTION
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def detect_structure_confluence(cones: list, day_structure, entry_time_mins: int = 30) -> StructureConfluence:
-    """
-    Detect when cone rails align with Day Structure lines.
-    Alignment within 10 points = HIGH PROBABILITY setup.
-    
-    CALLS Confluence: Cone Ascending Rail ≈ Day Structure Low Line
-    PUTS Confluence: Cone Descending Rail ≈ Day Structure High Line
-    """
-    conf = StructureConfluence()
-    ALIGNMENT_THRESHOLD = 10.0  # Points
-    
-    if not cones or not day_structure:
-        return conf
-    
-    # Get Day Structure projected prices at entry
-    ds_high = day_structure.high_line_at_entry if day_structure.high_line_valid else 0
-    ds_low = day_structure.low_line_at_entry if day_structure.low_line_valid else 0
-    
-    best_calls_dist = 999
-    best_puts_dist = 999
-    
-    for cone in cones:
-        # Check CALLS confluence: Ascending rail vs Low Line
-        if ds_low > 0 and cone.ascending_rail > 0:
-            dist = abs(cone.ascending_rail - ds_low)
-            if dist < best_calls_dist:
-                best_calls_dist = dist
-                conf.calls_cone = cone.name
-                conf.calls_cone_rail = cone.ascending_rail
-                conf.calls_ds_line = ds_low
-                conf.calls_distance = dist
-                conf.calls_aligned = dist <= ALIGNMENT_THRESHOLD
-        
-        # Check PUTS confluence: Descending rail vs High Line
-        if ds_high > 0 and cone.descending_rail > 0:
-            dist = abs(cone.descending_rail - ds_high)
-            if dist < best_puts_dist:
-                best_puts_dist = dist
-                conf.puts_cone = cone.name
-                conf.puts_cone_rail = cone.descending_rail
-                conf.puts_ds_line = ds_high
-                conf.puts_distance = dist
-                conf.puts_aligned = dist <= ALIGNMENT_THRESHOLD
-    
-    # Determine overall confluence
-    if conf.calls_aligned and conf.puts_aligned:
-        conf.has_confluence = True
-        conf.confluence_type = "BOTH"
-        conf.confidence_boost = 25
-        # Pick the tighter alignment as best
-        if conf.calls_distance <= conf.puts_distance:
-            conf.best_direction = "CALLS"
-            conf.best_entry_price = (conf.calls_cone_rail + conf.calls_ds_line) / 2
-        else:
-            conf.best_direction = "PUTS"
-            conf.best_entry_price = (conf.puts_cone_rail + conf.puts_ds_line) / 2
-        conf.description = f"🎯 DUAL CONFLUENCE: CALLS ({conf.calls_cone} + Low Line), PUTS ({conf.puts_cone} + High Line)"
-        
-    elif conf.calls_aligned:
-        conf.has_confluence = True
-        conf.confluence_type = "CALLS_CONFLUENCE"
-        conf.best_direction = "CALLS"
-        conf.best_entry_price = (conf.calls_cone_rail + conf.calls_ds_line) / 2
-        conf.confidence_boost = 20
-        conf.description = f"🎯 CALLS CONFLUENCE: {conf.calls_cone} Ascending ({conf.calls_cone_rail:.0f}) + Low Line ({conf.calls_ds_line:.0f}) = {conf.calls_distance:.1f} pts apart"
-        
-    elif conf.puts_aligned:
-        conf.has_confluence = True
-        conf.confluence_type = "PUTS_CONFLUENCE"
-        conf.best_direction = "PUTS"
-        conf.best_entry_price = (conf.puts_cone_rail + conf.puts_ds_line) / 2
-        conf.confidence_boost = 20
-        conf.description = f"🎯 PUTS CONFLUENCE: {conf.puts_cone} Descending ({conf.puts_cone_rail:.0f}) + High Line ({conf.puts_ds_line:.0f}) = {conf.puts_distance:.1f} pts apart"
-    else:
-        conf.confluence_type = "NONE"
-        conf.description = "No cone/structure confluence detected"
-    
-    return conf
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #13: DYNAMIC STOP BASED ON STRUCTURE
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def calculate_dynamic_stop(direction: str, entry_price: float, 
-                           day_structure, cones: list,
-                           default_stop_pts: float = 6.0) -> tuple:
-    """
-    Calculate stop loss based on structure rather than fixed points.
-    
-    For CALLS: Stop below the support (Low Line or Ascending Rail)
-    For PUTS: Stop above the resistance (High Line or Descending Rail)
-    
-    Returns: (stop_price, stop_source, stop_distance)
-    """
-    stop_price = 0.0
-    stop_source = "DEFAULT"
-    buffer = 2.0  # Points beyond structure
-    
-    if direction == "CALLS":
-        # Stop should be BELOW the entry support
-        candidates = []
-        
-        # Day Structure Low Line
-        if day_structure and day_structure.low_line_valid and day_structure.low_line_at_entry > 0:
-            candidates.append((day_structure.low_line_at_entry - buffer, "Low Line"))
-        
-        # Cone ascending rails (below entry)
-        for cone in cones:
-            if cone.ascending_rail > 0 and cone.ascending_rail < entry_price:
-                candidates.append((cone.ascending_rail - buffer, f"{cone.name} Ascending"))
-        
-        if candidates:
-            # Use the highest support (tightest stop)
-            stop_price, stop_source = max(candidates, key=lambda x: x[0])
-        else:
-            stop_price = entry_price - default_stop_pts
-            stop_source = "DEFAULT"
-            
-    else:  # PUTS
-        # Stop should be ABOVE the entry resistance
-        candidates = []
-        
-        # Day Structure High Line
-        if day_structure and day_structure.high_line_valid and day_structure.high_line_at_entry > 0:
-            candidates.append((day_structure.high_line_at_entry + buffer, "High Line"))
-        
-        # Cone descending rails (above entry)
-        for cone in cones:
-            if cone.descending_rail > 0 and cone.descending_rail > entry_price:
-                candidates.append((cone.descending_rail + buffer, f"{cone.name} Descending"))
-        
-        if candidates:
-            # Use the lowest resistance (tightest stop)
-            stop_price, stop_source = min(candidates, key=lambda x: x[0])
-        else:
-            stop_price = entry_price + default_stop_pts
-            stop_source = "DEFAULT"
-    
-    stop_distance = abs(entry_price - stop_price)
-    return (stop_price, stop_source, stop_distance)
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #14: ENTRY VALIDATION CHECKLIST
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def validate_entry(direction: str, entry_price: float, premium: float,
-                   vix_zone, ma_bias, day_structure, current_spx: float,
-                   trading_date, economic_events: list = None) -> EntryValidation:
-    """
-    Validate all conditions before taking a trade.
-    Returns checklist of what's passing/failing.
-    """
-    v = EntryValidation()
-    now = get_ct_now()
-    
-    # 1. VIX Zone agrees with direction
-    if vix_zone:
-        if direction == "CALLS" and vix_zone.bias in ["CALLS", "STRONG_CALLS"]:
-            v.vix_agrees = True
-            v.vix_detail = f"✅ VIX in lower zone → {vix_zone.bias}"
-        elif direction == "PUTS" and vix_zone.bias in ["PUTS", "STRONG_PUTS"]:
-            v.vix_agrees = True
-            v.vix_detail = f"✅ VIX in upper zone → {vix_zone.bias}"
-        elif vix_zone.bias == "WAIT":
-            v.vix_agrees = False
-            v.vix_detail = "⚠️ VIX in mid-zone → WAIT"
-        else:
-            v.vix_agrees = False
-            v.vix_detail = f"❌ VIX says {vix_zone.bias}, not {direction}"
-    else:
-        v.vix_detail = "⚠️ VIX data not available"
-    
-    # 2. MA Bias permits direction
-    if ma_bias:
-        if direction == "CALLS" and ma_bias.bias == "LONG":
-            v.ma_permits = True
-            v.ma_detail = f"✅ Price above 200 SMA → LONG permitted"
-        elif direction == "PUTS" and ma_bias.bias == "SHORT":
-            v.ma_permits = True
-            v.ma_detail = f"✅ Price below 200 SMA → SHORT permitted"
-        elif ma_bias.bias == "NEUTRAL":
-            v.ma_permits = True  # Neutral allows both with caution
-            v.ma_detail = f"⚠️ MA Neutral → Proceed with caution"
-        else:
-            v.ma_permits = False
-            v.ma_detail = f"❌ MA says {ma_bias.bias}, want {direction}"
-    else:
-        v.ma_permits = True  # Default allow if no MA data
-        v.ma_detail = "⚠️ MA data not available"
-    
-    # 3. Price at or near entry level
-    distance = abs(current_spx - entry_price)
-    if distance <= 5:
-        v.price_at_level = True
-        v.price_detail = f"✅ Price within {distance:.1f} pts of entry"
-    elif distance <= 15:
-        v.price_at_level = True
-        v.price_detail = f"⚠️ Price {distance:.1f} pts from entry"
-    else:
-        v.price_at_level = False
-        v.price_detail = f"❌ Price {distance:.1f} pts away - too far"
-    
-    # 4. No high-impact economic event within 30 min
-    v.no_event_conflict = True
-    v.event_detail = "✅ No conflicting events"
-    if economic_events:
-        for event_name, event_time, impact in economic_events:
-            if impact == "HIGH":
-                # Parse event time and check if within 30 min
-                try:
-                    evt_hour, evt_min = int(event_time.split(":")[0]), int(event_time.split(":")[1].replace("am","").replace("pm",""))
-                    if "pm" in event_time.lower() and evt_hour != 12:
-                        evt_hour += 12
-                    evt_mins_from_midnight = evt_hour * 60 + evt_min
-                    now_mins = now.hour * 60 + now.minute
-                    if abs(evt_mins_from_midnight - now_mins) <= 30:
-                        v.no_event_conflict = False
-                        v.event_detail = f"❌ {event_name} in ~{abs(evt_mins_from_midnight - now_mins)} min"
-                        break
-                except:
-                    pass
-    
-    # 5. Within trading window (8:30am - 11:30am CT ideal, hard stop at 2pm)
-    if time(8, 30) <= now.time() <= time(11, 30):
-        v.within_window = True
-        v.window_detail = "✅ Prime trading window"
-    elif time(11, 30) < now.time() <= time(14, 0):
-        v.within_window = True
-        v.window_detail = "⚠️ Late window - reduced size"
-    else:
-        v.within_window = False
-        if now.time() < time(8, 30):
-            v.window_detail = "❌ Before market open"
-        else:
-            v.window_detail = "❌ After 2pm cutoff"
-    
-    # 6. Premium in sweet spot ($3.50 - $8.00)
-    if 3.50 <= premium <= 8.00:
-        v.premium_valid = True
-        v.premium_detail = f"✅ ${premium:.2f} in sweet spot"
-    elif 2.00 <= premium <= 12.00:
-        v.premium_valid = True
-        v.premium_detail = f"⚠️ ${premium:.2f} acceptable but not ideal"
-    else:
-        v.premium_valid = False
-        if premium < 2.00:
-            v.premium_detail = f"❌ ${premium:.2f} too cheap (lottery)"
-        else:
-            v.premium_detail = f"❌ ${premium:.2f} too expensive"
-    
-    # 7. Structure intact (not broken)
-    v.structure_intact = True
-    v.structure_detail = "✅ Structure intact"
-    if day_structure:
-        if direction == "CALLS" and day_structure.low_line_broken:
-            v.structure_intact = False
-            v.structure_detail = "❌ Low Line broken - structure invalid"
-        elif direction == "PUTS" and day_structure.high_line_broken:
-            v.structure_intact = False
-            v.structure_detail = "❌ High Line broken - structure invalid"
-    
-    # Calculate totals
-    checks = [v.vix_agrees, v.ma_permits, v.price_at_level, v.no_event_conflict,
-              v.within_window, v.premium_valid, v.structure_intact]
-    v.checks_passed = sum(checks)
-    v.checks_total = len(checks)
-    v.all_passed = all(checks)
-    
-    # Ready to trade if at least 5/7 pass and critical ones pass
-    critical = v.within_window and v.structure_intact and v.price_at_level
-    v.ready_to_trade = v.checks_passed >= 5 and critical
-    
-    if not v.ready_to_trade:
-        if not v.within_window:
-            v.block_reason = "Outside trading window"
-        elif not v.structure_intact:
-            v.block_reason = "Structure broken"
-        elif not v.price_at_level:
-            v.block_reason = "Price not at entry level"
-        elif v.checks_passed < 5:
-            v.block_reason = f"Only {v.checks_passed}/7 checks passed"
-    
-    return v
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #15: SESSION AWARENESS
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def get_session_status(day_structure=None) -> SessionStatus:
-    """
-    Determine current trading session and pivot status.
-    
-    Session Times (CT):
-    - Sydney:   5:00pm - 8:30pm
-    - Tokyo:    9:00pm - 1:30am
-    - London:   2:00am - 6:30am
-    - New York: 8:30am - 3:00pm
-    """
-    ss = SessionStatus()
-    now = get_ct_now()
-    current_time = now.time()
-    
-    # Determine current session
-    if time(17, 0) <= current_time <= time(20, 30):
-        ss.current_session = "SYDNEY"
-        ss.session_emoji = "🌙"
-        ss.session_label = "Sydney Session"
-        end_time = time(20, 30)
-        ss.next_session = "Tokyo"
-    elif time(21, 0) <= current_time or current_time <= time(1, 30):
-        ss.current_session = "TOKYO"
-        ss.session_emoji = "🗼"
-        ss.session_label = "Tokyo Session"
-        ss.next_session = "London"
-    elif time(2, 0) <= current_time <= time(6, 30):
-        ss.current_session = "LONDON"
-        ss.session_emoji = "🏛️"
-        ss.session_label = "London Session"
-        ss.next_session = "New York"
-    elif time(8, 30) <= current_time <= time(15, 0):
-        ss.current_session = "NEW_YORK"
-        ss.session_emoji = "🗽"
-        ss.session_label = "New York Session"
-        ss.next_session = "Market Close"
-    else:
-        ss.current_session = "BETWEEN"
-        ss.session_emoji = "⏳"
-        ss.session_label = "Between Sessions"
-        if time(6, 30) < current_time < time(8, 30):
-            ss.next_session = "New York in " + str(int((8*60+30 - (current_time.hour*60 + current_time.minute)))) + "m"
-        elif time(15, 0) < current_time < time(17, 0):
-            ss.next_session = "Sydney in " + str(int((17*60 - (current_time.hour*60 + current_time.minute)))) + "m"
-    
-    # Check pivot status
-    if day_structure:
-        ss.sydney_high_set = day_structure.sydney_high > 0
-        ss.sydney_low_set = day_structure.sydney_low > 0
-        ss.tokyo_high_set = day_structure.tokyo_high > 0
-        ss.tokyo_low_set = day_structure.tokyo_low > 0
-        ss.london_high_set = day_structure.london_high > 0
-        ss.london_low_set = day_structure.london_low > 0
-        
-        # Check structure completeness
-        missing = []
-        if not ss.sydney_high_set: missing.append("Syd H")
-        if not ss.sydney_low_set: missing.append("Syd L")
-        if not ss.tokyo_high_set: missing.append("Tok H")
-        if not ss.tokyo_low_set: missing.append("Tok L")
-        if not ss.london_high_set: missing.append("Lon H")
-        if not ss.london_low_set: missing.append("Lon L")
-        
-        ss.missing_pivots = ", ".join(missing) if missing else ""
-        ss.structure_complete = len(missing) == 0
-    
-    return ss
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #16: BEST TRADE RECOMMENDATION
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def get_best_trade(entry_levels: list, vix_zone, ma_bias, day_structure,
-                   current_spx: float, trading_date, confluence: StructureConfluence = None,
-                   options_chain: dict = None) -> BestTrade:
-    """
-    Analyze all entry levels and return the single best trade recommendation.
-    """
-    bt = BestTrade()
-    
-    if not entry_levels:
-        return bt
-    
-    best_score = 0
-    best_entry = None
-    
-    for entry in entry_levels:
-        score = entry.confluence_score
-        
-        # Boost for structure confluence
-        if confluence and confluence.has_confluence:
-            if entry.direction == confluence.best_direction:
-                score += confluence.confidence_boost
-        
-        # Boost for VIX alignment
-        if vix_zone:
-            if entry.direction == "CALLS" and vix_zone.bias in ["CALLS", "STRONG_CALLS"]:
-                score += 15
-            elif entry.direction == "PUTS" and vix_zone.bias in ["PUTS", "STRONG_PUTS"]:
-                score += 15
-        
-        # Boost for MA alignment
-        if ma_bias:
-            if entry.direction == "CALLS" and ma_bias.bias == "LONG":
-                score += 10
-            elif entry.direction == "PUTS" and ma_bias.bias == "SHORT":
-                score += 10
-        
-        # Boost for proximity to current price
-        distance = abs(current_spx - entry.price)
-        if distance <= 5:
-            score += 15
-        elif distance <= 10:
-            score += 10
-        elif distance <= 20:
-            score += 5
-        
-        if score > best_score:
-            best_score = score
-            best_entry = entry
-    
-    if best_entry:
-        bt.has_trade = True
-        bt.direction = best_entry.direction
-        bt.entry_price = best_entry.price
-        bt.entry_source = best_entry.source_name
-        bt.strike = best_entry.recommended_strike
-        bt.contract_type = "C" if best_entry.direction == "CALLS" else "P"
-        bt.premium = best_entry.expected_premium if best_entry.expected_premium > 0 else best_entry.current_premium
-        bt.target_50 = bt.premium * 1.5 if bt.premium > 0 else 0
-        bt.target_100 = bt.premium * 2.0 if bt.premium > 0 else 0
-        bt.confidence = min(100, best_score)
-        
-        # Calculate dynamic stop
-        stop_price, stop_source, stop_dist = calculate_dynamic_stop(
-            bt.direction, bt.entry_price, day_structure, [], STOP_LOSS_PTS
-        )
-        bt.stop_spx = stop_price
-        
-        # Validate entry
-        bt.validation = validate_entry(
-            bt.direction, bt.entry_price, bt.premium,
-            vix_zone, ma_bias, day_structure, current_spx, trading_date
-        )
-        
-        # Build reasons
-        reasons = []
-        if confluence and confluence.has_confluence and bt.direction == confluence.best_direction:
-            reasons.append("Cone + Day Structure aligned")
-        if vix_zone and ((bt.direction == "CALLS" and vix_zone.bias in ["CALLS", "STRONG_CALLS"]) or 
-                         (bt.direction == "PUTS" and vix_zone.bias in ["PUTS", "STRONG_PUTS"])):
-            reasons.append("VIX confirms direction")
-        if ma_bias and ((bt.direction == "CALLS" and ma_bias.bias == "LONG") or
-                        (bt.direction == "PUTS" and ma_bias.bias == "SHORT")):
-            reasons.append("MA permits direction")
-        bt.reasons = " | ".join(reasons) if reasons else "Best available setup"
-        
-        # Warnings
-        warnings = []
-        if bt.validation and not bt.validation.all_passed:
-            warnings.append(f"{bt.validation.checks_passed}/{bt.validation.checks_total} checks")
-        if bt.confidence < 60:
-            warnings.append("Low confidence")
-        bt.warnings = " | ".join(warnings) if warnings else ""
-    
-    return bt
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #17: PRICE ACTION CONTEXT
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def get_price_context(current_spx: float, day_structure, cones: list) -> PriceContext:
-    """
-    Describe what price is doing relative to structure.
-    """
-    pc = PriceContext()
-    pc.current_price = current_spx
-    
-    # Relative to Day Structure High Line
-    if day_structure and day_structure.high_line_valid and day_structure.high_line_at_entry > 0:
-        high_line = day_structure.high_line_at_entry
-        pc.high_line_dist = current_spx - high_line
-        
-        if day_structure.high_line_broken:
-            pc.vs_high_line = "BROKEN"
-        elif pc.high_line_dist > 5:
-            pc.vs_high_line = "ABOVE"
-        elif pc.high_line_dist < -5:
-            pc.vs_high_line = "BELOW"
-        else:
-            pc.vs_high_line = "AT"
-    
-    # Relative to Day Structure Low Line
-    if day_structure and day_structure.low_line_valid and day_structure.low_line_at_entry > 0:
-        low_line = day_structure.low_line_at_entry
-        pc.low_line_dist = current_spx - low_line
-        
-        if day_structure.low_line_broken:
-            pc.vs_low_line = "BROKEN"
-        elif pc.low_line_dist > 5:
-            pc.vs_low_line = "ABOVE"
-        elif pc.low_line_dist < -5:
-            pc.vs_low_line = "BELOW"
-        else:
-            pc.vs_low_line = "AT"
-    
-    # Find nearest cone rail
-    min_dist = 9999
-    for cone in cones:
-        if cone.ascending_rail > 0:
-            dist = abs(current_spx - cone.ascending_rail)
-            if dist < min_dist:
-                min_dist = dist
-                pc.nearest_cone = cone.name
-                pc.nearest_rail = "ASCENDING"
-                pc.nearest_rail_price = cone.ascending_rail
-                pc.nearest_rail_dist = current_spx - cone.ascending_rail
-        
-        if cone.descending_rail > 0:
-            dist = abs(current_spx - cone.descending_rail)
-            if dist < min_dist:
-                min_dist = dist
-                pc.nearest_cone = cone.name
-                pc.nearest_rail = "DESCENDING"
-                pc.nearest_rail_price = cone.descending_rail
-                pc.nearest_rail_dist = current_spx - cone.descending_rail
-    
-    # Generate action description
-    if pc.vs_high_line == "AT":
-        pc.action = "Testing High Line (resistance)"
-        pc.action_emoji = "🎯"
-    elif pc.vs_low_line == "AT":
-        pc.action = "Testing Low Line (support)"
-        pc.action_emoji = "🎯"
-    elif pc.vs_high_line == "BROKEN":
-        pc.action = "Broke above High Line → Watch for retest"
-        pc.action_emoji = "🚀"
-    elif pc.vs_low_line == "BROKEN":
-        pc.action = "Broke below Low Line → Watch for retest"
-        pc.action_emoji = "📉"
-    elif pc.vs_high_line == "BELOW" and pc.vs_low_line == "ABOVE":
-        pc.action = "Inside structure → Wait for level test"
-        pc.action_emoji = "⏳"
-    elif abs(pc.nearest_rail_dist) <= 5:
-        pc.action = f"Near {pc.nearest_cone} {pc.nearest_rail.lower()} rail"
-        pc.action_emoji = "📍"
-    else:
-        pc.action = "Between levels"
-        pc.action_emoji = "↔️"
-    
-    return pc
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #18: CONTRACT DECAY TRACKING
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def calculate_contract_decay(contract_type: str, day_structure, entry_time_mins: int = 30) -> ContractDecay:
-    """
-    Calculate contract decay rate across sessions.
-    """
-    cd = ContractDecay()
-    cd.contract_type = contract_type
-    
-    if not day_structure:
-        return cd
-    
-    if contract_type == "PUT":
-        cd.price_sydney = day_structure.put_price_sydney
-        cd.price_tokyo = day_structure.put_price_tokyo
-        cd.price_london = day_structure.put_price_london
-        cd.strike = day_structure.put_strike
-    else:
-        cd.price_sydney = day_structure.call_price_sydney
-        cd.price_tokyo = day_structure.call_price_tokyo
-        cd.price_london = day_structure.call_price_london
-        cd.strike = day_structure.call_strike
-    
-    # Calculate decay rates (approximate hours between sessions)
-    # Sydney to Tokyo: ~4 hours
-    # Tokyo to London: ~5 hours
-    
-    if cd.price_sydney > 0 and cd.price_tokyo > 0:
-        cd.decay_syd_tok = (cd.price_sydney - cd.price_tokyo) / 4.0  # $/hour
-    
-    if cd.price_tokyo > 0 and cd.price_london > 0:
-        cd.decay_tok_lon = (cd.price_tokyo - cd.price_london) / 5.0  # $/hour
-    
-    # Average decay
-    decays = [d for d in [cd.decay_syd_tok, cd.decay_tok_lon] if d > 0]
-    cd.decay_avg = sum(decays) / len(decays) if decays else 0
-    
-    # Project to entry (London to Entry: ~3 hours)
-    if cd.price_london > 0 and cd.decay_avg > 0:
-        cd.price_at_entry = cd.price_london - (cd.decay_avg * 3.0)
-        cd.price_at_entry = max(0.50, cd.price_at_entry)  # Floor
-    elif cd.price_london > 0:
-        cd.price_at_entry = cd.price_london * 0.85  # Estimate 15% decay
-    
-    # Check sweet spot
-    cd.in_sweet_spot = 3.50 <= cd.price_at_entry <= 8.00
-    
-    # Decay concern if losing more than $0.50/hour
-    cd.decay_concern = cd.decay_avg > 0.50
-    
-    return cd
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# IMPROVEMENT #19 & 21: STATE PERSISTENCE & EXPORT/IMPORT
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def export_state_to_json(session_state) -> str:
-    """
-    Export current state to JSON string for saving/sharing.
-    """
-    import json
-    
-    data = {
-        "export_date": get_ct_now().strftime("%Y-%m-%d"),
-        "export_time": get_ct_now().strftime("%H:%M:%S"),
-        "day_structure": {
-            "sydney_high": session_state.get("sydney_high", 0),
-            "sydney_high_time": session_state.get("sydney_high_time", ""),
-            "sydney_low": session_state.get("sydney_low", 0),
-            "sydney_low_time": session_state.get("sydney_low_time", ""),
-            "tokyo_high": session_state.get("tokyo_high", 0),
-            "tokyo_high_time": session_state.get("tokyo_high_time", ""),
-            "tokyo_low": session_state.get("tokyo_low", 0),
-            "tokyo_low_time": session_state.get("tokyo_low_time", ""),
-            "london_high": session_state.get("london_high", 0),
-            "london_high_time": session_state.get("london_high_time", ""),
-            "london_low": session_state.get("london_low", 0),
-            "london_low_time": session_state.get("london_low_time", ""),
-        },
-        "contract_prices": {
-            "put_price_sydney": session_state.get("put_price_sydney", 0),
-            "put_price_tokyo": session_state.get("put_price_tokyo", 0),
-            "put_price_london": session_state.get("put_price_london", 0),
-            "call_price_sydney": session_state.get("call_price_sydney", 0),
-            "call_price_tokyo": session_state.get("call_price_tokyo", 0),
-            "call_price_london": session_state.get("call_price_london", 0),
-        },
-        "vix": {
-            "vix_bottom": session_state.get("vix_bottom", 0),
-            "vix_top": session_state.get("vix_top", 0),
-        },
-        "trades": []
-    }
-    
-    # Export trades
-    trades = session_state.get("trades", [])
-    for t in trades:
-        if hasattr(t, '__dict__'):
-            data["trades"].append(t.__dict__)
-        elif isinstance(t, dict):
-            data["trades"].append(t)
-    
-    return json.dumps(data, indent=2)
-
-def import_state_from_json(json_str: str) -> dict:
-    """
-    Import state from JSON string.
-    Returns dict of values to set in session_state.
-    """
-    import json
-    
-    try:
-        data = json.loads(json_str)
-        
-        result = {}
-        
-        # Day Structure
-        ds = data.get("day_structure", {})
-        result["sydney_high"] = ds.get("sydney_high", 0)
-        result["sydney_high_time"] = ds.get("sydney_high_time", "17:00")
-        result["sydney_low"] = ds.get("sydney_low", 0)
-        result["sydney_low_time"] = ds.get("sydney_low_time", "17:30")
-        result["tokyo_high"] = ds.get("tokyo_high", 0)
-        result["tokyo_high_time"] = ds.get("tokyo_high_time", "21:00")
-        result["tokyo_low"] = ds.get("tokyo_low", 0)
-        result["tokyo_low_time"] = ds.get("tokyo_low_time", "23:00")
-        result["london_high"] = ds.get("london_high", 0)
-        result["london_high_time"] = ds.get("london_high_time", "05:00")
-        result["london_low"] = ds.get("london_low", 0)
-        result["london_low_time"] = ds.get("london_low_time", "06:00")
-        
-        # Contract prices
-        cp = data.get("contract_prices", {})
-        result["put_price_sydney"] = cp.get("put_price_sydney", 0)
-        result["put_price_tokyo"] = cp.get("put_price_tokyo", 0)
-        result["put_price_london"] = cp.get("put_price_london", 0)
-        result["call_price_sydney"] = cp.get("call_price_sydney", 0)
-        result["call_price_tokyo"] = cp.get("call_price_tokyo", 0)
-        result["call_price_london"] = cp.get("call_price_london", 0)
-        
-        # VIX
-        vix = data.get("vix", {})
-        result["vix_bottom"] = vix.get("vix_bottom", 0)
-        result["vix_top"] = vix.get("vix_top", 0)
-        
-        return result
-        
-    except Exception as e:
-        return {"error": str(e)}
-
-def get_localstorage_js() -> str:
-    """
-    IMPROVEMENT #19: JavaScript for localStorage persistence.
-    """
-    return '''
-    <script>
-    // Save state to localStorage
-    function saveToLocalStorage(key, value) {
-        try {
-            localStorage.setItem('spx_prophet_' + key, JSON.stringify(value));
-            return true;
-        } catch (e) {
-            console.error('localStorage save failed:', e);
-            return false;
-        }
-    }
-    
-    // Load state from localStorage
-    function loadFromLocalStorage(key) {
-        try {
-            const value = localStorage.getItem('spx_prophet_' + key);
-            return value ? JSON.parse(value) : null;
-        } catch (e) {
-            console.error('localStorage load failed:', e);
-            return null;
-        }
-    }
-    
-    // Clear all SPX Prophet data
-    function clearLocalStorage() {
-        try {
-            const keys = Object.keys(localStorage);
-            keys.forEach(key => {
-                if (key.startsWith('spx_prophet_')) {
-                    localStorage.removeItem(key);
-                }
-            });
-            return true;
-        } catch (e) {
-            console.error('localStorage clear failed:', e);
-            return false;
-        }
-    }
-    
-    // Export to clipboard
-    function copyToClipboard(text) {
-        navigator.clipboard.writeText(text).then(() => {
-            alert('Copied to clipboard!');
-        }).catch(err => {
-            console.error('Copy failed:', err);
-        });
-    }
-    </script>
-    '''
-
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 6: UTILITY FUNCTIONS                                ║
-# ║                                                                                          ║
-# ║  Helper functions for time, date, and market calendar operations.                       ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
-
 def get_ct_now():
-    """Get current time in Central Time zone."""
     return datetime.now(CT_TZ)
 
 def is_holiday(d):
-    """Check if date is a market holiday (exchange closed)."""
     return d in HOLIDAYS_2025 or d in HOLIDAYS_2026
 
 def is_half_day(d):
-    """Check if date is a half-day (early close at 12pm CT)."""
     return d in HALF_DAYS_2025 or d in HALF_DAYS_2026
 
 def get_market_close_time(d):
-    """Get market close time for a given date (accounts for half-days)."""
     return HALF_DAY_CLOSE if is_half_day(d) else REGULAR_CLOSE
 
 def get_session_info(d):
@@ -2577,7 +554,6 @@ def get_time_until(target, from_dt=None, trading_date=None):
     return target_dt - from_dt
 
 def format_countdown(td):
-    """Format a timedelta as human-readable countdown string."""
     if td.total_seconds() <= 0:
         return "NOW"
     total_secs = int(td.total_seconds())
@@ -2591,34 +567,12 @@ def format_countdown(td):
         return f"{hours}h {minutes}m"
     return f"{minutes}m {seconds}s" if minutes > 0 else f"{seconds}s"
 
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 7: POLYGON API INTEGRATION                          ║
-# ║                                                                                          ║
-# ║  Functions for fetching real-time and historical data from Polygon.io API.              ║
-# ║                                                                                          ║
-# ║  API Endpoints Used:                                                                     ║
-# ║  • /v3/snapshot/indices/{ticker} - Real-time SPX/VIX quotes                            ║
-# ║  • /v3/snapshot/options/{underlying}/{optionTicker} - Options data with Greeks          ║
-# ║  • /v2/aggs/ticker/{ticker}/range - Historical price bars                              ║
-# ║                                                                                          ║
-# ║  Required Plans:                                                                         ║
-# ║  • Indices Starter ($49/mo) - SPX, VIX real-time data                                  ║
-# ║  • Options Starter ($29/mo) - Options chain with 15-min delay                          ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
+# ═══════════════════════════════════════════════════════════════════════════
+# POLYGON API
+# ═══════════════════════════════════════════════════════════════════════════
 
 def polygon_get(endpoint, params=None):
-    """
-    Make a request to Polygon API and return JSON response.
-    
-    Args:
-        endpoint: API endpoint path (e.g., "/v3/snapshot/indices/I:SPX")
-        params: Optional query parameters dict
-        
-    Returns:
-        dict: JSON response or None on error
-    """
+    """Make a request to Polygon API and return JSON response"""
     try:
         if params is None:
             params = {}
@@ -2836,20 +790,18 @@ def polygon_get_intraday_bars(ticker, from_date, to_date, multiplier=30):
     data = polygon_get(f"/v2/aggs/ticker/{ticker}/range/{multiplier}/minute/{from_date.strftime('%Y-%m-%d')}/{to_date.strftime('%Y-%m-%d')}", {"adjusted": "true", "sort": "asc", "limit": 5000})
     return data.get("results", []) if data else []
 
-def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=50, vix_current=16, call_entry=None, put_entry=None):
+def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=50, vix_current=16):
     """
     Fetch comprehensive options chain for dashboard display.
     
     Fetches both PUTS and CALLS around center strike with full Greeks.
-    Calculates EXPECTED prices at entry rails (not current price).
+    Also calculates expected returns based on calibrated model.
     
     Args:
         center_strike: Center strike price (usually current SPX)
         expiration_date: Date object for 0DTE
         range_pts: Points above/below center to fetch (default 50 = +/- 50 pts)
         vix_current: Current VIX for expected return calculations
-        call_entry: SPX level where you'd enter CALLS (Low Line) - for expected price calc
-        put_entry: SPX level where you'd enter PUTS (High Line) - for expected price calc
     
     Returns:
         dict: {
@@ -2865,8 +817,6 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
         'calls': [],
         'expiration': expiration_date,
         'center': center_strike,
-        'call_entry': call_entry,
-        'put_entry': put_entry,
         'fetched_at': get_ct_now()
     }
     
@@ -2877,31 +827,17 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
         # Fetch PUT
         put_data = get_spx_option_price(strike, "P", expiration_date)
         if put_data:
-            # Calculate OTM distance from center
+            # Calculate OTM distance and expected move
             otm_dist = max(0, center_strike - strike)  # PUT is OTM if strike < SPX
             is_otm = strike < center_strike
             
-            # Current price from API
+            # Use best_price which tries multiple sources (last > day_close > mid > day_open)
             current_price = put_data.get('best_price', 0) or put_data['mid'] or put_data['last']
             
-            # EXPECTED PRICE AT ENTRY:
-            # For PUTS, entry is at High Line (put_entry)
-            # PUT gains value as SPX drops toward strike
-            # Estimate: current_price + (distance SPX will move toward strike) * delta
-            expected_entry_price = current_price
-            if put_entry and put_entry > 0 and current_price > 0:
-                # How much will SPX move from current to entry?
-                spx_move = center_strike - put_entry  # Positive if SPX drops to entry
-                # PUT delta is negative, so dropping SPX increases PUT value
-                delta = abs(put_data.get('delta', 0.3)) or 0.3
-                # Rough estimate: price change = SPX move * delta
-                price_change = spx_move * delta
-                expected_entry_price = max(0.10, current_price + price_change)
-            
-            # Calculate profit targets from EXPECTED entry price
-            target_50 = expected_entry_price * 1.5 if expected_entry_price > 0 else 0
-            target_100 = expected_entry_price * 2.0 if expected_entry_price > 0 else 0
-            target_200 = expected_entry_price * 3.0 if expected_entry_price > 0 else 0
+            # Calculate expected 50% and 100% returns
+            expected_50_return = current_price * 0.5 * 100  # 50% gain = +50% on premium
+            expected_100_return = current_price * 1.0 * 100  # 100% gain = double
+            expected_200_return = current_price * 2.0 * 100  # 200% gain = triple
             
             chain['puts'].append({
                 'strike': strike,
@@ -2912,7 +848,6 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
                 'day_close': put_data.get('day_close', 0),
                 'best_price': put_data.get('best_price', 0),
                 'current': current_price,
-                'expected_entry': expected_entry_price,  # Price at entry rail
                 'delta': put_data['delta'],
                 'gamma': put_data['gamma'],
                 'theta': put_data['theta'],
@@ -2921,10 +856,10 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
                 'oi': put_data['open_interest'],
                 'otm_dist': otm_dist,
                 'is_otm': is_otm,
-                'target_50': target_50,
-                'target_100': target_100,
-                'target_200': target_200,
-                'in_sweet_spot': 3.50 <= expected_entry_price <= 8.00 if expected_entry_price > 0 else False
+                'exp_50': expected_50_return,
+                'exp_100': expected_100_return,
+                'exp_200': expected_200_return,
+                'in_sweet_spot': 3.50 <= current_price <= 8.00 if current_price > 0 else False
             })
         
         # Fetch CALL
@@ -2934,25 +869,12 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
             otm_dist = max(0, strike - center_strike)  # CALL is OTM if strike > SPX
             is_otm = strike > center_strike
             
-            # Current price from API
+            # Use best_price
             current_price = call_data.get('best_price', 0) or call_data['mid'] or call_data['last']
             
-            # EXPECTED PRICE AT ENTRY:
-            # For CALLS, entry is at Low Line (call_entry)
-            # CALL gains value as SPX rises toward strike
-            expected_entry_price = current_price
-            if call_entry and call_entry > 0 and current_price > 0:
-                # How much will SPX move from current to entry?
-                spx_move = call_entry - center_strike  # Negative if SPX drops to entry
-                # CALL delta is positive, so SPX drop decreases CALL value
-                delta = abs(call_data.get('delta', 0.3)) or 0.3
-                price_change = spx_move * delta
-                expected_entry_price = max(0.10, current_price + price_change)
-            
-            # Calculate profit targets from EXPECTED entry price
-            target_50 = expected_entry_price * 1.5 if expected_entry_price > 0 else 0
-            target_100 = expected_entry_price * 2.0 if expected_entry_price > 0 else 0
-            target_200 = expected_entry_price * 3.0 if expected_entry_price > 0 else 0
+            expected_50_return = current_price * 0.5 * 100
+            expected_100_return = current_price * 1.0 * 100
+            expected_200_return = current_price * 2.0 * 100
             
             chain['calls'].append({
                 'strike': strike,
@@ -2963,7 +885,6 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
                 'day_close': call_data.get('day_close', 0),
                 'best_price': call_data.get('best_price', 0),
                 'current': current_price,
-                'expected_entry': expected_entry_price,  # Price at entry rail
                 'delta': call_data['delta'],
                 'gamma': call_data['gamma'],
                 'theta': call_data['theta'],
@@ -2972,10 +893,10 @@ def fetch_options_chain_for_dashboard(center_strike, expiration_date, range_pts=
                 'oi': call_data['open_interest'],
                 'otm_dist': otm_dist,
                 'is_otm': is_otm,
-                'target_50': target_50,
-                'target_100': target_100,
-                'target_200': target_200,
-                'in_sweet_spot': 3.50 <= expected_entry_price <= 8.00 if expected_entry_price > 0 else False
+                'exp_50': expected_50_return,
+                'exp_100': expected_100_return,
+                'exp_200': expected_200_return,
+                'in_sweet_spot': 3.50 <= current_price <= 8.00 if current_price > 0 else False
             })
     
     # Sort: PUTs descending by strike, CALLs ascending by strike
@@ -3056,45 +977,17 @@ def fetch_es_ma_bias():
         current_close = recent_closes[-1]
         ma_bias.current_close = current_close
         
-        # ═══════════════════════════════════════════════════════════════════════
-        # BIAS CALCULATION (50 EMA / 200 SMA)
-        # ═══════════════════════════════════════════════════════════════════════
-        
         # Calculate SMA200 using last 200 bars
         sma200_bars = recent_closes[-200:]
         ma_bias.sma200 = sum(sma200_bars) / 200
         
         # Calculate EMA50 properly (need to start from beginning for accuracy)
         ema50_seed = recent_closes[-100:]  # Use 100 bars to seed EMA
-        multiplier_50 = 2 / (50 + 1)
+        multiplier = 2 / (50 + 1)
         ema = sum(ema50_seed[:50]) / 50  # Start with SMA of first 50
         for price in ema50_seed[50:]:
-            ema = (price - ema) * multiplier_50 + ema
+            ema = (price - ema) * multiplier + ema
         ma_bias.ema50 = ema
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # CONFIRMATION CALCULATION (8 EMA / 21 EMA) - NEW in v11
-        # ═══════════════════════════════════════════════════════════════════════
-        
-        # Calculate EMA8
-        ema8_seed = recent_closes[-30:]  # Use 30 bars to seed
-        multiplier_8 = 2 / (8 + 1)
-        ema8 = sum(ema8_seed[:8]) / 8  # Start with SMA of first 8
-        for price in ema8_seed[8:]:
-            ema8 = (price - ema8) * multiplier_8 + ema8
-        ma_bias.ema8 = ema8
-        
-        # Calculate EMA21
-        ema21_seed = recent_closes[-50:]  # Use 50 bars to seed
-        multiplier_21 = 2 / (21 + 1)
-        ema21 = sum(ema21_seed[:21]) / 21  # Start with SMA of first 21
-        for price in ema21_seed[21:]:
-            ema21 = (price - ema21) * multiplier_21 + ema21
-        ma_bias.ema21 = ema21
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # DETERMINE BIAS AND CONFIRMATION STATUS
-        # ═══════════════════════════════════════════════════════════════════════
         
         # Calculate distances
         price_to_sma = ((current_close - ma_bias.sma200) / ma_bias.sma200) * 100
@@ -3115,15 +1008,6 @@ def fetch_es_ma_bias():
             ma_bias.ema_vs_sma = "BEARISH"
         else:
             ma_bias.ema_vs_sma = "NEUTRAL"
-        
-        # Determine momentum confirmation (8 EMA vs 21 EMA) - NEW in v11
-        ema8_vs_21_pct = ((ma_bias.ema8 - ma_bias.ema21) / ma_bias.ema21) * 100 if ma_bias.ema21 > 0 else 0
-        if ema8_vs_21_pct > 0.05:  # 8 EMA above 21 EMA
-            ma_bias.ema8_vs_ema21 = "BULLISH"
-        elif ema8_vs_21_pct < -0.05:  # 8 EMA below 21 EMA
-            ma_bias.ema8_vs_ema21 = "BEARISH"
-        else:
-            ma_bias.ema8_vs_ema21 = "NEUTRAL"
         
         # Check for recent SMA200 crosses (choppiness indicator)
         cross_count = 0
@@ -3156,38 +1040,6 @@ def fetch_es_ma_bias():
         else:
             ma_bias.bias = "NEUTRAL"
             ma_bias.bias_reason = "Ranging market"
-        
-        # Determine confirmation status - NEW in v11
-        if ma_bias.bias == "LONG":
-            if ma_bias.ema8_vs_ema21 == "BULLISH":
-                ma_bias.confirmation = "CONFIRMED"
-                ma_bias.confirmation_reason = "8 EMA > 21 EMA ✓"
-                ma_bias.momentum_aligned = True
-            elif ma_bias.ema8_vs_ema21 == "BEARISH":
-                ma_bias.confirmation = "CONFLICT"
-                ma_bias.confirmation_reason = "8 EMA < 21 EMA ⚠️"
-                ma_bias.momentum_aligned = False
-            else:
-                ma_bias.confirmation = "PENDING"
-                ma_bias.confirmation_reason = "Waiting for 8/21 cross"
-                ma_bias.momentum_aligned = False
-        elif ma_bias.bias == "SHORT":
-            if ma_bias.ema8_vs_ema21 == "BEARISH":
-                ma_bias.confirmation = "CONFIRMED"
-                ma_bias.confirmation_reason = "8 EMA < 21 EMA ✓"
-                ma_bias.momentum_aligned = True
-            elif ma_bias.ema8_vs_ema21 == "BULLISH":
-                ma_bias.confirmation = "CONFLICT"
-                ma_bias.confirmation_reason = "8 EMA > 21 EMA ⚠️"
-                ma_bias.momentum_aligned = False
-            else:
-                ma_bias.confirmation = "PENDING"
-                ma_bias.confirmation_reason = "Waiting for 8/21 cross"
-                ma_bias.momentum_aligned = False
-        else:
-            ma_bias.confirmation = "NONE"
-            ma_bias.confirmation_reason = "No bias established"
-            ma_bias.momentum_aligned = False
         
         return ma_bias
         
@@ -3376,206 +1228,6 @@ def analyze_market_context(prior_session, vix_current, current_time_ct):
     
     return ctx
 
-def calculate_day_structure_simple(high_line, high_line_time, low_line, low_line_time,
-                                   entry_time_mins, high_line_broken=False, low_line_broken=False,
-                                   sydney_high=0, tokyo_high=0, london_high=0,
-                                   sydney_low=0, tokyo_low=0, london_low=0):
-    """
-    SIMPLIFIED Day Structure calculation (v11).
-    
-    Can work with:
-    1. Just high_line and low_line (simplest - uses ±0.475 slope)
-    2. Session pivots (sydney/tokyo/london) to create proper trendlines
-    
-    When session pivots are provided, connects them to project to entry time.
-    """
-    ds = DayStructure()
-    ds.high_line_broken = high_line_broken
-    ds.low_line_broken = low_line_broken
-    
-    # Store session pivots
-    ds.sydney_high = sydney_high
-    ds.sydney_low = sydney_low
-    ds.tokyo_high = tokyo_high
-    ds.tokyo_low = tokyo_low
-    ds.london_high = london_high
-    ds.london_low = london_low
-    
-    # Entry time in minutes from midnight (8:30 AM + entry_time_mins)
-    entry_mins = 8 * 60 + 30 + entry_time_mins
-    
-    def parse_time_to_mins(t_str):
-        """Parse time string to minutes from midnight"""
-        if not t_str:
-            return 0
-        try:
-            t_str = t_str.strip().replace(" ", "")
-            parts = t_str.split(":")
-            h = int(parts[0])
-            m = int(parts[1]) if len(parts) > 1 else 0
-            return h * 60 + m
-        except:
-            return 0
-    
-    def calc_slope(price1, time1_mins, price2, time2_mins):
-        """Calculate slope between two points, handling overnight"""
-        t2 = time2_mins
-        if t2 < time1_mins:
-            t2 += 24 * 60  # Overnight adjustment
-        time_diff = t2 - time1_mins
-        if time_diff > 0:
-            return (price2 - price1) / time_diff
-        return 0
-    
-    # Session times in minutes from midnight (approximate midpoints)
-    SYDNEY_TIME = 18 * 60  # 6pm CT
-    TOKYO_TIME = 23 * 60   # 11pm CT  
-    LONDON_TIME = 4 * 60   # 4am CT
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # HIGH LINE (for PUTS) - Connect session highs
-    # ═══════════════════════════════════════════════════════════════════════
-    
-    high_points = []
-    if sydney_high > 0:
-        high_points.append((sydney_high, SYDNEY_TIME, "Sydney"))
-    if tokyo_high > 0:
-        high_points.append((tokyo_high, TOKYO_TIME, "Tokyo"))
-    if london_high > 0:
-        high_points.append((london_high, LONDON_TIME, "London"))
-    
-    if len(high_points) >= 2:
-        # Use last two points to calculate slope and project
-        p1 = high_points[-2]  # Second to last
-        p2 = high_points[-1]  # Last (most recent)
-        
-        slope = calc_slope(p1[0], p1[1], p2[0], p2[1])
-        ds.high_line_slope = slope
-        
-        # Project from last point to entry time
-        entry_mins_adj = entry_mins
-        if entry_mins < p2[1]:
-            entry_mins_adj += 24 * 60
-        mins_to_entry = entry_mins_adj - p2[1]
-        
-        ds.high_line_at_entry = p2[0] + (slope * mins_to_entry)
-        ds.high_line_valid = True
-        ds.high_line_quality = "STRONG" if len(high_points) == 3 else "MODERATE"
-        ds.high_line_active_segment = f"{p1[2]}_{p2[2]}"
-        
-        if slope > 0.001:
-            ds.high_line_direction = "ASCENDING"
-        elif slope < -0.001:
-            ds.high_line_direction = "DESCENDING"
-        else:
-            ds.high_line_direction = "FLAT"
-            
-    elif len(high_points) == 1 or high_line > 0:
-        # Single point - use standard slope or flat
-        anchor = high_points[0][0] if high_points else high_line
-        anchor_time = high_points[0][1] if high_points else parse_time_to_mins(high_line_time) or LONDON_TIME
-        
-        # Use descending slope for high line (resistance tends to drop)
-        ds.high_line_slope = -DAY_STRUCTURE_SLOPE_PER_MIN
-        
-        entry_mins_adj = entry_mins
-        if entry_mins < anchor_time:
-            entry_mins_adj += 24 * 60
-        mins_to_entry = entry_mins_adj - anchor_time
-        
-        ds.high_line_at_entry = anchor + (ds.high_line_slope * mins_to_entry)
-        ds.high_line_valid = True
-        ds.high_line_quality = "WEAK"
-        ds.high_line_direction = "DESCENDING"
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # LOW LINE (for CALLS) - Connect session lows
-    # ═══════════════════════════════════════════════════════════════════════
-    
-    low_points = []
-    if sydney_low > 0:
-        low_points.append((sydney_low, SYDNEY_TIME, "Sydney"))
-    if tokyo_low > 0:
-        low_points.append((tokyo_low, TOKYO_TIME, "Tokyo"))
-    if london_low > 0:
-        low_points.append((london_low, LONDON_TIME, "London"))
-    
-    if len(low_points) >= 2:
-        # Use last two points to calculate slope and project
-        p1 = low_points[-2]  # Second to last
-        p2 = low_points[-1]  # Last (most recent)
-        
-        slope = calc_slope(p1[0], p1[1], p2[0], p2[1])
-        ds.low_line_slope = slope
-        
-        # Project from last point to entry time
-        entry_mins_adj = entry_mins
-        if entry_mins < p2[1]:
-            entry_mins_adj += 24 * 60
-        mins_to_entry = entry_mins_adj - p2[1]
-        
-        ds.low_line_at_entry = p2[0] + (slope * mins_to_entry)
-        ds.low_line_valid = True
-        ds.low_line_quality = "STRONG" if len(low_points) == 3 else "MODERATE"
-        ds.low_line_active_segment = f"{p1[2]}_{p2[2]}"
-        
-        if slope > 0.001:
-            ds.low_line_direction = "ASCENDING"
-        elif slope < -0.001:
-            ds.low_line_direction = "DESCENDING"
-        else:
-            ds.low_line_direction = "FLAT"
-            
-    elif len(low_points) == 1 or low_line > 0:
-        # Single point - use standard slope or flat
-        anchor = low_points[0][0] if low_points else low_line
-        anchor_time = low_points[0][1] if low_points else parse_time_to_mins(low_line_time) or LONDON_TIME
-        
-        # Use ascending slope for low line (support tends to rise)
-        ds.low_line_slope = DAY_STRUCTURE_SLOPE_PER_MIN
-        
-        entry_mins_adj = entry_mins
-        if entry_mins < anchor_time:
-            entry_mins_adj += 24 * 60
-        mins_to_entry = entry_mins_adj - anchor_time
-        
-        ds.low_line_at_entry = anchor + (ds.low_line_slope * mins_to_entry)
-        ds.low_line_valid = True
-        ds.low_line_quality = "WEAK"
-        ds.low_line_direction = "ASCENDING"
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # OVERALL STRUCTURE
-    # ═══════════════════════════════════════════════════════════════════════
-    
-    if ds.high_line_valid and ds.low_line_valid:
-        if ds.high_line_quality == "STRONG" and ds.low_line_quality == "STRONG":
-            ds.structure_quality = "STRONG"
-        elif ds.high_line_quality == "STRONG" or ds.low_line_quality == "STRONG":
-            ds.structure_quality = "MODERATE"
-        else:
-            ds.structure_quality = "WEAK"
-        
-        # Determine shape
-        if ds.high_line_slope > 0 and ds.low_line_slope > 0:
-            ds.structure_shape = "PARALLEL_UP"
-        elif ds.high_line_slope < 0 and ds.low_line_slope < 0:
-            ds.structure_shape = "PARALLEL_DOWN"
-        elif ds.high_line_slope > ds.low_line_slope:
-            ds.structure_shape = "EXPANDING"
-        elif ds.high_line_slope < ds.low_line_slope:
-            ds.structure_shape = "CONTRACTING"
-        else:
-            ds.structure_shape = "PARALLEL"
-    elif ds.high_line_valid:
-        ds.structure_quality = "WEAK"
-        ds.structure_shape = "HIGH_ONLY"
-    elif ds.low_line_valid:
-        ds.structure_quality = "WEAK"
-        ds.structure_shape = "LOW_ONLY"
-    
-    return ds
-
 def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_low_time,
                             tokyo_high, tokyo_high_time, tokyo_low, tokyo_low_time,
                             london_high, london_high_time, london_low, london_low_time,
@@ -3589,7 +1241,7 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
     Uses the ACTIVE line (most recent segment if pivoted) for RTH projection.
     
     Times are in CT (Central Time).
-    Session times: Sydney 5pm-8:30pm, Tokyo 9pm-1:30am, London 2am-6:30am
+    Session times: Sydney 4pm-6pm, Tokyo 6pm-2am, London 2am-6:30am
     """
     ds = DayStructure()
     ds.high_line_broken = high_line_broken
@@ -3640,38 +1292,22 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
     # ═══════════════════════════════════════════════════════════════════════
     # HIGH LINE ANALYSIS (Sydney High → Tokyo High → London High) - for PUTS
     # ═══════════════════════════════════════════════════════════════════════
-    # 
-    # Valid combinations (in order of preference):
-    # 1. Sydney → Tokyo → London (3-point, strongest)
-    # 2. Tokyo → London (2-point, most recent)
-    # 3. Sydney → London (2-point, skip Tokyo)
-    # 4. Sydney → Tokyo (2-point, no London yet)
-    # 5. London only (1-point, flat projection)
-    # ═══════════════════════════════════════════════════════════════════════
     
     syd_h_mins = parse_time_to_mins_from_midnight(sydney_high_time) if sydney_high > 0 else 0
     tok_h_mins = parse_time_to_mins_from_midnight(tokyo_high_time) if tokyo_high > 0 else 0
     lon_h_mins = parse_time_to_mins_from_midnight(london_high_time) if london_high > 0 else 0
     
-    # Calculate ALL possible segment slopes
+    # Calculate segment slopes
     if sydney_high > 0 and tokyo_high > 0:
         ds.high_syd_tok_slope, _ = calc_slope(sydney_high, syd_h_mins, tokyo_high, tok_h_mins)
     if tokyo_high > 0 and london_high > 0:
         ds.high_tok_lon_slope, _ = calc_slope(tokyo_high, tok_h_mins, london_high, lon_h_mins)
     
-    # NEW: Sydney → London slope (skip Tokyo)
-    high_syd_lon_slope = 0.0
-    if sydney_high > 0 and london_high > 0:
-        high_syd_lon_slope, _ = calc_slope(sydney_high, syd_h_mins, london_high, lon_h_mins)
+    # Determine if we have valid 3-point or 2-point line
+    has_3pt_high = sydney_high > 0 and tokyo_high > 0 and london_high > 0
+    has_2pt_high = tokyo_high > 0 and london_high > 0
     
-    # Determine which combination we have
-    has_all_3_high = sydney_high > 0 and tokyo_high > 0 and london_high > 0
-    has_tok_lon_high = tokyo_high > 0 and london_high > 0
-    has_syd_lon_high = sydney_high > 0 and london_high > 0 and tokyo_high == 0  # Sydney to London, skip Tokyo
-    has_syd_tok_high = sydney_high > 0 and tokyo_high > 0 and london_high == 0  # Sydney to Tokyo only
-    has_lon_only_high = london_high > 0 and sydney_high == 0 and tokyo_high == 0
-    
-    if has_all_3_high:
+    if has_3pt_high:
         # Check for pivot (slopes conflict)
         if slopes_aligned(ds.high_syd_tok_slope, ds.high_tok_lon_slope):
             # All 3 points aligned - use full line
@@ -3679,89 +1315,43 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
             ds.high_line_pivot_type = "ALIGNED"
             ds.high_line_active_segment = "SYD_TOK_LON"
             ds.high_line_quality = "STRONG"
+            # Use Sydney → London for projection (but slope from Tok→Lon for accuracy)
             ds.high_line_slope = ds.high_tok_lon_slope  # Most recent slope
         else:
-            # Pivot detected at Tokyo - use Tokyo → London
+            # Pivot detected at Tokyo
             ds.high_line_pivot = True
             ds.high_line_active_segment = "TOK_LON"
             ds.high_line_quality = "MODERATE"
-            ds.high_line_slope = ds.high_tok_lon_slope
+            ds.high_line_slope = ds.high_tok_lon_slope  # Use Tokyo → London
             
+            # Determine pivot type
             if ds.high_syd_tok_slope < 0 and ds.high_tok_lon_slope > 0:
-                ds.high_line_pivot_type = "V_BOTTOM"
+                ds.high_line_pivot_type = "V_BOTTOM"  # Descended then ascended
             elif ds.high_syd_tok_slope > 0 and ds.high_tok_lon_slope < 0:
-                ds.high_line_pivot_type = "INVERTED_V"
+                ds.high_line_pivot_type = "INVERTED_V"  # Ascended then descended
             else:
                 ds.high_line_pivot_type = "MIXED"
+        
         ds.high_line_valid = True
         
-    elif has_tok_lon_high:
-        # Tokyo → London (most common 2-point)
+    elif has_2pt_high:
+        # Only Tokyo → London available
         ds.high_line_pivot = False
-        ds.high_line_pivot_type = "2PT_TOK_LON"
+        ds.high_line_pivot_type = "2PT_ONLY"
         ds.high_line_active_segment = "TOK_LON"
         ds.high_line_quality = "MODERATE"
         ds.high_line_slope = ds.high_tok_lon_slope
         ds.high_line_valid = True
-        
-    elif has_syd_lon_high:
-        # Sydney → London (skip Tokyo) - NEW
-        ds.high_line_pivot = False
-        ds.high_line_pivot_type = "2PT_SYD_LON"
-        ds.high_line_active_segment = "SYD_LON"
-        ds.high_line_quality = "MODERATE"
-        ds.high_line_slope = high_syd_lon_slope
-        ds.high_line_valid = True
-        
-    elif has_syd_tok_high:
-        # Sydney → Tokyo only (London not yet available) - NEW
-        ds.high_line_pivot = False
-        ds.high_line_pivot_type = "2PT_SYD_TOK"
-        ds.high_line_active_segment = "SYD_TOK"
-        ds.high_line_quality = "WEAK"  # Less reliable without London confirmation
-        ds.high_line_slope = ds.high_syd_tok_slope
-        ds.high_line_valid = True
-        
-    elif has_lon_only_high:
-        # London only - use standard Day Structure slope (descending from high)
-        # HIGH LINE descends at -0.475 per 30min (resistance drops over time)
-        ds.high_line_pivot = False
-        ds.high_line_pivot_type = "1PT_LON"
-        ds.high_line_active_segment = "LON_ONLY"
-        ds.high_line_quality = "WEAK"
-        ds.high_line_slope = -DAY_STRUCTURE_SLOPE_PER_MIN  # Descending slope for HIGH line
-        ds.high_line_valid = True
     
-    # Project high line to entry time
-    # Use the most recent valid anchor point for projection
-    if ds.high_line_valid:
-        if ds.high_line_active_segment in ["TOK_LON", "SYD_TOK_LON"] and tokyo_high > 0:
-            # Project from Tokyo
-            anchor_price = tokyo_high
-            anchor_mins = tok_h_mins
-        elif ds.high_line_active_segment == "SYD_LON" and london_high > 0:
-            # Project from London (more recent)
-            anchor_price = london_high
-            anchor_mins = lon_h_mins
-        elif ds.high_line_active_segment == "SYD_TOK" and tokyo_high > 0:
-            # Project from Tokyo
-            anchor_price = tokyo_high
-            anchor_mins = tok_h_mins
-        elif ds.high_line_active_segment == "LON_ONLY" and london_high > 0:
-            # Project from London (flat)
-            anchor_price = london_high
-            anchor_mins = lon_h_mins
-        else:
-            anchor_price = london_high if london_high > 0 else tokyo_high if tokyo_high > 0 else sydney_high
-            anchor_mins = lon_h_mins if london_high > 0 else tok_h_mins if tokyo_high > 0 else syd_h_mins
-        
-        anchor_mins_adj = anchor_mins
+    # Project high line to entry time (always use Tokyo as base for projection)
+    if ds.high_line_valid and tokyo_high > 0:
+        tok_h_adj = tok_h_mins
         entry_mins_adj = entry_mins
-        if entry_mins < anchor_mins:
+        if entry_mins < tok_h_mins:
             entry_mins_adj += 24 * 60
         
-        mins_from_anchor = entry_mins_adj - anchor_mins_adj
-        ds.high_line_at_entry = anchor_price + (ds.high_line_slope * mins_from_anchor)
+        mins_from_tokyo = entry_mins_adj - tok_h_adj
+        ds.high_line_at_entry = tokyo_high + (ds.high_line_slope * mins_from_tokyo)
         
         # Direction from active slope
         if ds.high_line_slope > 0.001:
@@ -3780,38 +1370,22 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
     # ═══════════════════════════════════════════════════════════════════════
     # LOW LINE ANALYSIS (Sydney Low → Tokyo Low → London Low) - for CALLS
     # ═══════════════════════════════════════════════════════════════════════
-    # 
-    # Valid combinations (in order of preference):
-    # 1. Sydney → Tokyo → London (3-point, strongest)
-    # 2. Tokyo → London (2-point, most recent)
-    # 3. Sydney → London (2-point, skip Tokyo)
-    # 4. Sydney → Tokyo (2-point, no London yet)
-    # 5. London only (1-point, flat projection)
-    # ═══════════════════════════════════════════════════════════════════════
     
     syd_l_mins = parse_time_to_mins_from_midnight(sydney_low_time) if sydney_low > 0 else 0
     tok_l_mins = parse_time_to_mins_from_midnight(tokyo_low_time) if tokyo_low > 0 else 0
     lon_l_mins = parse_time_to_mins_from_midnight(london_low_time) if london_low > 0 else 0
     
-    # Calculate ALL possible segment slopes
+    # Calculate segment slopes
     if sydney_low > 0 and tokyo_low > 0:
         ds.low_syd_tok_slope, _ = calc_slope(sydney_low, syd_l_mins, tokyo_low, tok_l_mins)
     if tokyo_low > 0 and london_low > 0:
         ds.low_tok_lon_slope, _ = calc_slope(tokyo_low, tok_l_mins, london_low, lon_l_mins)
     
-    # NEW: Sydney → London slope (skip Tokyo)
-    low_syd_lon_slope = 0.0
-    if sydney_low > 0 and london_low > 0:
-        low_syd_lon_slope, _ = calc_slope(sydney_low, syd_l_mins, london_low, lon_l_mins)
+    # Determine if we have valid 3-point or 2-point line
+    has_3pt_low = sydney_low > 0 and tokyo_low > 0 and london_low > 0
+    has_2pt_low = tokyo_low > 0 and london_low > 0
     
-    # Determine which combination we have
-    has_all_3_low = sydney_low > 0 and tokyo_low > 0 and london_low > 0
-    has_tok_lon_low = tokyo_low > 0 and london_low > 0
-    has_syd_lon_low = sydney_low > 0 and london_low > 0 and tokyo_low == 0  # Sydney to London, skip Tokyo
-    has_syd_tok_low = sydney_low > 0 and tokyo_low > 0 and london_low == 0  # Sydney to Tokyo only
-    has_lon_only_low = london_low > 0 and sydney_low == 0 and tokyo_low == 0
-    
-    if has_all_3_low:
+    if has_3pt_low:
         # Check for pivot (slopes conflict)
         if slopes_aligned(ds.low_syd_tok_slope, ds.low_tok_lon_slope):
             # All 3 points aligned - strong structure
@@ -3821,87 +1395,40 @@ def calculate_day_structure(sydney_high, sydney_high_time, sydney_low, sydney_lo
             ds.low_line_quality = "STRONG"
             ds.low_line_slope = ds.low_tok_lon_slope  # Most recent slope
         else:
-            # Pivot detected at Tokyo - use Tokyo → London
+            # Pivot detected at Tokyo
             ds.low_line_pivot = True
             ds.low_line_active_segment = "TOK_LON"
             ds.low_line_quality = "MODERATE"
-            ds.low_line_slope = ds.low_tok_lon_slope
+            ds.low_line_slope = ds.low_tok_lon_slope  # Use Tokyo → London
             
+            # Determine pivot type
             if ds.low_syd_tok_slope < 0 and ds.low_tok_lon_slope > 0:
-                ds.low_line_pivot_type = "V_BOTTOM"  # Bullish
+                ds.low_line_pivot_type = "V_BOTTOM"  # Descended then ascended (bullish)
             elif ds.low_syd_tok_slope > 0 and ds.low_tok_lon_slope < 0:
-                ds.low_line_pivot_type = "INVERTED_V"  # Bearish
+                ds.low_line_pivot_type = "INVERTED_V"  # Ascended then descended (bearish)
             else:
                 ds.low_line_pivot_type = "MIXED"
+        
         ds.low_line_valid = True
         
-    elif has_tok_lon_low:
-        # Tokyo → London (most common 2-point)
+    elif has_2pt_low:
+        # Only Tokyo → London available
         ds.low_line_pivot = False
-        ds.low_line_pivot_type = "2PT_TOK_LON"
+        ds.low_line_pivot_type = "2PT_ONLY"
         ds.low_line_active_segment = "TOK_LON"
         ds.low_line_quality = "MODERATE"
         ds.low_line_slope = ds.low_tok_lon_slope
         ds.low_line_valid = True
-        
-    elif has_syd_lon_low:
-        # Sydney → London (skip Tokyo) - NEW
-        ds.low_line_pivot = False
-        ds.low_line_pivot_type = "2PT_SYD_LON"
-        ds.low_line_active_segment = "SYD_LON"
-        ds.low_line_quality = "MODERATE"
-        ds.low_line_slope = low_syd_lon_slope
-        ds.low_line_valid = True
-        
-    elif has_syd_tok_low:
-        # Sydney → Tokyo only (London not yet available) - NEW
-        ds.low_line_pivot = False
-        ds.low_line_pivot_type = "2PT_SYD_TOK"
-        ds.low_line_active_segment = "SYD_TOK"
-        ds.low_line_quality = "WEAK"  # Less reliable without London confirmation
-        ds.low_line_slope = ds.low_syd_tok_slope
-        ds.low_line_valid = True
-        
-    elif has_lon_only_low:
-        # London only - use standard Day Structure slope (ascending from low)
-        # LOW LINE ascends at +0.475 per 30min (support rises over time)
-        ds.low_line_pivot = False
-        ds.low_line_pivot_type = "1PT_LON"
-        ds.low_line_active_segment = "LON_ONLY"
-        ds.low_line_quality = "WEAK"
-        ds.low_line_slope = DAY_STRUCTURE_SLOPE_PER_MIN  # Ascending slope for LOW line
-        ds.low_line_valid = True
     
     # Project low line to entry time
-    # Use the most recent valid anchor point for projection
-    if ds.low_line_valid:
-        if ds.low_line_active_segment in ["TOK_LON", "SYD_TOK_LON"] and tokyo_low > 0:
-            # Project from Tokyo
-            anchor_price = tokyo_low
-            anchor_mins = tok_l_mins
-        elif ds.low_line_active_segment == "SYD_LON" and london_low > 0:
-            # Project from London (more recent)
-            anchor_price = london_low
-            anchor_mins = lon_l_mins
-        elif ds.low_line_active_segment == "SYD_TOK" and tokyo_low > 0:
-            # Project from Tokyo
-            anchor_price = tokyo_low
-            anchor_mins = tok_l_mins
-        elif ds.low_line_active_segment == "LON_ONLY" and london_low > 0:
-            # Project from London (flat)
-            anchor_price = london_low
-            anchor_mins = lon_l_mins
-        else:
-            anchor_price = london_low if london_low > 0 else tokyo_low if tokyo_low > 0 else sydney_low
-            anchor_mins = lon_l_mins if london_low > 0 else tok_l_mins if tokyo_low > 0 else syd_l_mins
-        
-        anchor_mins_adj = anchor_mins
+    if ds.low_line_valid and tokyo_low > 0:
+        tok_l_adj = tok_l_mins
         entry_mins_adj = entry_mins
-        if entry_mins < anchor_mins:
+        if entry_mins < tok_l_mins:
             entry_mins_adj += 24 * 60
         
-        mins_from_anchor = entry_mins_adj - anchor_mins_adj
-        ds.low_line_at_entry = anchor_price + (ds.low_line_slope * mins_from_anchor)
+        mins_from_tokyo = entry_mins_adj - tok_l_adj
+        ds.low_line_at_entry = tokyo_low + (ds.low_line_slope * mins_from_tokyo)
         
         # Direction from active slope
         if ds.low_line_slope > 0.001:
@@ -5090,7 +2617,6 @@ def calculate_day_score(vix_zone, cones, setups, confluence=None, market_ctx=Non
     return score
 
 def check_alerts(setups, vix_zone, current_time):
-    """Generate real-time alerts for active setups and market conditions."""
     alerts = []
     for s in setups:
         if s.status == "ACTIVE":
@@ -5103,711 +2629,7 @@ def check_alerts(setups, vix_zone, current_time):
         alerts.append({"priority": "INFO", "message": "🏛️ Institutional Window (9:00-9:30 CT)"})
     return alerts
 
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 8: DASHBOARD RENDERING                              ║
-# ║                                                                                          ║
-# ║  The main dashboard is rendered as a single HTML component using Streamlit's            ║
-# ║  components.html() function. This approach provides:                                    ║
-# ║                                                                                          ║
-# ║  • Complete control over layout and styling                                             ║
-# ║  • Premium glassmorphism visual effects                                                 ║
-# ║  • Responsive design with CSS Grid/Flexbox                                              ║
-# ║  • Interactive collapsible sections via JavaScript                                      ║
-# ║                                                                                          ║
-# ║  The dashboard includes:                                                                 ║
-# ║  • Header with VIX zone, market status, and day score                                   ║
-# ║  • Options chain with expected prices and targets                                       ║
-# ║  • Setup cards for CALLS and PUTS                                                       ║
-# ║  • Cone structure visualization                                                         ║
-# ║  • Prior session statistics                                                             ║
-# ║  • Trading rules reference                                                              ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# CLEAN DASHBOARD - v11.1 Minimal, focused trading view
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def render_clean_dashboard(
-    spx_price: float,
-    vix_zone,
-    ma_bias,
-    day_structure,
-    cones: list,
-    trading_date,
-    entry_time_mins: int,
-    theme: str = "dark",
-    options_chain: dict = None
-) -> str:
-    """
-    Render a clean, minimal trading dashboard.
-    
-    Shows only what matters:
-    1. Current SPX + VIX direction
-    2. Day Structure (with session values visible)
-    3. Cone Rails (entries when inside structure, exits when outside)
-    4. Simple trade recommendations
-    5. Collapsible trading rules
-    """
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # THEME
-    # ═══════════════════════════════════════════════════════════════════════
-    if theme == "light":
-        bg_main = "#fafafa"
-        bg_card = "#ffffff"
-        text_primary = "#171717"
-        text_secondary = "#525252"
-        text_muted = "#a3a3a3"
-        border = "#e5e5e5"
-        success = "#16a34a"
-        danger = "#dc2626"
-        warning = "#d97706"
-        accent = "#7c3aed"
-    else:
-        bg_main = "#0a0a0b"
-        bg_card = "#111113"
-        text_primary = "#f4f4f5"
-        text_secondary = "#a1a1aa"
-        text_muted = "#52525b"
-        border = "rgba(255,255,255,0.08)"
-        success = "#22c55e"
-        danger = "#ef4444"
-        warning = "#f59e0b"
-        accent = "#8b5cf6"
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # DETERMINE MARKET CONTEXT
-    # ═══════════════════════════════════════════════════════════════════════
-    
-    # Get Day Structure values
-    high_line = day_structure.high_line_at_entry if day_structure and day_structure.high_line_valid else 0
-    low_line = day_structure.low_line_at_entry if day_structure and day_structure.low_line_valid else 0
-    
-    # Session values
-    syd_high = day_structure.sydney_high if day_structure else 0
-    tok_high = day_structure.tokyo_high if day_structure else 0
-    lon_high = day_structure.london_high if day_structure else 0
-    syd_low = day_structure.sydney_low if day_structure else 0
-    tok_low = day_structure.tokyo_low if day_structure else 0
-    lon_low = day_structure.london_low if day_structure else 0
-    
-    # Line broken status
-    high_broken = day_structure.high_line_broken if day_structure else False
-    low_broken = day_structure.low_line_broken if day_structure else False
-    
-    # Determine position relative to structure
-    if high_line > 0 and low_line > 0:
-        if spx_price > high_line:
-            position = "ABOVE"
-            position_color = success
-            position_text = f"ABOVE Day Structure (+{spx_price - high_line:.0f} pts)"
-            cone_context = "EXIT TARGETS"
-        elif spx_price < low_line:
-            position = "BELOW"
-            position_color = danger
-            position_text = f"BELOW Day Structure ({spx_price - low_line:.0f} pts)"
-            cone_context = "EXIT TARGETS"
-        else:
-            position = "INSIDE"
-            position_color = accent
-            position_text = "INSIDE Day Structure"
-            cone_context = "Additional Entries"
-    else:
-        position = "UNKNOWN"
-        position_color = text_muted
-        position_text = "Day Structure not set"
-        cone_context = ""
-    
-    # VIX direction
-    vix_direction = "NEUTRAL"
-    vix_color = text_muted
-    vix_value = ""
-    if vix_zone:
-        vix_value = f" ({vix_zone.current:.2f})" if hasattr(vix_zone, 'current') and vix_zone.current else ""
-        if vix_zone.bias in ["CALLS", "STRONG_CALLS"]:
-            vix_direction = "CALLS"
-            vix_color = success
-        elif vix_zone.bias in ["PUTS", "STRONG_PUTS"]:
-            vix_direction = "PUTS"
-            vix_color = danger
-        elif vix_zone.bias == "WAIT":
-            vix_direction = "WAIT"
-            vix_color = warning
-    
-    # MA bias
-    ma_direction = "NEUTRAL"
-    ma_color = text_muted
-    if ma_bias:
-        if ma_bias.bias == "LONG":
-            ma_direction = "LONG"
-            ma_color = success
-        elif ma_bias.bias == "SHORT":
-            ma_direction = "SHORT"
-            ma_color = danger
-    
-    # Format trading date
-    date_str = trading_date.strftime("%b %d, %Y") if trading_date else ""
-    
-    # Entry time
-    entry_hour = 8 + (30 + entry_time_mins) // 60
-    entry_min = (30 + entry_time_mins) % 60
-    entry_time_str = f"{entry_hour}:{entry_min:02d} AM CT"
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # BUILD HTML
-    # ═══════════════════════════════════════════════════════════════════════
-    
-    html = f'''
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    
-    .clean-dashboard {{
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        background: {bg_main};
-        color: {text_primary};
-        padding: 20px;
-        min-height: 100vh;
-    }}
-    
-    .brand {{
-        text-align: center;
-        padding: 24px 0;
-        margin-bottom: 20px;
-    }}
-    .brand-title {{
-        font-size: 28px;
-        font-weight: 700;
-        background: linear-gradient(135deg, {accent}, {success});
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        letter-spacing: 2px;
-    }}
-    .brand-tagline {{
-        font-size: 11px;
-        color: {text_muted};
-        letter-spacing: 3px;
-        text-transform: uppercase;
-        margin-top: 4px;
-    }}
-    
-    .header-bar {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 16px 20px;
-        background: {bg_card};
-        border: 1px solid {border};
-        border-radius: 12px;
-        margin-bottom: 16px;
-    }}
-    .spx-price {{
-        font-size: 36px;
-        font-weight: 700;
-        font-family: "SF Mono", Monaco, monospace;
-    }}
-    .spx-label {{
-        font-size: 12px;
-        color: {text_muted};
-    }}
-    .status-badges {{
-        display: flex;
-        gap: 10px;
-        align-items: center;
-    }}
-    .badge {{
-        padding: 6px 12px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-weight: 600;
-    }}
-    .meta-info {{
-        font-size: 11px;
-        color: {text_muted};
-        text-align: right;
-    }}
-    
-    .context-banner {{
-        padding: 14px 18px;
-        border-radius: 10px;
-        margin-bottom: 16px;
-        font-size: 14px;
-        font-weight: 500;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }}
-    
-    .section {{
-        background: {bg_card};
-        border: 1px solid {border};
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 16px;
-    }}
-    .section-title {{
-        font-size: 13px;
-        font-weight: 600;
-        color: {text_muted};
-        margin-bottom: 16px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }}
-    
-    .structure-line {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 14px 16px;
-        background: {bg_main};
-        border-radius: 8px;
-        margin-bottom: 10px;
-    }}
-    .line-info {{
-        flex: 1;
-    }}
-    .line-label {{
-        font-weight: 600;
-        font-size: 14px;
-        margin-bottom: 4px;
-    }}
-    .session-values {{
-        font-size: 11px;
-        color: {text_muted};
-        font-family: "SF Mono", Monaco, monospace;
-    }}
-    .line-value {{
-        font-family: "SF Mono", Monaco, monospace;
-        font-size: 22px;
-        font-weight: 700;
-        text-align: right;
-    }}
-    .line-subtext {{
-        font-size: 10px;
-        color: {text_muted};
-        text-align: right;
-    }}
-    .broken-badge {{
-        display: inline-block;
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 10px;
-        font-weight: 600;
-        margin-left: 8px;
-    }}
-    
-    .range-info {{
-        text-align: center;
-        padding: 10px 0 0 0;
-        font-size: 12px;
-        color: {text_muted};
-        border-top: 1px solid {border};
-        margin-top: 10px;
-    }}
-    
-    .cone-grid {{
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px;
-    }}
-    .cone-card {{
-        padding: 12px;
-        background: {bg_main};
-        border-radius: 8px;
-        text-align: center;
-    }}
-    .cone-name {{
-        font-size: 11px;
-        color: {text_muted};
-        margin-bottom: 8px;
-        font-weight: 500;
-    }}
-    .cone-rail {{
-        font-family: "SF Mono", Monaco, monospace;
-        font-size: 14px;
-        font-weight: 600;
-        margin: 4px 0;
-    }}
-    .cone-dist {{
-        font-size: 10px;
-        color: {text_muted};
-    }}
-    
-    .trade-grid {{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
-    }}
-    .trade-box {{
-        padding: 16px;
-        border-radius: 10px;
-    }}
-    .trade-box.calls {{
-        background: rgba(34, 197, 94, 0.08);
-        border: 1px solid rgba(34, 197, 94, 0.25);
-    }}
-    .trade-box.puts {{
-        background: rgba(239, 68, 68, 0.08);
-        border: 1px solid rgba(239, 68, 68, 0.25);
-    }}
-    .trade-header {{
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 12px;
-    }}
-    .trade-icon {{
-        font-size: 18px;
-    }}
-    .trade-direction {{
-        font-size: 16px;
-        font-weight: 700;
-    }}
-    .trade-row {{
-        display: flex;
-        justify-content: space-between;
-        font-size: 13px;
-        margin-bottom: 6px;
-        color: {text_secondary};
-    }}
-    .trade-value {{
-        font-family: "SF Mono", Monaco, monospace;
-        font-weight: 600;
-        color: {text_primary};
-    }}
-    
-    .collapsible {{
-        cursor: pointer;
-    }}
-    .collapsible-content {{
-        max-height: 0;
-        overflow: hidden;
-        transition: max-height 0.3s ease;
-    }}
-    .collapsible.open .collapsible-content {{
-        max-height: 2000px;
-    }}
-    .collapsible-header {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }}
-    .collapsible-icon {{
-        font-size: 12px;
-        transition: transform 0.2s;
-        color: {text_muted};
-    }}
-    .collapsible.open .collapsible-icon {{
-        transform: rotate(180deg);
-    }}
-    .rules-content {{
-        padding-top: 16px;
-        font-size: 13px;
-        line-height: 1.7;
-        color: {text_secondary};
-    }}
-    .rules-content h4 {{
-        color: {accent};
-        margin: 16px 0 8px 0;
-        font-size: 14px;
-    }}
-    .rules-content ul {{
-        margin-left: 20px;
-        margin-bottom: 8px;
-    }}
-    .rules-content li {{
-        margin-bottom: 4px;
-    }}
-</style>
-</head>
-<body>
-<div class="clean-dashboard">
-    
-    <!-- BRAND -->
-    <div class="brand">
-        <div class="brand-title">SPX PROPHET</div>
-        <div class="brand-tagline">Where Structure Becomes Foresight</div>
-    </div>
-    
-    <!-- HEADER BAR -->
-    <div class="header-bar">
-        <div>
-            <div class="spx-price">{spx_price:,.0f}</div>
-            <div class="spx-label">SPX</div>
-        </div>
-        <div class="status-badges">
-            <div class="badge" style="background:{vix_color}18;color:{vix_color};border:1px solid {vix_color}40;">VIX: {vix_direction}{vix_value}</div>
-            <div class="badge" style="background:{ma_color}18;color:{ma_color};border:1px solid {ma_color}40;">MA: {ma_direction}</div>
-        </div>
-        <div class="meta-info">
-            {date_str}<br>
-            Entry @ {entry_time_str}
-        </div>
-    </div>
-    
-    <!-- CONTEXT BANNER -->
-    <div class="context-banner" style="background:{position_color}12;border:1px solid {position_color}35;color:{position_color};">
-        <span><strong>{position_text}</strong></span>
-        <span style="font-size:12px;opacity:0.8;">{f'Cones → {cone_context}' if cone_context else ''}</span>
-    </div>
-    
-    <!-- DAY STRUCTURE -->
-    <div class="section">
-        <div class="section-title">📐 Day Structure</div>
-        
-        <!-- HIGH LINE -->
-        <div class="structure-line">
-            <div class="line-info">
-                <div class="line-label" style="color:{danger};">
-                    🔴 HIGH LINE → PUTS Entry
-                    {f'<span class="broken-badge" style="background:{success}30;color:{success};">⚡ BROKEN → CALLS</span>' if high_broken else ''}
-                </div>
-                <div class="session-values">
-                    Syd: {syd_high:,.0f} → Tok: {tok_high:,.0f} → Lon: {lon_high:,.0f}
-                </div>
-            </div>
-            <div>
-                <div class="line-value" style="color:{danger if not high_broken else text_muted};">{high_line:,.0f}</div>
-                <div class="line-subtext">@ entry</div>
-            </div>
-        </div>
-        
-        <!-- LOW LINE -->
-        <div class="structure-line">
-            <div class="line-info">
-                <div class="line-label" style="color:{success};">
-                    🟢 LOW LINE → CALLS Entry
-                    {f'<span class="broken-badge" style="background:{danger}30;color:{danger};">⚡ BROKEN → PUTS</span>' if low_broken else ''}
-                </div>
-                <div class="session-values">
-                    Syd: {syd_low:,.0f} → Tok: {tok_low:,.0f} → Lon: {lon_low:,.0f}
-                </div>
-            </div>
-            <div>
-                <div class="line-value" style="color:{success if not low_broken else text_muted};">{low_line:,.0f}</div>
-                <div class="line-subtext">@ entry</div>
-            </div>
-        </div>
-        
-        <!-- Range info -->
-        <div class="range-info">
-            Range: <strong>{high_line - low_line:.0f}</strong> pts &nbsp;│&nbsp; 
-            SPX to High: <strong>{high_line - spx_price:+.0f}</strong> &nbsp;│&nbsp;
-            SPX to Low: <strong>{low_line - spx_price:+.0f}</strong>
-        </div>
-    </div>
-    
-    <!-- CONE RAILS -->
-    <div class="section">
-        <div class="section-title">📐 Cone Rails <span style="font-weight:400;color:{text_muted};">({cone_context})</span></div>
-        <div class="cone-grid">
-'''
-    
-    # Add cone cards
-    for i, cone in enumerate(cones[:3]):  # Show max 3 cones
-        asc_rail = cone.ascending_rail if hasattr(cone, 'ascending_rail') else 0
-        desc_rail = cone.descending_rail if hasattr(cone, 'descending_rail') else 0
-        cone_name = cone.name if hasattr(cone, 'name') else f"Cone {i+1}"
-        
-        # Distance from current price
-        asc_dist = spx_price - asc_rail if asc_rail > 0 else 0
-        desc_dist = spx_price - desc_rail if desc_rail > 0 else 0
-        
-        html += f'''
-            <div class="cone-card">
-                <div class="cone-name">{cone_name}</div>
-                <div class="cone-rail" style="color:{success};">↑ {asc_rail:,.0f}</div>
-                <div class="cone-dist">{asc_dist:+.0f} pts</div>
-                <div class="cone-rail" style="color:{danger};margin-top:8px;">↓ {desc_rail:,.0f}</div>
-                <div class="cone-dist">{desc_dist:+.0f} pts</div>
-            </div>
-'''
-    
-    html += '''
-        </div>
-    </div>
-'''
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # TRADE RECOMMENDATIONS
-    # ═══════════════════════════════════════════════════════════════════════
-    
-    # Calculate distances
-    dist_to_high = high_line - spx_price if high_line > 0 else 0
-    dist_to_low = spx_price - low_line if low_line > 0 else 0
-    
-    # Determine recommended strikes (10 OTM from entry)
-    call_strike = int((low_line + 10) // 5) * 5 if low_line > 0 else 0
-    put_strike = int((high_line - 10) // 5) * 5 if high_line > 0 else 0
-    
-    html += f'''
-    <!-- TRADE RECOMMENDATIONS -->
-    <div class="section">
-        <div class="section-title">🎯 Trade Setup</div>
-        
-        <div class="trade-grid">
-            <div class="trade-box calls">
-                <div class="trade-header">
-                    <span class="trade-icon">🟢</span>
-                    <span class="trade-direction" style="color:{success};">CALLS</span>
-                </div>
-                <div class="trade-row">
-                    <span>Entry</span>
-                    <span class="trade-value">Low Line @ {low_line:,.0f}</span>
-                </div>
-                <div class="trade-row">
-                    <span>Strike</span>
-                    <span class="trade-value">{call_strike}C</span>
-                </div>
-                <div class="trade-row">
-                    <span>Distance</span>
-                    <span class="trade-value" style="color:{success if dist_to_low > 10 else warning};">{dist_to_low:.0f} pts ↓</span>
-                </div>
-            </div>
-            
-            <div class="trade-box puts">
-                <div class="trade-header">
-                    <span class="trade-icon">🔴</span>
-                    <span class="trade-direction" style="color:{danger};">PUTS</span>
-                </div>
-                <div class="trade-row">
-                    <span>Entry</span>
-                    <span class="trade-value">High Line @ {high_line:,.0f}</span>
-                </div>
-                <div class="trade-row">
-                    <span>Strike</span>
-                    <span class="trade-value">{put_strike}P</span>
-                </div>
-                <div class="trade-row">
-                    <span>Distance</span>
-                    <span class="trade-value" style="color:{danger if dist_to_high > 10 else warning};">{dist_to_high:.0f} pts ↑</span>
-                </div>
-            </div>
-        </div>
-    </div>
-'''
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # COLLAPSIBLE TRADING RULES
-    # ═══════════════════════════════════════════════════════════════════════
-    
-    html += f'''
-    <!-- TRADING RULES (Collapsible) -->
-    <div class="section collapsible" id="rulesSection">
-        <div class="collapsible-header" onclick="document.getElementById('rulesSection').classList.toggle('open')">
-            <div class="section-title" style="margin-bottom:0;">📖 Trading Rules Reference</div>
-            <span class="collapsible-icon">▼</span>
-        </div>
-        <div class="collapsible-content">
-            <div class="rules-content">
-            
-                <h4>PART 1: MARKET ENVIRONMENT</h4>
-                <p><strong>Rule 1.1:</strong> Determine market bias using 50 EMA vs 200 SMA on SPX 24-hour chart.</p>
-                <ul>
-                    <li><span style="color:{success};">BULLISH:</span> 50 EMA > 200 SMA, Price > 50 EMA → CALLS only</li>
-                    <li><span style="color:{danger};">BEARISH:</span> 50 EMA < 200 SMA, Price < 50 EMA → PUTS only</li>
-                    <li><span style="color:{warning};">TRANSITIONAL:</span> Mixed signals → Trade with caution</li>
-                </ul>
-                <p><strong>Rule 1.2:</strong> <span style="color:{danger};">NEVER</span> trade against the trend.</p>
-                
-                <h4>PART 2: VIX ZONE</h4>
-                <p><strong>Rule 2.1:</strong> Track VIX from 5pm-8:30am CT to establish overnight zone.</p>
-                <p><strong>Rule 2.2:</strong> Expected zone = 1% of VIX, rounded to 0.05.</p>
-                <p><strong>Rule 2.3:</strong> VIX position determines direction:</p>
-                <ul>
-                    <li>At/Below Bottom → <span style="color:{success};">CALLS</span></li>
-                    <li>At/Above Top → <span style="color:{danger};">PUTS</span></li>
-                    <li>Mid-Zone → WAIT</li>
-                </ul>
-                
-                <h4>PART 3: DAY STRUCTURE</h4>
-                <p><strong>Rule 3.1:</strong> Build from Sydney (5pm-8:30pm) → Tokyo (9pm-1:30am) → London (2am-6:30am).</p>
-                <p><strong>Rule 3.2:</strong> Low Line = CALL entry (support). High Line = PUT entry (resistance).</p>
-                <p><strong>Rule 3.3:</strong> Break & Retest: Line breaks → Wait for retest → Enter opposite direction.</p>
-                
-                <h4>PART 4: CONE RAILS</h4>
-                <p><strong>Rule 4.1:</strong> INSIDE structure → Cones are additional entry points.</p>
-                <p><strong>Rule 4.2:</strong> OUTSIDE structure → Cones are EXIT targets.</p>
-                <p><strong>Rule 4.3:</strong> Ascending rails = CALLS entry/exit. Descending rails = PUTS entry/exit.</p>
-                
-                <h4>PART 5: CONTRACT SELECTION</h4>
-                <p><strong>Rule 5.1:</strong> Strike = Entry Price ± 10 (slightly OTM at entry).</p>
-                <p><strong>Rule 5.2:</strong> Premium sweet spot: $3.50 - $8.00.</p>
-                
-                <h4>PART 6: NO TRADE CONDITIONS</h4>
-                <ul style="color:{danger};">
-                    <li>VIX and MA bias in CONFLICT</li>
-                    <li>Trading against the trend</li>
-                    <li>Day Structure not set</li>
-                    <li>After 11:30am CT</li>
-                </ul>
-                
-            </div>
-        </div>
-    </div>
-    
-    <!-- FOOTER -->
-    <div style="text-align:center;padding:20px 0;font-size:11px;color:{text_muted};">
-        SPX Prophet v11.1 │ Where Structure Becomes Foresight
-    </div>
-    
-</div>
-</body>
-</html>
-'''
-    
-    return html
-
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-# LEGACY DASHBOARD (kept for reference, not used)
-# ═══════════════════════════════════════════════════════════════════════════════════════════
-
-def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, market_ctx=None, price_proximity=None, day_structure=None, options_chain=None, entry_levels=None, trades=None, api_status=None, price_alerts=None):
-    """
-    Render the main trading dashboard as HTML.
-    
-    v11 NEW PARAMETERS:
-    - entry_levels: Unified entry levels from get_all_entry_levels()
-    - trades: List of Trade objects for P&L tracking
-    - api_status: APIStatus for connection status display
-    - price_alerts: List of Alert objects for notifications
-    
-    Args:
-        vix_zone: VIXZone dataclass with current VIX analysis
-        cones: List of Cone objects for structural analysis
-        setups: List of Setup objects (trade opportunities)
-        pivot_table: Dict of pivot levels for the day
-        prior_session: Dict with prior day's OHLC data
-        day_score: DayScore dataclass with overall day rating
-        alerts: List of alert dicts for urgent notifications
-        spx_price: Current SPX price
-        trading_date: Date being displayed
-        pivot_date: Date used for pivot calculations
-        pivot_session_info: Dict with session timing info
-        is_historical: Boolean - True if viewing past date
-        theme: "dark" or "light" color scheme
-        ma_bias: Optional MABias dataclass from ES futures
-        confluence: Optional Confluence dataclass
-        market_ctx: Optional MarketContext dataclass
-        price_proximity: Optional PriceProximity dataclass
-        day_structure: Optional DayStructure dataclass
-        options_chain: Optional dict with loaded options data
-        entry_levels: Optional list of EntryLevel (v11)
-        trades: Optional list of Trade objects (v11)
-        api_status: Optional APIStatus (v11)
-        price_alerts: Optional list of Alert objects (v11)
-        
-    Returns:
-        str: Complete HTML string for the dashboard
-    """
+def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, market_ctx=None, price_proximity=None, day_structure=None, options_chain=None):
     # ═══════════════════════════════════════════════════════════════════════
     # OBSIDIAN PREMIUM DESIGN SYSTEM
     # ═══════════════════════════════════════════════════════════════════════
@@ -7247,245 +4069,24 @@ body {{
     <div class="brand-divider"></div>
 </div>
 
-<!-- v11 STATUS BAR - API Status, Market Countdown, P&L Summary -->
-'''
-    # Build API status display
-    api_emoji = "🟢"
-    api_text = "Live"
-    api_color = "var(--success)"
-    if api_status:
-        status_info = get_api_status_display(api_status)
-        api_emoji = status_info['emoji']
-        api_text = status_info['status']
-        api_color = status_info['color']
-    
-    # Calculate market countdown
-    now = get_ct_now()
-    market_open = time(8, 30)
-    market_close = get_market_close_time(trading_date)
-    
-    if now.time() < market_open:
-        market_status = "Pre-Market"
-        countdown_label = "Opens in"
-        countdown_val = format_countdown(get_time_until(market_open))
-    elif now.time() > market_close:
-        market_status = "After Hours"
-        countdown_label = "Closed"
-        countdown_val = "—"
-    else:
-        market_status = "Market Open"
-        countdown_label = "Closes in"
-        countdown_val = format_countdown(get_time_until(market_close))
-    
-    # Trade stats
-    trade_stats = get_session_stats(trades or [])
-    open_trades = trade_stats.get('open', 0)
-    total_pnl = trade_stats.get('total_pnl', 0)
-    win_rate = trade_stats.get('win_rate', 0)
-    
-    pnl_color = "var(--success)" if total_pnl >= 0 else "var(--danger)"
-    pnl_sign = "+" if total_pnl >= 0 else ""
-    
-    html += f'''
-<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);margin-bottom:var(--space-3);display:flex;justify-content:space-between;align-items:center;">
-    <!-- API Status -->
-    <div style="display:flex;align-items:center;gap:var(--space-3);">
-        <div style="display:flex;align-items:center;gap:var(--space-1);">
-            <span style="font-size:12px;">{api_emoji}</span>
-            <span style="font-size:11px;color:{api_color};font-weight:500;">{api_text}</span>
-        </div>
-        <div style="width:1px;height:16px;background:var(--border);"></div>
-        <div style="display:flex;align-items:center;gap:var(--space-1);">
-            <span style="font-size:11px;color:var(--text-muted);">{market_status}</span>
-            <span style="font-size:11px;font-weight:600;color:var(--text-primary);">{countdown_val}</span>
-        </div>
-    </div>
-    
-    <!-- P&L Summary -->
-    <div style="display:flex;align-items:center;gap:var(--space-3);">
-        <div style="text-align:right;">
-            <span style="font-size:10px;color:var(--text-muted);">Today's P&L</span>
-            <span style="font-size:13px;font-weight:700;color:{pnl_color};margin-left:var(--space-2);font-family:var(--font-mono);">{pnl_sign}${total_pnl:,.0f}</span>
-        </div>
-        <div style="width:1px;height:16px;background:var(--border);"></div>
-        <div style="text-align:right;">
-            <span style="font-size:10px;color:var(--text-muted);">Win Rate</span>
-            <span style="font-size:11px;font-weight:600;color:var(--text-primary);margin-left:var(--space-2);">{win_rate:.0f}%</span>
-        </div>
-        <div style="width:1px;height:16px;background:var(--border);"></div>
-        <div style="text-align:right;">
-            <span style="font-size:10px;color:var(--text-muted);">Open</span>
-            <span style="font-size:11px;font-weight:600;color:{'var(--warning)' if open_trades > 0 else 'var(--text-muted)'};margin-left:var(--space-2);">{open_trades}</span>
-        </div>
-    </div>
-</div>
-'''
-
-    # Price Alerts Banner (if any unread alerts)
-    if price_alerts:
-        unread = [a for a in price_alerts if not a.is_read]
-        if unread:
-            latest = unread[-1]
-            alert_bg = "var(--success-soft)" if latest.direction == "CALLS" else "var(--danger-soft)"
-            alert_border = "var(--success)" if latest.direction == "CALLS" else "var(--danger)"
-            html += f'''
-<div style="background:{alert_bg};border:1px solid {alert_border};border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);margin-bottom:var(--space-3);display:flex;justify-content:space-between;align-items:center;">
-    <div style="display:flex;align-items:center;gap:var(--space-2);">
-        <span style="font-size:16px;">{"🔔" if latest.alert_type == "ENTRY_NEAR" else "🚨"}</span>
-        <span style="font-size:12px;font-weight:600;color:var(--text-primary);">{latest.message}</span>
-    </div>
-    <span style="font-size:10px;color:var(--text-muted);">{len(unread)} alert{"s" if len(unread) > 1 else ""}</span>
-</div>
-'''
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # v11 IMPROVEMENT #15: SESSION STATUS BAR
-    # ═══════════════════════════════════════════════════════════════════════
-    session_status = get_session_status(day_structure)
-    
-    html += f'''
-<!-- SESSION STATUS BAR -->
-<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);margin-bottom:var(--space-3);display:flex;justify-content:space-between;align-items:center;">
-    <div style="display:flex;align-items:center;gap:var(--space-3);">
-        <span style="font-size:16px;">{session_status.session_emoji}</span>
-        <span style="font-size:12px;font-weight:600;color:var(--text-primary);">{session_status.session_label}</span>
-        <span style="font-size:10px;color:var(--text-muted);">{session_status.next_session}</span>
-    </div>
-    <div style="display:flex;align-items:center;gap:var(--space-2);">
-        <span style="font-size:10px;color:var(--text-muted);">Pivots:</span>
-        <span style="font-size:11px;">{"🌙" if session_status.sydney_high_set else "○"}{"🌙" if session_status.sydney_low_set else "○"}</span>
-        <span style="font-size:11px;">{"🗼" if session_status.tokyo_high_set else "○"}{"🗼" if session_status.tokyo_low_set else "○"}</span>
-        <span style="font-size:11px;">{"🏛️" if session_status.london_high_set else "○"}{"🏛️" if session_status.london_low_set else "○"}</span>
-        <span style="font-size:10px;color:{'var(--success)' if session_status.structure_complete else 'var(--warning)'};">{"✓ Complete" if session_status.structure_complete else session_status.missing_pivots}</span>
-    </div>
-</div>
-'''
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # v11 IMPROVEMENT #12 & #16: CONFLUENCE + BEST TRADE CARD
-    # ═══════════════════════════════════════════════════════════════════════
-    structure_confluence = detect_structure_confluence(cones, day_structure, st.session_state.get('entry_time_mins', 30)) if cones and day_structure else None
-    best_trade = get_best_trade(entry_levels or [], vix_zone, ma_bias, day_structure, spx_price, trading_date, structure_confluence, options_chain) if entry_levels else None
-    
-    if best_trade and best_trade.has_trade:
-        bt_bg = "var(--success-soft)" if best_trade.direction == "CALLS" else "var(--danger-soft)"
-        bt_border = "var(--success)" if best_trade.direction == "CALLS" else "var(--danger)"
-        bt_icon = "↑" if best_trade.direction == "CALLS" else "↓"
-        conf_pct = best_trade.confidence
-        conf_color = "var(--success)" if conf_pct >= 70 else "var(--warning)" if conf_pct >= 50 else "var(--text-muted)"
-        
-        # Validation checklist
-        v = best_trade.validation
-        checks_html = ""
-        if v:
-            checks_html = f'''
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;margin-top:var(--space-2);">
-                <div>{v.vix_detail}</div>
-                <div>{v.ma_detail}</div>
-                <div>{v.price_detail}</div>
-                <div>{v.premium_detail}</div>
-                <div>{v.window_detail}</div>
-                <div>{v.structure_detail}</div>
-            </div>
-            '''
-        
-        html += f'''
-<!-- BEST TRADE CARD -->
-<div style="background:{bt_bg};border:2px solid {bt_border};border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-        <div>
-            <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2);">
-                <span style="font-size:20px;">{bt_icon}</span>
-                <span style="font-size:16px;font-weight:700;color:var(--text-primary);">BEST SETUP: {best_trade.direction}</span>
-                <span style="font-size:12px;padding:2px 8px;background:{conf_color};color:white;border-radius:10px;">{conf_pct}%</span>
-            </div>
-            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:var(--space-1);">
-                Entry: <strong>{best_trade.entry_price:,.0f}</strong> ({best_trade.entry_source})
-            </div>
-            <div style="font-size:12px;color:var(--text-muted);">
-                Strike: <strong>{best_trade.strike}{"C" if best_trade.direction == "CALLS" else "P"}</strong> @ ${best_trade.premium:.2f} → Target ${best_trade.target_50:.2f} (+50%)
-            </div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:var(--space-1);">
-                Stop: {best_trade.stop_spx:,.0f} SPX
-            </div>
-        </div>
-        <div style="text-align:right;">
-            <div style="font-size:11px;color:var(--text-muted);">Confidence</div>
-            <div style="font-size:24px;font-weight:700;color:{conf_color};">{conf_pct}</div>
-        </div>
-    </div>
-    {checks_html}
-    <div style="font-size:10px;color:var(--text-muted);margin-top:var(--space-2);border-top:1px solid var(--border);padding-top:var(--space-2);">
-        {best_trade.reasons}
-        {f' | ⚠️ {best_trade.warnings}' if best_trade.warnings else ''}
-    </div>
-</div>
-'''
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # v11 IMPROVEMENT #12: CONFLUENCE BANNER (if detected)
-    # ═══════════════════════════════════════════════════════════════════════
-    if structure_confluence and structure_confluence.has_confluence:
-        conf_bg = "linear-gradient(135deg, rgba(234,179,8,0.2) 0%, rgba(234,179,8,0.05) 100%)"
-        html += f'''
-<!-- STRUCTURE CONFLUENCE ALERT -->
-<div style="background:{conf_bg};border:1px solid var(--warning);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-4);">
-    <div style="display:flex;align-items:center;gap:var(--space-2);">
-        <span style="font-size:18px;">🎯</span>
-        <span style="font-size:13px;font-weight:600;color:var(--text-primary);">STRUCTURE CONFLUENCE DETECTED</span>
-    </div>
-    <div style="font-size:12px;color:var(--text-secondary);margin-top:var(--space-1);">
-        {structure_confluence.description}
-    </div>
-    <div style="font-size:11px;color:var(--text-muted);margin-top:var(--space-1);">
-        Entry Zone: <strong>{structure_confluence.best_entry_price:,.0f}</strong> | Confidence Boost: <strong>+{structure_confluence.confidence_boost}</strong>
-    </div>
-</div>
-'''
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # v11 IMPROVEMENT #17: PRICE CONTEXT
-    # ═══════════════════════════════════════════════════════════════════════
-    price_ctx = get_price_context(spx_price, day_structure, cones) if cones else None
-    
-    if price_ctx and price_ctx.action:
-        html += f'''
-<!-- PRICE CONTEXT -->
-<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2) var(--space-4);margin-bottom:var(--space-3);display:flex;align-items:center;gap:var(--space-2);">
-    <span style="font-size:14px;">{price_ctx.action_emoji}</span>
-    <span style="font-size:12px;color:var(--text-secondary);">{price_ctx.action}</span>
-    <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">
-        SPX: <strong>{spx_price:,.0f}</strong>
-        {f' | High Line: {price_ctx.high_line_dist:+.0f}' if price_ctx.vs_high_line else ''}
-        {f' | Low Line: {price_ctx.low_line_dist:+.0f}' if price_ctx.vs_low_line else ''}
-    </span>
-</div>
-'''
-
-    entry_window_countdown = format_countdown(get_time_until(ENTRY_TARGET))
-    cutoff_countdown = format_countdown(get_time_until(CUTOFF_TIME))
-    current_time_str = now.strftime("%H:%M")
-    current_date_str = trading_date.strftime("%b %d")
-    
-    html += f'''
 <!-- HEADER (Info Bar) -->
 <header class="header">
     <div class="meta-group">
         <div class="meta-item">
             <div class="meta-label">Entry Window</div>
-            <div class="meta-value">{entry_window_countdown}</div>
+            <div class="meta-value">{format_countdown(get_time_until(ENTRY_TARGET))}</div>
         </div>
         <div class="meta-item">
             <div class="meta-label">Cutoff</div>
-            <div class="meta-value">{cutoff_countdown}</div>
+            <div class="meta-value">{format_countdown(get_time_until(CUTOFF_TIME))}</div>
         </div>
         <div class="meta-item">
             <div class="meta-label">Time CT</div>
-            <div class="meta-value">{current_time_str}</div>
+            <div class="meta-value">{now.strftime("%H:%M")}</div>
         </div>
         <div class="meta-item">
             <div class="meta-label">Date</div>
-            <div class="meta-value">{current_date_str}</div>
+            <div class="meta-value">{trading_date.strftime("%b %d")}</div>
         </div>
     </div>
 </header>
@@ -8409,26 +5010,22 @@ body {{
         sweet_spot_puts = [p for p in near_puts if p.get('in_sweet_spot', False)]
         sweet_spot_calls = [c for c in near_calls if c.get('in_sweet_spot', False)]
         
-        # Check for price data
+        # Check for price data - use best_price or current field
         any_has_price = any(p.get('best_price', 0) > 0 or p.get('current', 0) > 0 for p in near_puts + near_calls)
         
-        # Get entry levels for display
-        call_entry = options_chain.get('call_entry')
-        put_entry = options_chain.get('put_entry')
+        # Get price source date if different from display date
+        price_source_date = options_chain.get('price_source_date')
+        display_exp_date = options_chain.get('display_expiration', exp_date)
         
-        # Build info message
+        # Build info message based on data availability
         market_status = ""
-        entry_info = ""
-        if put_entry or call_entry:
-            entry_parts = []
-            if put_entry:
-                entry_parts.append(f"PUT Entry: {put_entry:,.0f}")
-            if call_entry:
-                entry_parts.append(f"CALL Entry: {call_entry:,.0f}")
-            entry_info = f'<div style="font-size:10px;color:var(--info);margin-bottom:var(--space-2);">📍 {" | ".join(entry_parts)}</div>'
+        price_source_note = ""
+        if price_source_date and price_source_date != display_exp_date:
+            # Showing tomorrow's contracts but prices from today
+            price_source_note = f'<div style="font-size:10px;color:var(--warning);">💰 Prices from {price_source_date.strftime("%b %d")} contracts (reference)</div>'
         
         if not any_has_price:
-            market_status = '<div style="background:var(--warning-soft);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:var(--space-2);margin-bottom:var(--space-3);font-size:11px;color:var(--warning);text-align:center;">⚠️ No price data - check Debug API in sidebar</div>'
+            market_status = '<div style="background:var(--warning-soft);border:1px solid var(--warning);border-radius:var(--radius-sm);padding:var(--space-2);margin-bottom:var(--space-3);font-size:11px;color:var(--warning);text-align:center;">⚠️ No price data available - try reloading after market hours</div>'
         
         html += f'''
 <!-- OPTIONS CHAIN - TRADING FOCUSED -->
@@ -8440,11 +5037,11 @@ body {{
         </div>
         <div style="text-align:right;">
             <div style="font-size:12px;font-weight:500;color:var(--info);">{exp_label}</div>
+            {price_source_note}
             <div style="font-size:10px;color:var(--text-muted);">Updated {fetched_str}</div>
         </div>
     </div>
     
-    {entry_info}
     {market_status}
     
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);">
@@ -8455,44 +5052,45 @@ body {{
                 <span style="font-size:10px;color:var(--text-muted);">{len(all_puts)} loaded</span>
             </div>
             
-            <!-- Table Header - Now shows CURRENT, ENTRY, and TARGETS -->
-            <div style="display:grid;grid-template-columns:50px 45px 45px 45px 45px 45px;gap:2px;font-size:8px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
+            <!-- Table Header -->
+            <div style="display:grid;grid-template-columns:55px 50px 40px 50px 50px 50px;gap:2px;font-size:9px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
                 <span>STRIKE</span>
-                <span>NOW</span>
-                <span style="color:var(--warning);">@ENTRY</span>
+                <span>PRICE</span>
+                <span>IV</span>
                 <span style="color:var(--success);">+50%</span>
                 <span style="color:var(--success);">+100%</span>
                 <span style="color:var(--success);">+200%</span>
             </div>
 '''
-        # PUT rows
+        # PUT rows - show PRICE (best available), IV, and TARGET PRICES
         for p in near_puts:
             strike = p['strike']
-            current_price = p.get('best_price', 0) or p.get('current', 0) or p.get('last', 0) or p.get('mid', 0)
-            expected_entry = p.get('expected_entry', current_price)
+            # Use best_price (tries: last > day_close > mid > day_open) or current field
+            display_price = p.get('best_price', 0) or p.get('current', 0) or p.get('last', 0) or p.get('mid', 0)
             iv = p.get('iv', 0)
             in_sweet = p.get('in_sweet_spot', False)
             is_otm = p.get('is_otm', strike < filter_center)
             
-            # Get pre-calculated targets (based on expected entry price)
-            target_50 = p.get('target_50', expected_entry * 1.5 if expected_entry > 0 else 0)
-            target_100 = p.get('target_100', expected_entry * 2.0 if expected_entry > 0 else 0)
-            target_200 = p.get('target_200', expected_entry * 3.0 if expected_entry > 0 else 0)
+            # Calculate target sell prices
+            target_50 = display_price * 1.5 if display_price > 0 else 0
+            target_100 = display_price * 2.0 if display_price > 0 else 0
+            target_200 = display_price * 3.0 if display_price > 0 else 0
             
-            # Highlight sweet spot
+            # Highlight: green for sweet spot, gradient for near-money
             row_bg = ""
-            if in_sweet:
+            if in_sweet and display_price > 0:
                 row_bg = "background:var(--success-soft);border-radius:4px;"
             elif abs(strike - filter_center) <= 10:
                 row_bg = "background:linear-gradient(90deg, var(--danger-soft), transparent);border-radius:4px;"
             
             strike_color = "var(--text-primary)" if is_otm else "var(--danger)"
+            price_display = f"${display_price:.2f}" if display_price > 0 else "—"
             
             html += f'''
-            <div style="display:grid;grid-template-columns:50px 45px 45px 45px 45px 45px;gap:2px;font-family:var(--font-mono);font-size:10px;padding:4px 2px;{row_bg}">
+            <div style="display:grid;grid-template-columns:55px 50px 40px 50px 50px 50px;gap:2px;font-family:var(--font-mono);font-size:11px;padding:5px 2px;{row_bg}">
                 <span style="font-weight:600;color:{strike_color};">{strike}P</span>
-                <span style="color:var(--text-muted);">{f"${current_price:.2f}" if current_price > 0 else "—"}</span>
-                <span style="color:var(--warning);font-weight:600;">{f"${expected_entry:.2f}" if expected_entry > 0 else "—"}</span>
+                <span style="color:var(--text-primary);font-weight:500;">{price_display}</span>
+                <span style="color:var(--text-muted);">{iv:.0%}</span>
                 <span style="color:var(--success);">{f"${target_50:.2f}" if target_50 > 0 else "—"}</span>
                 <span style="color:var(--success);">{f"${target_100:.2f}" if target_100 > 0 else "—"}</span>
                 <span style="color:var(--success);font-weight:600;">{f"${target_200:.2f}" if target_200 > 0 else "—"}</span>
@@ -8513,10 +5111,10 @@ body {{
             </div>
             
             <!-- Table Header -->
-            <div style="display:grid;grid-template-columns:50px 45px 45px 45px 45px 45px;gap:2px;font-size:8px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
+            <div style="display:grid;grid-template-columns:55px 50px 40px 50px 50px 50px;gap:2px;font-size:9px;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border);font-weight:600;">
                 <span>STRIKE</span>
-                <span>NOW</span>
-                <span style="color:var(--warning);">@ENTRY</span>
+                <span>PRICE</span>
+                <span>IV</span>
                 <span style="color:var(--success);">+50%</span>
                 <span style="color:var(--success);">+100%</span>
                 <span style="color:var(--success);">+200%</span>
@@ -8525,30 +5123,31 @@ body {{
         # CALL rows
         for c in near_calls:
             strike = c['strike']
-            current_price = c.get('best_price', 0) or c.get('current', 0) or c.get('last', 0) or c.get('mid', 0)
-            expected_entry = c.get('expected_entry', current_price)
+            last_price = c.get('last', 0)
+            mid_price = c.get('mid', 0)
+            display_price = last_price if last_price > 0 else mid_price
             iv = c.get('iv', 0)
             in_sweet = c.get('in_sweet_spot', False)
             is_otm = c.get('is_otm', strike > filter_center)
             
-            # Get pre-calculated targets
-            target_50 = c.get('target_50', expected_entry * 1.5 if expected_entry > 0 else 0)
-            target_100 = c.get('target_100', expected_entry * 2.0 if expected_entry > 0 else 0)
-            target_200 = c.get('target_200', expected_entry * 3.0 if expected_entry > 0 else 0)
+            target_50 = display_price * 1.5 if display_price > 0 else 0
+            target_100 = display_price * 2.0 if display_price > 0 else 0
+            target_200 = display_price * 3.0 if display_price > 0 else 0
             
             row_bg = ""
-            if in_sweet:
+            if in_sweet and display_price > 0:
                 row_bg = "background:var(--success-soft);border-radius:4px;"
             elif abs(strike - filter_center) <= 10:
                 row_bg = "background:linear-gradient(90deg, transparent, var(--success-soft));border-radius:4px;"
             
             strike_color = "var(--text-primary)" if is_otm else "var(--success)"
+            price_display = f"${display_price:.2f}" if display_price > 0 else "—"
             
             html += f'''
-            <div style="display:grid;grid-template-columns:50px 45px 45px 45px 45px 45px;gap:2px;font-family:var(--font-mono);font-size:10px;padding:4px 2px;{row_bg}">
+            <div style="display:grid;grid-template-columns:55px 50px 40px 50px 50px 50px;gap:2px;font-family:var(--font-mono);font-size:11px;padding:5px 2px;{row_bg}">
                 <span style="font-weight:600;color:{strike_color};">{strike}C</span>
-                <span style="color:var(--text-muted);">{f"${current_price:.2f}" if current_price > 0 else "—"}</span>
-                <span style="color:var(--warning);font-weight:600;">{f"${expected_entry:.2f}" if expected_entry > 0 else "—"}</span>
+                <span style="color:var(--text-primary);font-weight:500;">{price_display}</span>
+                <span style="color:var(--text-muted);">{iv:.0%}</span>
                 <span style="color:var(--success);">{f"${target_50:.2f}" if target_50 > 0 else "—"}</span>
                 <span style="color:var(--success);">{f"${target_100:.2f}" if target_100 > 0 else "—"}</span>
                 <span style="color:var(--success);font-weight:600;">{f"${target_200:.2f}" if target_200 > 0 else "—"}</span>
@@ -8565,10 +5164,10 @@ body {{
     <!-- Legend -->
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-3);padding-top:var(--space-2);border-top:1px solid var(--border);">
         <div style="font-size:10px;color:var(--text-muted);">
-            💡 <strong>NOW</strong>=Current | <strong>@ENTRY</strong>=Expected at entry rail | <strong>+%</strong>=Sell targets
+            💡 <strong>+50/100/200%</strong> = Sell price at that profit level
         </div>
         <div style="font-size:10px;color:var(--text-muted);">
-            Green = Sweet Spot ($3.50-$8)
+            Green highlight = Sweet Spot ($3.50-$8)
         </div>
     </div>
 </div>
@@ -8581,85 +5180,6 @@ body {{
     <span style="font-size:24px;">📊</span>
     <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-top:var(--space-2);">Options Chain Not Loaded</div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:var(--space-1);">Click "Load Chain to Dashboard" in sidebar</div>
-</div>
-'''
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # v11 IMPROVEMENT #5: TRADE LOG SECTION
-    # ═══════════════════════════════════════════════════════════════════════
-    if trades:
-        trade_stats = get_session_stats(trades)
-        html += f'''
-<!-- v11 TRADE LOG -->
-<div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-4);">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-3);">
-        <div style="display:flex;align-items:center;gap:var(--space-2);">
-            <span style="font-size:18px;">📋</span>
-            <span style="font-size:14px;font-weight:600;color:var(--text-primary);">Trade Log</span>
-            <span style="font-size:11px;color:var(--text-muted);">({len(trades)} trades)</span>
-        </div>
-        <div style="display:flex;gap:var(--space-3);">
-            <div style="text-align:center;">
-                <div style="font-size:10px;color:var(--text-muted);">Wins</div>
-                <div style="font-size:14px;font-weight:700;color:var(--success);">{trade_stats['wins']}</div>
-            </div>
-            <div style="text-align:center;">
-                <div style="font-size:10px;color:var(--text-muted);">Losses</div>
-                <div style="font-size:14px;font-weight:700;color:var(--danger);">{trade_stats['losses']}</div>
-            </div>
-            <div style="text-align:center;">
-                <div style="font-size:10px;color:var(--text-muted);">Total P&L</div>
-                <div style="font-size:14px;font-weight:700;color:{'var(--success)' if trade_stats['total_pnl'] >= 0 else 'var(--danger)'};font-family:var(--font-mono);">{"+" if trade_stats['total_pnl'] >= 0 else ""}${trade_stats['total_pnl']:,.0f}</div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Trade Table -->
-    <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;">
-            <thead>
-                <tr style="border-bottom:1px solid var(--border);">
-                    <th style="text-align:left;padding:8px 4px;color:var(--text-muted);font-weight:500;">Time</th>
-                    <th style="text-align:left;padding:8px 4px;color:var(--text-muted);font-weight:500;">Dir</th>
-                    <th style="text-align:left;padding:8px 4px;color:var(--text-muted);font-weight:500;">Strike</th>
-                    <th style="text-align:right;padding:8px 4px;color:var(--text-muted);font-weight:500;">Entry</th>
-                    <th style="text-align:right;padding:8px 4px;color:var(--text-muted);font-weight:500;">Exit</th>
-                    <th style="text-align:right;padding:8px 4px;color:var(--text-muted);font-weight:500;">P&L</th>
-                    <th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-weight:500;">Status</th>
-                </tr>
-            </thead>
-            <tbody>
-'''
-        for trade in trades[-10:]:  # Show last 10 trades
-            dir_color = "var(--success)" if trade.direction == "CALLS" else "var(--danger)"
-            dir_icon = "↑" if trade.direction == "CALLS" else "↓"
-            pnl_color = "var(--success)" if trade.pnl_dollars >= 0 else "var(--danger)"
-            status_emoji = "✅" if trade.status == "WIN" else "❌" if trade.status in ["LOSS", "STOPPED"] else "⏳" if trade.status == "OPEN" else "➖"
-            
-            entry_time_str = ""
-            if trade.entry_time:
-                try:
-                    et = datetime.fromisoformat(trade.entry_time)
-                    entry_time_str = et.strftime("%H:%M")
-                except:
-                    entry_time_str = trade.entry_time[:5]
-            
-            html += f'''
-                <tr style="border-bottom:1px solid var(--border-light);">
-                    <td style="padding:8px 4px;font-family:var(--font-mono);">{entry_time_str}</td>
-                    <td style="padding:8px 4px;color:{dir_color};font-weight:600;">{dir_icon} {trade.direction[:1]}</td>
-                    <td style="padding:8px 4px;font-family:var(--font-mono);">{trade.strike}{'C' if trade.direction == 'CALLS' else 'P'}</td>
-                    <td style="padding:8px 4px;text-align:right;font-family:var(--font-mono);">${trade.entry_price:.2f}</td>
-                    <td style="padding:8px 4px;text-align:right;font-family:var(--font-mono);">{f"${trade.exit_price:.2f}" if trade.exit_price > 0 else "—"}</td>
-                    <td style="padding:8px 4px;text-align:right;font-family:var(--font-mono);color:{pnl_color};font-weight:600;">{f"${trade.pnl_dollars:+,.0f}" if trade.status != "OPEN" else "—"}</td>
-                    <td style="padding:8px 4px;text-align:center;">{status_emoji}</td>
-                </tr>
-'''
-        
-        html += '''
-            </tbody>
-        </table>
-    </div>
 </div>
 '''
     
@@ -8687,25 +5207,6 @@ body {{
         
         # De-emphasize setups without confluence when confluence exists
         should_deemphasize = bool(confluence_cone_names) and not has_ds_confluence and not is_broken and not is_tested
-        
-        # Get chain pricing if available
-        chain_now_price = 0
-        chain_entry_price = 0
-        if options_chain:
-            for c in options_chain.get('calls', []):
-                if c['strike'] == opt.spx_strike:
-                    chain_now_price = c.get('current', 0) or c.get('best_price', 0)
-                    chain_entry_price = c.get('expected_entry', chain_now_price)
-                    break
-        
-        # Use chain price if available, otherwise use calculated estimate
-        display_now = chain_now_price if chain_now_price > 0 else opt.spx_price_est
-        display_entry = chain_entry_price if chain_entry_price > 0 else opt.spx_price_est
-        
-        # Calculate profit targets based on entry price
-        target_50 = display_entry * 1.5 if display_entry > 0 else 0
-        target_100 = display_entry * 2.0 if display_entry > 0 else 0
-        target_200 = display_entry * 3.0 if display_entry > 0 else 0
         
         # Status class and text
         if is_broken:
@@ -8769,20 +5270,16 @@ body {{
                         <div class="contract-value calls">{opt.spx_strike}C</div>
                     </div>
                     <div class="contract-item">
-                        <div class="contract-label">NOW</div>
-                        <div class="contract-value" style="color:var(--text-muted);">${display_now:.2f}</div>
-                    </div>
-                    <div class="contract-item">
-                        <div class="contract-label">@ENTRY</div>
-                        <div class="contract-value" style="color:var(--warning);font-weight:700;">${display_entry:.2f}</div>
+                        <div class="contract-label">Premium</div>
+                        <div class="contract-value">${opt.spx_price_est:.2f}</div>
                     </div>
                 </div>
                 <div class="setup-targets">
-                    <div style="font-size:9px;color:var(--text-muted);margin-bottom:4px;">Sell Targets (from @ENTRY)</div>
                     <div class="targets-row">
-                        <div class="target-item"><div class="target-pct">+50%</div><div class="target-profit" style="color:var(--success);">${target_50:.2f}</div></div>
-                        <div class="target-item"><div class="target-pct">+100%</div><div class="target-profit" style="color:var(--success);">${target_100:.2f}</div></div>
-                        <div class="target-item"><div class="target-pct">+200%</div><div class="target-profit" style="color:var(--success);font-weight:700;">${target_200:.2f}</div></div>
+                        <div class="target-item"><div class="target-pct">25%</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">50%</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">75%</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">100%</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
                     </div>
                 </div>
                 <div class="setup-risk">
@@ -8817,25 +5314,6 @@ body {{
         
         # De-emphasize setups without confluence when confluence exists
         should_deemphasize = bool(confluence_cone_names) and not has_ds_confluence and not is_broken and not is_tested
-        
-        # Get chain pricing if available
-        chain_now_price = 0
-        chain_entry_price = 0
-        if options_chain:
-            for p in options_chain.get('puts', []):
-                if p['strike'] == opt.spx_strike:
-                    chain_now_price = p.get('current', 0) or p.get('best_price', 0)
-                    chain_entry_price = p.get('expected_entry', chain_now_price)
-                    break
-        
-        # Use chain price if available, otherwise use calculated estimate
-        display_now = chain_now_price if chain_now_price > 0 else opt.spx_price_est
-        display_entry = chain_entry_price if chain_entry_price > 0 else opt.spx_price_est
-        
-        # Calculate profit targets based on entry price
-        target_50 = display_entry * 1.5 if display_entry > 0 else 0
-        target_100 = display_entry * 2.0 if display_entry > 0 else 0
-        target_200 = display_entry * 3.0 if display_entry > 0 else 0
         
         # Status class and text
         if is_broken:
@@ -8899,20 +5377,16 @@ body {{
                         <div class="contract-value puts">{opt.spx_strike}P</div>
                     </div>
                     <div class="contract-item">
-                        <div class="contract-label">NOW</div>
-                        <div class="contract-value" style="color:var(--text-muted);">${display_now:.2f}</div>
-                    </div>
-                    <div class="contract-item">
-                        <div class="contract-label">@ENTRY</div>
-                        <div class="contract-value" style="color:var(--warning);font-weight:700;">${display_entry:.2f}</div>
+                        <div class="contract-label">Premium</div>
+                        <div class="contract-value">${opt.spx_price_est:.2f}</div>
                     </div>
                 </div>
                 <div class="setup-targets">
-                    <div style="font-size:9px;color:var(--text-muted);margin-bottom:4px;">Sell Targets (from @ENTRY)</div>
                     <div class="targets-row">
-                        <div class="target-item"><div class="target-pct">+50%</div><div class="target-profit" style="color:var(--success);">${target_50:.2f}</div></div>
-                        <div class="target-item"><div class="target-pct">+100%</div><div class="target-profit" style="color:var(--success);">${target_100:.2f}</div></div>
-                        <div class="target-item"><div class="target-pct">+200%</div><div class="target-profit" style="color:var(--success);font-weight:700;">${target_200:.2f}</div></div>
+                        <div class="target-item"><div class="target-pct">25%</div><div class="target-profit">+${s.profit_25:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">50%</div><div class="target-profit">+${s.profit_50:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">75%</div><div class="target-profit">+${s.profit_75:,.0f}</div></div>
+                        <div class="target-item"><div class="target-pct">100%</div><div class="target-profit">+${s.profit_100:,.0f}</div></div>
                     </div>
                 </div>
                 <div class="setup-risk">
@@ -9169,53 +5643,8 @@ document.addEventListener('DOMContentLoaded', function() {{
 '''
     return html
 
-# ╔══════════════════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                                          ║
-# ║                              SECTION 9: MAIN APPLICATION                                 ║
-# ║                                                                                          ║
-# ║  The main() function orchestrates the entire application:                               ║
-# ║                                                                                          ║
-# ║  STREAMLIT SIDEBAR:                                                                      ║
-# ║  ├── Theme toggle (dark/light)                                                          ║
-# ║  ├── VIX Configuration (manual or auto-fetch)                                           ║
-# ║  ├── Prior Session Pivots (High, Low, Close times)                                      ║
-# ║  ├── Day Structure Inputs (Sydney/Tokyo/London sessions)                                ║
-# ║  ├── Options Chain Controls                                                              ║
-# ║  └── Debug Tools                                                                         ║
-# ║                                                                                          ║
-# ║  DATA FLOW:                                                                              ║
-# ║  1. Load VIX data → Calculate zones and bias                                            ║
-# ║  2. Load prior session → Create pivot points                                            ║
-# ║  3. Generate cones → Calculate rails for current time                                   ║
-# ║  4. Generate setups → Identify trade opportunities                                      ║
-# ║  5. Load options chain → Get real prices and Greeks                                     ║
-# ║  6. Render dashboard → Display everything                                               ║
-# ║                                                                                          ║
-# ╚══════════════════════════════════════════════════════════════════════════════════════════╝
-
 def main():
-    """
-    Main application entry point.
-    
-    v11 UPDATES:
-    - Trade logging system
-    - Auto-refresh capability  
-    - Alert system
-    - API status tracking
-    - Unified entry levels
-    
-    This function:
-    1. Configures the Streamlit page
-    2. Initializes session state with defaults
-    3. Renders the sidebar with all inputs
-    4. Fetches/calculates all trading data
-    5. Renders the main dashboard
-    """
-    st.set_page_config(page_title="SPX Prophet v11", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
-    
-    # ─────────────────────────────────────────────────────────────────────────────────────────
-    # Session State Defaults - Initialize all persistent state variables
-    # ─────────────────────────────────────────────────────────────────────────────────────────
+    st.set_page_config(page_title="SPX Prophet", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
     defaults = {
         'theme': 'dark', 
         'vix_bottom': 0.0, 'vix_top': 0.0, 'vix_current': 0.0, 
@@ -9227,43 +5656,32 @@ def main():
         'trading_date': None, 
         'last_refresh': None,
         'overnight_spx': 0.0,  # Current SPX/ES price for proximity analysis
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # SIMPLIFIED DAY STRUCTURE (v11) - Just High Line and Low Line
-        # ═══════════════════════════════════════════════════════════════════════
-        'high_line': 0.0,           # Overnight high - entry for PUTS
-        'high_line_time': '',       # When high was made (CT)
-        'low_line': 0.0,            # Overnight low - entry for CALLS
-        'low_line_time': '',        # When low was made (CT)
-        'high_line_broken': False,  # SPX broke above high → FLIP to CALLS
-        'low_line_broken': False,   # SPX broke below low → FLIP to PUTS
-        'es_spx_offset': 12.0,      # ES to SPX conversion offset (ES - offset = SPX)
-        
-        # Advanced: Individual session pivots (optional, collapsed by default)
-        'sydney_high': 0.0, 'sydney_low': 0.0,
-        'tokyo_high': 0.0, 'tokyo_low': 0.0,
-        'london_high': 0.0, 'london_low': 0.0,
-        
-        # v11 NEW: Trade Logging
-        'trades': [],  # List of Trade dicts
-        'active_trade': None,  # Current open trade
-        # v11 NEW: Auto-Refresh
-        'auto_refresh': False,
-        'refresh_interval': 30,  # seconds
-        'last_auto_refresh': None,
-        # v11 NEW: Alerts
-        'price_alerts': [],  # List of Alert dicts
-        'alerts_enabled': True,
-        'sound_enabled': False,
-        # v11 NEW: API Status
-        'api_status': None,  # APIStatus dict
+        # Day Structure - 3 Session pivots for trendlines (Sydney → Tokyo → London)
+        # Session times (CT): Sydney 4pm-6pm, Tokyo 6pm-2am, London 2am-6:30am
+        'sydney_high': 0.0, 'sydney_high_time': "17:00",
+        'sydney_low': 0.0, 'sydney_low_time': "17:30",
+        'tokyo_high': 0.0, 'tokyo_high_time': "21:00", 
+        'tokyo_low': 0.0, 'tokyo_low_time': "23:00",
+        'london_high': 0.0, 'london_high_time': "05:00", 
+        'london_low': 0.0, 'london_low_time': "06:00",
+        # Contract Prices - PUT (tracks high line)
+        'put_price_sydney': 0.0,
+        'put_price_tokyo': 0.0,
+        'put_price_london': 0.0,
+        # Contract Prices - CALL (tracks low line)
+        'call_price_sydney': 0.0,
+        'call_price_tokyo': 0.0,
+        'call_price_london': 0.0,
+        # Structure broken flags
+        'high_line_broken': False,
+        'low_line_broken': False
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
     
     with st.sidebar:
-        st.markdown("## 📈 SPX Prophet v11")
+        st.markdown("## 📈 SPX Prophet")
         st.caption("Where Structure Becomes Foresight")
         st.divider()
         theme = st.radio("🎨 Theme", ["Dark", "Light"], horizontal=True, index=0 if st.session_state.theme == "dark" else 1)
@@ -9487,280 +5905,100 @@ def main():
         st.caption(f"📍 Pricing at **{entry_hour}:{entry_min:02d} AM CT**")
         st.divider()
         
-        # ═══════════════════════════════════════════════════════════════════════
-        # SIMPLIFIED DAY STRUCTURE - Just High Line and Low Line
-        # ═══════════════════════════════════════════════════════════════════════
+        # DAY STRUCTURE - 3 Session Trendlines
         st.markdown("### 📐 Day Structure")
-        st.caption("Overnight High/Low for entry levels")
+        st.caption("3-Session trendlines (Sydney → Tokyo → London)")
         
-        # HIGH LINE (for PUTS)
-        st.markdown("**🔴 HIGH LINE** (Resistance → PUTS)")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.session_state.high_line = st.number_input(
-                "SPX Price", 
-                value=st.session_state.get('high_line', 0.0), 
-                step=0.25, 
-                format="%.2f", 
-                key="high_line_input",
-                help="Overnight high - entry point for PUTS"
-            )
-        with c2:
-            st.session_state.high_line_time = st.text_input(
-                "Time (CT)", 
-                value=st.session_state.get('high_line_time', ''), 
-                key="high_line_time_input",
-                help="When high was made, e.g. 05:30"
-            )
-        
-        # LOW LINE (for CALLS)
-        st.markdown("**🟢 LOW LINE** (Support → CALLS)")
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.session_state.low_line = st.number_input(
-                "SPX Price", 
-                value=st.session_state.get('low_line', 0.0), 
-                step=0.25, 
-                format="%.2f", 
-                key="low_line_input",
-                help="Overnight low - entry point for CALLS"
-            )
-        with c2:
-            st.session_state.low_line_time = st.text_input(
-                "Time (CT)", 
-                value=st.session_state.get('low_line_time', ''), 
-                key="low_line_time_input",
-                help="When low was made, e.g. 02:15"
-            )
-        
-        # ES to SPX Offset
-        st.markdown("**⚙️ ES → SPX Offset**")
-        st.session_state.es_spx_offset = st.number_input(
-            "Subtract from ES", 
-            value=st.session_state.get('es_spx_offset', 12.0), 
-            min_value=-50.0,
-            max_value=50.0,
-            step=0.5, 
-            format="%.1f", 
-            key="es_offset_input",
-            help="ES typically trades 10-15 pts above SPX. Adjust based on current spread."
-        )
-        st.caption(f"ES 6000 → SPX {6000 - st.session_state.es_spx_offset:.0f}")
-        
-        # Quick action buttons
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📊 From ES Futures", key="fetch_es_structure", use_container_width=True):
-                with st.spinner("Fetching ES session pivots..."):
-                    try:
-                        # Use Yahoo Finance for ES futures overnight data
-                        import yfinance as yf
-                        
-                        # Get user-defined offset
-                        spx_adj = st.session_state.get('es_spx_offset', 12.0)
-                        
-                        es = yf.Ticker("ES=F")
-                        # Get 3 days of 30m data to cover overnight sessions
-                        hist = es.history(period="3d", interval="30m")
-                        
-                        if not hist.empty:
-                            # Convert index to CT timezone
-                            ct_tz = pytz.timezone('America/Chicago')
-                            hist.index = hist.index.tz_convert(ct_tz)
-                            
-                            # Get current time in CT
-                            now_ct = datetime.now(ct_tz)
-                            today = now_ct.date()
-                            yesterday = today - timedelta(days=1)
-                            
-                            # Define session windows for TODAY's structure
-                            # Sydney: 5pm - 8:30pm CT (yesterday)
-                            # Tokyo: 9pm - 1:30am CT (yesterday to today)  
-                            # London: 2am - 6:30am CT (today)
-                            
-                            sydney_start = ct_tz.localize(datetime.combine(yesterday, time(17, 0)))
-                            sydney_end = ct_tz.localize(datetime.combine(yesterday, time(20, 30)))
-                            tokyo_start = ct_tz.localize(datetime.combine(yesterday, time(21, 0)))
-                            tokyo_end = ct_tz.localize(datetime.combine(today, time(1, 30)))
-                            london_start = ct_tz.localize(datetime.combine(today, time(2, 0)))
-                            london_end = ct_tz.localize(datetime.combine(today, time(6, 30)))
-                            
-                            # Filter data for each session
-                            sydney_data = hist[(hist.index >= sydney_start) & (hist.index <= sydney_end)]
-                            tokyo_data = hist[(hist.index >= tokyo_start) & (hist.index <= tokyo_end)]
-                            london_data = hist[(hist.index >= london_start) & (hist.index <= london_end)]
-                            
-                            # ES to SPX adjustment - uses user-defined offset
-                            # spx_adj already set from session_state above
-                            
-                            # Get HIGH and LOW of EACH SESSION (for trendlines)
-                            results = []
-                            
-                            # Sydney session pivot
-                            if not sydney_data.empty:
-                                syd_high = sydney_data['High'].max() - spx_adj
-                                syd_low = sydney_data['Low'].min() - spx_adj
-                                syd_high_time = sydney_data['High'].idxmax().strftime("%H:%M")
-                                syd_low_time = sydney_data['Low'].idxmin().strftime("%H:%M")
-                                st.session_state.sydney_high = round(syd_high, 2)
-                                st.session_state.sydney_low = round(syd_low, 2)
-                                results.append(f"🌙 Syd: H {syd_high:.0f} @ {syd_high_time} | L {syd_low:.0f} @ {syd_low_time}")
-                            
-                            # Tokyo session pivot
-                            if not tokyo_data.empty:
-                                tok_high = tokyo_data['High'].max() - spx_adj
-                                tok_low = tokyo_data['Low'].min() - spx_adj
-                                tok_high_time = tokyo_data['High'].idxmax().strftime("%H:%M")
-                                tok_low_time = tokyo_data['Low'].idxmin().strftime("%H:%M")
-                                st.session_state.tokyo_high = round(tok_high, 2)
-                                st.session_state.tokyo_low = round(tok_low, 2)
-                                results.append(f"🗼 Tok: H {tok_high:.0f} @ {tok_high_time} | L {tok_low:.0f} @ {tok_low_time}")
-                            
-                            # London session pivot
-                            if not london_data.empty:
-                                lon_high = london_data['High'].max() - spx_adj
-                                lon_low = london_data['Low'].min() - spx_adj
-                                lon_high_time = london_data['High'].idxmax().strftime("%H:%M")
-                                lon_low_time = london_data['Low'].idxmin().strftime("%H:%M")
-                                st.session_state.london_high = round(lon_high, 2)
-                                st.session_state.london_low = round(lon_low, 2)
-                                results.append(f"🏛️ Lon: H {lon_high:.0f} @ {lon_high_time} | L {lon_low:.0f} @ {lon_low_time}")
-                            
-                            # Now calculate the projected HIGH LINE and LOW LINE at entry
-                            # HIGH LINE = Connect session highs
-                            # LOW LINE = Connect session lows
-                            
-                            highs = []
-                            lows = []
-                            
-                            if st.session_state.get('sydney_high', 0) > 0:
-                                highs.append(st.session_state.sydney_high)
-                            if st.session_state.get('tokyo_high', 0) > 0:
-                                highs.append(st.session_state.tokyo_high)
-                            if st.session_state.get('london_high', 0) > 0:
-                                highs.append(st.session_state.london_high)
-                                
-                            if st.session_state.get('sydney_low', 0) > 0:
-                                lows.append(st.session_state.sydney_low)
-                            if st.session_state.get('tokyo_low', 0) > 0:
-                                lows.append(st.session_state.tokyo_low)
-                            if st.session_state.get('london_low', 0) > 0:
-                                lows.append(st.session_state.london_low)
-                            
-                            # Use the most recent session's value as the anchor
-                            # and project with standard slope
-                            if len(highs) >= 2:
-                                # Use last two highs to calculate slope, project to entry
-                                # For simplicity, use London high as the main HIGH LINE
-                                st.session_state.high_line = st.session_state.get('london_high', 0) or st.session_state.get('tokyo_high', 0)
-                                st.session_state.high_line_time = lon_high_time if not london_data.empty else tok_high_time if not tokyo_data.empty else ""
-                            elif len(highs) == 1:
-                                st.session_state.high_line = highs[0]
-                            
-                            if len(lows) >= 2:
-                                st.session_state.low_line = st.session_state.get('london_low', 0) or st.session_state.get('tokyo_low', 0)
-                                st.session_state.low_line_time = lon_low_time if not london_data.empty else tok_low_time if not tokyo_data.empty else ""
-                            elif len(lows) == 1:
-                                st.session_state.low_line = lows[0]
-                            
-                            # Show results
-                            for r in results:
-                                st.success(r)
-                            
-                            if len(highs) >= 2 and len(lows) >= 2:
-                                st.info(f"📐 Structure: {len(highs)}-pt High Line, {len(lows)}-pt Low Line")
-                            
-                            st.rerun()
-                        else:
-                            st.error("No ES data available")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)[:80]}")
-        
-        with col2:
-            if st.button("📋 From Prior Day", key="use_prior_day", use_container_width=True):
-                # Use prior session high/low if available
-                prior_high = st.session_state.get('prior_high', 0)
-                prior_low = st.session_state.get('prior_low', 0)
-                if prior_high > 0 and prior_low > 0:
-                    st.session_state.high_line = prior_high
-                    st.session_state.low_line = prior_low
-                    st.success(f"✓ Using prior day range")
-                    st.rerun()
-                else:
-                    st.warning("Enter prior session H/L first")
-        
-        # Structure status
-        has_high = st.session_state.get('high_line', 0) > 0
-        has_low = st.session_state.get('low_line', 0) > 0
-        
-        if has_high and has_low:
-            high_val = st.session_state.high_line
-            low_val = st.session_state.low_line
-            range_size = high_val - low_val
-            st.success(f"📐 Range: {range_size:.0f} pts ({low_val:.0f} - {high_val:.0f})")
-        elif has_high:
-            st.info(f"🔴 High Line set: {st.session_state.high_line:.0f}")
-        elif has_low:
-            st.info(f"🟢 Low Line set: {st.session_state.low_line:.0f}")
-        
-        # Line break indicators
-        with st.expander("⚡ Line Breaks", expanded=False):
-            st.session_state.high_line_broken = st.checkbox(
-                "High Line BROKEN (price above)", 
-                value=st.session_state.get("high_line_broken", False), 
-                key="high_broken",
-                help="Check if SPX broke above high line → FLIP to CALLS"
-            )
-            st.session_state.low_line_broken = st.checkbox(
-                "Low Line BROKEN (price below)", 
-                value=st.session_state.get("low_line_broken", False), 
-                key="low_broken",
-                help="Check if SPX broke below low line → FLIP to PUTS"
-            )
-            
-            if st.session_state.get('high_line_broken'):
-                st.warning("⚡ HIGH BROKEN → FLIP to CALLS")
-            if st.session_state.get('low_line_broken'):
-                st.warning("⚡ LOW BROKEN → FLIP to PUTS")
-        
-        # Advanced: Show individual session inputs (collapsed by default)
-        with st.expander("🔧 Advanced: Session Details", expanded=False):
-            st.caption("Optional: Track individual session pivots")
-            
-            st.markdown("**Sydney** (5pm-8:30pm)")
-            c1, c2 = st.columns(2)
+        with st.expander("HIGH LINE (PUTS)", expanded=False):
+            st.markdown("**Sydney High** (4pm-6pm CT)")
+            c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.sydney_high = st.number_input("High", value=st.session_state.get('sydney_high', 0.0), step=0.25, format="%.2f", key="adv_syd_h")
+                st.session_state.sydney_high = st.number_input("SPX", value=st.session_state.sydney_high, step=0.01, format="%.2f", key="syd_h")
             with c2:
-                st.session_state.sydney_low = st.number_input("Low", value=st.session_state.get('sydney_low', 0.0), step=0.25, format="%.2f", key="adv_syd_l")
+                st.session_state.sydney_high_time = st.text_input("Time", value=st.session_state.sydney_high_time, key="syd_ht", help="CT, e.g. 17:00")
             
-            st.markdown("**Tokyo** (9pm-1:30am)")
-            c1, c2 = st.columns(2)
+            st.markdown("**Tokyo High** (6pm-2am CT)")
+            c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.tokyo_high = st.number_input("High", value=st.session_state.get('tokyo_high', 0.0), step=0.25, format="%.2f", key="adv_tok_h")
+                st.session_state.tokyo_high = st.number_input("SPX", value=st.session_state.tokyo_high, step=0.01, format="%.2f", key="tok_h")
             with c2:
-                st.session_state.tokyo_low = st.number_input("Low", value=st.session_state.get('tokyo_low', 0.0), step=0.25, format="%.2f", key="adv_tok_l")
+                st.session_state.tokyo_high_time = st.text_input("Time", value=st.session_state.tokyo_high_time, key="tok_ht", help="CT, e.g. 21:00")
             
-            st.markdown("**London** (2am-6:30am)")
-            c1, c2 = st.columns(2)
+            st.markdown("**London High** (2am-6:30am CT)")
+            c1, c2 = st.columns([2, 1])
             with c1:
-                st.session_state.london_high = st.number_input("High", value=st.session_state.get('london_high', 0.0), step=0.25, format="%.2f", key="adv_lon_h")
+                st.session_state.london_high = st.number_input("SPX", value=st.session_state.london_high, step=0.01, format="%.2f", key="lon_h")
             with c2:
-                st.session_state.london_low = st.number_input("Low", value=st.session_state.get('london_low', 0.0), step=0.25, format="%.2f", key="adv_lon_l")
+                st.session_state.london_high_time = st.text_input("Time", value=st.session_state.london_high_time, key="lon_ht")
             
-            # Sync button
-            if st.button("↑ Sync to Main", key="sync_sessions", use_container_width=True):
-                # Use highest high and lowest low from all sessions
-                highs = [st.session_state.get('sydney_high', 0), st.session_state.get('tokyo_high', 0), st.session_state.get('london_high', 0)]
-                lows = [st.session_state.get('sydney_low', 0), st.session_state.get('tokyo_low', 0), st.session_state.get('london_low', 0)]
-                highs = [h for h in highs if h > 0]
-                lows = [l for l in lows if l > 0]
-                if highs:
-                    st.session_state.high_line = max(highs)
-                if lows:
-                    st.session_state.low_line = min(lows)
-                st.success("✓ Synced")
-                st.rerun()
+            st.markdown("**PUT Contract Prices** (10 OTM)")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.session_state.put_price_sydney = st.number_input("@ Syd", value=st.session_state.put_price_sydney, step=0.10, format="%.2f", key="put_syd")
+            with c2:
+                st.session_state.put_price_tokyo = st.number_input("@ Tok", value=st.session_state.put_price_tokyo, step=0.10, format="%.2f", key="put_tok")
+            with c3:
+                st.session_state.put_price_london = st.number_input("@ Lon", value=st.session_state.put_price_london, step=0.10, format="%.2f", key="put_lon")
+            
+            # High line broken checkbox
+            st.session_state.high_line_broken = st.checkbox("⚡ High line BROKEN (SPX broke above)", value=st.session_state.get("high_line_broken", False), key="high_broken")
+        
+        with st.expander("LOW LINE (CALLS)", expanded=False):
+            st.markdown("**Sydney Low** (4pm-6pm CT)")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.sydney_low = st.number_input("SPX", value=st.session_state.sydney_low, step=0.01, format="%.2f", key="syd_l")
+            with c2:
+                st.session_state.sydney_low_time = st.text_input("Time", value=st.session_state.sydney_low_time, key="syd_lt", help="CT, e.g. 17:30")
+            
+            st.markdown("**Tokyo Low** (6pm-2am CT)")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.tokyo_low = st.number_input("SPX", value=st.session_state.tokyo_low, step=0.01, format="%.2f", key="tok_l")
+            with c2:
+                st.session_state.tokyo_low_time = st.text_input("Time", value=st.session_state.tokyo_low_time, key="tok_lt", help="CT, e.g. 23:00")
+            
+            st.markdown("**London Low** (2am-6:30am CT)")
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.session_state.london_low = st.number_input("SPX", value=st.session_state.london_low, step=0.01, format="%.2f", key="lon_l")
+            with c2:
+                st.session_state.london_low_time = st.text_input("Time", value=st.session_state.london_low_time, key="lon_lt")
+            
+            st.markdown("**CALL Contract Prices** (10 OTM)")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.session_state.call_price_sydney = st.number_input("@ Syd", value=st.session_state.call_price_sydney, step=0.10, format="%.2f", key="call_syd")
+            with c2:
+                st.session_state.call_price_tokyo = st.number_input("@ Tok", value=st.session_state.call_price_tokyo, step=0.10, format="%.2f", key="call_tok")
+            with c3:
+                st.session_state.call_price_london = st.number_input("@ Lon", value=st.session_state.call_price_london, step=0.10, format="%.2f", key="call_lon")
+            
+            # Low line broken checkbox
+            st.session_state.low_line_broken = st.checkbox("⚡ Low line BROKEN (SPX broke below)", value=st.session_state.get("low_line_broken", False), key="low_broken")
+        
+        # Show day structure status
+        has_high_line = st.session_state.tokyo_high > 0 and st.session_state.london_high > 0
+        has_low_line = st.session_state.tokyo_low > 0 and st.session_state.london_low > 0
+        has_sydney_high = st.session_state.sydney_high > 0
+        has_sydney_low = st.session_state.sydney_low > 0
+        
+        if has_high_line or has_low_line:
+            status_parts = []
+            if has_sydney_high and has_high_line:
+                status_parts.append("High 3pt ✓")
+            elif has_high_line:
+                status_parts.append("High 2pt")
+            if has_sydney_low and has_low_line:
+                status_parts.append("Low 3pt ✓")
+            elif has_low_line:
+                status_parts.append("Low 2pt")
+            st.success(f"📐 {' | '.join(status_parts)}")
+            
+            if st.session_state.high_line_broken:
+                st.warning("⚡ HIGH LINE BROKEN → FLIP to CALLS")
+            if st.session_state.low_line_broken:
+                st.warning("⚡ LOW LINE BROKEN → FLIP to PUTS")
         
         st.divider()
         
@@ -9797,191 +6035,6 @@ def main():
             st.rerun()
         
         st.caption("💡 Full chain with Greeks shown in main dashboard")
-        
-        st.divider()
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # v11: TRADE LOGGING
-        # ═══════════════════════════════════════════════════════════════════════
-        st.markdown("### 📋 Trade Log")
-        
-        with st.expander("➕ Log New Trade", expanded=False):
-            trade_dir = st.selectbox("Direction", ["CALLS", "PUTS"], key="new_trade_dir")
-            trade_strike = st.number_input("Strike", value=int(current_spx // 5) * 5, step=5, key="new_trade_strike")
-            trade_entry = st.number_input("Entry $", value=5.00, step=0.25, format="%.2f", key="new_trade_entry")
-            trade_contracts = st.number_input("Qty", value=10, min_value=1, max_value=100, key="new_trade_contracts")
-            trade_source = st.selectbox("Setup", ["C1", "C2", "C3", "DS_HIGH", "DS_LOW", "OTHER"], key="new_trade_source")
-            
-            if st.button("📝 Log Entry", key="log_trade_btn", use_container_width=True):
-                new_trade = create_trade(
-                    direction=trade_dir,
-                    strike=trade_strike,
-                    entry_price=trade_entry,
-                    entry_spx=current_spx,
-                    entry_source=trade_source,
-                    contracts=trade_contracts
-                )
-                if 'trades' not in st.session_state:
-                    st.session_state.trades = []
-                st.session_state.trades.append(new_trade)
-                st.session_state.active_trade = new_trade
-                st.success(f"✅ {trade_dir} {trade_strike} @ ${trade_entry:.2f}")
-                st.rerun()
-        
-        # Show active trade
-        active_trade = st.session_state.get('active_trade')
-        if active_trade and active_trade.status == "OPEN":
-            st.info(f"🔵 {active_trade.direction} {active_trade.strike} @ ${active_trade.entry_price:.2f}")
-            
-            with st.expander("📤 Close Trade"):
-                exit_price = st.number_input("Exit $", value=active_trade.entry_price * 1.5, step=0.25, format="%.2f", key="exit_price")
-                if st.button("✅ Close", key="close_trade_btn", use_container_width=True):
-                    closed = close_trade(active_trade, exit_price, current_spx, "")
-                    for i, t in enumerate(st.session_state.trades):
-                        if t.id == closed.id:
-                            st.session_state.trades[i] = closed
-                    st.session_state.active_trade = None
-                    st.success(f"{closed.status}: ${closed.pnl_dollars:+,.0f}")
-                    st.rerun()
-        
-        # Quick stats
-        if st.session_state.get('trades'):
-            stats = get_session_stats(st.session_state.trades)
-            c1, c2, c3 = st.columns(3)
-            c1.metric("W/L", f"{stats['wins']}/{stats['losses']}")
-            c2.metric("Rate", f"{stats['win_rate']:.0f}%")
-            c3.metric("P&L", f"${stats['total_pnl']:+,.0f}")
-        
-        st.divider()
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # v11: AUTO-REFRESH & ALERTS
-        # ═══════════════════════════════════════════════════════════════════════
-        st.markdown("### ⚡ Auto-Refresh")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            auto_refresh = st.checkbox("Enable", value=st.session_state.get('auto_refresh', False), key="auto_ref_cb")
-            st.session_state.auto_refresh = auto_refresh
-        with c2:
-            interval = st.selectbox("Sec", [15, 30, 60], index=1, key="ref_int")
-            st.session_state.refresh_interval = interval
-        
-        if auto_refresh:
-            now = get_ct_now()
-            if time(8, 30) <= now.time() <= get_market_close_time(trading_date):
-                last = st.session_state.get('last_auto_refresh')
-                if last:
-                    try:
-                        elapsed = (now - datetime.fromisoformat(last)).total_seconds()
-                        if elapsed >= interval:
-                            st.session_state.last_auto_refresh = now.isoformat()
-                            st.session_state.load_options_chain = True
-                            st.rerun()
-                        st.caption(f"🔄 {max(0, int(interval - elapsed))}s")
-                    except:
-                        st.session_state.last_auto_refresh = now.isoformat()
-                else:
-                    st.session_state.last_auto_refresh = now.isoformat()
-        
-        st.markdown("### 🔔 Alerts")
-        st.session_state.alerts_enabled = st.checkbox("Entry Alerts", value=st.session_state.get('alerts_enabled', True), key="alerts_cb")
-        
-        st.divider()
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # v11 IMPROVEMENT #20: QUICK RESET BUTTONS
-        # ═══════════════════════════════════════════════════════════════════════
-        st.markdown("### 🔄 Reset")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🌙 Reset Day Struct", key="reset_ds_btn", use_container_width=True):
-                for key in ['sydney_high', 'sydney_low', 'tokyo_high', 'tokyo_low', 
-                           'london_high', 'london_low', 'put_price_sydney', 'put_price_tokyo',
-                           'put_price_london', 'call_price_sydney', 'call_price_tokyo', 'call_price_london']:
-                    st.session_state[key] = 0.0
-                st.success("✓ Day Structure reset")
-                st.rerun()
-        
-        with col2:
-            if st.button("📊 Reset VIX", key="reset_vix_btn", use_container_width=True):
-                st.session_state.vix_bottom = 0.0
-                st.session_state.vix_top = 0.0
-                st.session_state.vix_current = 0.0
-                st.success("✓ VIX reset")
-                st.rerun()
-        
-        if st.button("🆕 New Trading Day", key="new_day_btn", use_container_width=True):
-            # Reset everything except theme
-            keep_keys = ['theme']
-            current_theme = st.session_state.get('theme', 'dark')
-            for key in list(st.session_state.keys()):
-                if key not in keep_keys:
-                    del st.session_state[key]
-            st.session_state.theme = current_theme
-            st.success("✓ Fresh start!")
-            st.rerun()
-        
-        st.divider()
-        
-        # ═══════════════════════════════════════════════════════════════════════
-        # v11 IMPROVEMENT #21: EXPORT/IMPORT
-        # ═══════════════════════════════════════════════════════════════════════
-        st.markdown("### 💾 Export/Import")
-        
-        with st.expander("📤 Export Setup", expanded=False):
-            if st.button("Generate Export", key="export_btn", use_container_width=True):
-                export_json = export_state_to_json(st.session_state)
-                st.code(export_json, language="json")
-                st.caption("Copy the JSON above to save your setup")
-        
-        with st.expander("📥 Import Setup", expanded=False):
-            import_json = st.text_area("Paste JSON here", key="import_json", height=100)
-            if st.button("Apply Import", key="import_btn", use_container_width=True):
-                if import_json:
-                    result = import_state_from_json(import_json)
-                    if "error" in result:
-                        st.error(f"Import failed: {result['error']}")
-                    else:
-                        for key, value in result.items():
-                            st.session_state[key] = value
-                        st.success("✓ Import successful!")
-                        st.rerun()
-                else:
-                    st.warning("Paste JSON first")
-        
-        st.divider()
-        
-        # DEBUG: Test single option fetch
-        with st.expander("🔧 Debug API", expanded=False):
-            test_strike = st.number_input("Test Strike", value=int(current_spx // 5) * 5, step=5, key="test_strike")
-            test_type = st.selectbox("Type", ["P", "C"], key="test_type")
-            if st.button("🧪 Test Fetch", key="test_fetch"):
-                # Build the ticker manually to show
-                exp_str = exp_date.strftime("%y%m%d")
-                strike_str = f"{int(test_strike * 1000):08d}"
-                ticker = f"O:SPXW{exp_str}{test_type}{strike_str}"
-                st.code(f"Ticker: {ticker}")
-                st.write(f"Expiration: {exp_date}")
-                
-                # Fetch and show raw response
-                result = get_spx_option_price(test_strike, test_type, exp_date)
-                if result:
-                    st.success("✅ Got data!")
-                    st.json({
-                        "bid": result.get('bid'),
-                        "ask": result.get('ask'),
-                        "last": result.get('last'),
-                        "day_close": result.get('day_close'),
-                        "best_price": result.get('best_price'),
-                        "iv": result.get('iv'),
-                        "delta": result.get('delta')
-                    })
-                else:
-                    st.error("❌ No data returned")
-                    if 'debug_info' in st.session_state:
-                        st.json(st.session_state.debug_info)
         
         st.divider()
         
@@ -10236,22 +6289,31 @@ def main():
     
     setups = generate_setups(cones, price_for_setups, vix_for_pricing, mins_after_open, is_after_cutoff, broken_structures, tested_structures)
     
-    # Calculate Day Structure - Uses session pivots to create trendlines
-    day_structure = calculate_day_structure_simple(
-        high_line=st.session_state.get("high_line", 0.0),
-        high_line_time=st.session_state.get("high_line_time", ""),
-        low_line=st.session_state.get("low_line", 0.0),
-        low_line_time=st.session_state.get("low_line_time", ""),
-        entry_time_mins=mins_after_open,
+    # Calculate Day Structure (3-session trendlines + contract pricing)
+    day_structure = calculate_day_structure(
+        st.session_state.get("sydney_high", 0.0),
+        st.session_state.get("sydney_high_time", "17:00"),
+        st.session_state.get("sydney_low", 0.0),
+        st.session_state.get("sydney_low_time", "17:30"),
+        st.session_state.get("tokyo_high", 0.0),
+        st.session_state.get("tokyo_high_time", "21:00"),
+        st.session_state.get("tokyo_low", 0.0),
+        st.session_state.get("tokyo_low_time", "23:00"),
+        st.session_state.get("london_high", 0.0),
+        st.session_state.get("london_high_time", "05:00"),
+        st.session_state.get("london_low", 0.0),
+        st.session_state.get("london_low_time", "06:00"),
+        mins_after_open,
+        cones,
+        trading_date,
+        put_price_sydney=st.session_state.get("put_price_sydney", 0.0),
+        put_price_tokyo=st.session_state.get("put_price_tokyo", 0.0),
+        put_price_london=st.session_state.get("put_price_london", 0.0),
+        call_price_sydney=st.session_state.get("call_price_sydney", 0.0),
+        call_price_tokyo=st.session_state.get("call_price_tokyo", 0.0),
+        call_price_london=st.session_state.get("call_price_london", 0.0),
         high_line_broken=st.session_state.get("high_line_broken", False),
-        low_line_broken=st.session_state.get("low_line_broken", False),
-        # Session pivots for proper trendlines
-        sydney_high=st.session_state.get("sydney_high", 0.0),
-        tokyo_high=st.session_state.get("tokyo_high", 0.0),
-        london_high=st.session_state.get("london_high", 0.0),
-        sydney_low=st.session_state.get("sydney_low", 0.0),
-        tokyo_low=st.session_state.get("tokyo_low", 0.0),
-        london_low=st.session_state.get("london_low", 0.0),
+        low_line_broken=st.session_state.get("low_line_broken", False)
     )
     
     # ═══════════════════════════════════════════════════════════════════════
@@ -10292,31 +6354,29 @@ def main():
     # Get smart 0DTE expiration date
     exp_date, exp_label, is_preview, price_ref_date = get_0dte_expiration_date()
     
-    # Get entry levels from Day Structure for expected price calculations
-    call_entry_level = day_structure.low_line_at_entry if day_structure and day_structure.low_line_valid else None
-    put_entry_level = day_structure.high_line_at_entry if day_structure and day_structure.high_line_valid else None
-    
     # Check if user requested chain load from sidebar
     if st.session_state.get("load_options_chain", False):
         with st.spinner("Loading options chain..."):
             chain_center = st.session_state.get("chain_center", int(spx_price // 5) * 5)
             chain_range = st.session_state.get("chain_range", 50)
             
-            # Use the ACTUAL expiration date (tomorrow's contracts ARE tradeable and have prices)
-            # Pass entry levels for expected price calculations
+            # KEY FIX: Use price_ref_date for fetching prices (today's contracts when after hours)
+            # This gives us actual last-traded prices instead of empty data for tomorrow's contracts
             options_chain = fetch_options_chain_for_dashboard(
                 center_strike=chain_center,
-                expiration_date=exp_date,
+                expiration_date=price_ref_date,  # Use TODAY's contracts for prices
                 range_pts=chain_range,
-                vix_current=vix_for_pricing,
-                call_entry=call_entry_level,  # Low Line = CALL entry
-                put_entry=put_entry_level      # High Line = PUT entry
+                vix_current=vix_for_pricing
             )
             
             if options_chain:
+                # Store the chain but note which expiration we're showing vs where prices came from
+                options_chain['display_expiration'] = exp_date  # Tomorrow's date for display
+                options_chain['price_source_date'] = price_ref_date  # Today's date where prices came from
                 st.session_state.dashboard_options_chain = options_chain
                 st.session_state.chain_exp_date = exp_date
                 st.session_state.chain_exp_label = exp_label
+                st.session_state.chain_price_source = price_ref_date
             
             # Reset the load flag
             st.session_state.load_options_chain = False
@@ -10325,45 +6385,8 @@ def main():
     if 'dashboard_options_chain' in st.session_state:
         options_chain = st.session_state.dashboard_options_chain
     
-    # v11: Get unified entry levels
-    entry_levels = get_all_entry_levels(cones, day_structure, spx_price, options_chain, vix_zone.bias) if cones else []
-    
-    # v11: Check for price alerts
-    if st.session_state.get('alerts_enabled', True) and entry_levels:
-        existing_alerts = st.session_state.get('price_alerts', [])
-        new_alerts = check_price_alerts(spx_price, entry_levels, existing_alerts)
-        if new_alerts:
-            st.session_state.price_alerts = existing_alerts + new_alerts
-    
-    # v11: Build API status
-    api_status = APIStatus(
-        is_connected=True if options_chain else False,
-        spx_price=spx_price,
-        vix_price=vix_zone.current,
-        chain_loaded=options_chain is not None,
-        chain_contracts=len(options_chain.get('puts', [])) + len(options_chain.get('calls', [])) if options_chain else 0
-    )
-    if options_chain:
-        api_status.last_successful_call = get_ct_now().isoformat()
-        api_status.chain_updated = options_chain.get('fetched_at', get_ct_now()).isoformat() if hasattr(options_chain.get('fetched_at', ''), 'isoformat') else str(options_chain.get('fetched_at', ''))
-    
-    # Get trades from session state
-    trades = st.session_state.get('trades', [])
-    price_alerts = st.session_state.get('price_alerts', [])
-    
-    # USE CLEAN DASHBOARD (v11.1)
-    html = render_clean_dashboard(
-        spx_price=spx_price,
-        vix_zone=vix_zone,
-        ma_bias=ma_bias,
-        day_structure=day_structure,
-        cones=cones,
-        trading_date=trading_date,
-        entry_time_mins=st.session_state.get('entry_time_mins', 30),
-        theme=st.session_state.theme,
-        options_chain=options_chain
-    )
-    components.html(html, height=1800, scrolling=True)
+    html = render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, st.session_state.theme, ma_bias, confluence, market_ctx, price_proximity, day_structure, options_chain)
+    components.html(html, height=5500, scrolling=True)
 
 if __name__ == "__main__":
     main()
