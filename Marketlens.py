@@ -5125,6 +5125,651 @@ def check_alerts(setups, vix_zone, current_time):
 # ║                                                                                          ║
 # ╚══════════════════════════════════════════════════════════════════════════════════════════╝
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# CLEAN DASHBOARD - v11.1 Minimal, focused trading view
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+def render_clean_dashboard(
+    spx_price: float,
+    vix_zone,
+    ma_bias,
+    day_structure,
+    cones: list,
+    trading_date,
+    entry_time_mins: int,
+    theme: str = "dark",
+    options_chain: dict = None
+) -> str:
+    """
+    Render a clean, minimal trading dashboard.
+    
+    Shows only what matters:
+    1. Current SPX + VIX direction
+    2. Day Structure (with session values visible)
+    3. Cone Rails (entries when inside structure, exits when outside)
+    4. Simple trade recommendations
+    5. Collapsible trading rules
+    """
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # THEME
+    # ═══════════════════════════════════════════════════════════════════════
+    if theme == "light":
+        bg_main = "#fafafa"
+        bg_card = "#ffffff"
+        text_primary = "#171717"
+        text_secondary = "#525252"
+        text_muted = "#a3a3a3"
+        border = "#e5e5e5"
+        success = "#16a34a"
+        danger = "#dc2626"
+        warning = "#d97706"
+        accent = "#7c3aed"
+    else:
+        bg_main = "#0a0a0b"
+        bg_card = "#111113"
+        text_primary = "#f4f4f5"
+        text_secondary = "#a1a1aa"
+        text_muted = "#52525b"
+        border = "rgba(255,255,255,0.08)"
+        success = "#22c55e"
+        danger = "#ef4444"
+        warning = "#f59e0b"
+        accent = "#8b5cf6"
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # DETERMINE MARKET CONTEXT
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    # Get Day Structure values
+    high_line = day_structure.high_line_at_entry if day_structure and day_structure.high_line_valid else 0
+    low_line = day_structure.low_line_at_entry if day_structure and day_structure.low_line_valid else 0
+    
+    # Session values
+    syd_high = day_structure.sydney_high if day_structure else 0
+    tok_high = day_structure.tokyo_high if day_structure else 0
+    lon_high = day_structure.london_high if day_structure else 0
+    syd_low = day_structure.sydney_low if day_structure else 0
+    tok_low = day_structure.tokyo_low if day_structure else 0
+    lon_low = day_structure.london_low if day_structure else 0
+    
+    # Line broken status
+    high_broken = day_structure.high_line_broken if day_structure else False
+    low_broken = day_structure.low_line_broken if day_structure else False
+    
+    # Determine position relative to structure
+    if high_line > 0 and low_line > 0:
+        if spx_price > high_line:
+            position = "ABOVE"
+            position_color = success
+            position_text = f"ABOVE Day Structure (+{spx_price - high_line:.0f} pts)"
+            cone_context = "EXIT TARGETS"
+        elif spx_price < low_line:
+            position = "BELOW"
+            position_color = danger
+            position_text = f"BELOW Day Structure ({spx_price - low_line:.0f} pts)"
+            cone_context = "EXIT TARGETS"
+        else:
+            position = "INSIDE"
+            position_color = accent
+            position_text = "INSIDE Day Structure"
+            cone_context = "Additional Entries"
+    else:
+        position = "UNKNOWN"
+        position_color = text_muted
+        position_text = "Day Structure not set"
+        cone_context = ""
+    
+    # VIX direction
+    vix_direction = "NEUTRAL"
+    vix_color = text_muted
+    vix_value = ""
+    if vix_zone:
+        vix_value = f" ({vix_zone.current:.2f})" if hasattr(vix_zone, 'current') and vix_zone.current else ""
+        if vix_zone.bias in ["CALLS", "STRONG_CALLS"]:
+            vix_direction = "CALLS"
+            vix_color = success
+        elif vix_zone.bias in ["PUTS", "STRONG_PUTS"]:
+            vix_direction = "PUTS"
+            vix_color = danger
+        elif vix_zone.bias == "WAIT":
+            vix_direction = "WAIT"
+            vix_color = warning
+    
+    # MA bias
+    ma_direction = "NEUTRAL"
+    ma_color = text_muted
+    if ma_bias:
+        if ma_bias.bias == "LONG":
+            ma_direction = "LONG"
+            ma_color = success
+        elif ma_bias.bias == "SHORT":
+            ma_direction = "SHORT"
+            ma_color = danger
+    
+    # Format trading date
+    date_str = trading_date.strftime("%b %d, %Y") if trading_date else ""
+    
+    # Entry time
+    entry_hour = 8 + (30 + entry_time_mins) // 60
+    entry_min = (30 + entry_time_mins) % 60
+    entry_time_str = f"{entry_hour}:{entry_min:02d} AM CT"
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # BUILD HTML
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    html = f'''
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    
+    .clean-dashboard {{
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: {bg_main};
+        color: {text_primary};
+        padding: 20px;
+        min-height: 100vh;
+    }}
+    
+    .brand {{
+        text-align: center;
+        padding: 24px 0;
+        margin-bottom: 20px;
+    }}
+    .brand-title {{
+        font-size: 28px;
+        font-weight: 700;
+        background: linear-gradient(135deg, {accent}, {success});
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        letter-spacing: 2px;
+    }}
+    .brand-tagline {{
+        font-size: 11px;
+        color: {text_muted};
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        margin-top: 4px;
+    }}
+    
+    .header-bar {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        background: {bg_card};
+        border: 1px solid {border};
+        border-radius: 12px;
+        margin-bottom: 16px;
+    }}
+    .spx-price {{
+        font-size: 36px;
+        font-weight: 700;
+        font-family: "SF Mono", Monaco, monospace;
+    }}
+    .spx-label {{
+        font-size: 12px;
+        color: {text_muted};
+    }}
+    .status-badges {{
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }}
+    .badge {{
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    .meta-info {{
+        font-size: 11px;
+        color: {text_muted};
+        text-align: right;
+    }}
+    
+    .context-banner {{
+        padding: 14px 18px;
+        border-radius: 10px;
+        margin-bottom: 16px;
+        font-size: 14px;
+        font-weight: 500;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }}
+    
+    .section {{
+        background: {bg_card};
+        border: 1px solid {border};
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 16px;
+    }}
+    .section-title {{
+        font-size: 13px;
+        font-weight: 600;
+        color: {text_muted};
+        margin-bottom: 16px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }}
+    
+    .structure-line {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 16px;
+        background: {bg_main};
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }}
+    .line-info {{
+        flex: 1;
+    }}
+    .line-label {{
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 4px;
+    }}
+    .session-values {{
+        font-size: 11px;
+        color: {text_muted};
+        font-family: "SF Mono", Monaco, monospace;
+    }}
+    .line-value {{
+        font-family: "SF Mono", Monaco, monospace;
+        font-size: 22px;
+        font-weight: 700;
+        text-align: right;
+    }}
+    .line-subtext {{
+        font-size: 10px;
+        color: {text_muted};
+        text-align: right;
+    }}
+    .broken-badge {{
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        margin-left: 8px;
+    }}
+    
+    .range-info {{
+        text-align: center;
+        padding: 10px 0 0 0;
+        font-size: 12px;
+        color: {text_muted};
+        border-top: 1px solid {border};
+        margin-top: 10px;
+    }}
+    
+    .cone-grid {{
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+    }}
+    .cone-card {{
+        padding: 12px;
+        background: {bg_main};
+        border-radius: 8px;
+        text-align: center;
+    }}
+    .cone-name {{
+        font-size: 11px;
+        color: {text_muted};
+        margin-bottom: 8px;
+        font-weight: 500;
+    }}
+    .cone-rail {{
+        font-family: "SF Mono", Monaco, monospace;
+        font-size: 14px;
+        font-weight: 600;
+        margin: 4px 0;
+    }}
+    .cone-dist {{
+        font-size: 10px;
+        color: {text_muted};
+    }}
+    
+    .trade-grid {{
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }}
+    .trade-box {{
+        padding: 16px;
+        border-radius: 10px;
+    }}
+    .trade-box.calls {{
+        background: rgba(34, 197, 94, 0.08);
+        border: 1px solid rgba(34, 197, 94, 0.25);
+    }}
+    .trade-box.puts {{
+        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(239, 68, 68, 0.25);
+    }}
+    .trade-header {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+    }}
+    .trade-icon {{
+        font-size: 18px;
+    }}
+    .trade-direction {{
+        font-size: 16px;
+        font-weight: 700;
+    }}
+    .trade-row {{
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        margin-bottom: 6px;
+        color: {text_secondary};
+    }}
+    .trade-value {{
+        font-family: "SF Mono", Monaco, monospace;
+        font-weight: 600;
+        color: {text_primary};
+    }}
+    
+    .collapsible {{
+        cursor: pointer;
+    }}
+    .collapsible-content {{
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+    }}
+    .collapsible.open .collapsible-content {{
+        max-height: 2000px;
+    }}
+    .collapsible-header {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }}
+    .collapsible-icon {{
+        font-size: 12px;
+        transition: transform 0.2s;
+        color: {text_muted};
+    }}
+    .collapsible.open .collapsible-icon {{
+        transform: rotate(180deg);
+    }}
+    .rules-content {{
+        padding-top: 16px;
+        font-size: 13px;
+        line-height: 1.7;
+        color: {text_secondary};
+    }}
+    .rules-content h4 {{
+        color: {accent};
+        margin: 16px 0 8px 0;
+        font-size: 14px;
+    }}
+    .rules-content ul {{
+        margin-left: 20px;
+        margin-bottom: 8px;
+    }}
+    .rules-content li {{
+        margin-bottom: 4px;
+    }}
+</style>
+</head>
+<body>
+<div class="clean-dashboard">
+    
+    <!-- BRAND -->
+    <div class="brand">
+        <div class="brand-title">SPX PROPHET</div>
+        <div class="brand-tagline">Where Structure Becomes Foresight</div>
+    </div>
+    
+    <!-- HEADER BAR -->
+    <div class="header-bar">
+        <div>
+            <div class="spx-price">{spx_price:,.0f}</div>
+            <div class="spx-label">SPX</div>
+        </div>
+        <div class="status-badges">
+            <div class="badge" style="background:{vix_color}18;color:{vix_color};border:1px solid {vix_color}40;">VIX: {vix_direction}{vix_value}</div>
+            <div class="badge" style="background:{ma_color}18;color:{ma_color};border:1px solid {ma_color}40;">MA: {ma_direction}</div>
+        </div>
+        <div class="meta-info">
+            {date_str}<br>
+            Entry @ {entry_time_str}
+        </div>
+    </div>
+    
+    <!-- CONTEXT BANNER -->
+    <div class="context-banner" style="background:{position_color}12;border:1px solid {position_color}35;color:{position_color};">
+        <span><strong>{position_text}</strong></span>
+        <span style="font-size:12px;opacity:0.8;">{f'Cones → {cone_context}' if cone_context else ''}</span>
+    </div>
+    
+    <!-- DAY STRUCTURE -->
+    <div class="section">
+        <div class="section-title">📐 Day Structure</div>
+        
+        <!-- HIGH LINE -->
+        <div class="structure-line">
+            <div class="line-info">
+                <div class="line-label" style="color:{danger};">
+                    🔴 HIGH LINE → PUTS Entry
+                    {f'<span class="broken-badge" style="background:{success}30;color:{success};">⚡ BROKEN → CALLS</span>' if high_broken else ''}
+                </div>
+                <div class="session-values">
+                    Syd: {syd_high:,.0f} → Tok: {tok_high:,.0f} → Lon: {lon_high:,.0f}
+                </div>
+            </div>
+            <div>
+                <div class="line-value" style="color:{danger if not high_broken else text_muted};">{high_line:,.0f}</div>
+                <div class="line-subtext">@ entry</div>
+            </div>
+        </div>
+        
+        <!-- LOW LINE -->
+        <div class="structure-line">
+            <div class="line-info">
+                <div class="line-label" style="color:{success};">
+                    🟢 LOW LINE → CALLS Entry
+                    {f'<span class="broken-badge" style="background:{danger}30;color:{danger};">⚡ BROKEN → PUTS</span>' if low_broken else ''}
+                </div>
+                <div class="session-values">
+                    Syd: {syd_low:,.0f} → Tok: {tok_low:,.0f} → Lon: {lon_low:,.0f}
+                </div>
+            </div>
+            <div>
+                <div class="line-value" style="color:{success if not low_broken else text_muted};">{low_line:,.0f}</div>
+                <div class="line-subtext">@ entry</div>
+            </div>
+        </div>
+        
+        <!-- Range info -->
+        <div class="range-info">
+            Range: <strong>{high_line - low_line:.0f}</strong> pts &nbsp;│&nbsp; 
+            SPX to High: <strong>{high_line - spx_price:+.0f}</strong> &nbsp;│&nbsp;
+            SPX to Low: <strong>{low_line - spx_price:+.0f}</strong>
+        </div>
+    </div>
+    
+    <!-- CONE RAILS -->
+    <div class="section">
+        <div class="section-title">📐 Cone Rails <span style="font-weight:400;color:{text_muted};">({cone_context})</span></div>
+        <div class="cone-grid">
+'''
+    
+    # Add cone cards
+    for i, cone in enumerate(cones[:3]):  # Show max 3 cones
+        asc_rail = cone.ascending_rail if hasattr(cone, 'ascending_rail') else 0
+        desc_rail = cone.descending_rail if hasattr(cone, 'descending_rail') else 0
+        cone_name = cone.name if hasattr(cone, 'name') else f"Cone {i+1}"
+        
+        # Distance from current price
+        asc_dist = spx_price - asc_rail if asc_rail > 0 else 0
+        desc_dist = spx_price - desc_rail if desc_rail > 0 else 0
+        
+        html += f'''
+            <div class="cone-card">
+                <div class="cone-name">{cone_name}</div>
+                <div class="cone-rail" style="color:{success};">↑ {asc_rail:,.0f}</div>
+                <div class="cone-dist">{asc_dist:+.0f} pts</div>
+                <div class="cone-rail" style="color:{danger};margin-top:8px;">↓ {desc_rail:,.0f}</div>
+                <div class="cone-dist">{desc_dist:+.0f} pts</div>
+            </div>
+'''
+    
+    html += '''
+        </div>
+    </div>
+'''
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # TRADE RECOMMENDATIONS
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    # Calculate distances
+    dist_to_high = high_line - spx_price if high_line > 0 else 0
+    dist_to_low = spx_price - low_line if low_line > 0 else 0
+    
+    # Determine recommended strikes (10 OTM from entry)
+    call_strike = int((low_line + 10) // 5) * 5 if low_line > 0 else 0
+    put_strike = int((high_line - 10) // 5) * 5 if high_line > 0 else 0
+    
+    html += f'''
+    <!-- TRADE RECOMMENDATIONS -->
+    <div class="section">
+        <div class="section-title">🎯 Trade Setup</div>
+        
+        <div class="trade-grid">
+            <div class="trade-box calls">
+                <div class="trade-header">
+                    <span class="trade-icon">🟢</span>
+                    <span class="trade-direction" style="color:{success};">CALLS</span>
+                </div>
+                <div class="trade-row">
+                    <span>Entry</span>
+                    <span class="trade-value">Low Line @ {low_line:,.0f}</span>
+                </div>
+                <div class="trade-row">
+                    <span>Strike</span>
+                    <span class="trade-value">{call_strike}C</span>
+                </div>
+                <div class="trade-row">
+                    <span>Distance</span>
+                    <span class="trade-value" style="color:{success if dist_to_low > 10 else warning};">{dist_to_low:.0f} pts ↓</span>
+                </div>
+            </div>
+            
+            <div class="trade-box puts">
+                <div class="trade-header">
+                    <span class="trade-icon">🔴</span>
+                    <span class="trade-direction" style="color:{danger};">PUTS</span>
+                </div>
+                <div class="trade-row">
+                    <span>Entry</span>
+                    <span class="trade-value">High Line @ {high_line:,.0f}</span>
+                </div>
+                <div class="trade-row">
+                    <span>Strike</span>
+                    <span class="trade-value">{put_strike}P</span>
+                </div>
+                <div class="trade-row">
+                    <span>Distance</span>
+                    <span class="trade-value" style="color:{danger if dist_to_high > 10 else warning};">{dist_to_high:.0f} pts ↑</span>
+                </div>
+            </div>
+        </div>
+    </div>
+'''
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # COLLAPSIBLE TRADING RULES
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    html += f'''
+    <!-- TRADING RULES (Collapsible) -->
+    <div class="section collapsible" id="rulesSection">
+        <div class="collapsible-header" onclick="document.getElementById('rulesSection').classList.toggle('open')">
+            <div class="section-title" style="margin-bottom:0;">📖 Trading Rules Reference</div>
+            <span class="collapsible-icon">▼</span>
+        </div>
+        <div class="collapsible-content">
+            <div class="rules-content">
+            
+                <h4>PART 1: MARKET ENVIRONMENT</h4>
+                <p><strong>Rule 1.1:</strong> Determine market bias using 50 EMA vs 200 SMA on SPX 24-hour chart.</p>
+                <ul>
+                    <li><span style="color:{success};">BULLISH:</span> 50 EMA > 200 SMA, Price > 50 EMA → CALLS only</li>
+                    <li><span style="color:{danger};">BEARISH:</span> 50 EMA < 200 SMA, Price < 50 EMA → PUTS only</li>
+                    <li><span style="color:{warning};">TRANSITIONAL:</span> Mixed signals → Trade with caution</li>
+                </ul>
+                <p><strong>Rule 1.2:</strong> <span style="color:{danger};">NEVER</span> trade against the trend.</p>
+                
+                <h4>PART 2: VIX ZONE</h4>
+                <p><strong>Rule 2.1:</strong> Track VIX from 5pm-8:30am CT to establish overnight zone.</p>
+                <p><strong>Rule 2.2:</strong> Expected zone = 1% of VIX, rounded to 0.05.</p>
+                <p><strong>Rule 2.3:</strong> VIX position determines direction:</p>
+                <ul>
+                    <li>At/Below Bottom → <span style="color:{success};">CALLS</span></li>
+                    <li>At/Above Top → <span style="color:{danger};">PUTS</span></li>
+                    <li>Mid-Zone → WAIT</li>
+                </ul>
+                
+                <h4>PART 3: DAY STRUCTURE</h4>
+                <p><strong>Rule 3.1:</strong> Build from Sydney (5pm-8:30pm) → Tokyo (9pm-1:30am) → London (2am-6:30am).</p>
+                <p><strong>Rule 3.2:</strong> Low Line = CALL entry (support). High Line = PUT entry (resistance).</p>
+                <p><strong>Rule 3.3:</strong> Break & Retest: Line breaks → Wait for retest → Enter opposite direction.</p>
+                
+                <h4>PART 4: CONE RAILS</h4>
+                <p><strong>Rule 4.1:</strong> INSIDE structure → Cones are additional entry points.</p>
+                <p><strong>Rule 4.2:</strong> OUTSIDE structure → Cones are EXIT targets.</p>
+                <p><strong>Rule 4.3:</strong> Ascending rails = CALLS entry/exit. Descending rails = PUTS entry/exit.</p>
+                
+                <h4>PART 5: CONTRACT SELECTION</h4>
+                <p><strong>Rule 5.1:</strong> Strike = Entry Price ± 10 (slightly OTM at entry).</p>
+                <p><strong>Rule 5.2:</strong> Premium sweet spot: $3.50 - $8.00.</p>
+                
+                <h4>PART 6: NO TRADE CONDITIONS</h4>
+                <ul style="color:{danger};">
+                    <li>VIX and MA bias in CONFLICT</li>
+                    <li>Trading against the trend</li>
+                    <li>Day Structure not set</li>
+                    <li>After 11:30am CT</li>
+                </ul>
+                
+            </div>
+        </div>
+    </div>
+    
+    <!-- FOOTER -->
+    <div style="text-align:center;padding:20px 0;font-size:11px;color:{text_muted};">
+        SPX Prophet v11.1 │ Where Structure Becomes Foresight
+    </div>
+    
+</div>
+</body>
+</html>
+'''
+    
+    return html
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# LEGACY DASHBOARD (kept for reference, not used)
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
 def render_dashboard(vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, spx_price, trading_date, pivot_date, pivot_session_info, is_historical, theme, ma_bias=None, confluence=None, market_ctx=None, price_proximity=None, day_structure=None, options_chain=None, entry_levels=None, trades=None, api_status=None, price_alerts=None):
     """
     Render the main trading dashboard as HTML.
@@ -9706,17 +10351,19 @@ def main():
     trades = st.session_state.get('trades', [])
     price_alerts = st.session_state.get('price_alerts', [])
     
-    html = render_dashboard(
-        vix_zone, cones, setups, pivot_table, prior_session, day_score, alerts, 
-        spx_price, trading_date, pivot_date, pivot_session_info, is_historical, 
-        st.session_state.theme, ma_bias, confluence, market_ctx, price_proximity, 
-        day_structure, options_chain,
-        entry_levels=entry_levels,  # v11
-        trades=trades,              # v11
-        api_status=api_status,      # v11
-        price_alerts=price_alerts   # v11
+    # USE CLEAN DASHBOARD (v11.1)
+    html = render_clean_dashboard(
+        spx_price=spx_price,
+        vix_zone=vix_zone,
+        ma_bias=ma_bias,
+        day_structure=day_structure,
+        cones=cones,
+        trading_date=trading_date,
+        entry_time_mins=st.session_state.get('entry_time_mins', 30),
+        theme=st.session_state.theme,
+        options_chain=options_chain
     )
-    components.html(html, height=5500, scrolling=True)
+    components.html(html, height=1800, scrolling=True)
 
 if __name__ == "__main__":
     main()
