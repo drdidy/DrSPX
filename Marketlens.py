@@ -284,16 +284,33 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
         
         # ─────────────────────────────────────────────────────────────────────
         # PRIOR DAY RTH
+        # For cones:
+        # - HIGH cone: Ascending uses highest wick, Descending uses highest close
+        # - LOW cone: Both use lowest close (not lowest wick)
+        # - CLOSE cone: Both use last RTH close
         # ─────────────────────────────────────────────────────────────────────
         prior_mask=(df.index>=prior_rth_start)&(df.index<=prior_rth_end)
         prior_data=df[prior_mask]
         if not prior_data.empty:
-            result["prior_high"]=round(prior_data['High'].max(),2)
-            result["prior_low"]=round(prior_data['Low'].min(),2)
-            result["prior_high_time"]=prior_data['High'].idxmax()
-            result["prior_low_time"]=prior_data['Low'].idxmin()
+            # HIGH - wick for ascending, close for descending
+            result["prior_high_wick"]=round(prior_data['High'].max(),2)
+            result["prior_high_wick_time"]=prior_data['High'].idxmax()
+            result["prior_high_close"]=round(prior_data['Close'].max(),2)
+            result["prior_high_close_time"]=prior_data['Close'].idxmax()
+            
+            # LOW - lowest close for both (not lowest wick)
+            result["prior_low_close"]=round(prior_data['Close'].min(),2)
+            result["prior_low_close_time"]=prior_data['Close'].idxmin()
+            
+            # CLOSE - last RTH close
             result["prior_close"]=round(prior_data['Close'].iloc[-1],2)
             result["prior_close_time"]=prior_data.index[-1]
+            
+            # Legacy fields for backward compatibility
+            result["prior_high"]=result["prior_high_wick"]
+            result["prior_low"]=result["prior_low_close"]
+            result["prior_high_time"]=result["prior_high_wick_time"]
+            result["prior_low_time"]=result["prior_low_close_time"]
         
         # ─────────────────────────────────────────────────────────────────────
         # 8:30 AM CANDLE
@@ -409,12 +426,54 @@ def assess_position(price,ceiling,floor):
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONES
 # ═══════════════════════════════════════════════════════════════════════════════
-def calculate_cones(prior_high,prior_high_time,prior_low,prior_low_time,prior_close,prior_close_time,ref_time):
+def calculate_cones(prior_high_wick,prior_high_wick_time,prior_high_close,prior_high_close_time,
+                   prior_low_close,prior_low_close_time,prior_close,prior_close_time,ref_time):
+    """
+    Calculate cone rails with correct anchors:
+    - HIGH: Ascending from highest wick, Descending from highest close
+    - LOW: Both from lowest close
+    - CLOSE: Both from last RTH close
+    """
     cones={}
-    for name,price,anchor_time in [("HIGH",prior_high,prior_high_time),("LOW",prior_low,prior_low_time),("CLOSE",prior_close,prior_close_time)]:
-        blocks=blocks_between(anchor_time,ref_time)
-        exp=SLOPE*blocks
-        cones[name]={"anchor":price,"asc":round(price+exp,2),"desc":round(price-exp,2),"blocks":blocks}
+    
+    # HIGH cone - different anchors for asc vs desc
+    blocks_high_wick=blocks_between(prior_high_wick_time,ref_time)
+    blocks_high_close=blocks_between(prior_high_close_time,ref_time)
+    exp_high_wick=SLOPE*blocks_high_wick
+    exp_high_close=SLOPE*blocks_high_close
+    cones["HIGH"]={
+        "anchor_asc":prior_high_wick,
+        "anchor_desc":prior_high_close,
+        "asc":round(prior_high_wick+exp_high_wick,2),
+        "desc":round(prior_high_close-exp_high_close,2),
+        "blocks_asc":blocks_high_wick,
+        "blocks_desc":blocks_high_close
+    }
+    
+    # LOW cone - both from lowest close
+    blocks_low=blocks_between(prior_low_close_time,ref_time)
+    exp_low=SLOPE*blocks_low
+    cones["LOW"]={
+        "anchor_asc":prior_low_close,
+        "anchor_desc":prior_low_close,
+        "asc":round(prior_low_close+exp_low,2),
+        "desc":round(prior_low_close-exp_low,2),
+        "blocks_asc":blocks_low,
+        "blocks_desc":blocks_low
+    }
+    
+    # CLOSE cone - both from last RTH close
+    blocks_close=blocks_between(prior_close_time,ref_time)
+    exp_close=SLOPE*blocks_close
+    cones["CLOSE"]={
+        "anchor_asc":prior_close,
+        "anchor_desc":prior_close,
+        "asc":round(prior_close+exp_close,2),
+        "desc":round(prior_close-exp_close,2),
+        "blocks_asc":blocks_close,
+        "blocks_desc":blocks_close
+    }
+    
     return cones
 
 def find_targets(entry_level,cones,direction):
@@ -811,9 +870,13 @@ def main():
         tok_l=hist_data.get("tokyo_low",6045)
         on_high=hist_data.get("on_high",6075)
         on_low=hist_data.get("on_low",6040)
-        prior_high=hist_data.get("prior_high",6080)
-        prior_low=hist_data.get("prior_low",6030)
+        
+        # Prior day data for cones
+        prior_high_wick=hist_data.get("prior_high_wick",6080)
+        prior_high_close=hist_data.get("prior_high_close",6075)
+        prior_low_close=hist_data.get("prior_low_close",6030)
         prior_close=hist_data.get("prior_close",6055)
+        
         candle_830=hist_data.get("candle_830")
         current_es=hist_data.get("day_open",es_price or 6050)
         vix_high=inputs["vix_high"] or 18
@@ -826,8 +889,9 @@ def main():
         
         on_high_time=hist_data.get("on_high_time") or CT.localize(datetime.combine(prev_day,time(22,0)))
         on_low_time=hist_data.get("on_low_time") or CT.localize(datetime.combine(inputs["trading_date"],time(2,0)))
-        prior_high_time=hist_data.get("prior_high_time") or CT.localize(datetime.combine(prev_day,time(10,0)))
-        prior_low_time=hist_data.get("prior_low_time") or CT.localize(datetime.combine(prev_day,time(14,0)))
+        prior_high_wick_time=hist_data.get("prior_high_wick_time") or CT.localize(datetime.combine(prev_day,time(10,0)))
+        prior_high_close_time=hist_data.get("prior_high_close_time") or CT.localize(datetime.combine(prev_day,time(10,0)))
+        prior_low_close_time=hist_data.get("prior_low_close_time") or CT.localize(datetime.combine(prev_day,time(14,0)))
         prior_close_time=hist_data.get("prior_close_time") or CT.localize(datetime.combine(prev_day,time(15,0)))
     else:
         # Manual or live
@@ -837,9 +901,13 @@ def main():
         tok_l=inputs.get("on_low") or 6045
         on_high=inputs["on_high"] or 6075
         on_low=inputs["on_low"] or 6040
-        prior_high=inputs["prior_high"] or 6080
-        prior_low=inputs["prior_low"] or 6030
+        
+        # Prior day data for cones (manual mode uses same value for wick and close)
+        prior_high_wick=inputs["prior_high"] or 6080
+        prior_high_close=inputs["prior_high"] or 6080  # In manual mode, same as wick
+        prior_low_close=inputs["prior_low"] or 6030
         prior_close=inputs["prior_close"] or 6055
+        
         vix_high=inputs["vix_high"] or 18
         vix_low=inputs["vix_low"] or 15
         candle_830=None
@@ -852,8 +920,9 @@ def main():
         
         on_high_time=CT.localize(datetime.combine(prev_day,time(22,0)))
         on_low_time=CT.localize(datetime.combine(inputs["trading_date"],time(3,0)))
-        prior_high_time=CT.localize(datetime.combine(prev_day,time(10,0)))
-        prior_low_time=CT.localize(datetime.combine(prev_day,time(14,0)))
+        prior_high_wick_time=CT.localize(datetime.combine(prev_day,time(10,0)))
+        prior_high_close_time=CT.localize(datetime.combine(prev_day,time(10,0)))
+        prior_low_close_time=CT.localize(datetime.combine(prev_day,time(14,0)))
         prior_close_time=CT.localize(datetime.combine(prev_day,time(15,0)))
     
     current_spx=round(current_es-offset,2)
@@ -872,9 +941,18 @@ def main():
     ceiling_spx=round(ceiling_es-offset,2) if ceiling_es else None
     floor_spx=round(floor_es-offset,2) if floor_es else None
     
-    # Cones
-    cones_es=calculate_cones(prior_high,prior_high_time,prior_low,prior_low_time,prior_close,prior_close_time,ref_time)
-    cones_spx={k:{"anchor":round(v["anchor"]-offset,2),"asc":round(v["asc"]-offset,2),"desc":round(v["desc"]-offset,2)} for k,v in cones_es.items()}
+    # Cones - using correct anchors for each line
+    cones_es=calculate_cones(prior_high_wick,prior_high_wick_time,prior_high_close,prior_high_close_time,
+                             prior_low_close,prior_low_close_time,prior_close,prior_close_time,ref_time)
+    # Convert to SPX
+    cones_spx={}
+    for k,v in cones_es.items():
+        cones_spx[k]={
+            "anchor_asc":round(v["anchor_asc"]-offset,2),
+            "anchor_desc":round(v["anchor_desc"]-offset,2),
+            "asc":round(v["asc"]-offset,2),
+            "desc":round(v["desc"]-offset,2)
+        }
     
     # Validation - 8:30 candle determines position by breaking ceiling/floor
     if candle_830 and ceiling_es and floor_es:
