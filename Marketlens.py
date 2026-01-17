@@ -311,6 +311,15 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
             }
         
         # ─────────────────────────────────────────────────────────────────────
+        # PRE-8:30 PRICE (last price before market open - for position assessment)
+        # ─────────────────────────────────────────────────────────────────────
+        pre830_mask=(df.index>=overnight_start)&(df.index<market_open)
+        pre830_data=df[pre830_mask]
+        if not pre830_data.empty:
+            result["pre_830_price"]=round(pre830_data['Close'].iloc[-1],2)
+            result["pre_830_time"]=pre830_data.index[-1]
+        
+        # ─────────────────────────────────────────────────────────────────────
         # TRADING DAY DATA (for analysis)
         # ─────────────────────────────────────────────────────────────────────
         day_mask=(df.index>=market_open)&(df.index<=market_close)
@@ -427,44 +436,56 @@ def find_targets(entry_level,cones,direction):
 # ═══════════════════════════════════════════════════════════════════════════════
 # 8:30 VALIDATION
 # ═══════════════════════════════════════════════════════════════════════════════
-def validate_830_candle(candle,ceiling,floor,position):
+def validate_830_candle(candle,ceiling,floor):
+    """
+    Validate the 8:30 candle based on:
+    1. Did it break above ceiling or below floor? (using High/Low)
+    2. Where did it close?
+    
+    Returns position, validation status, and setup direction
+    """
     if candle is None:
-        return {"status":"AWAITING","message":"Waiting for 8:30 candle","setup":"WAIT"}
+        return {"status":"AWAITING","message":"Waiting for 8:30 candle","setup":"WAIT","position":"UNKNOWN"}
     
     o,h,l,c=candle["open"],candle["high"],candle["low"],candle["close"]
     
-    if position in ["BELOW","MARGINAL_BELOW"]:
-        touched=h>=floor-2
-        closed_below=c<floor
-        closed_inside=floor<=c<=ceiling
-        
-        if touched and closed_below:
-            return {"status":"VALID","message":"✅ Touched floor, closed below","setup":"PUTS","edge":"floor"}
-        elif touched and closed_inside:
-            return {"status":"TREND_DAY","message":"⚡ Touched floor, closed inside - TREND DAY","setup":"BOTH"}
-        elif c>floor:
-            return {"status":"INVALIDATED","message":"❌ Closed above floor","setup":"WAIT_CEILING"}
-        return {"status":"PARTIAL","message":"⏳ Didn't touch floor","setup":"WAIT"}
+    broke_above=h>ceiling  # High exceeded ceiling
+    broke_below=l<floor    # Low exceeded floor
+    closed_above=c>ceiling
+    closed_below=c<floor
+    closed_inside=floor<=c<=ceiling
     
-    elif position in ["ABOVE","MARGINAL_ABOVE"]:
-        touched=l<=ceiling+2
-        closed_above=c>ceiling
-        closed_inside=floor<=c<=ceiling
-        
-        if touched and closed_above:
-            return {"status":"VALID","message":"✅ Touched ceiling, closed above","setup":"CALLS","edge":"ceiling"}
-        elif touched and closed_inside:
-            return {"status":"TREND_DAY","message":"⚡ Touched ceiling, closed inside - TREND DAY","setup":"BOTH"}
-        elif c<ceiling:
-            return {"status":"INVALIDATED","message":"❌ Closed below ceiling","setup":"WAIT_FLOOR"}
-        return {"status":"PARTIAL","message":"⏳ Didn't touch ceiling","setup":"WAIT"}
+    # Determine what happened during the 8:30 candle
+    if broke_below and not broke_above:
+        # Candle broke below floor
+        if closed_below:
+            return {"status":"VALID","message":"✅ Broke below floor, closed below","setup":"PUTS","position":"BELOW","edge":floor}
+        elif closed_inside:
+            return {"status":"TREND_DAY","message":"⚡ Broke below floor, closed inside - TREND DAY","setup":"BOTH","position":"INSIDE"}
+        else:  # closed_above - very wide range candle
+            return {"status":"INVALIDATED","message":"❌ Broke below but closed above ceiling","setup":"WAIT","position":"ABOVE"}
     
-    else:  # INSIDE
-        if c>ceiling:
-            return {"status":"BREAKOUT_UP","message":"📈 Broke above - wait retest","setup":"CALLS_RETEST"}
-        elif c<floor:
-            return {"status":"BREAKOUT_DOWN","message":"📉 Broke below - wait retest","setup":"PUTS_RETEST"}
-        return {"status":"INSIDE","message":"⏸️ Still inside channel","setup":"WAIT"}
+    elif broke_above and not broke_below:
+        # Candle broke above ceiling
+        if closed_above:
+            return {"status":"VALID","message":"✅ Broke above ceiling, closed above","setup":"CALLS","position":"ABOVE","edge":ceiling}
+        elif closed_inside:
+            return {"status":"TREND_DAY","message":"⚡ Broke above ceiling, closed inside - TREND DAY","setup":"BOTH","position":"INSIDE"}
+        else:  # closed_below - very wide range candle
+            return {"status":"INVALIDATED","message":"❌ Broke above but closed below floor","setup":"WAIT","position":"BELOW"}
+    
+    elif broke_above and broke_below:
+        # Very wide range candle - broke both sides
+        if closed_above:
+            return {"status":"VALID","message":"✅ Wide range, closed above ceiling","setup":"CALLS","position":"ABOVE","edge":ceiling}
+        elif closed_below:
+            return {"status":"VALID","message":"✅ Wide range, closed below floor","setup":"PUTS","position":"BELOW","edge":floor}
+        else:
+            return {"status":"TREND_DAY","message":"⚡ Wide range, closed inside - TREND DAY","setup":"BOTH","position":"INSIDE"}
+    
+    else:
+        # Candle stayed inside channel
+        return {"status":"INSIDE","message":"⏸️ 8:30 candle stayed inside channel","setup":"WAIT","position":"INSIDE"}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HISTORICAL OUTCOME ANALYSIS
@@ -662,6 +683,15 @@ def calculate_confidence(channel_type,position,flow,vix_zone):
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ═══════════════════════════════════════════════════════════════════════════════
+def safe_float(value,default):
+    """Safely convert to float, returning default if None or invalid"""
+    if value is None:
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError,ValueError):
+        return float(default)
+
 def render_sidebar():
     saved=load_inputs()
     
@@ -677,7 +707,7 @@ def render_sidebar():
         
         st.markdown("---")
         st.markdown("### ⚙️ ES/SPX Offset")
-        offset=st.number_input("SPX = ES - Offset",value=float(saved.get("offset",18.0)),step=0.5)
+        offset=st.number_input("SPX = ES - Offset",value=safe_float(saved.get("offset"),18.0),step=0.5)
         
         st.markdown("---")
         st.markdown("### 📊 Data Mode")
@@ -691,19 +721,19 @@ def render_sidebar():
             with st.expander("Manual Inputs",expanded=not is_historical):
                 st.markdown("**O/N Structure (ES)**")
                 c1,c2=st.columns(2)
-                on_high=c1.number_input("O/N High",value=float(saved.get("on_high",6075)),step=0.5)
-                on_low=c2.number_input("O/N Low",value=float(saved.get("on_low",6040)),step=0.5)
+                on_high=c1.number_input("O/N High",value=safe_float(saved.get("on_high"),6075.0),step=0.5)
+                on_low=c2.number_input("O/N Low",value=safe_float(saved.get("on_low"),6040.0),step=0.5)
                 
                 st.markdown("**VIX**")
                 c1,c2=st.columns(2)
-                vix_high=c1.number_input("VIX High",value=float(saved.get("vix_high",18)),step=0.1)
-                vix_low=c2.number_input("VIX Low",value=float(saved.get("vix_low",15)),step=0.1)
+                vix_high=c1.number_input("VIX High",value=safe_float(saved.get("vix_high"),18.0),step=0.1)
+                vix_low=c2.number_input("VIX Low",value=safe_float(saved.get("vix_low"),15.0),step=0.1)
                 
                 st.markdown("**Prior Day (ES)**")
                 c1,c2=st.columns(2)
-                prior_high=c1.number_input("Prior High",value=float(saved.get("prior_high",6080)),step=0.5)
-                prior_low=c2.number_input("Prior Low",value=float(saved.get("prior_low",6030)),step=0.5)
-                prior_close=st.number_input("Prior Close",value=float(saved.get("prior_close",6055)),step=0.5)
+                prior_high=c1.number_input("Prior High",value=safe_float(saved.get("prior_high"),6080.0),step=0.5)
+                prior_low=c2.number_input("Prior Low",value=safe_float(saved.get("prior_low"),6030.0),step=0.5)
+                prior_close=st.number_input("Prior Close",value=safe_float(saved.get("prior_close"),6055.0),step=0.5)
         else:
             on_high=on_low=vix_high=vix_low=prior_high=prior_low=prior_close=None
         
@@ -746,7 +776,8 @@ def main():
     with st.spinner("Loading data..."):
         if inputs["is_historical"]:
             # Historical mode - fetch candles for that date range
-            start=inputs["trading_date"]-timedelta(days=3)
+            # Need extra days to handle weekends (if trading_date is Monday/Tuesday)
+            start=inputs["trading_date"]-timedelta(days=7)  # Go back a full week
             end=inputs["trading_date"]+timedelta(days=1)
             es_candles=fetch_es_candles_range(start,end)
             
@@ -841,32 +872,50 @@ def main():
     ceiling_spx=round(ceiling_es-offset,2) if ceiling_es else None
     floor_spx=round(floor_es-offset,2) if floor_es else None
     
-    # Pre-open position (use 8:30 open or current)
-    pre_open_price=candle_830["open"] if candle_830 else current_es
-    if ceiling_es and floor_es:
-        position,pos_desc,pos_dist=assess_position(pre_open_price,ceiling_es,floor_es)
-    else:
-        position,pos_desc,pos_dist="UNKNOWN","undetermined",0
-    
     # Cones
     cones_es=calculate_cones(prior_high,prior_high_time,prior_low,prior_low_time,prior_close,prior_close_time,ref_time)
     cones_spx={k:{"anchor":round(v["anchor"]-offset,2),"asc":round(v["asc"]-offset,2),"desc":round(v["desc"]-offset,2)} for k,v in cones_es.items()}
     
-    # Validation
+    # Validation - 8:30 candle determines position by breaking ceiling/floor
     if candle_830 and ceiling_es and floor_es:
-        validation=validate_830_candle(candle_830,ceiling_es,floor_es,position)
+        validation=validate_830_candle(candle_830,ceiling_es,floor_es)
+        position=validation.get("position","UNKNOWN")
     else:
-        validation={"status":"AWAITING","message":"Waiting for data","setup":"WAIT"}
+        validation={"status":"AWAITING","message":"Waiting for data","setup":"WAIT","position":"UNKNOWN"}
+        position="UNKNOWN"
     
-    # Direction & targets
-    if position in ["BELOW","MARGINAL_BELOW"]:
+    # Calculate distance from edges for display
+    if candle_830 and ceiling_es and floor_es:
+        c830_close=candle_830["close"]
+        if position=="ABOVE":
+            pos_desc="above ceiling"
+            pos_dist=c830_close-ceiling_es
+        elif position=="BELOW":
+            pos_desc="below floor"
+            pos_dist=floor_es-c830_close
+        else:
+            pos_desc="inside channel"
+            pos_dist=min(c830_close-floor_es,ceiling_es-c830_close) if c830_close else 0
+    else:
+        pos_desc="unknown"
+        pos_dist=0
+    
+    # Direction & targets based on validation
+    if validation["setup"]=="PUTS":
         direction="PUTS"
-        entry_edge_es=floor_es
-        targets=find_targets(floor_spx,cones_spx,"PUTS") if floor_spx else []
-    elif position in ["ABOVE","MARGINAL_ABOVE"]:
+        entry_edge_es=validation.get("edge",floor_es)
+        entry_edge_spx=round(entry_edge_es-offset,2) if entry_edge_es else floor_spx
+        targets=find_targets(entry_edge_spx,cones_spx,"PUTS") if entry_edge_spx else []
+    elif validation["setup"]=="CALLS":
         direction="CALLS"
-        entry_edge_es=ceiling_es
-        targets=find_targets(ceiling_spx,cones_spx,"CALLS") if ceiling_spx else []
+        entry_edge_es=validation.get("edge",ceiling_es)
+        entry_edge_spx=round(entry_edge_es-offset,2) if entry_edge_es else ceiling_spx
+        targets=find_targets(entry_edge_spx,cones_spx,"CALLS") if entry_edge_spx else []
+    elif validation["setup"]=="BOTH":
+        # Trend day - could go either direction
+        direction="TREND_DAY"
+        entry_edge_es=None
+        targets=[]
     else:
         direction="WAIT"
         entry_edge_es=None
@@ -1092,13 +1141,28 @@ def main():
     if inputs["debug"]:
         st.markdown("### 🔧 Debug")
         
+        # Show 8:30 candle vs channel
+        st.markdown("**8:30 Candle vs Channel:**")
+        if candle_830:
+            st.write(f"- Candle: O={candle_830['open']}, H={candle_830['high']}, L={candle_830['low']}, C={candle_830['close']}")
+        st.write(f"- Ceiling (ES): {ceiling_es}")
+        st.write(f"- Floor (ES): {floor_es}")
+        if candle_830 and ceiling_es and floor_es:
+            st.write(f"- High vs Ceiling: {candle_830['high']} {'>' if candle_830['high']>ceiling_es else '<='} {ceiling_es} → {'BROKE ABOVE' if candle_830['high']>ceiling_es else 'did not break'}")
+            st.write(f"- Low vs Floor: {candle_830['low']} {'<' if candle_830['low']<floor_es else '>='} {floor_es} → {'BROKE BELOW' if candle_830['low']<floor_es else 'did not break'}")
+            st.write(f"- Close: {candle_830['close']} → {'ABOVE ceiling' if candle_830['close']>ceiling_es else 'BELOW floor' if candle_830['close']<floor_es else 'INSIDE channel'}")
+        
+        # Show validation result
+        st.markdown("**Validation Result:**")
+        st.write(f"- Status: {validation['status']}")
+        st.write(f"- Message: {validation['message']}")
+        st.write(f"- Setup: {validation['setup']}")
+        st.write(f"- Position: {validation.get('position','N/A')}")
+        
         # Show times
         st.markdown("**Anchor Times:**")
         st.write(f"- O/N High Time: {on_high_time}")
         st.write(f"- O/N Low Time: {on_low_time}")
-        st.write(f"- Prior High Time: {prior_high_time}")
-        st.write(f"- Prior Low Time: {prior_low_time}")
-        st.write(f"- Prior Close Time: {prior_close_time}")
         st.write(f"- Reference Time: {ref_time}")
         
         # Show block calculations
@@ -1112,6 +1176,7 @@ def main():
         st.markdown("**Raw Values (ES):**")
         st.write(f"- O/N High: {on_high}, O/N Low: {on_low}")
         st.write(f"- Sydney H/L: {syd_h}/{syd_l}, Tokyo H/L: {tok_h}/{tok_l}")
+        st.write(f"- Channel Type: {channel_type} ({channel_reason})")
         
         # Show calculated levels
         st.markdown("**Calculated Levels (ES):**")
