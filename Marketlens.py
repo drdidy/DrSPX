@@ -110,7 +110,75 @@ STYLES="""<style>
 # UTILITIES
 # ═══════════════════════════════════════════════════════════════════════════════
 def now_ct():return datetime.now(CT)
-def blocks_between(start,end):return max(0,int((end-start).total_seconds()/60//30)) if end>start else 0
+
+def blocks_between(start,end):
+    """
+    Count 30-min blocks between two times, excluding maintenance breaks.
+    ALL maintenance breaks = 2 blocks (1 hour equivalent):
+    - Mon-Thu: 4:00 PM - 5:00 PM CT = 2 blocks
+    - Weekend: Fri 4:00 PM - Sun 5:00 PM CT = 2 blocks (whole weekend = 1 maintenance break)
+    """
+    if end<=start:
+        return 0
+    
+    # Count total raw blocks
+    total_seconds=(end-start).total_seconds()
+    raw_blocks=int(total_seconds/60//30)
+    
+    # Count maintenance breaks crossed (each = 2 blocks)
+    maintenance_count=0
+    current_date=start.date()
+    end_date=end.date()
+    
+    while current_date<=end_date:
+        weekday=current_date.weekday()
+        
+        if weekday==4:  # Friday - weekend break
+            break_start=CT.localize(datetime.combine(current_date,time(16,0)))
+            break_end=CT.localize(datetime.combine(current_date+timedelta(days=2),time(17,0)))  # Sunday 5 PM
+            
+            # If our range crosses this break, count it as 1 maintenance (2 blocks)
+            if start<break_end and end>break_start:
+                maintenance_count+=1
+            
+            current_date+=timedelta(days=3)  # Skip to Monday
+            
+        elif weekday in [5,6]:  # Saturday/Sunday - handled by Friday
+            current_date+=timedelta(days=1)
+            
+        else:  # Mon-Thu: regular 4-5 PM maintenance
+            break_start=CT.localize(datetime.combine(current_date,time(16,0)))
+            break_end=CT.localize(datetime.combine(current_date,time(17,0)))
+            
+            if start<break_end and end>break_start:
+                maintenance_count+=1
+            
+            current_date+=timedelta(days=1)
+    
+    # Each maintenance break = 2 blocks
+    maintenance_blocks=maintenance_count*2
+    
+    # Also subtract the actual time of weekend (since raw_blocks includes it)
+    # Weekend = Fri 4 PM to Sun 5 PM = 49 hours, but we only want to count 2 blocks
+    # So subtract (49 hours worth of blocks - 2)
+    weekend_adjustment=0
+    current_date=start.date()
+    while current_date<=end_date:
+        if current_date.weekday()==4:  # Friday
+            wknd_start=CT.localize(datetime.combine(current_date,time(16,0)))
+            wknd_end=CT.localize(datetime.combine(current_date+timedelta(days=2),time(17,0)))
+            
+            if start<wknd_end and end>wknd_start:
+                overlap_start=max(start,wknd_start)
+                overlap_end=min(end,wknd_end)
+                if overlap_end>overlap_start:
+                    overlap_blocks=int((overlap_end-overlap_start).total_seconds()/60//30)
+                    # We already counted 2 blocks for this, so subtract the excess
+                    weekend_adjustment+=max(0,overlap_blocks-2)
+        current_date+=timedelta(days=1)
+    
+    return max(0,raw_blocks-maintenance_blocks-weekend_adjustment)
+
 def get_vix_zone(vix):
     for z,(lo,hi) in VIX_ZONES.items():
         if lo<=vix<hi:return z
@@ -205,12 +273,17 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
     
     result={}
     
-    # Handle weekends - if trading_date is Monday, prev_day should be Friday
-    prev_day=trading_date-timedelta(days=1)
-    if prev_day.weekday()==6:  # Sunday
-        prev_day=prev_day-timedelta(days=2)  # Go to Friday
-    elif prev_day.weekday()==5:  # Saturday
-        prev_day=prev_day-timedelta(days=1)  # Go to Friday
+    # For PRIOR DAY RTH (cones): If Monday, use Friday
+    prior_rth_day=trading_date-timedelta(days=1)
+    if prior_rth_day.weekday()==6:  # Sunday
+        prior_rth_day=prior_rth_day-timedelta(days=2)  # Go to Friday
+    elif prior_rth_day.weekday()==5:  # Saturday
+        prior_rth_day=prior_rth_day-timedelta(days=1)  # Go to Friday
+    
+    # For OVERNIGHT SESSION: The day before trading_date
+    # If Monday, overnight starts Sunday 5 PM (not Friday)
+    overnight_day=trading_date-timedelta(days=1)  # This is the day overnight STARTS
+    # Note: For Monday, overnight_day is Sunday, which is correct (futures open Sunday 5 PM)
     
     # Convert index to CT
     # Yahoo Finance returns data in ET (Eastern Time), not UTC
@@ -223,19 +296,20 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
     
     # ─────────────────────────────────────────────────────────────────────────
     # SESSION TIMES (CT)
+    # For Monday: overnight starts Sunday 5 PM, but prior RTH is Friday
     # ─────────────────────────────────────────────────────────────────────────
-    sydney_start=CT.localize(datetime.combine(prev_day,time(17,0)))
-    sydney_end=CT.localize(datetime.combine(prev_day,time(20,30)))
-    tokyo_start=CT.localize(datetime.combine(prev_day,time(21,0)))
+    sydney_start=CT.localize(datetime.combine(overnight_day,time(17,0)))
+    sydney_end=CT.localize(datetime.combine(overnight_day,time(20,30)))
+    tokyo_start=CT.localize(datetime.combine(overnight_day,time(21,0)))
     tokyo_end=CT.localize(datetime.combine(trading_date,time(1,30)))
-    overnight_start=CT.localize(datetime.combine(prev_day,time(17,0)))
+    overnight_start=CT.localize(datetime.combine(overnight_day,time(17,0)))
     overnight_end=CT.localize(datetime.combine(trading_date,time(3,0)))  # Sydney + Tokyo + London 1st hour
     market_open=CT.localize(datetime.combine(trading_date,time(8,30)))
     market_close=CT.localize(datetime.combine(trading_date,time(15,0)))
     
-    # Prior day RTH
-    prior_rth_start=CT.localize(datetime.combine(prev_day,time(8,30)))
-    prior_rth_end=CT.localize(datetime.combine(prev_day,time(15,0)))
+    # Prior day RTH (for cones) - uses prior_rth_day which handles Monday→Friday
+    prior_rth_start=CT.localize(datetime.combine(prior_rth_day,time(8,30)))
+    prior_rth_end=CT.localize(datetime.combine(prior_rth_day,time(15,0)))
     
     try:
         # ─────────────────────────────────────────────────────────────────────
@@ -891,17 +965,24 @@ def main():
         vix_high=inputs["vix_high"] or 18
         vix_low=inputs["vix_low"] or 15
         
-        # Get times with fallbacks
-        prev_day=inputs["trading_date"]-timedelta(days=1)
-        if prev_day.weekday()==6:prev_day=prev_day-timedelta(days=2)
-        elif prev_day.weekday()==5:prev_day=prev_day-timedelta(days=1)
+        # Get times with fallbacks - separate overnight_day from prior_rth_day
+        # For PRIOR RTH (cones): Monday uses Friday
+        prior_rth_day=inputs["trading_date"]-timedelta(days=1)
+        if prior_rth_day.weekday()==6:prior_rth_day=prior_rth_day-timedelta(days=2)
+        elif prior_rth_day.weekday()==5:prior_rth_day=prior_rth_day-timedelta(days=1)
         
-        on_high_time=hist_data.get("on_high_time") or CT.localize(datetime.combine(prev_day,time(22,0)))
+        # For OVERNIGHT: Day before trading date (Sunday for Monday)
+        overnight_day=inputs["trading_date"]-timedelta(days=1)
+        
+        # O/N times use overnight_day
+        on_high_time=hist_data.get("on_high_time") or CT.localize(datetime.combine(overnight_day,time(22,0)))
         on_low_time=hist_data.get("on_low_time") or CT.localize(datetime.combine(inputs["trading_date"],time(2,0)))
-        prior_high_wick_time=hist_data.get("prior_high_wick_time") or CT.localize(datetime.combine(prev_day,time(10,0)))
-        prior_high_close_time=hist_data.get("prior_high_close_time") or CT.localize(datetime.combine(prev_day,time(10,0)))
-        prior_low_close_time=hist_data.get("prior_low_close_time") or CT.localize(datetime.combine(prev_day,time(14,0)))
-        prior_close_time=hist_data.get("prior_close_time") or CT.localize(datetime.combine(prev_day,time(15,0)))
+        
+        # Prior RTH times use prior_rth_day
+        prior_high_wick_time=hist_data.get("prior_high_wick_time") or CT.localize(datetime.combine(prior_rth_day,time(10,0)))
+        prior_high_close_time=hist_data.get("prior_high_close_time") or CT.localize(datetime.combine(prior_rth_day,time(10,0)))
+        prior_low_close_time=hist_data.get("prior_low_close_time") or CT.localize(datetime.combine(prior_rth_day,time(14,0)))
+        prior_close_time=hist_data.get("prior_close_time") or CT.localize(datetime.combine(prior_rth_day,time(15,0)))
     else:
         # Manual or live
         syd_h=inputs.get("on_high") or 6070
@@ -923,16 +1004,23 @@ def main():
         current_es=es_price or 6050
         
         # Default times - handle weekends
-        prev_day=inputs["trading_date"]-timedelta(days=1)
-        if prev_day.weekday()==6:prev_day=prev_day-timedelta(days=2)
-        elif prev_day.weekday()==5:prev_day=prev_day-timedelta(days=1)
+        # For PRIOR RTH (cones): Monday uses Friday
+        prior_rth_day=inputs["trading_date"]-timedelta(days=1)
+        if prior_rth_day.weekday()==6:prior_rth_day=prior_rth_day-timedelta(days=2)  # Sunday→Friday
+        elif prior_rth_day.weekday()==5:prior_rth_day=prior_rth_day-timedelta(days=1)  # Saturday→Friday
         
-        on_high_time=CT.localize(datetime.combine(prev_day,time(22,0)))
+        # For OVERNIGHT: Day before trading date (Sunday for Monday)
+        overnight_day=inputs["trading_date"]-timedelta(days=1)
+        
+        # O/N times use overnight_day (Sunday for Monday)
+        on_high_time=CT.localize(datetime.combine(overnight_day,time(22,0)))
         on_low_time=CT.localize(datetime.combine(inputs["trading_date"],time(3,0)))
-        prior_high_wick_time=CT.localize(datetime.combine(prev_day,time(10,0)))
-        prior_high_close_time=CT.localize(datetime.combine(prev_day,time(10,0)))
-        prior_low_close_time=CT.localize(datetime.combine(prev_day,time(14,0)))
-        prior_close_time=CT.localize(datetime.combine(prev_day,time(15,0)))
+        
+        # Prior RTH times use prior_rth_day (Friday for Monday)
+        prior_high_wick_time=CT.localize(datetime.combine(prior_rth_day,time(10,0)))
+        prior_high_close_time=CT.localize(datetime.combine(prior_rth_day,time(10,0)))
+        prior_low_close_time=CT.localize(datetime.combine(prior_rth_day,time(14,0)))
+        prior_close_time=CT.localize(datetime.combine(prior_rth_day,time(15,0)))
     
     current_spx=round(current_es-offset,2)
     
