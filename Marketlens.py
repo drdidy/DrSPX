@@ -460,11 +460,25 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
 # CHANNEL LOGIC
 # ═══════════════════════════════════════════════════════════════════════════════
 def determine_channel(sydney_high,sydney_low,tokyo_high,tokyo_low):
+    """
+    Determine channel direction based on Sydney vs Tokyo session.
+    Primary: Compare highs
+    Tiebreaker: If highs equal, compare lows
+    """
+    # Primary comparison: Highs
     if tokyo_high>sydney_high:
         return "RISING","Tokyo High > Sydney High"
+    elif tokyo_high<sydney_high:
+        return "FALLING","Tokyo High < Sydney High"
+    
+    # Tiebreaker: If highs are equal, use lows
+    if tokyo_low>sydney_low:
+        return "RISING","Highs equal, Tokyo Low > Sydney Low (higher lows)"
     elif tokyo_low<sydney_low:
-        return "FALLING","Tokyo Low < Sydney Low"
-    return "UNDETERMINED","No clear signal"
+        return "FALLING","Highs equal, Tokyo Low < Sydney Low (lower lows)"
+    
+    # Both highs and lows equal = truly flat/undetermined
+    return "UNDETERMINED","Both highs and lows equal"
 
 def calculate_channel_levels(on_high,on_high_time,on_low,on_low_time,ref_time):
     blocks_high=blocks_between(on_high_time,ref_time)
@@ -480,11 +494,18 @@ def calculate_channel_levels(on_high,on_high_time,on_low,on_low_time,ref_time):
     }
 
 def get_channel_edges(levels,channel_type):
+    """
+    Get the active ceiling and floor based on channel type.
+    If UNDETERMINED, default to FALLING (conservative - tighter channel)
+    """
     if channel_type=="RISING":
         return levels["ceiling_rising"]["level"],levels["floor_rising"]["level"],"ceiling_rising","floor_rising"
     elif channel_type=="FALLING":
         return levels["ceiling_falling"]["level"],levels["floor_falling"]["level"],"ceiling_falling","floor_falling"
-    return None,None,None,None
+    else:
+        # UNDETERMINED: Default to FALLING (conservative approach)
+        # This still shows values but user should treat with caution
+        return levels["ceiling_falling"]["level"],levels["floor_falling"]["level"],"ceiling_falling (default)","floor_falling (default)"
 
 def assess_position(price,ceiling,floor):
     if price>ceiling+BREAK_THRESHOLD:
