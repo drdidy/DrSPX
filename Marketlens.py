@@ -243,7 +243,6 @@ def calculate_delta(S: float, K: float, T: float, r: float, sigma: float, option
 # ═══════════════════════════════════════════════════════════════════════════════════════
 # CSS STYLES - Premium Institutional Dark Theme (COMPLETE)
 # ═══════════════════════════════════════════════════════════════════════════════════════
-
 STYLES = """
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════════════
@@ -1850,7 +1849,6 @@ footer { visibility: hidden; }
 .stDeployButton { display: none; }
 </style>
 """
-
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
 # UTILITY FUNCTIONS
