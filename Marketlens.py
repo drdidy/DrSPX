@@ -239,8 +239,9 @@ def calculate_delta(S: float, K: float, T: float, r: float, sigma: float, option
         return 0.0
 
 
+
 # ═══════════════════════════════════════════════════════════════════════════════════════
-# CSS STYLES - Premium Institutional Dark Theme
+# CSS STYLES - Premium Institutional Dark Theme (COMPLETE)
 # ═══════════════════════════════════════════════════════════════════════════════════════
 
 STYLES = """
@@ -254,26 +255,19 @@ STYLES = """
    CSS VARIABLES - Design System Tokens
    ═══════════════════════════════════════════════════════════════════════════════════ */
 :root {
-    /* Backgrounds */
     --bg-primary: #06060a;
     --bg-secondary: #0a0a10;
     --bg-tertiary: #0f0f16;
     --bg-card: rgba(255,255,255,0.015);
     --bg-card-hover: rgba(255,255,255,0.03);
     --bg-elevated: rgba(255,255,255,0.04);
-    
-    /* Borders */
     --border-subtle: rgba(255,255,255,0.04);
     --border-default: rgba(255,255,255,0.08);
     --border-bright: rgba(255,255,255,0.15);
-    
-    /* Text */
     --text-primary: #ffffff;
     --text-secondary: rgba(255,255,255,0.65);
     --text-muted: rgba(255,255,255,0.4);
     --text-disabled: rgba(255,255,255,0.25);
-    
-    /* Accent Colors */
     --green-400: #4ade80;
     --green-500: #22c55e;
     --green-600: #16a34a;
@@ -288,40 +282,27 @@ STYLES = """
     --cyan-400: #22d3ee;
     --cyan-500: #06b6d4;
     --blue-500: #3b82f6;
-    
-    /* Semantic Colors */
     --color-bullish: var(--green-500);
     --color-bearish: var(--red-500);
     --color-neutral: var(--amber-500);
     --color-info: var(--cyan-500);
     --color-accent: var(--purple-500);
-    
-    /* Glows */
     --glow-green: 0 0 40px rgba(34, 197, 94, 0.3);
     --glow-red: 0 0 40px rgba(239, 68, 68, 0.3);
     --glow-purple: 0 0 40px rgba(139, 92, 246, 0.25);
     --glow-cyan: 0 0 40px rgba(6, 182, 212, 0.25);
     --glow-amber: 0 0 40px rgba(245, 158, 11, 0.25);
-    
-    /* Typography */
     --font-display: 'Outfit', sans-serif;
     --font-body: 'Inter', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
-    
-    /* Spacing */
     --radius-sm: 6px;
     --radius-md: 10px;
     --radius-lg: 16px;
     --radius-xl: 24px;
-    
-    /* Transitions */
     --transition-fast: 0.15s ease;
     --transition-normal: 0.25s ease;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   BASE STYLES
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; }
 
 .stApp {
@@ -336,15 +317,11 @@ STYLES = """
 
 .stApp > header { background: transparent !important; }
 
-/* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg-secondary); }
 ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   SIDEBAR
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%) !important;
     border-right: 1px solid var(--border-subtle) !important;
@@ -366,9 +343,6 @@ STYLES = """
     letter-spacing: 0.5px;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   HERO HEADER - Command Center Top Bar
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .hero-container {
     background: linear-gradient(135deg, rgba(139,92,246,0.06) 0%, rgba(6,182,212,0.06) 100%);
     border: 1px solid var(--border-default);
@@ -401,7 +375,6 @@ STYLES = """
     align-items: center;
 }
 
-/* Hero Left - Branding */
 .hero-left { text-align: left; }
 .hero-brand {
     font-family: var(--font-display);
@@ -446,12 +419,8 @@ STYLES = """
     color: var(--text-primary);
 }
 
-/* Hero Center - Price Display */
 .hero-center { text-align: center; }
-.hero-price-container {
-    position: relative;
-    display: inline-block;
-}
+.hero-price-container { position: relative; display: inline-block; }
 .hero-price {
     font-family: var(--font-mono);
     font-size: 64px;
@@ -480,7 +449,6 @@ STYLES = """
     font-weight: 600;
 }
 
-/* Hero Right - Time & Phase */
 .hero-right { text-align: right; }
 .hero-time {
     font-family: var(--font-mono);
@@ -500,7 +468,6 @@ STYLES = """
     margin-top: 4px;
 }
 
-/* Trading Phase Badge */
 .phase-badge {
     display: inline-flex;
     align-items: center;
@@ -553,9 +520,6 @@ STYLES = """
     50% { box-shadow: 0 0 40px rgba(34,197,94,0.5); }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   COMMAND CENTER - Main Trading Panel
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .command-center {
     background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%);
     border: 1px solid var(--border-default);
@@ -609,10 +573,7 @@ STYLES = """
     margin-top: 2px;
 }
 
-/* Confidence Display */
-.confidence-display {
-    text-align: right;
-}
+.confidence-display { text-align: right; }
 .confidence-label {
     font-size: 10px;
     color: var(--text-muted);
@@ -629,14 +590,8 @@ STYLES = """
 .confidence-medium { color: var(--amber-400); }
 .confidence-low { color: var(--red-400); }
 
-/* Command Body */
-.command-body {
-    padding: 24px 28px;
-}
+.command-body { padding: 24px 28px; }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   CHANNEL DISPLAY - Visual Channel Representation
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .channel-container {
     background: rgba(0,0,0,0.3);
     border: 1px solid var(--border-subtle);
@@ -664,12 +619,8 @@ STYLES = """
     background: rgba(255,255,255,0.04);
     border-color: var(--border-bright);
 }
-.channel-edge.ceiling {
-    border-top: 3px solid var(--green-500);
-}
-.channel-edge.floor {
-    border-bottom: 3px solid var(--red-500);
-}
+.channel-edge.ceiling { border-top: 3px solid var(--green-500); }
+.channel-edge.floor { border-bottom: 3px solid var(--red-500); }
 .channel-edge-name {
     font-size: 10px;
     font-weight: 600;
@@ -692,9 +643,7 @@ STYLES = """
     margin-top: 8px;
 }
 
-.channel-middle {
-    text-align: center;
-}
+.channel-middle { text-align: center; }
 .channel-type-badge {
     display: inline-block;
     padding: 8px 16px;
@@ -734,9 +683,6 @@ STYLES = """
     color: var(--text-muted);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   POSITION INDICATOR - Where is price vs channel
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .position-indicator {
     display: flex;
     align-items: center;
@@ -776,9 +722,6 @@ STYLES = """
 .position-value.below { color: var(--red-400); }
 .position-value.inside { color: var(--amber-400); }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   8:30 CANDLE DISPLAY
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .candle-830-container {
     background: rgba(0,0,0,0.25);
     border: 1px solid var(--border-subtle);
@@ -848,18 +791,7 @@ STYLES = """
 }
 .candle-830-item-value.high { color: var(--green-400); }
 .candle-830-item-value.low { color: var(--red-400); }
-</style>
-"""
 
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# CSS STYLES CONTINUED - Add this directly after the previous STYLES string
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-STYLES_PART2 = """
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   TRADE SETUP CARD - The Primary Trade Recommendation
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .trade-setup-card {
     border-radius: var(--radius-lg);
     padding: 24px;
@@ -923,9 +855,7 @@ STYLES_PART2 = """
     color: var(--text-secondary);
     max-width: 300px;
 }
-.trade-entry-window {
-    text-align: right;
-}
+.trade-entry-window { text-align: right; }
 .trade-entry-window-label {
     font-size: 10px;
     color: var(--text-muted);
@@ -940,7 +870,6 @@ STYLES_PART2 = """
     margin-top: 4px;
 }
 
-/* Trade Metrics Grid */
 .trade-metrics-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -982,9 +911,6 @@ STYLES_PART2 = """
     margin-top: 4px;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   TARGETS SECTION - Cone Rail Targets with Priority
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .targets-section {
     background: rgba(0,0,0,0.25);
     border: 1px solid var(--border-subtle);
@@ -1020,17 +946,13 @@ STYLES_PART2 = """
     margin-bottom: 10px;
     transition: var(--transition-fast);
 }
-.target-row:hover {
-    background: rgba(255,255,255,0.04);
-}
+.target-row:hover { background: rgba(255,255,255,0.04); }
 .target-row.primary {
     background: rgba(6,182,212,0.1);
     border-color: rgba(6,182,212,0.3);
     border-left: 4px solid var(--cyan-500);
 }
-.target-row.primary:hover {
-    background: rgba(6,182,212,0.15);
-}
+.target-row.primary:hover { background: rgba(6,182,212,0.15); }
 
 .target-info {
     display: flex;
@@ -1090,9 +1012,6 @@ STYLES_PART2 = """
     text-align: right;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   SCENARIO CARDS - Pre-Market Planning
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .scenarios-container {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1108,18 +1027,10 @@ STYLES_PART2 = """
     position: relative;
     transition: var(--transition-normal);
 }
-.scenario-card:hover {
-    background: rgba(0,0,0,0.3);
-}
-.scenario-card.valid {
-    border-left: 4px solid var(--green-500);
-}
-.scenario-card.invalid {
-    border-left: 4px solid var(--red-500);
-}
-.scenario-card.trend {
-    border-left: 4px solid var(--amber-500);
-}
+.scenario-card:hover { background: rgba(0,0,0,0.3); }
+.scenario-card.valid { border-left: 4px solid var(--green-500); }
+.scenario-card.invalid { border-left: 4px solid var(--red-500); }
+.scenario-card.trend { border-left: 4px solid var(--amber-500); }
 
 .scenario-header {
     display: flex;
@@ -1137,15 +1048,9 @@ STYLES_PART2 = """
     font-size: 14px;
     flex-shrink: 0;
 }
-.scenario-card.valid .scenario-icon {
-    background: rgba(34,197,94,0.15);
-}
-.scenario-card.invalid .scenario-icon {
-    background: rgba(239,68,68,0.15);
-}
-.scenario-card.trend .scenario-icon {
-    background: rgba(245,158,11,0.15);
-}
+.scenario-card.valid .scenario-icon { background: rgba(34,197,94,0.15); }
+.scenario-card.invalid .scenario-icon { background: rgba(239,68,68,0.15); }
+.scenario-card.trend .scenario-icon { background: rgba(245,158,11,0.15); }
 .scenario-title {
     font-family: var(--font-display);
     font-size: 14px;
@@ -1184,9 +1089,6 @@ STYLES_PART2 = """
 .scenario-detail-value.calls { color: var(--green-400); }
 .scenario-detail-value.puts { color: var(--red-400); }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   TREND DAY DISPLAY - Special Mode for Range Trading
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .trend-day-banner {
     background: linear-gradient(135deg, rgba(245,158,11,0.12) 0%, rgba(139,92,246,0.08) 100%);
     border: 1px solid rgba(245,158,11,0.3);
@@ -1232,23 +1134,17 @@ STYLES_PART2 = """
     text-align: center;
     transition: var(--transition-normal);
 }
-.trend-trade-card:hover {
-    transform: translateY(-2px);
-}
+.trend-trade-card:hover { transform: translateY(-2px); }
 .trend-trade-card.buy {
     background: linear-gradient(135deg, rgba(34,197,94,0.1) 0%, rgba(34,197,94,0.02) 100%);
     border: 1px solid rgba(34,197,94,0.3);
 }
-.trend-trade-card.buy:hover {
-    box-shadow: var(--glow-green);
-}
+.trend-trade-card.buy:hover { box-shadow: var(--glow-green); }
 .trend-trade-card.sell {
     background: linear-gradient(135deg, rgba(239,68,68,0.1) 0%, rgba(239,68,68,0.02) 100%);
     border: 1px solid rgba(239,68,68,0.3);
 }
-.trend-trade-card.sell:hover {
-    box-shadow: var(--glow-red);
-}
+.trend-trade-card.sell:hover { box-shadow: var(--glow-red); }
 
 .trend-trade-label {
     font-size: 10px;
@@ -1288,9 +1184,6 @@ STYLES_PART2 = """
     color: var(--red-400);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   CONFIDENCE METER - Detailed Breakdown
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .confidence-section {
     background: rgba(0,0,0,0.2);
     border: 1px solid var(--border-subtle);
@@ -1317,9 +1210,7 @@ STYLES_PART2 = """
     font-weight: 700;
 }
 
-.confidence-bar-container {
-    margin-bottom: 20px;
-}
+.confidence-bar-container { margin-bottom: 20px; }
 .confidence-bar {
     height: 10px;
     background: rgba(255,255,255,0.1);
@@ -1368,9 +1259,7 @@ STYLES_PART2 = """
     border-radius: var(--radius-sm);
     transition: var(--transition-fast);
 }
-.confidence-factor:hover {
-    background: rgba(255,255,255,0.04);
-}
+.confidence-factor:hover { background: rgba(255,255,255,0.04); }
 .confidence-factor-name {
     font-size: 11px;
     color: var(--text-muted);
@@ -1384,9 +1273,6 @@ STYLES_PART2 = """
 .confidence-factor-value.negative { color: var(--red-400); }
 .confidence-factor-value.neutral { color: var(--text-secondary); }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   ANALYSIS CARDS - Supporting Indicators
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .analysis-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -1416,9 +1302,7 @@ STYLES_PART2 = """
     opacity: 0;
     transition: var(--transition-normal);
 }
-.analysis-card:hover::before {
-    opacity: 1;
-}
+.analysis-card:hover::before { opacity: 1; }
 .analysis-card.flow::before { background: var(--purple-500); }
 .analysis-card.vix::before { background: var(--red-500); }
 .analysis-card.momentum::before { background: var(--cyan-500); }
@@ -1497,22 +1381,15 @@ STYLES_PART2 = """
     padding: 8px 0;
     font-size: 12px;
 }
-.analysis-detail-row:not(:last-child) {
-    border-bottom: 1px solid var(--border-subtle);
-}
-.analysis-detail-label {
-    color: var(--text-muted);
-}
+.analysis-detail-row:not(:last-child) { border-bottom: 1px solid var(--border-subtle); }
+.analysis-detail-label { color: var(--text-muted); }
 .analysis-detail-value {
     font-family: var(--font-mono);
     font-weight: 500;
     color: var(--text-primary);
 }
 
-/* Flow Meter */
-.flow-meter-container {
-    margin: 16px 0;
-}
+.flow-meter-container { margin: 16px 0; }
 .flow-meter {
     height: 12px;
     background: linear-gradient(90deg, var(--red-500) 0%, var(--amber-500) 50%, var(--green-500) 100%);
@@ -1540,20 +1417,7 @@ STYLES_PART2 = """
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
-"""
 
-# Combine styles
-STYLES = STYLES + STYLES_PART2
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# CSS STYLES FINAL PART - Add this directly after STYLES_PART2
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-STYLES_PART3 = """
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   SESSION LEVELS TABLE
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .session-table-container {
     background: var(--bg-card);
     border: 1px solid var(--border-default);
@@ -1564,9 +1428,7 @@ STYLES_PART3 = """
     width: 100%;
     border-collapse: collapse;
 }
-.session-table thead {
-    background: rgba(0,0,0,0.3);
-}
+.session-table thead { background: rgba(0,0,0,0.3); }
 .session-table th {
     padding: 14px 16px;
     text-align: left;
@@ -1584,32 +1446,19 @@ STYLES_PART3 = """
     color: var(--text-primary);
     border-bottom: 1px solid var(--border-subtle);
 }
-.session-table tbody tr {
-    transition: var(--transition-fast);
-}
-.session-table tbody tr:hover {
-    background: rgba(255,255,255,0.02);
-}
-.session-table tbody tr:last-child td {
-    border-bottom: none;
-}
+.session-table tbody tr { transition: var(--transition-fast); }
+.session-table tbody tr:hover { background: rgba(255,255,255,0.02); }
+.session-table tbody tr:last-child td { border-bottom: none; }
 .session-table .session-name {
     font-family: var(--font-body);
     font-weight: 500;
     color: var(--text-secondary);
 }
-.session-table .highlight-row {
-    background: rgba(139,92,246,0.05);
-}
-.session-table .highlight-row td {
-    font-weight: 600;
-}
+.session-table .highlight-row { background: rgba(139,92,246,0.05); }
+.session-table .highlight-row td { font-weight: 600; }
 .session-table .value-high { color: var(--green-400); }
 .session-table .value-low { color: var(--red-400); }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   CONE RAILS DISPLAY
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .cones-container {
     background: var(--bg-card);
     border: 1px solid var(--border-default);
@@ -1719,9 +1568,6 @@ STYLES_PART3 = """
     color: var(--text-secondary);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   ALL 4 TRADES GRID
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .all-trades-container {
     background: var(--bg-card);
     border: 1px solid var(--border-default);
@@ -1837,9 +1683,6 @@ STYLES_PART3 = """
     color: var(--text-secondary);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   EXPANDER STYLING
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .streamlit-expanderHeader {
     background: var(--bg-card) !important;
     border: 1px solid var(--border-default) !important;
@@ -1859,9 +1702,6 @@ STYLES_PART3 = """
     background: var(--bg-secondary) !important;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   DEBUG SECTION
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .debug-container {
     background: rgba(239,68,68,0.05);
     border: 1px solid rgba(239,68,68,0.2);
@@ -1909,9 +1749,6 @@ STYLES_PART3 = """
     color: var(--text-primary);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   FOOTER
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .app-footer {
     text-align: center;
     padding: 32px 20px;
@@ -1950,9 +1787,6 @@ STYLES_PART3 = """
     color: var(--border-bright);
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   UTILITY CLASSES
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 .text-green { color: var(--green-400) !important; }
 .text-red { color: var(--red-400) !important; }
 .text-amber { color: var(--amber-400) !important; }
@@ -1983,9 +1817,6 @@ STYLES_PART3 = """
 .mb-2 { margin-bottom: 16px !important; }
 .mb-3 { margin-bottom: 24px !important; }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   RESPONSIVE ADJUSTMENTS
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 1200px) {
     .hero-grid {
         grid-template-columns: 1fr;
@@ -1993,17 +1824,10 @@ STYLES_PART3 = """
         text-align: center;
     }
     .hero-left, .hero-right { text-align: center; }
-    .analysis-grid {
-        grid-template-columns: 1fr;
-    }
-    .trade-metrics-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
+    .analysis-grid { grid-template-columns: 1fr; }
+    .trade-metrics-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════════════
-   ANIMATIONS
-   ═══════════════════════════════════════════════════════════════════════════════════ */
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
@@ -2021,18 +1845,11 @@ STYLES_PART3 = """
 .animate-slide-in { animation: slideIn 0.4s ease-out; }
 .animate-pulse { animation: pulse 2s infinite; }
 
-/* Hide Streamlit Elements */
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 .stDeployButton { display: none; }
 </style>
 """
-
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# COMBINE ALL STYLES
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
-STYLES = STYLES + STYLES_PART3
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
