@@ -549,21 +549,26 @@ def validate_830_candle(candle,ceiling,floor):
 # ═══════════════════════════════════════════════════════════════════════════════
 # HISTORICAL OUTCOME ANALYSIS
 # ═══════════════════════════════════════════════════════════════════════════════
-def analyze_historical_outcome(hist_data,validation,ceiling,floor,targets,direction,entry_level,offset):
-    """Analyze what actually happened on a historical date"""
+def analyze_historical_outcome(hist_data,validation,ceiling,floor,targets,direction,entry_level_es,offset):
+    """
+    Analyze what actually happened on a historical date
+    All prices displayed in SPX (converted from ES candles)
+    """
     if "day_candles" not in hist_data:
         return None
     
     day_candles=hist_data["day_candles"]
+    entry_level_spx=round(entry_level_es-offset,2)
+    
     result={
         "setup_valid":validation["status"] in ["VALID","TREND_DAY"],
         "direction":direction,
-        "entry_level_es":entry_level,
-        "entry_level_spx":round(entry_level-offset,2),
+        "entry_level_es":entry_level_es,
+        "entry_level_spx":entry_level_spx,
         "targets_hit":[],
         "max_favorable":0,
         "max_adverse":0,
-        "final_price":hist_data.get("day_close",0),
+        "final_price":round(hist_data.get("day_close",0)-offset,2),
         "timeline":[]
     }
     
@@ -573,46 +578,50 @@ def analyze_historical_outcome(hist_data,validation,ceiling,floor,targets,direct
         return result
     
     # Track price movement after 9:00 AM
-    entry_time_str="09:00"
+    # Convert all ES candle prices to SPX for comparison
     entered=False
-    entry_price=None
+    entry_price_spx=None
     
     for idx,row in day_candles.iterrows():
         candle_time=idx.strftime("%H:%M")
         
+        # Convert ES candle to SPX
+        candle_high_spx=row['High']-offset
+        candle_low_spx=row['Low']-offset
+        
         # Entry window: 9:00-9:10
         if not entered and candle_time>="09:00":
-            # Check if price returned to entry level
+            # Check if price returned to entry level (in SPX terms)
             if direction=="PUTS":
-                if row['High']>=entry_level-3:  # Within 3 pts of floor
+                if candle_high_spx>=entry_level_spx-3:  # Within 3 pts of floor
                     entered=True
-                    entry_price=min(row['High'],entry_level)
-                    result["timeline"].append({"time":candle_time,"event":"ENTRY","price":entry_price})
+                    entry_price_spx=min(candle_high_spx,entry_level_spx)
+                    result["timeline"].append({"time":candle_time,"event":"ENTRY","price":round(entry_price_spx,2)})
             else:  # CALLS
-                if row['Low']<=entry_level+3:  # Within 3 pts of ceiling
+                if candle_low_spx<=entry_level_spx+3:  # Within 3 pts of ceiling
                     entered=True
-                    entry_price=max(row['Low'],entry_level)
-                    result["timeline"].append({"time":candle_time,"event":"ENTRY","price":entry_price})
+                    entry_price_spx=max(candle_low_spx,entry_level_spx)
+                    result["timeline"].append({"time":candle_time,"event":"ENTRY","price":round(entry_price_spx,2)})
         
-        if entered and entry_price:
-            # Track movement
+        if entered and entry_price_spx:
+            # Track movement (in SPX terms)
             if direction=="PUTS":
-                favorable=entry_price-row['Low']
-                adverse=row['High']-entry_price
+                favorable=entry_price_spx-candle_low_spx
+                adverse=candle_high_spx-entry_price_spx
             else:
-                favorable=row['High']-entry_price
-                adverse=entry_price-row['Low']
+                favorable=candle_high_spx-entry_price_spx
+                adverse=entry_price_spx-candle_low_spx
             
             result["max_favorable"]=max(result["max_favorable"],favorable)
             result["max_adverse"]=max(result["max_adverse"],adverse)
             
-            # Check targets
+            # Check targets (targets are already in SPX)
             for tgt in targets:
                 if tgt["name"] not in [t["name"] for t in result["targets_hit"]]:
-                    if direction=="PUTS" and row['Low']<=tgt["level"]:
+                    if direction=="PUTS" and candle_low_spx<=tgt["level"]:
                         result["targets_hit"].append({"name":tgt["name"],"level":tgt["level"],"time":candle_time})
                         result["timeline"].append({"time":candle_time,"event":f"TARGET: {tgt['name']}","price":tgt["level"]})
-                    elif direction=="CALLS" and row['High']>=tgt["level"]:
+                    elif direction=="CALLS" and candle_high_spx>=tgt["level"]:
                         result["targets_hit"].append({"name":tgt["name"],"level":tgt["level"],"time":candle_time})
                         result["timeline"].append({"time":candle_time,"event":f"TARGET: {tgt['name']}","price":tgt["level"]})
     
