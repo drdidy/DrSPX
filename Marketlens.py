@@ -772,15 +772,62 @@ def calculate_momentum(es_candles):
     else:signal="NEUTRAL"
     return {"signal":signal,"rsi":rsi_val,"macd":macd_hist}
 
-def calculate_ma_bias(es_candles):
-    if es_candles is None or len(es_candles)<50:
-        return {"signal":"NEUTRAL"}
+def calculate_ema_signals(es_candles,current_price):
+    """
+    8/21 EMA Cross + 200 EMA Filter
+    - 8/21 cross: Fast momentum signal for 0DTE entries
+    - 200 EMA: Directional filter (above = favor longs, below = favor shorts)
+    """
+    result={
+        "cross_signal":"NEUTRAL",
+        "filter_signal":"NEUTRAL",
+        "ema8":None,"ema21":None,"ema200":None,
+        "cross_bullish":False,"cross_bearish":False,
+        "above_200":False,"below_200":False,
+        "aligned_calls":False,"aligned_puts":False
+    }
+    
+    if es_candles is None or len(es_candles)<21:
+        return result
+    
     close=es_candles['Close']
-    ema50=close.ewm(span=50).mean().iloc[-1]
-    sma200=close.rolling(min(200,len(close))).mean().iloc[-1]
-    if ema50>sma200:return {"signal":"LONG","ema50":round(ema50,2),"sma200":round(sma200,2)}
-    elif ema50<sma200:return {"signal":"SHORT","ema50":round(ema50,2),"sma200":round(sma200,2)}
-    return {"signal":"NEUTRAL","ema50":round(ema50,2),"sma200":round(sma200,2)}
+    
+    # Calculate EMAs
+    ema8=close.ewm(span=8).mean()
+    ema21=close.ewm(span=21).mean()
+    ema200=close.ewm(span=min(200,len(close))).mean()
+    
+    ema8_val=round(ema8.iloc[-1],2)
+    ema21_val=round(ema21.iloc[-1],2)
+    ema200_val=round(ema200.iloc[-1],2)
+    
+    result["ema8"]=ema8_val
+    result["ema21"]=ema21_val
+    result["ema200"]=ema200_val
+    
+    # 8/21 Cross Signal
+    if ema8_val>ema21_val:
+        result["cross_signal"]="BULLISH"
+        result["cross_bullish"]=True
+    elif ema8_val<ema21_val:
+        result["cross_signal"]="BEARISH"
+        result["cross_bearish"]=True
+    
+    # 200 EMA Filter
+    if current_price and current_price>ema200_val:
+        result["filter_signal"]="ABOVE_200"
+        result["above_200"]=True
+    elif current_price and current_price<ema200_val:
+        result["filter_signal"]="BELOW_200"
+        result["below_200"]=True
+    
+    # Alignment check
+    # CALLS aligned: 8>21 (bullish cross) AND price above 200
+    result["aligned_calls"]=result["cross_bullish"] and result["above_200"]
+    # PUTS aligned: 8<21 (bearish cross) AND price below 200
+    result["aligned_puts"]=result["cross_bearish"] and result["below_200"]
+    
+    return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OPTION PRICING
@@ -810,17 +857,85 @@ def estimate_exit_prices(entry_level,strike,opt_type,vix,hours,targets):
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIDENCE
 # ═══════════════════════════════════════════════════════════════════════════════
-def calculate_confidence(channel_type,position,flow,vix_zone):
+def calculate_confidence(channel_type,validation,direction,ema_signals,flow,vix_zone):
+    """
+    Confidence scoring:
+    - Channel determined: +25
+    - 8:30 candle validated: +25  
+    - 200 EMA filter aligned: +15
+    - 8/21 cross aligned: +15
+    - Flow bias aligned: +10
+    - VIX favorable: +10
+    = 100 max
+    """
     score=0
-    if channel_type!="UNDETERMINED":score+=25
-    if position in ["ABOVE","BELOW"]:score+=25
-    elif position in ["MARGINAL_ABOVE","MARGINAL_BELOW"]:score+=15
-    if flow["bias"]!="NEUTRAL":score+=20
-    else:score+=10
-    if vix_zone in ["LOW","NORMAL"]:score+=15
-    elif vix_zone=="ELEVATED":score+=10
-    else:score+=5
-    return score
+    breakdown=[]
+    
+    # Channel determination (+25)
+    if channel_type!="UNDETERMINED":
+        score+=25
+        breakdown.append(("Channel","+25"))
+    else:
+        breakdown.append(("Channel","0"))
+    
+    # 8:30 validation (+25)
+    if validation["status"] in ["VALID","TREND_DAY"]:
+        score+=25
+        breakdown.append(("8:30 Valid","+25"))
+    elif validation["status"]=="INSIDE":
+        score+=10
+        breakdown.append(("8:30 Inside","+10"))
+    else:
+        breakdown.append(("8:30 Wait","0"))
+    
+    # 200 EMA filter (+15)
+    if direction=="PUTS" and ema_signals["below_200"]:
+        score+=15
+        breakdown.append(("Below 200","+15"))
+    elif direction=="CALLS" and ema_signals["above_200"]:
+        score+=15
+        breakdown.append(("Above 200","+15"))
+    elif direction in ["PUTS","CALLS"]:
+        breakdown.append(("200 EMA","0 ⚠️"))
+    else:
+        breakdown.append(("200 EMA","N/A"))
+    
+    # 8/21 cross (+15)
+    if direction=="PUTS" and ema_signals["cross_bearish"]:
+        score+=15
+        breakdown.append(("8/21 Bear","+15"))
+    elif direction=="CALLS" and ema_signals["cross_bullish"]:
+        score+=15
+        breakdown.append(("8/21 Bull","+15"))
+    elif direction in ["PUTS","CALLS"]:
+        breakdown.append(("8/21 Cross","0 ⚠️"))
+    else:
+        breakdown.append(("8/21 Cross","N/A"))
+    
+    # Flow bias (+10)
+    if direction=="PUTS" and flow["bias"] in ["HEAVY_PUTS","MODERATE_PUTS"]:
+        score+=10
+        breakdown.append(("Flow","+10"))
+    elif direction=="CALLS" and flow["bias"] in ["HEAVY_CALLS","MODERATE_CALLS"]:
+        score+=10
+        breakdown.append(("Flow","+10"))
+    elif flow["bias"]=="NEUTRAL":
+        score+=5
+        breakdown.append(("Flow","+5"))
+    else:
+        breakdown.append(("Flow","0"))
+    
+    # VIX zone (+10)
+    if vix_zone in ["LOW","NORMAL"]:
+        score+=10
+        breakdown.append(("VIX","+10"))
+    elif vix_zone=="ELEVATED":
+        score+=5
+        breakdown.append(("VIX","+5"))
+    else:
+        breakdown.append(("VIX","0"))
+    
+    return {"score":score,"breakdown":breakdown}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -1118,9 +1233,9 @@ def main():
     flow_price=candle_830["open"] if candle_830 else current_es
     flow=calculate_flow_bias(flow_price,on_high,on_low,vix,vix_high,vix_low,prior_close)
     momentum=calculate_momentum(es_candles)
-    ma_bias=calculate_ma_bias(es_candles)
+    ema_signals=calculate_ema_signals(es_candles,current_es)
     vix_zone=get_vix_zone(vix)
-    confidence=calculate_confidence(channel_type,position,flow,vix_zone)
+    confidence=calculate_confidence(channel_type,validation,direction,ema_signals,flow,vix_zone)
     
     # Historical outcome
     if inputs["is_historical"] and hist_data and entry_edge_es:
@@ -1292,14 +1407,17 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     # SUPPORTING ANALYSIS
     # ═══════════════════════════════════════════════════════════════════════════
-    col1,col2,col3=st.columns(3)
+    col1,col2,col3,col4=st.columns(4)
     
     with col1:
-        conf_color="#00d4aa" if confidence>=70 else "#ffa502" if confidence>=50 else "#ff4757"
+        conf_score=confidence["score"]
+        conf_color="#00d4aa" if conf_score>=70 else "#ffa502" if conf_score>=50 else "#ff4757"
+        breakdown_html="".join([f'<div class="pillar" style="font-size:10px"><span>{k}</span><span>{v}</span></div>' for k,v in confidence["breakdown"]])
         st.markdown(f'''<div class="card">
 <div class="card-h"><div class="card-icon" style="background:rgba(168,85,247,0.15)">📊</div><div><div class="card-title">Confidence</div></div></div>
-<div class="metric" style="color:{conf_color}">{confidence}%</div>
-<div class="conf-bar"><div class="conf-fill" style="width:{confidence}%;background:{conf_color}"></div></div>
+<div class="metric" style="color:{conf_color}">{conf_score}%</div>
+<div class="conf-bar"><div class="conf-fill" style="width:{conf_score}%;background:{conf_color}"></div></div>
+{breakdown_html}
 </div>''',unsafe_allow_html=True)
     
     with col2:
@@ -1312,13 +1430,40 @@ def main():
 </div>''',unsafe_allow_html=True)
     
     with col3:
-        ma_color="#00d4aa" if ma_bias["signal"]=="LONG" else "#ff4757" if ma_bias["signal"]=="SHORT" else "#ffa502"
-        mom_color="#00d4aa" if "BULL" in momentum["signal"] else "#ff4757" if "BEAR" in momentum["signal"] else "#ffa502"
+        # 8/21 Cross color
+        cross_color="#00d4aa" if ema_signals["cross_bullish"] else "#ff4757" if ema_signals["cross_bearish"] else "#ffa502"
+        # 200 EMA filter color
+        filter_color="#00d4aa" if ema_signals["above_200"] else "#ff4757" if ema_signals["below_200"] else "#ffa502"
+        filter_text="Above 200" if ema_signals["above_200"] else "Below 200" if ema_signals["below_200"] else "At 200"
+        # Alignment indicator
+        if direction=="CALLS" and ema_signals["aligned_calls"]:
+            align_text="✅ ALIGNED"
+            align_color="#00d4aa"
+        elif direction=="PUTS" and ema_signals["aligned_puts"]:
+            align_text="✅ ALIGNED"
+            align_color="#00d4aa"
+        elif direction in ["CALLS","PUTS"]:
+            align_text="⚠️ CONFLICT"
+            align_color="#ffa502"
+        else:
+            align_text="—"
+            align_color="#888"
+        
         st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(59,130,246,0.15)">📈</div><div><div class="card-title">Context</div></div></div>
-<div class="pillar"><span>MA Bias</span><span style="color:{ma_color}">{ma_bias["signal"]}</span></div>
+<div class="card-h"><div class="card-icon" style="background:rgba(59,130,246,0.15)">📈</div><div><div class="card-title">EMA Signals</div><div class="card-sub">8/21 + 200</div></div></div>
+<div class="pillar"><span>8/21 Cross</span><span style="color:{cross_color}">{ema_signals["cross_signal"]}</span></div>
+<div class="pillar"><span>200 EMA</span><span style="color:{filter_color}">{filter_text}</span></div>
+<div class="pillar"><span>Alignment</span><span style="color:{align_color}">{align_text}</span></div>
+</div>''',unsafe_allow_html=True)
+    
+    with col4:
+        mom_color="#00d4aa" if "BULL" in momentum["signal"] else "#ff4757" if "BEAR" in momentum["signal"] else "#ffa502"
+        vix_color="#00d4aa" if vix_zone in ["LOW","NORMAL"] else "#ffa502" if vix_zone=="ELEVATED" else "#ff4757"
+        st.markdown(f'''<div class="card">
+<div class="card-h"><div class="card-icon" style="background:rgba(255,165,2,0.15)">📉</div><div><div class="card-title">Context</div></div></div>
 <div class="pillar"><span>Momentum</span><span style="color:{mom_color}">{momentum["signal"]}</span></div>
-<div class="pillar"><span>VIX</span><span>{vix:.1f} ({vix_zone})</span></div>
+<div class="pillar"><span>RSI</span><span>{momentum["rsi"]}</span></div>
+<div class="pillar"><span>VIX</span><span style="color:{vix_color}">{vix:.1f} ({vix_zone})</span></div>
 </div>''',unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
