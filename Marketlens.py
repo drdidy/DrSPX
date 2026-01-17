@@ -921,8 +921,9 @@ def main():
         entry_edge_es=None
         targets=[]
     
-    # Flow & momentum
-    flow=calculate_flow_bias(pre_open_price,on_high,on_low,vix,vix_high,vix_low,prior_close)
+    # Flow & momentum - use 8:30 candle open for flow bias calculation
+    flow_price=candle_830["open"] if candle_830 else current_es
+    flow=calculate_flow_bias(flow_price,on_high,on_low,vix,vix_high,vix_low,prior_close)
     momentum=calculate_momentum(es_candles)
     ma_bias=calculate_ma_bias(es_candles)
     vix_zone=get_vix_zone(vix)
