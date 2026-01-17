@@ -464,6 +464,7 @@ def determine_channel(sydney_high,sydney_low,tokyo_high,tokyo_low):
     Determine channel direction based on Sydney vs Tokyo session.
     Primary: Compare highs
     Tiebreaker: If highs equal, compare lows
+    Final fallback: Default to FALLING (conservative)
     """
     # Primary comparison: Highs
     if tokyo_high>sydney_high:
@@ -477,8 +478,8 @@ def determine_channel(sydney_high,sydney_low,tokyo_high,tokyo_low):
     elif tokyo_low<sydney_low:
         return "FALLING","Highs equal, Tokyo Low < Sydney Low (lower lows)"
     
-    # Both highs and lows equal = truly flat/undetermined
-    return "UNDETERMINED","Both highs and lows equal"
+    # Both highs and lows equal = truly flat, default to FALLING (conservative)
+    return "FALLING","Flat overnight - defaulting to FALLING (conservative)"
 
 def calculate_channel_levels(on_high,on_high_time,on_low,on_low_time,ref_time):
     blocks_high=blocks_between(on_high_time,ref_time)
@@ -1095,13 +1096,26 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     if (inputs["is_historical"] or inputs["is_planning"]) and hist_data and inputs["data_mode"].startswith("Auto"):
         # Use extracted historical/planning data
-        # For planning mode: Sydney/Tokyo/O/N won't have data yet, but prior RTH will
-        syd_h=hist_data.get("sydney_high") or hist_data.get("prior_high_wick",6070)
-        syd_l=hist_data.get("sydney_low") or hist_data.get("prior_low_close",6050)
-        tok_h=hist_data.get("tokyo_high") or hist_data.get("prior_high_wick",6075)
-        tok_l=hist_data.get("tokyo_low") or hist_data.get("prior_low_close",6045)
-        on_high=hist_data.get("on_high") or hist_data.get("prior_high_wick",6075)
-        on_low=hist_data.get("on_low") or hist_data.get("prior_low_close",6040)
+        syd_h=hist_data.get("sydney_high")
+        syd_l=hist_data.get("sydney_low")
+        tok_h=hist_data.get("tokyo_high")
+        tok_l=hist_data.get("tokyo_low")
+        on_high=hist_data.get("on_high")
+        on_low=hist_data.get("on_low")
+        
+        # For planning mode: Sydney/Tokyo/O/N won't have data yet
+        # Use prior day RTH range as proxy for channel levels
+        if inputs["is_planning"] or syd_h is None or tok_h is None:
+            # No overnight data - use prior RTH high/low for channel calculation
+            # Can't determine Sydney vs Tokyo, so default to FALLING (conservative)
+            prior_h=hist_data.get("prior_high_wick",6070)
+            prior_l=hist_data.get("prior_low_close",6050)
+            syd_h=syd_h or prior_h
+            syd_l=syd_l or prior_l
+            tok_h=tok_h or prior_h - 1  # Slightly lower to force FALLING (conservative)
+            tok_l=tok_l or prior_l
+            on_high=on_high or prior_h
+            on_low=on_low or prior_l
         
         # Prior day data for cones
         prior_high_wick=hist_data.get("prior_high_wick",6080)
@@ -1138,13 +1152,15 @@ def main():
         prior_low_close_time=hist_data.get("prior_low_close_time") or CT.localize(datetime.combine(prior_rth_day,time(14,0)))
         prior_close_time=hist_data.get("prior_close_time") or CT.localize(datetime.combine(prior_rth_day,time(15,0)))
     else:
-        # Manual or live
-        syd_h=inputs.get("on_high") or 6070
-        syd_l=inputs.get("on_low") or 6050
-        tok_h=inputs.get("on_high") or 6075
-        tok_l=inputs.get("on_low") or 6045
+        # Manual or live mode
+        # In manual mode, we only have O/N High/Low, not separate Sydney/Tokyo
+        # Default to FALLING (conservative) by making Tokyo slightly lower than Sydney
         on_high=inputs["on_high"] or 6075
         on_low=inputs["on_low"] or 6040
+        syd_h=on_high
+        syd_l=on_low
+        tok_h=on_high - 1  # Slightly lower to default to FALLING
+        tok_l=on_low
         
         # Prior day data for cones (manual mode uses same value for wick and close)
         prior_high_wick=inputs["prior_high"] or 6080
