@@ -221,7 +221,7 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
     tokyo_start=CT.localize(datetime.combine(prev_day,time(21,0)))
     tokyo_end=CT.localize(datetime.combine(trading_date,time(1,30)))
     overnight_start=CT.localize(datetime.combine(prev_day,time(17,0)))
-    overnight_end=CT.localize(datetime.combine(trading_date,time(8,30)))
+    overnight_end=CT.localize(datetime.combine(trading_date,time(3,0)))  # Sydney + Tokyo + London 1st hour
     market_open=CT.localize(datetime.combine(trading_date,time(8,30)))
     market_close=CT.localize(datetime.combine(trading_date,time(15,0)))
     
@@ -251,6 +251,17 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
             result["tokyo_low"]=round(tok_data['Low'].min(),2)
             result["tokyo_high_time"]=tok_data['High'].idxmax()
             result["tokyo_low_time"]=tok_data['Low'].idxmin()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # LONDON SESSION (First hour only: 2AM - 3AM CT)
+        # ─────────────────────────────────────────────────────────────────────
+        london_start=CT.localize(datetime.combine(trading_date,time(2,0)))
+        london_end=CT.localize(datetime.combine(trading_date,time(3,0)))
+        lon_mask=(df.index>=london_start)&(df.index<=london_end)
+        lon_data=df[lon_mask]
+        if not lon_data.empty:
+            result["london_high"]=round(lon_data['High'].max(),2)
+            result["london_low"]=round(lon_data['Low'].min(),2)
         
         # ─────────────────────────────────────────────────────────────────────
         # OVERNIGHT SESSION (Full: 5PM prev to 8:30AM trading day)
@@ -913,25 +924,34 @@ def main():
     if inputs["is_historical"] and hist_data:
         st.markdown("### 📊 Auto-Populated Session Data")
         
-        col1,col2,col3=st.columns(3)
+        col1,col2,col3,col4=st.columns(4)
         
         with col1:
             st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(59,130,246,0.15)">🌏</div><div><div class="card-title">Sydney Session</div><div class="card-sub">5:00 PM - 8:30 PM CT</div></div></div>
+<div class="card-h"><div class="card-icon" style="background:rgba(59,130,246,0.15)">🌏</div><div><div class="card-title">Sydney</div><div class="card-sub">5PM-8:30PM</div></div></div>
 <div class="pillar"><span>High</span><span style="color:#00d4aa">{syd_h}</span></div>
 <div class="pillar"><span>Low</span><span style="color:#ff4757">{syd_l}</span></div>
 </div>''',unsafe_allow_html=True)
         
         with col2:
             st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(255,71,87,0.15)">🗼</div><div><div class="card-title">Tokyo Session</div><div class="card-sub">9:00 PM - 1:30 AM CT</div></div></div>
+<div class="card-h"><div class="card-icon" style="background:rgba(255,71,87,0.15)">🗼</div><div><div class="card-title">Tokyo</div><div class="card-sub">9PM-1:30AM</div></div></div>
 <div class="pillar"><span>High</span><span style="color:#00d4aa">{tok_h}</span></div>
 <div class="pillar"><span>Low</span><span style="color:#ff4757">{tok_l}</span></div>
 </div>''',unsafe_allow_html=True)
         
         with col3:
+            lon_h=hist_data.get("london_high","—")
+            lon_l=hist_data.get("london_low","—")
             st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(168,85,247,0.15)">🌙</div><div><div class="card-title">Overnight</div><div class="card-sub">Full Session</div></div></div>
+<div class="card-h"><div class="card-icon" style="background:rgba(0,212,170,0.15)">🏛️</div><div><div class="card-title">London</div><div class="card-sub">2AM-3AM</div></div></div>
+<div class="pillar"><span>High</span><span style="color:#00d4aa">{lon_h}</span></div>
+<div class="pillar"><span>Low</span><span style="color:#ff4757">{lon_l}</span></div>
+</div>''',unsafe_allow_html=True)
+        
+        with col4:
+            st.markdown(f'''<div class="card">
+<div class="card-h"><div class="card-icon" style="background:rgba(168,85,247,0.15)">🌙</div><div><div class="card-title">O/N Total</div><div class="card-sub">5PM-3AM</div></div></div>
 <div class="pillar"><span>High</span><span style="color:#00d4aa">{on_high}</span></div>
 <div class="pillar"><span>Low</span><span style="color:#ff4757">{on_low}</span></div>
 </div>''',unsafe_allow_html=True)
