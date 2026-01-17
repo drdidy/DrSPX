@@ -843,9 +843,13 @@ def render_sidebar():
         
         trading_date=st.date_input("📅 Date",value=date.today())
         is_historical=trading_date<date.today()
+        is_future=trading_date>date.today()
+        is_planning=is_future  # Future date = planning mode (fetch prior RTH data)
         
         if is_historical:
             st.info(f"📜 Historical Mode: {trading_date.strftime('%A, %b %d, %Y')}")
+        elif is_planning:
+            st.info(f"📋 Planning Mode: {trading_date.strftime('%A, %b %d, %Y')}")
         
         st.markdown("---")
         st.markdown("### ⚙️ ES/SPX Offset")
@@ -853,7 +857,7 @@ def render_sidebar():
         
         st.markdown("---")
         st.markdown("### 📊 Data Mode")
-        if is_historical:
+        if is_historical or is_planning:
             data_mode=st.radio("Source",["Auto (from ES candles)","Manual Override"],index=0)
         else:
             data_mode=st.radio("Source",["Auto","Manual"],index=0,horizontal=True)
@@ -885,7 +889,7 @@ def render_sidebar():
         ref_hr,ref_mn=ref_map[ref_time_sel]
         
         st.markdown("---")
-        auto_refresh=st.checkbox("Auto Refresh",value=False) if not is_historical else False
+        auto_refresh=st.checkbox("Auto Refresh",value=False) if not (is_historical or is_planning) else False
         debug=st.checkbox("Debug",value=False)
         
         if st.button("💾 Save",use_container_width=True):
@@ -895,6 +899,7 @@ def render_sidebar():
     return {
         "trading_date":trading_date,
         "is_historical":is_historical,
+        "is_planning":is_planning,
         "data_mode":data_mode,
         "offset":offset,
         "on_high":on_high,"on_low":on_low,
@@ -916,8 +921,8 @@ def main():
     # FETCH DATA
     # ─────────────────────────────────────────────────────────────────────────
     with st.spinner("Loading data..."):
-        if inputs["is_historical"]:
-            # Historical mode - fetch candles for that date range
+        if inputs["is_historical"] or inputs["is_planning"]:
+            # Historical or Planning mode - fetch candles for that date range
             # Need extra days to handle weekends (if trading_date is Monday/Tuesday)
             start=inputs["trading_date"]-timedelta(days=7)  # Go back a full week
             end=inputs["trading_date"]+timedelta(days=1)
@@ -927,13 +932,20 @@ def main():
                 hist_data=extract_historical_data(es_candles,inputs["trading_date"],inputs["offset"])
             else:
                 hist_data=None
-                st.error("❌ Could not fetch historical data for this date. Try a date within the last 60 days.")
+                if inputs["is_planning"]:
+                    st.warning("⚠️ Could not fetch prior RTH data. Using manual inputs.")
+                else:
+                    st.error("❌ Could not fetch historical data for this date. Try a date within the last 60 days.")
             
-            es_price=hist_data.get("day_open") if hist_data else None
+            if inputs["is_historical"]:
+                es_price=hist_data.get("day_open") if hist_data else None
+            else:
+                # Planning mode - use most recent ES price
+                es_price=fetch_es_current() or (hist_data.get("prior_close") if hist_data else None)
             spx_price=round(es_price-inputs["offset"],2) if es_price else None
-            vix=16.0  # Default for historical
+            vix=fetch_vix_polygon() or 16.0
         else:
-            # Live mode
+            # Live mode (today)
             es_candles=fetch_es_candles(7)
             es_price=fetch_es_current()
             spx_price=fetch_spx_polygon()
@@ -945,14 +957,15 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # POPULATE DATA (Auto or Manual)
     # ─────────────────────────────────────────────────────────────────────────
-    if inputs["is_historical"] and hist_data and inputs["data_mode"].startswith("Auto"):
-        # Use extracted historical data
-        syd_h=hist_data.get("sydney_high",6070)
-        syd_l=hist_data.get("sydney_low",6050)
-        tok_h=hist_data.get("tokyo_high",6075)
-        tok_l=hist_data.get("tokyo_low",6045)
-        on_high=hist_data.get("on_high",6075)
-        on_low=hist_data.get("on_low",6040)
+    if (inputs["is_historical"] or inputs["is_planning"]) and hist_data and inputs["data_mode"].startswith("Auto"):
+        # Use extracted historical/planning data
+        # For planning mode: Sydney/Tokyo/O/N won't have data yet, but prior RTH will
+        syd_h=hist_data.get("sydney_high") or hist_data.get("prior_high_wick",6070)
+        syd_l=hist_data.get("sydney_low") or hist_data.get("prior_low_close",6050)
+        tok_h=hist_data.get("tokyo_high") or hist_data.get("prior_high_wick",6075)
+        tok_l=hist_data.get("tokyo_low") or hist_data.get("prior_low_close",6045)
+        on_high=hist_data.get("on_high") or hist_data.get("prior_high_wick",6075)
+        on_low=hist_data.get("on_low") or hist_data.get("prior_low_close",6040)
         
         # Prior day data for cones
         prior_high_wick=hist_data.get("prior_high_wick",6080)
@@ -960,8 +973,13 @@ def main():
         prior_low_close=hist_data.get("prior_low_close",6030)
         prior_close=hist_data.get("prior_close",6055)
         
-        candle_830=hist_data.get("candle_830")
-        current_es=hist_data.get("day_open",es_price or 6050)
+        if inputs["is_planning"]:
+            candle_830=None  # No 8:30 candle yet for future date
+            current_es=es_price or hist_data.get("prior_close",6050)
+        else:
+            candle_830=hist_data.get("candle_830")
+            current_es=hist_data.get("day_open",es_price or 6050)
+        
         vix_high=inputs["vix_high"] or 18
         vix_low=inputs["vix_low"] or 15
         
@@ -1113,13 +1131,18 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     # HERO
     # ═══════════════════════════════════════════════════════════════════════════
-    hist_badge=f'<div class="hist-badge">📜 HISTORICAL ANALYSIS</div>' if inputs["is_historical"] else ""
+    if inputs["is_historical"]:
+        mode_badge='<div class="hist-badge">📜 HISTORICAL ANALYSIS</div>'
+    elif inputs["is_planning"]:
+        mode_badge='<div class="hist-badge" style="background:linear-gradient(135deg,rgba(0,212,170,0.15),rgba(34,211,238,0.15))">📋 PLANNING MODE</div>'
+    else:
+        mode_badge=""
     
     st.markdown(f'''<div class="hero">
 <div class="hero-title">🔮 SPX PROPHET V6.1</div>
 <div class="hero-sub">ES: {current_es:,.2f} | Offset: {offset:+.2f} | {channel_type} Channel</div>
 <div class="hero-price">{current_spx:,.2f}</div>
-{hist_badge}
+{mode_badge}
 <div style="font-family:IBM Plex Mono;font-size:13px;color:rgba(255,255,255,0.5);margin-top:8px">{inputs["trading_date"].strftime("%A, %B %d, %Y")}</div>
 </div>''',unsafe_allow_html=True)
     
