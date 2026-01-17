@@ -204,12 +204,20 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
         return None
     
     result={}
+    
+    # Handle weekends - if trading_date is Monday, prev_day should be Friday
     prev_day=trading_date-timedelta(days=1)
+    if prev_day.weekday()==6:  # Sunday
+        prev_day=prev_day-timedelta(days=2)  # Go to Friday
+    elif prev_day.weekday()==5:  # Saturday
+        prev_day=prev_day-timedelta(days=1)  # Go to Friday
     
     # Convert index to CT
+    # Yahoo Finance returns data in ET (Eastern Time), not UTC
     df=es_candles.copy()
+    ET=pytz.timezone("America/New_York")
     if df.index.tz is None:
-        df.index=df.index.tz_localize('UTC').tz_convert(CT)
+        df.index=df.index.tz_localize(ET).tz_convert(CT)
     else:
         df.index=df.index.tz_convert(CT)
     
@@ -264,9 +272,9 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
             result["london_low"]=round(lon_data['Low'].min(),2)
         
         # ─────────────────────────────────────────────────────────────────────
-        # OVERNIGHT SESSION (Full: 5PM prev to 8:30AM trading day)
+        # OVERNIGHT SESSION (5PM prev to 3AM trading day)
         # ─────────────────────────────────────────────────────────────────────
-        on_mask=(df.index>=overnight_start)&(df.index<market_open)
+        on_mask=(df.index>=overnight_start)&(df.index<=overnight_end)
         on_data=df[on_mask]
         if not on_data.empty:
             result["on_high"]=round(on_data['High'].max(),2)
@@ -772,18 +780,24 @@ def main():
         tok_l=hist_data.get("tokyo_low",6045)
         on_high=hist_data.get("on_high",6075)
         on_low=hist_data.get("on_low",6040)
-        on_high_time=hist_data.get("on_high_time")
-        on_low_time=hist_data.get("on_low_time")
         prior_high=hist_data.get("prior_high",6080)
         prior_low=hist_data.get("prior_low",6030)
         prior_close=hist_data.get("prior_close",6055)
-        prior_high_time=hist_data.get("prior_high_time")
-        prior_low_time=hist_data.get("prior_low_time")
-        prior_close_time=hist_data.get("prior_close_time")
         candle_830=hist_data.get("candle_830")
         current_es=hist_data.get("day_open",es_price or 6050)
         vix_high=inputs["vix_high"] or 18
         vix_low=inputs["vix_low"] or 15
+        
+        # Get times with fallbacks
+        prev_day=inputs["trading_date"]-timedelta(days=1)
+        if prev_day.weekday()==6:prev_day=prev_day-timedelta(days=2)
+        elif prev_day.weekday()==5:prev_day=prev_day-timedelta(days=1)
+        
+        on_high_time=hist_data.get("on_high_time") or CT.localize(datetime.combine(prev_day,time(22,0)))
+        on_low_time=hist_data.get("on_low_time") or CT.localize(datetime.combine(inputs["trading_date"],time(2,0)))
+        prior_high_time=hist_data.get("prior_high_time") or CT.localize(datetime.combine(prev_day,time(10,0)))
+        prior_low_time=hist_data.get("prior_low_time") or CT.localize(datetime.combine(prev_day,time(14,0)))
+        prior_close_time=hist_data.get("prior_close_time") or CT.localize(datetime.combine(prev_day,time(15,0)))
     else:
         # Manual or live
         syd_h=inputs.get("on_high") or 6070
@@ -800,8 +814,11 @@ def main():
         candle_830=None
         current_es=es_price or 6050
         
-        # Default times
+        # Default times - handle weekends
         prev_day=inputs["trading_date"]-timedelta(days=1)
+        if prev_day.weekday()==6:prev_day=prev_day-timedelta(days=2)
+        elif prev_day.weekday()==5:prev_day=prev_day-timedelta(days=1)
+        
         on_high_time=CT.localize(datetime.combine(prev_day,time(22,0)))
         on_low_time=CT.localize(datetime.combine(inputs["trading_date"],time(3,0)))
         prior_high_time=CT.localize(datetime.combine(prev_day,time(10,0)))
@@ -1074,7 +1091,37 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     if inputs["debug"]:
         st.markdown("### 🔧 Debug")
-        st.json({"hist_data":str(hist_data)[:500] if hist_data else None,"validation":validation,"outcome":outcome,"position":position,"channel":channel_type})
+        
+        # Show times
+        st.markdown("**Anchor Times:**")
+        st.write(f"- O/N High Time: {on_high_time}")
+        st.write(f"- O/N Low Time: {on_low_time}")
+        st.write(f"- Prior High Time: {prior_high_time}")
+        st.write(f"- Prior Low Time: {prior_low_time}")
+        st.write(f"- Prior Close Time: {prior_close_time}")
+        st.write(f"- Reference Time: {ref_time}")
+        
+        # Show block calculations
+        st.markdown("**Block Calculations:**")
+        blocks_high=blocks_between(on_high_time,ref_time)
+        blocks_low=blocks_between(on_low_time,ref_time)
+        st.write(f"- Blocks from O/N High to Ref: {blocks_high} (exp: {SLOPE*blocks_high:.2f})")
+        st.write(f"- Blocks from O/N Low to Ref: {blocks_low} (exp: {SLOPE*blocks_low:.2f})")
+        
+        # Show raw values
+        st.markdown("**Raw Values (ES):**")
+        st.write(f"- O/N High: {on_high}, O/N Low: {on_low}")
+        st.write(f"- Sydney H/L: {syd_h}/{syd_l}, Tokyo H/L: {tok_h}/{tok_l}")
+        
+        # Show calculated levels
+        st.markdown("**Calculated Levels (ES):**")
+        st.json(levels)
+        
+        # Show hist_data if available
+        if hist_data:
+            st.markdown("**Historical Data Extracted:**")
+            hist_display={k:str(v) if isinstance(v,pd.DataFrame) else v for k,v in hist_data.items() if k!="day_candles"}
+            st.json(hist_display)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # FOOTER
