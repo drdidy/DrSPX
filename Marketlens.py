@@ -259,8 +259,9 @@ def fetch_vix_polygon():
     except:pass
     return None
 
-@st.cache_data(ttl=60,show_spinner=False)
+@st.cache_data(ttl=15,show_spinner=False)
 def fetch_es_current():
+    """Fetch current ES price - short cache for live updates"""
     try:
         es=yf.Ticker("ES=F")
         d=es.history(period="1d",interval="1m")
@@ -1422,6 +1423,24 @@ def main():
     st.markdown(STYLES,unsafe_allow_html=True)
     inputs=render_sidebar()
     now=now_ct()
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # CHECK FOR FUTURE DATE IN HISTORICAL MODE
+    # ─────────────────────────────────────────────────────────────────────────
+    if inputs["is_historical"]:
+        today = now.date()
+        selected_date = inputs["trading_date"]
+        if selected_date > today:
+            st.error(f"⚠️ **Cannot analyze {selected_date.strftime('%A, %B %d, %Y')}** - this date hasn't occurred yet!")
+            st.info("💡 Switch to **Planning Mode** to prepare for a future trading day, or select a past date for historical analysis.")
+            return
+        elif selected_date == today:
+            # Check if market has opened yet (8:30 AM CT)
+            market_open_time = now.replace(hour=8, minute=30, second=0, microsecond=0)
+            if now < market_open_time:
+                st.warning(f"⚠️ **Today's session hasn't started yet.** Market opens at 8:30 AM CT.")
+                st.info("💡 Switch to **Planning Mode** to prepare for today, or wait until after market open for historical analysis.")
+                return
     
     # ─────────────────────────────────────────────────────────────────────────
     # FETCH DATA
