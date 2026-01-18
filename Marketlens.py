@@ -679,169 +679,247 @@ def validate_830_candle(candle,ceiling,floor):
         return {"status":"INSIDE","message":"⏸️ 8:30 candle stayed inside channel","setup":"WAIT","position":"INSIDE"}
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ENTRY CONFIRMATION
+# ENTRY CONFIRMATION - Complete Logic
 # ═══════════════════════════════════════════════════════════════════════════════
-def check_entry_confirmation(candle,entry_level,direction):
+def check_entry_confirmation(candle, entry_level, direction, ceiling, floor, break_threshold=6.0):
     """
     Check if a candle confirms entry at the entry level.
     
-    PUTS Entry Confirmation:
-    - Need a BULLISH candle (close > open) that tests the entry level
-    - Candle can wick above entry (testing resistance)
-    - Must close BELOW entry level
-    - This confirms sellers rejected the level
+    There are TWO distinct scenarios:
     
-    CALLS Entry Confirmation:
-    - Need a BEARISH candle (close < open) that tests the entry level
-    - Candle can wick below entry (testing support)
-    - Must close ABOVE entry level
-    - This confirms buyers rejected the level
+    ═══════════════════════════════════════════════════════════════════════════
+    SCENARIO 1: OVERNIGHT BREAKOUT (price already broke channel before 8:30)
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    PUTS after overnight broke BELOW floor:
+    - 8:30 opens far BELOW channel
+    - Rallies UP (BULLISH candle) back to floor (entry level)
+    - Touches floor and closes BELOW it
+    - ✅ Rejection confirmed → Enter PUTS at 9:00
+    
+    CALLS after overnight broke ABOVE ceiling:
+    - 8:30 opens far ABOVE channel
+    - Sells DOWN (BEARISH candle) back to ceiling (entry level)
+    - Touches ceiling and closes ABOVE it
+    - ✅ Rejection confirmed → Enter CALLS at 9:00
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    SCENARIO 2: INSIDE CHANNEL (price inside channel at 8:30)
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    PUTS - Rejection at ceiling:
+    - BULLISH candle rallies to ceiling
+    - Touches ceiling but closes BELOW it
+    - AND did NOT break through by more than 6 pts (threshold)
+    - ✅ Rejection confirmed → Enter PUTS targeting floor
+    
+    CALLS - Rejection at floor:
+    - BEARISH candle sells to floor
+    - Touches floor but closes ABOVE it
+    - AND did NOT break through by more than 6 pts (threshold)
+    - ✅ Rejection confirmed → Enter CALLS targeting ceiling
+    
+    ═══════════════════════════════════════════════════════════════════════════
+    CRITICAL: MOMENTUM PROBE (>6 pts break) - DO NOT ENTER
+    ═══════════════════════════════════════════════════════════════════════════
+    
+    If candle breaks through by MORE than 6 pts but closes back inside:
+    - This is NOT a rejection - it's a momentum probe
+    - 9:00 AM will likely CONTINUE in the breakout direction
+    - DO NOT fade this move!
     
     Returns: dict with confirmed status, message, and details
     """
     if candle is None or entry_level is None:
-        return {"confirmed":False,"message":"Waiting for candle data","reason":"NO_DATA"}
+        return {"confirmed": False, "message": "Waiting for candle data", "reason": "NO_DATA"}
     
-    o,h,l,c=candle["open"],candle["high"],candle["low"],candle["close"]
-    is_bullish=c>o
-    is_bearish=c<o
+    o, h, l, c = candle["open"], candle["high"], candle["low"], candle["close"]
+    is_bullish = c > o
+    is_bearish = c < o
     
-    if direction=="PUTS":
-        # For PUTS: need bullish candle that touches entry but closes below
-        touched_entry=h>=entry_level-2  # Allow 2 pts tolerance
-        closed_below=c<entry_level
+    if direction == "PUTS":
+        # Entry level for PUTS is at the ceiling (or floor if overnight broke below)
+        # We need: BULLISH candle that touches entry and closes BELOW it
+        
+        touched_entry = h >= entry_level - 2  # Allow 2 pts tolerance for touch
+        closed_below = c < entry_level
+        break_beyond = h - entry_level if h > entry_level else 0  # How far it broke through
         
         if not touched_entry:
-            return {"confirmed":False,"message":"Candle did not reach entry level","reason":"NO_TOUCH",
-                    "detail":f"High {h:.2f} < Entry {entry_level:.2f}"}
+            return {"confirmed": False, "message": "Candle did not reach entry level", "reason": "NO_TOUCH",
+                    "detail": f"High {h:.2f} did not reach Entry {entry_level:.2f}"}
         
         if not is_bullish:
-            return {"confirmed":False,"message":"Waiting for bullish rejection candle","reason":"WRONG_COLOR",
-                    "detail":"Need bullish candle (close > open) for PUTS entry"}
+            return {"confirmed": False, "message": "Waiting for bullish rejection candle", "reason": "WRONG_COLOR",
+                    "detail": "Need BULLISH candle (close > open) for PUTS entry"}
         
         if not closed_below:
-            return {"confirmed":False,"message":"Candle closed above entry - no rejection","reason":"NO_REJECTION",
-                    "detail":f"Close {c:.2f} >= Entry {entry_level:.2f}"}
+            return {"confirmed": False, "message": "Candle closed above entry - no rejection", "reason": "NO_REJECTION",
+                    "detail": f"Close {c:.2f} >= Entry {entry_level:.2f}"}
         
-        # All conditions met!
-        wick_above=h-entry_level if h>entry_level else 0
-        return {"confirmed":True,"message":"✅ ENTRY CONFIRMED - Bullish rejection candle",
-                "reason":"CONFIRMED","candle_color":"BULLISH",
-                "detail":f"Touched {h:.2f}, closed below at {c:.2f}",
-                "wick_beyond":round(wick_above,2)}
+        # Check for momentum probe (broke through too far)
+        if break_beyond > break_threshold:
+            return {"confirmed": False, "message": f"⚠️ Momentum probe - broke {break_beyond:.1f} pts through", 
+                    "reason": "MOMENTUM_PROBE",
+                    "detail": f"Broke through by {break_beyond:.1f} pts (>{break_threshold}) - 9AM will likely continue UP"}
+        
+        # All conditions met - valid rejection!
+        return {"confirmed": True, "message": "✅ ENTRY CONFIRMED - Bullish rejection candle",
+                "reason": "CONFIRMED", "candle_color": "BULLISH",
+                "detail": f"Touched {h:.2f}, closed below at {c:.2f}" + (f" (wick {break_beyond:.1f} pts beyond)" if break_beyond > 0 else ""),
+                "wick_beyond": round(break_beyond, 2)}
     
-    elif direction=="CALLS":
-        # For CALLS: need bearish candle that touches entry but closes above
-        touched_entry=l<=entry_level+2  # Allow 2 pts tolerance
-        closed_above=c>entry_level
+    elif direction == "CALLS":
+        # Entry level for CALLS is at the floor (or ceiling if overnight broke above)
+        # We need: BEARISH candle that touches entry and closes ABOVE it
+        
+        touched_entry = l <= entry_level + 2  # Allow 2 pts tolerance for touch
+        closed_above = c > entry_level
+        break_beyond = entry_level - l if l < entry_level else 0  # How far it broke through
         
         if not touched_entry:
-            return {"confirmed":False,"message":"Candle did not reach entry level","reason":"NO_TOUCH",
-                    "detail":f"Low {l:.2f} > Entry {entry_level:.2f}"}
+            return {"confirmed": False, "message": "Candle did not reach entry level", "reason": "NO_TOUCH",
+                    "detail": f"Low {l:.2f} did not reach Entry {entry_level:.2f}"}
         
         if not is_bearish:
-            return {"confirmed":False,"message":"Waiting for bearish rejection candle","reason":"WRONG_COLOR",
-                    "detail":"Need bearish candle (close < open) for CALLS entry"}
+            return {"confirmed": False, "message": "Waiting for bearish rejection candle", "reason": "WRONG_COLOR",
+                    "detail": "Need BEARISH candle (close < open) for CALLS entry"}
         
         if not closed_above:
-            return {"confirmed":False,"message":"Candle closed below entry - no rejection","reason":"NO_REJECTION",
-                    "detail":f"Close {c:.2f} <= Entry {entry_level:.2f}"}
+            return {"confirmed": False, "message": "Candle closed below entry - no rejection", "reason": "NO_REJECTION",
+                    "detail": f"Close {c:.2f} <= Entry {entry_level:.2f}"}
         
-        # All conditions met!
-        wick_below=entry_level-l if l<entry_level else 0
-        return {"confirmed":True,"message":"✅ ENTRY CONFIRMED - Bearish rejection candle",
-                "reason":"CONFIRMED","candle_color":"BEARISH",
-                "detail":f"Touched {l:.2f}, closed above at {c:.2f}",
-                "wick_beyond":round(wick_below,2)}
+        # Check for momentum probe (broke through too far)
+        if break_beyond > break_threshold:
+            return {"confirmed": False, "message": f"⚠️ Momentum probe - broke {break_beyond:.1f} pts through",
+                    "reason": "MOMENTUM_PROBE", 
+                    "detail": f"Broke through by {break_beyond:.1f} pts (>{break_threshold}) - 9AM will likely continue DOWN"}
+        
+        # All conditions met - valid rejection!
+        return {"confirmed": True, "message": "✅ ENTRY CONFIRMED - Bearish rejection candle",
+                "reason": "CONFIRMED", "candle_color": "BEARISH",
+                "detail": f"Touched {l:.2f}, closed above at {c:.2f}" + (f" (wick {break_beyond:.1f} pts beyond)" if break_beyond > 0 else ""),
+                "wick_beyond": round(break_beyond, 2)}
     
-    return {"confirmed":False,"message":"No direction set","reason":"NO_DIRECTION"}
+    return {"confirmed": False, "message": "No direction set", "reason": "NO_DIRECTION"}
 
-def find_entry_confirmation(day_candles,entry_level,direction,offset,start_time="09:00"):
+
+def find_entry_confirmation(day_candles, entry_level, direction, offset, ceiling_spx, floor_spx, break_threshold=6.0, start_time="08:30"):
     """
     Scan through day candles to find the first entry confirmation candle.
+    
+    IMPORTANT: The 8:30 candle itself CAN be the entry confirmation!
+    
+    Scenarios where 8:30 confirms:
+    1. Overnight broke below → 8:30 rallies (bullish) to floor, closes below → PUTS
+    2. Overnight broke above → 8:30 sells (bearish) to ceiling, closes above → CALLS
+    3. Inside channel → 8:30 tests ceiling (bullish), closes below, <6pt break → PUTS
+    4. Inside channel → 8:30 tests floor (bearish), closes above, <6pt break → CALLS
+    
+    We start checking from 8:30 AM.
     Returns the confirmation details and the candle time.
     """
     if day_candles is None or day_candles.empty:
-        return None
+        return {"confirmed": False, "message": "No candle data available", "reason": "NO_DATA"}
     
-    entry_level_spx=entry_level-offset
+    entry_level_spx = entry_level - offset
     
-    for idx,row in day_candles.iterrows():
-        candle_time=idx.strftime("%H:%M")
+    for idx, row in day_candles.iterrows():
+        candle_time = idx.strftime("%H:%M")
         
-        # Only check candles after start_time (typically 9:00 AM)
-        if candle_time<start_time:
+        # Start checking from 8:30 AM
+        if candle_time < start_time:
             continue
         
-        candle={
-            "open":row["Open"]-offset,
-            "high":row["High"]-offset,
-            "low":row["Low"]-offset,
-            "close":row["Close"]-offset
+        # Stop checking after 10:30 AM - if no confirmation by then, setup is invalid
+        if candle_time > "10:30":
+            break
+        
+        candle = {
+            "open": row["Open"] - offset,
+            "high": row["High"] - offset,
+            "low": row["Low"] - offset,
+            "close": row["Close"] - offset
         }
         
-        confirmation=check_entry_confirmation(candle,entry_level_spx,direction)
+        confirmation = check_entry_confirmation(candle, entry_level_spx, direction, ceiling_spx, floor_spx, break_threshold)
         
         if confirmation["confirmed"]:
-            confirmation["time"]=candle_time
-            confirmation["candle"]=candle
+            confirmation["time"] = candle_time
+            confirmation["candle"] = candle
+            return confirmation
+        
+        # If we got a momentum probe, return that as the result (don't keep searching)
+        if confirmation.get("reason") == "MOMENTUM_PROBE":
+            confirmation["time"] = candle_time
             return confirmation
     
-    return {"confirmed":False,"message":"No entry confirmation found in session","reason":"NOT_FOUND"}
+    return {"confirmed": False, "message": "No entry confirmation found by 10:30 AM", "reason": "NOT_FOUND"}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HISTORICAL OUTCOME ANALYSIS
 # ═══════════════════════════════════════════════════════════════════════════════
-def analyze_historical_outcome(hist_data,validation,ceiling,floor,targets,direction,entry_level_es,offset):
+def analyze_historical_outcome(hist_data, validation, ceiling_es, floor_es, targets, direction, entry_level_es, offset):
     """
     Analyze what actually happened on a historical date
     All prices displayed in SPX (converted from ES candles)
     
-    Entry confirmation logic:
-    - PUTS: Wait for bullish candle that touches entry but closes BELOW
-    - CALLS: Wait for bearish candle that touches entry but closes ABOVE
+    Entry confirmation logic includes momentum probe detection:
+    - PUTS: Bullish candle touches entry, closes BELOW, break <6pts
+    - CALLS: Bearish candle touches entry, closes ABOVE, break <6pts
+    - If break >6pts but closes inside = MOMENTUM PROBE, don't enter!
     """
     if "day_candles" not in hist_data:
         return None
     
-    day_candles=hist_data["day_candles"]
-    entry_level_spx=round(entry_level_es-offset,2)
+    day_candles = hist_data["day_candles"]
+    entry_level_spx = round(entry_level_es - offset, 2)
+    ceiling_spx = round(ceiling_es - offset, 2) if ceiling_es else None
+    floor_spx = round(floor_es - offset, 2) if floor_es else None
     
-    result={
-        "setup_valid":validation["status"] in ["VALID","TREND_DAY"],
-        "direction":direction,
-        "entry_level_es":entry_level_es,
-        "entry_level_spx":entry_level_spx,
-        "targets_hit":[],
-        "max_favorable":0,
-        "max_adverse":0,
-        "final_price":round(hist_data.get("day_close",0)-offset,2),
-        "timeline":[],
-        "entry_confirmation":None
+    result = {
+        "setup_valid": validation["status"] in ["VALID", "TREND_DAY"],
+        "direction": direction,
+        "entry_level_es": entry_level_es,
+        "entry_level_spx": entry_level_spx,
+        "targets_hit": [],
+        "max_favorable": 0,
+        "max_adverse": 0,
+        "final_price": round(hist_data.get("day_close", 0) - offset, 2),
+        "timeline": [],
+        "entry_confirmation": None
     }
     
     if not result["setup_valid"]:
-        result["outcome"]="NO_SETUP"
-        result["message"]="Setup was not valid"
+        result["outcome"] = "NO_SETUP"
+        result["message"] = "Setup was not valid"
         return result
     
-    # Find entry confirmation candle
-    entry_conf=find_entry_confirmation(day_candles,entry_level_es,direction,offset,"09:00")
-    result["entry_confirmation"]=entry_conf
+    # Find entry confirmation candle - start from 8:30 as it can be the confirmation candle itself
+    # Pass ceiling and floor for momentum probe detection
+    entry_conf = find_entry_confirmation(
+        day_candles, entry_level_es, direction, offset, 
+        ceiling_spx, floor_spx, BREAK_THRESHOLD, "08:30"
+    )
+    result["entry_confirmation"] = entry_conf
     
     if not entry_conf.get("confirmed"):
-        result["outcome"]="NO_ENTRY"
-        result["message"]=entry_conf.get("message","No valid entry confirmation")
+        # Check if it was a momentum probe
+        if entry_conf.get("reason") == "MOMENTUM_PROBE":
+            result["outcome"] = "MOMENTUM_PROBE"
+            result["message"] = entry_conf.get("message", "Momentum probe detected - no entry")
+        else:
+            result["outcome"] = "NO_ENTRY"
+            result["message"] = entry_conf.get("message", "No valid entry confirmation")
         return result
     
     # Entry confirmed - track from confirmation candle
-    entered=True
-    entry_price_spx=entry_level_spx  # Use the entry level as entry price
-    entry_time=entry_conf.get("time","09:00")
+    entry_price_spx = entry_level_spx
+    entry_time = entry_conf.get("time", "08:30")
     result["timeline"].append({
-        "time":entry_time,
-        "event":f"ENTRY CONFIRMED ({entry_conf.get('candle_color','')}) ",
-        "price":round(entry_price_spx,2)
+        "time": entry_time,
+        "event": f"ENTRY ({entry_conf.get('candle_color', '')})",
+        "price": round(entry_price_spx, 2)
     })
     
     # Track price movement after entry
@@ -1556,6 +1634,9 @@ def main():
         elif outcome["outcome"]=="LOSS":
             box_class="loss"
             icon="❌"
+        elif outcome["outcome"]=="MOMENTUM_PROBE":
+            box_class="neutral"
+            icon="⚡"
         else:
             box_class="neutral"
             icon="⚠️"
@@ -1570,14 +1651,20 @@ def main():
         # Entry confirmation details
         entry_conf=outcome.get("entry_confirmation",{})
         if entry_conf.get("confirmed"):
-            entry_conf_html=f'''<div style="background:rgba(0,212,170,0.1);border:1px solid rgba(0,212,170,0.3);border-radius:8px;padding:10px;margin-bottom:12px">
-<div style="font-size:12px;font-weight:600;color:#00d4aa;margin-bottom:4px">✅ Entry Confirmation @ {entry_conf.get("time","")}</div>
-<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("candle_color","")} rejection candle - {entry_conf.get("detail","")}</div>
+            entry_conf_html=f'''<div style="background:rgba(0,212,170,0.1);border:1px solid rgba(0,212,170,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+<div style="font-size:12px;font-weight:600;color:#00d4aa;margin-bottom:4px">✅ Entry Confirmed @ {entry_conf.get("time","")}</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("candle_color","")} rejection candle — {entry_conf.get("detail","")}</div>
+</div>'''
+        elif outcome["outcome"]=="MOMENTUM_PROBE":
+            entry_conf_html=f'''<div style="background:rgba(255,71,87,0.1);border:1px solid rgba(255,71,87,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+<div style="font-size:12px;font-weight:600;color:#ff4757;margin-bottom:4px">⚡ Momentum Probe @ {entry_conf.get("time","")}</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("detail","Broke through by >6 pts - 9AM continued in breakout direction")}</div>
+<div style="font-size:10px;color:#ff4757;margin-top:6px;font-weight:500">❌ NO ENTRY - Fade would have failed</div>
 </div>'''
         elif outcome["outcome"]=="NO_ENTRY":
-            entry_conf_html=f'''<div style="background:rgba(255,165,2,0.1);border:1px solid rgba(255,165,2,0.3);border-radius:8px;padding:10px;margin-bottom:12px">
+            entry_conf_html=f'''<div style="background:rgba(255,165,2,0.1);border:1px solid rgba(255,165,2,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
 <div style="font-size:12px;font-weight:600;color:#ffa502;margin-bottom:4px">⚠️ No Entry Confirmation</div>
-<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("message","No valid rejection candle found")}</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("message","No valid rejection candle found by 10:30 AM")}</div>
 </div>'''
         else:
             entry_conf_html=""
@@ -1585,7 +1672,7 @@ def main():
         st.markdown(f'''<div class="result-box {box_class}">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
 <div style="font-size:18px;font-weight:700">{icon} HISTORICAL RESULT</div>
-<div style="font-size:14px;font-weight:600">{outcome["outcome"]}</div>
+<div style="font-size:14px;font-weight:600">{outcome["outcome"].replace("_"," ")}</div>
 </div>
 <div style="font-size:14px;margin-bottom:12px">{outcome["message"]}</div>
 {entry_conf_html}
@@ -1723,12 +1810,14 @@ def main():
         dir_color="#ff4757" if direction=="PUTS" else "#00d4aa"
         dir_icon="🔴" if direction=="PUTS" else "🟢"
         
-        # Entry confirmation rule
+        # Entry confirmation rules with momentum probe warning
         if direction=="PUTS":
-            entry_rule="Wait for BULLISH candle that tests entry level but closes BELOW it"
+            entry_rule="BULLISH candle touches entry, closes BELOW"
+            rule_detail="If candle breaks >6 pts ABOVE entry but closes below → NO ENTRY (momentum probe, 9AM continues UP)"
             rule_icon="📗"
         else:
-            entry_rule="Wait for BEARISH candle that tests entry level but closes ABOVE it"
+            entry_rule="BEARISH candle touches entry, closes ABOVE"
+            rule_detail="If candle breaks >6 pts BELOW entry but closes above → NO ENTRY (momentum probe, 9AM continues DOWN)"
             rule_icon="📕"
         
         targets_html=""
@@ -1759,9 +1848,10 @@ def main():
 </div>
 </div>
 
-<div style="background:rgba(255,165,2,0.08);border:1px solid rgba(255,165,2,0.25);border-radius:10px;padding:12px;margin-bottom:14px">
-<div style="font-size:11px;color:#ffa502;font-weight:600;margin-bottom:4px">{rule_icon} ENTRY CONFIRMATION RULE</div>
-<div style="font-size:12px;color:rgba(255,255,255,0.8)">{entry_rule}</div>
+<div style="background:rgba(255,165,2,0.08);border:1px solid rgba(255,165,2,0.25);border-radius:10px;padding:14px;margin-bottom:14px">
+<div style="font-size:11px;color:#ffa502;font-weight:600;margin-bottom:6px">{rule_icon} ENTRY CONFIRMATION</div>
+<div style="font-size:13px;color:rgba(255,255,255,0.9);font-weight:500;margin-bottom:8px">{entry_rule}</div>
+<div style="font-size:10px;color:rgba(255,71,87,0.9);background:rgba(255,71,87,0.1);border-radius:6px;padding:8px">⚠️ {rule_detail}</div>
 </div>
 
 <div class="target-box">
