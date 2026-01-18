@@ -791,7 +791,7 @@ def check_entry_confirmation(candle, entry_level, direction, break_threshold=6.0
 
 def get_next_candle_time(current_time):
     """Get the next 30-min candle time"""
-    time_sequence = ["08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00"]
+    time_sequence = ["08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30"]
     try:
         idx = time_sequence.index(current_time)
         if idx < len(time_sequence) - 1:
@@ -809,12 +809,14 @@ def find_entry_confirmation(day_candles, entry_level, direction, offset, break_t
     KEY RULE: Setup Candle → Entry at NEXT candle's open
     ═══════════════════════════════════════════════════════════════════════════
     
-    | Setup Time | Entry Time |
-    |------------|------------|
-    | 8:00 AM    | 8:30 AM    |
-    | 8:30 AM    | 9:00 AM    |
-    | 9:00 AM    | 9:30 AM    |
-    | 9:30 AM    | 10:00 AM   |
+    | Setup Time  | Entry Time |
+    |-------------|------------|
+    | 8:00 AM     | 8:30 AM    |
+    | 8:30 AM     | 9:00 AM    |
+    | 9:00 AM     | 9:30 AM    |
+    | 9:30 AM     | 10:00 AM   |
+    | 10:00 AM    | 10:30 AM   |
+    | 10:30 AM    | 11:00 AM   | ← Latest possible entry
     
     We start checking from 8:00 AM (pre-RTH can set up for 8:30 entry).
     Returns the confirmation details with setup_time and entry_time.
@@ -831,8 +833,8 @@ def find_entry_confirmation(day_candles, entry_level, direction, offset, break_t
         if candle_time < start_time:
             continue
         
-        # Stop checking after 10:00 AM (latest setup for 10:30 entry)
-        if candle_time > "10:00":
+        # Stop checking after 10:30 AM (latest setup for 11:00 AM entry)
+        if candle_time > "10:30":
             break
         
         candle = {
@@ -859,7 +861,7 @@ def find_entry_confirmation(day_candles, entry_level, direction, offset, break_t
             confirmation["time"] = candle_time
             return confirmation
     
-    return {"confirmed": False, "message": "No setup candle found by 10:00 AM", "reason": "NOT_FOUND"}
+    return {"confirmed": False, "message": "No setup candle found by 10:30 AM", "reason": "NOT_FOUND"}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HISTORICAL OUTCOME ANALYSIS
@@ -1671,7 +1673,7 @@ def main():
         elif outcome["outcome"]=="NO_ENTRY":
             entry_conf_html=f'''<div style="background:rgba(255,165,2,0.1);border:1px solid rgba(255,165,2,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
 <div style="font-size:12px;font-weight:600;color:#ffa502;margin-bottom:4px">⚠️ No Setup Found</div>
-<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("message","No valid setup candle found by 10:00 AM")}</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("message","No valid setup candle found by 10:30 AM")}</div>
 </div>'''
         else:
             entry_conf_html=""
@@ -1820,11 +1822,11 @@ def main():
         # Entry confirmation rules with momentum probe warning
         if direction=="PUTS":
             entry_rule="BULLISH candle touches entry, closes BELOW"
-            rule_detail="If candle breaks >6 pts ABOVE entry but closes below → NO ENTRY (momentum probe, 9AM continues UP)"
+            rule_detail="If candle breaks >6 pts ABOVE entry but closes below → NO ENTRY (momentum probe, next candle continues UP)"
             rule_icon="📗"
         else:
             entry_rule="BEARISH candle touches entry, closes ABOVE"
-            rule_detail="If candle breaks >6 pts BELOW entry but closes above → NO ENTRY (momentum probe, 9AM continues DOWN)"
+            rule_detail="If candle breaks >6 pts BELOW entry but closes above → NO ENTRY (momentum probe, next candle continues DOWN)"
             rule_icon="📕"
         
         targets_html=""
@@ -1839,7 +1841,7 @@ def main():
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
 <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center">
 <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">ENTRY WINDOW</div>
-<div style="font-weight:600;font-size:15px">9:00 - 9:30</div>
+<div style="font-weight:600;font-size:15px">8:30 - 11:00</div>
 </div>
 <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center">
 <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">ENTRY LEVEL</div>
@@ -2072,10 +2074,10 @@ def main():
     st.markdown(f'''<div class="footer">
 <div style="margin-bottom:8px;font-weight:600;font-size:12px">🔮 SPX PROPHET V6.1</div>
 <div style="font-size:10px;color:rgba(255,255,255,0.4)">
-Sydney/Tokyo Channel • 8:30 Candle Validation • Rejection Entry Confirmation • Structural Cone Targets
+Sydney/Tokyo Channel • Setup Candle → Next Candle Entry • Momentum Probe Filter • Structural Cone Targets
 </div>
 <div style="margin-top:6px;font-size:10px;color:rgba(255,255,255,0.3)">
-Slope: {SLOPE} pts/block | Break Threshold: {BREAK_THRESHOLD} pts
+Setup Window: 8:00-10:30 AM | Entry Window: 8:30-11:00 AM | Slope: {SLOPE} pts/block | Break Threshold: {BREAK_THRESHOLD} pts
 </div>
 </div>''',unsafe_allow_html=True)
     
