@@ -309,7 +309,8 @@ def extract_historical_data(es_candles,trading_date,offset=18.0):
     tokyo_end=CT.localize(datetime.combine(trading_date,time(1,30)))
     overnight_start=CT.localize(datetime.combine(overnight_day,time(17,0)))
     overnight_end=CT.localize(datetime.combine(trading_date,time(3,0)))  # Sydney + Tokyo + London 1st hour
-    market_open=CT.localize(datetime.combine(trading_date,time(8,30)))
+    # Start at 8:00 AM to include pre-RTH candle (can be setup candle for 8:30 entry)
+    market_open=CT.localize(datetime.combine(trading_date,time(8,0)))
     market_close=CT.localize(datetime.combine(trading_date,time(15,0)))
     
     # Prior day RTH (for cones) - uses prior_rth_day which handles Monday→Friday
