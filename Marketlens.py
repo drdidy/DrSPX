@@ -1471,65 +1471,137 @@ def main():
     st.markdown(cmd_html,unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # SUPPORTING ANALYSIS
+    # SUPPORTING ANALYSIS - Row 1: Confidence + EMA Alignment
     # ═══════════════════════════════════════════════════════════════════════════
-    col1,col2,col3,col4=st.columns(4)
+    st.markdown("### 📊 Analysis")
+    
+    col1,col2=st.columns(2)
     
     with col1:
         conf_score=confidence["score"]
         conf_color="#00d4aa" if conf_score>=70 else "#ffa502" if conf_score>=50 else "#ff4757"
-        breakdown_html="".join([f'<div class="pillar" style="font-size:10px"><span>{k}</span><span>{v}</span></div>' for k,v in confidence["breakdown"]])
-        st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(168,85,247,0.15)">📊</div><div><div class="card-title">Confidence</div></div></div>
-<div class="metric" style="color:{conf_color}">{conf_score}%</div>
-<div class="conf-bar"><div class="conf-fill" style="width:{conf_score}%;background:{conf_color}"></div></div>
-{breakdown_html}
+        conf_label="HIGH" if conf_score>=70 else "MEDIUM" if conf_score>=50 else "LOW"
+        breakdown_html="".join([f'<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:rgba(255,255,255,0.6)">{k}</span><span style="font-weight:500">{v}</span></div>' for k,v in confidence["breakdown"]])
+        st.markdown(f'''<div class="card" style="padding:20px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<div style="display:flex;align-items:center;gap:12px">
+<div style="width:48px;height:48px;background:rgba(168,85,247,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px">📊</div>
+<div><div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">Confidence Score</div>
+<div style="font-size:12px;color:rgba(255,255,255,0.5)">Setup quality assessment</div></div>
+</div>
+<div style="text-align:right">
+<div style="font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:700;color:{conf_color}">{conf_score}%</div>
+<div style="font-size:11px;font-weight:600;color:{conf_color}">{conf_label} CONFIDENCE</div>
+</div>
+</div>
+<div class="conf-bar" style="height:10px;margin-bottom:16px"><div class="conf-fill" style="width:{conf_score}%;background:{conf_color}"></div></div>
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:12px">{breakdown_html}</div>
 </div>''',unsafe_allow_html=True)
     
     with col2:
-        flow_color="#00d4aa" if flow["bias"]=="HEAVY_CALLS" else "#ff4757" if flow["bias"]=="HEAVY_PUTS" else "#ffa502"
-        meter_pos=(flow["score"]+100)/2
-        st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(34,211,238,0.15)">🌊</div><div><div class="card-title">Flow Bias</div><div class="card-sub">{flow["bias"].replace("_"," ")}</div></div></div>
-<div class="metric" style="color:{flow_color}">{flow["score"]:+d}</div>
-<div class="flow-meter"><div class="flow-marker" style="left:{meter_pos}%"></div></div>
+        # EMA Signals Card
+        cross_color="#00d4aa" if ema_signals["cross_bullish"] else "#ff4757" if ema_signals["cross_bearish"] else "#ffa502"
+        filter_color="#00d4aa" if ema_signals["above_200"] else "#ff4757" if ema_signals["below_200"] else "#ffa502"
+        filter_text="ABOVE" if ema_signals["above_200"] else "BELOW" if ema_signals["below_200"] else "AT"
+        
+        if direction=="CALLS" and ema_signals["aligned_calls"]:
+            align_text="✅ FULLY ALIGNED"
+            align_color="#00d4aa"
+            align_bg="rgba(0,212,170,0.15)"
+        elif direction=="PUTS" and ema_signals["aligned_puts"]:
+            align_text="✅ FULLY ALIGNED"
+            align_color="#00d4aa"
+            align_bg="rgba(0,212,170,0.15)"
+        elif direction in ["CALLS","PUTS"]:
+            align_text="⚠️ CONFLICTING SIGNALS"
+            align_color="#ffa502"
+            align_bg="rgba(255,165,2,0.15)"
+        else:
+            align_text="— NO SETUP"
+            align_color="#888"
+            align_bg="rgba(255,255,255,0.05)"
+        
+        st.markdown(f'''<div class="card" style="padding:20px">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+<div style="width:48px;height:48px;background:rgba(59,130,246,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px">📈</div>
+<div><div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">EMA Confirmation</div>
+<div style="font-size:12px;color:rgba(255,255,255,0.5)">8/21 Cross + 200 EMA Filter</div></div>
+</div>
+<div style="background:{align_bg};border-radius:10px;padding:12px;text-align:center;margin-bottom:16px">
+<div style="font-size:14px;font-weight:600;color:{align_color}">{align_text}</div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
+<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">8/21 CROSS</div>
+<div style="font-size:18px;font-weight:600;color:{cross_color}">{ema_signals["cross_signal"]}</div>
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px">EMA8: {ema_signals["ema8"] or "—"}</div>
+</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
+<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">200 EMA FILTER</div>
+<div style="font-size:18px;font-weight:600;color:{filter_color}">{filter_text}</div>
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px">EMA200: {ema_signals["ema200"] or "—"}</div>
+</div>
+</div>
 </div>''',unsafe_allow_html=True)
     
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SUPPORTING ANALYSIS - Row 2: Flow Bias + Market Context
+    # ═══════════════════════════════════════════════════════════════════════════
+    col3,col4=st.columns(2)
+    
     with col3:
-        # 8/21 Cross color
-        cross_color="#00d4aa" if ema_signals["cross_bullish"] else "#ff4757" if ema_signals["cross_bearish"] else "#ffa502"
-        # 200 EMA filter color
-        filter_color="#00d4aa" if ema_signals["above_200"] else "#ff4757" if ema_signals["below_200"] else "#ffa502"
-        filter_text="Above 200" if ema_signals["above_200"] else "Below 200" if ema_signals["below_200"] else "At 200"
-        # Alignment indicator
-        if direction=="CALLS" and ema_signals["aligned_calls"]:
-            align_text="✅ ALIGNED"
-            align_color="#00d4aa"
-        elif direction=="PUTS" and ema_signals["aligned_puts"]:
-            align_text="✅ ALIGNED"
-            align_color="#00d4aa"
-        elif direction in ["CALLS","PUTS"]:
-            align_text="⚠️ CONFLICT"
-            align_color="#ffa502"
-        else:
-            align_text="—"
-            align_color="#888"
+        flow_color="#00d4aa" if "CALLS" in flow["bias"] else "#ff4757" if "PUTS" in flow["bias"] else "#ffa502"
+        meter_pos=(flow["score"]+100)/2
+        flow_label=flow["bias"].replace("_"," ")
         
-        st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(59,130,246,0.15)">📈</div><div><div class="card-title">EMA Signals</div><div class="card-sub">8/21 + 200</div></div></div>
-<div class="pillar"><span>8/21 Cross</span><span style="color:{cross_color}">{ema_signals["cross_signal"]}</span></div>
-<div class="pillar"><span>200 EMA</span><span style="color:{filter_color}">{filter_text}</span></div>
-<div class="pillar"><span>Alignment</span><span style="color:{align_color}">{align_text}</span></div>
+        st.markdown(f'''<div class="card" style="padding:20px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<div style="display:flex;align-items:center;gap:12px">
+<div style="width:48px;height:48px;background:rgba(34,211,238,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px">🌊</div>
+<div><div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">Flow Bias</div>
+<div style="font-size:12px;color:rgba(255,255,255,0.5)">Institutional positioning signal</div></div>
+</div>
+<div style="text-align:right">
+<div style="font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:700;color:{flow_color}">{flow["score"]:+d}</div>
+<div style="font-size:11px;font-weight:600;color:{flow_color}">{flow_label}</div>
+</div>
+</div>
+<div style="position:relative;margin:20px 0">
+<div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px">
+<span>HEAVY PUTS</span><span>NEUTRAL</span><span>HEAVY CALLS</span>
+</div>
+<div class="flow-meter" style="height:10px"><div class="flow-marker" style="left:{meter_pos}%;width:6px;height:16px;top:-3px"></div></div>
+<div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px">
+<span>-100</span><span>0</span><span>+100</span>
+</div>
+</div>
 </div>''',unsafe_allow_html=True)
     
     with col4:
         mom_color="#00d4aa" if "BULL" in momentum["signal"] else "#ff4757" if "BEAR" in momentum["signal"] else "#ffa502"
         vix_color="#00d4aa" if vix_zone in ["LOW","NORMAL"] else "#ffa502" if vix_zone=="ELEVATED" else "#ff4757"
-        st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(255,165,2,0.15)">📉</div><div><div class="card-title">Context</div></div></div>
-<div class="pillar"><span>Momentum</span><span style="color:{mom_color}">{momentum["signal"]}</span></div>
-<div class="pillar"><span>RSI</span><span>{momentum["rsi"]}</span></div>
-<div class="pillar"><span>VIX</span><span style="color:{vix_color}">{vix:.1f} ({vix_zone})</span></div>
+        
+        st.markdown(f'''<div class="card" style="padding:20px">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+<div style="width:48px;height:48px;background:rgba(255,165,2,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px">📉</div>
+<div><div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">Market Context</div>
+<div style="font-size:12px;color:rgba(255,255,255,0.5)">Momentum & volatility</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
+<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">MOMENTUM</div>
+<div style="font-size:16px;font-weight:600;color:{mom_color}">{momentum["signal"]}</div>
+</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
+<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">RSI (14)</div>
+<div style="font-size:16px;font-weight:600">{momentum["rsi"]}</div>
+</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
+<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">VIX</div>
+<div style="font-size:16px;font-weight:600;color:{vix_color}">{vix:.1f}</div>
+<div style="font-size:9px;color:{vix_color}">{vix_zone}</div>
+</div>
+</div>
 </div>''',unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
