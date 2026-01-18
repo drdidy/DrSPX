@@ -58,52 +58,57 @@ STYLES="""<style>
 .stApp>header{background:transparent!important}
 [data-testid="stSidebar"]{background:rgba(10,10,15,0.95)!important;border-right:1px solid var(--border)}
 [data-testid="stSidebar"] *{color:var(--text)!important}
-.hero{background:linear-gradient(135deg,rgba(168,85,247,0.15),rgba(34,211,238,0.15));border:1px solid var(--border);border-radius:20px;padding:20px 28px;margin-bottom:20px;text-align:center;backdrop-filter:blur(20px)}
-.hero-title{font-family:'Space Grotesk',sans-serif;font-size:28px;font-weight:700;margin:0}
-.hero-sub{font-size:13px;color:var(--text2);margin-top:4px}
-.hero-price{font-family:'IBM Plex Mono',monospace;font-size:42px;font-weight:700;color:var(--cyan);margin-top:10px}
-.hist-badge{background:linear-gradient(90deg,#a855f7,#3b82f6);color:white;padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block;margin-top:8px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:14px;backdrop-filter:blur(10px)}
-.card-h{display:flex;align-items:center;gap:10px;margin-bottom:12px}
-.card-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
-.card-title{font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:600}
-.card-sub{font-size:11px;color:var(--text2)}
-.badge{display:inline-block;padding:5px 12px;border-radius:16px;font-size:11px;font-weight:600;text-transform:uppercase}
-.metric{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600}
-.cmd-card{background:linear-gradient(135deg,rgba(168,85,247,0.1),rgba(34,211,238,0.1));border:2px solid var(--purple);border-radius:20px;padding:20px;margin-bottom:16px}
-.cmd-title{font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700;color:var(--purple);margin-bottom:4px}
-.phase-badge{background:var(--purple);color:white;padding:4px 12px;border-radius:12px;font-size:11px;font-weight:600}
-.channel-box{background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:12px;margin:12px 0}
-.level-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)}
+h3{font-family:'Space Grotesk',sans-serif!important;font-size:18px!important;font-weight:600!important;color:var(--text)!important;margin:24px 0 16px 0!important;padding-bottom:8px!important;border-bottom:1px solid var(--border)!important}
+.hero{background:linear-gradient(135deg,rgba(168,85,247,0.12),rgba(34,211,238,0.12));border:1px solid var(--border);border-radius:24px;padding:28px 32px;margin-bottom:24px;text-align:center;backdrop-filter:blur(20px)}
+.hero-title{font-family:'Space Grotesk',sans-serif;font-size:32px;font-weight:700;margin:0;background:linear-gradient(135deg,#a855f7,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:13px;color:var(--text2);margin-top:6px;letter-spacing:0.5px}
+.hero-price{font-family:'IBM Plex Mono',monospace;font-size:48px;font-weight:700;color:var(--cyan);margin-top:12px;text-shadow:0 0 30px rgba(34,211,238,0.3)}
+.hist-badge{background:linear-gradient(90deg,#a855f7,#3b82f6);color:white;padding:8px 20px;border-radius:24px;font-size:12px;font-weight:600;display:inline-block;margin-top:12px;letter-spacing:0.5px;box-shadow:0 4px 15px rgba(168,85,247,0.3)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px;backdrop-filter:blur(10px);transition:all 0.2s ease}
+.card:hover{border-color:rgba(255,255,255,0.12);background:rgba(255,255,255,0.04)}
+.card-h{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.card-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px}
+.card-title{font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600}
+.card-sub{font-size:11px;color:var(--text2);margin-top:2px}
+.badge{display:inline-block;padding:6px 14px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+.metric{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600}
+.cmd-card{background:linear-gradient(135deg,rgba(168,85,247,0.08),rgba(34,211,238,0.08));border:2px solid rgba(168,85,247,0.4);border-radius:24px;padding:24px;margin-bottom:20px;box-shadow:0 8px 32px rgba(168,85,247,0.1)}
+.cmd-title{font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700;background:linear-gradient(135deg,#a855f7,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:4px}
+.phase-badge{background:var(--purple);color:white;padding:6px 14px;border-radius:14px;font-size:11px;font-weight:600;letter-spacing:0.5px}
+.channel-box{background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:14px;padding:16px;margin:16px 0}
+.level-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.level-row:last-child{border-bottom:none}
 .level-name{font-size:13px;color:var(--text2)}
-.level-val{font-family:'IBM Plex Mono',monospace;font-weight:500}
-.scenario{background:rgba(255,255,255,0.02);border-radius:12px;padding:14px;margin:10px 0;border-left:3px solid var(--border)}
-.scenario.valid{border-left-color:var(--green)}
-.scenario.invalid{border-left-color:var(--red)}
-.scenario-h{font-size:12px;font-weight:600;margin-bottom:8px}
-.target-box{background:rgba(0,212,170,0.1);border:1px solid rgba(0,212,170,0.3);border-radius:10px;padding:10px;margin-top:10px}
-.target-h{font-size:11px;color:var(--green);font-weight:600;margin-bottom:6px}
-.result-box{border-radius:12px;padding:14px;margin:12px 0}
-.result-box.win{background:rgba(0,212,170,0.15);border:1px solid var(--green)}
-.result-box.loss{background:rgba(255,71,87,0.15);border:1px solid var(--red)}
-.result-box.neutral{background:rgba(255,165,2,0.15);border:1px solid var(--amber)}
-.conf-bar{height:8px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden;margin:6px 0}
-.conf-fill{height:100%;border-radius:4px}
-.pillar{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:12px}
-.flow-meter{height:6px;background:linear-gradient(90deg,#ff4757,#ffa502 50%,#00d4aa);border-radius:3px;position:relative;margin:8px 0}
-.flow-marker{position:absolute;top:-3px;width:4px;height:12px;background:#fff;border-radius:2px;transform:translateX(-50%);box-shadow:0 0 6px rgba(255,255,255,0.5)}
-.candle-display{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
-.candle-item{text-align:center;padding:8px;background:rgba(255,255,255,0.03);border-radius:8px}
-.candle-label{font-size:10px;color:var(--text2)}
-.candle-val{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600}
-.timeline{position:relative;padding-left:20px;margin:12px 0}
-.timeline-item{position:relative;padding:10px 0 10px 20px;border-left:2px solid var(--border)}
+.level-val{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:14px}
+.scenario{background:rgba(255,255,255,0.02);border-radius:14px;padding:18px;margin:14px 0;border-left:4px solid var(--border)}
+.scenario.valid{border-left-color:var(--green);background:rgba(0,212,170,0.05)}
+.scenario.invalid{border-left-color:var(--red);background:rgba(255,71,87,0.05)}
+.scenario-h{font-size:14px;font-weight:700;margin-bottom:12px;letter-spacing:0.5px}
+.target-box{background:rgba(0,212,170,0.08);border:1px solid rgba(0,212,170,0.25);border-radius:12px;padding:14px;margin-top:14px}
+.target-h{font-size:12px;color:var(--green);font-weight:600;margin-bottom:8px;letter-spacing:0.5px}
+.result-box{border-radius:16px;padding:20px;margin:16px 0}
+.result-box.win{background:rgba(0,212,170,0.12);border:1px solid var(--green)}
+.result-box.loss{background:rgba(255,71,87,0.12);border:1px solid var(--red)}
+.result-box.neutral{background:rgba(255,165,2,0.12);border:1px solid var(--amber)}
+.conf-bar{height:10px;background:rgba(255,255,255,0.08);border-radius:5px;overflow:hidden;margin:8px 0}
+.conf-fill{height:100%;border-radius:5px;transition:width 0.3s ease}
+.pillar{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:13px}
+.pillar:last-child{border-bottom:none}
+.flow-meter{height:8px;background:linear-gradient(90deg,#ff4757,#ffa502 50%,#00d4aa);border-radius:4px;position:relative;margin:10px 0}
+.flow-marker{position:absolute;top:-4px;width:6px;height:16px;background:#fff;border-radius:3px;transform:translateX(-50%);box-shadow:0 0 10px rgba(255,255,255,0.6)}
+.candle-display{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}
+.candle-item{text-align:center;padding:10px;background:rgba(255,255,255,0.03);border-radius:10px}
+.candle-label{font-size:10px;color:var(--text2);margin-bottom:4px}
+.candle-val{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600}
+.timeline{position:relative;padding-left:24px;margin:14px 0}
+.timeline-item{position:relative;padding:12px 0 12px 24px;border-left:2px solid var(--border)}
 .timeline-item:last-child{border-left:2px solid transparent}
-.timeline-dot{position:absolute;left:-7px;top:12px;width:12px;height:12px;border-radius:50%;background:var(--border)}
+.timeline-dot{position:absolute;left:-8px;top:14px;width:14px;height:14px;border-radius:50%;background:var(--border);border:2px solid var(--bg)}
 .timeline-dot.active{background:var(--green)}
 .timeline-dot.hit{background:var(--green)}
 .timeline-dot.miss{background:var(--red)}
-.footer{text-align:center;padding:16px;color:var(--text2);font-size:11px;border-top:1px solid var(--border);margin-top:20px}
+.footer{text-align:center;padding:20px;color:var(--text2);font-size:11px;border-top:1px solid var(--border);margin-top:24px}
+.stExpander{border:1px solid var(--border)!important;border-radius:12px!important;background:var(--card)!important}
 </style>"""
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1564,22 +1569,23 @@ def main():
     ch_icon="▲" if channel_type=="RISING" else "▼" if channel_type=="FALLING" else "◆"
     pos_color="#ff4757" if "BELOW" in position else "#00d4aa" if "ABOVE" in position else "#ffa502"
     val_color="#00d4aa" if validation["status"]=="VALID" else "#ff4757" if validation["status"]=="INVALIDATED" else "#ffa502"
+    trend_badge=f'<span style="background:linear-gradient(90deg,#f59e0b,#ef4444);color:white;padding:4px 10px;border-radius:10px;font-size:10px;font-weight:600;margin-left:8px">⚡ TREND DAY</span>' if is_trend_day else ""
     
     cmd_html=f'''<div class="cmd-card">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-<div><div class="cmd-title">{"Historical " if inputs["is_historical"] else ""}Trading Plan</div><div style="font-size:12px;color:rgba(255,255,255,0.6)">{channel_reason}</div></div>
-<span style="background:{ch_color};color:white;padding:4px 12px;border-radius:12px;font-size:11px;font-weight:600">{channel_type}</span>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<div><div class="cmd-title">{"📜 Historical " if inputs["is_historical"] else ""}Trading Plan</div><div style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:4px">{channel_reason}</div></div>
+<span style="background:{ch_color};color:white;padding:6px 16px;border-radius:14px;font-size:12px;font-weight:600;letter-spacing:0.5px">{ch_icon} {channel_type}</span>
 </div>
 
 <div class="channel-box">
 <div class="level-row"><span class="level-name">Ceiling ({ceil_key or "N/A"})</span><span class="level-val" style="color:#00d4aa">ES {ceiling_es or "—"} → SPX {ceiling_spx or "—"}</span></div>
 <div class="level-row"><span class="level-name">Floor ({floor_key or "N/A"})</span><span class="level-val" style="color:#ff4757">ES {floor_es or "—"} → SPX {floor_spx or "—"}</span></div>
-<div class="level-row" style="border:none"><span class="level-name">Pre-Open Position</span><span class="level-val" style="color:{pos_color}">{position} ({pos_dist:.1f} pts)</span></div>
+<div class="level-row"><span class="level-name">8:30 Position</span><span class="level-val" style="color:{pos_color}">{position} ({pos_dist:.1f} pts)</span></div>
 </div>
 
-<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:12px;margin:12px 0">
-<div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:6px">8:30 AM Candle Validation</div>
-<div style="font-size:14px;font-weight:600;color:{val_color}">{validation["message"]}</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:12px;padding:14px;margin:14px 0">
+<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">8:30 AM Candle Validation</div>
+<div style="font-size:15px;font-weight:600;color:{val_color}">{validation["message"]}{trend_badge}</div>
 </div>'''
     
     # Trade setup
@@ -1590,20 +1596,53 @@ def main():
         exits,_=estimate_exit_prices(entry_spx,strike,"PUT" if direction=="PUTS" else "CALL",vix,hours_to_expiry,targets)
         
         dir_color="#ff4757" if direction=="PUTS" else "#00d4aa"
+        dir_icon="🔴" if direction=="PUTS" else "🟢"
+        
+        # Entry confirmation rule
+        if direction=="PUTS":
+            entry_rule="Wait for BULLISH candle that tests entry level but closes BELOW it"
+            rule_icon="📗"
+        else:
+            entry_rule="Wait for BEARISH candle that tests entry level but closes ABOVE it"
+            rule_icon="📕"
+        
         targets_html=""
         for i,t in enumerate(exits):
-            hl="border:1px solid #00d4aa;background:rgba(0,212,170,0.1)" if i==0 else ""
-            targets_html+=f'<div style="display:flex;justify-content:space-between;padding:6px 8px;border-radius:6px;margin:4px 0;{hl}"><span>{t["target"]} @ {t["level"]}</span><span style="color:{"#00d4aa" if t["pct"]>0 else "#ff4757"}">${t["price"]} ({t["pct"]:+.0f}%)</span></div>'
+            hl="border:1px solid rgba(0,212,170,0.4);background:rgba(0,212,170,0.1)" if i==0 else ""
+            pct_color="#00d4aa" if t["pct"]>0 else "#ff4757"
+            targets_html+=f'<div style="display:flex;justify-content:space-between;padding:8px 10px;border-radius:8px;margin:4px 0;{hl}"><span style="font-weight:500">{t["target"]} @ {t["level"]}</span><span style="color:{pct_color};font-family:IBM Plex Mono;font-weight:600">${t["price"]} ({t["pct"]:+.0f}%)</span></div>'
         
         cmd_html+=f'''<div class="scenario valid">
-<div class="scenario-h" style="color:{dir_color}">{"🔴" if direction=="PUTS" else "🟢"} {direction} SETUP</div>
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
-<div><div style="font-size:10px;color:rgba(255,255,255,0.5)">Entry</div><div style="font-weight:600">9:00-9:10</div></div>
-<div><div style="font-size:10px;color:rgba(255,255,255,0.5)">Level</div><div style="font-weight:600">{entry_spx}</div></div>
-<div><div style="font-size:10px;color:rgba(255,255,255,0.5)">Strike</div><div style="font-weight:600;color:{dir_color}">{strike}</div></div>
-<div><div style="font-size:10px;color:rgba(255,255,255,0.5)">Entry $</div><div style="font-weight:600">${entry_price}</div></div>
+<div class="scenario-h" style="color:{dir_color}">{dir_icon} {direction} SETUP</div>
+
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">ENTRY WINDOW</div>
+<div style="font-weight:600;font-size:15px">9:00 - 9:30</div>
 </div>
-<div class="target-box"><div class="target-h">📍 Targets</div>{targets_html if targets_html else "<div style='color:rgba(255,255,255,0.5)'>No targets found</div>"}</div>
+<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">ENTRY LEVEL</div>
+<div style="font-weight:600;font-size:15px;font-family:IBM Plex Mono">{entry_spx}</div>
+</div>
+<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">STRIKE</div>
+<div style="font-weight:600;font-size:15px;color:{dir_color}">{strike}</div>
+</div>
+<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">EST. ENTRY</div>
+<div style="font-weight:600;font-size:15px;font-family:IBM Plex Mono">${entry_price}</div>
+</div>
+</div>
+
+<div style="background:rgba(255,165,2,0.08);border:1px solid rgba(255,165,2,0.25);border-radius:10px;padding:12px;margin-bottom:14px">
+<div style="font-size:11px;color:#ffa502;font-weight:600;margin-bottom:4px">{rule_icon} ENTRY CONFIRMATION RULE</div>
+<div style="font-size:12px;color:rgba(255,255,255,0.8)">{entry_rule}</div>
+</div>
+
+<div class="target-box">
+<div class="target-h">📍 PROFIT TARGETS</div>
+{targets_html if targets_html else "<div style='color:rgba(255,255,255,0.5)'>No targets found</div>"}
+</div>
 </div>'''
     
     cmd_html+="</div>"
@@ -1812,7 +1851,15 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     # FOOTER
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown(f'<div class="footer">SPX PROPHET V6.1 | Historical Analysis Mode | Slope: {SLOPE}</div>',unsafe_allow_html=True)
+    st.markdown(f'''<div class="footer">
+<div style="margin-bottom:8px;font-weight:600;font-size:12px">🔮 SPX PROPHET V6.1</div>
+<div style="font-size:10px;color:rgba(255,255,255,0.4)">
+Sydney/Tokyo Channel • 8:30 Candle Validation • Rejection Entry Confirmation • Structural Cone Targets
+</div>
+<div style="margin-top:6px;font-size:10px;color:rgba(255,255,255,0.3)">
+Slope: {SLOPE} pts/block | Break Threshold: {BREAK_THRESHOLD} pts
+</div>
+</div>''',unsafe_allow_html=True)
     
     if inputs["auto_refresh"] and not inputs["is_historical"]:
         time_module.sleep(30)
