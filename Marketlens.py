@@ -801,13 +801,20 @@ def get_next_candle_time(current_time):
     return None
 
 
-def find_entry_confirmation(day_candles, entry_level, direction, offset, break_threshold=6.0, start_time="08:00"):
+def find_entry_confirmation(day_candles, entry_level, direction, offset, break_threshold=6.0, start_time="08:00", slope=0.48):
     """
     Scan through candles to find the setup candle.
     
     ═══════════════════════════════════════════════════════════════════════════
-    KEY RULE: Setup Candle → Entry at NEXT candle's open
+    CRITICAL: Entry level CHANGES over time!
     ═══════════════════════════════════════════════════════════════════════════
+    
+    The floor/ceiling are sloped lines (0.48 pts per 30-min block).
+    - Ascending channel: floor rises, ceiling rises
+    - Descending channel: floor falls, ceiling falls
+    
+    So we must calculate the entry level AT EACH CANDLE'S TIME, not use
+    a fixed 9:00 AM entry level.
     
     | Setup Time  | Entry Time |
     |-------------|------------|
@@ -818,13 +825,30 @@ def find_entry_confirmation(day_candles, entry_level, direction, offset, break_t
     | 10:00 AM    | 10:30 AM   |
     | 10:30 AM    | 11:00 AM   | ← Latest possible entry
     
-    We start checking from 8:00 AM (pre-RTH can set up for 8:30 entry).
     Returns the confirmation details with setup_time and entry_time.
     """
     if day_candles is None or day_candles.empty:
         return {"confirmed": False, "message": "No candle data available", "reason": "NO_DATA"}
     
-    entry_level_spx = entry_level - offset
+    # Base entry level at 9:00 AM (in SPX terms)
+    base_entry_level_spx = entry_level - offset
+    
+    # Reference time for slope calculation (9:00 AM)
+    ref_time_str = "09:00"
+    
+    # Time to blocks offset from 9:00 AM
+    time_to_blocks = {
+        "08:00": -2,  # 2 blocks before 9:00
+        "08:30": -1,  # 1 block before 9:00
+        "09:00": 0,   # Reference
+        "09:30": 1,   # 1 block after 9:00
+        "10:00": 2,   # 2 blocks after 9:00
+        "10:30": 3,   # 3 blocks after 9:00
+        "11:00": 4,   # 4 blocks after 9:00
+    }
+    
+    # Track all candle evaluations for debugging
+    debug_info = []
     
     for idx, row in day_candles.iterrows():
         candle_time = idx.strftime("%H:%M")
@@ -844,7 +868,21 @@ def find_entry_confirmation(day_candles, entry_level, direction, offset, break_t
             "close": row["Close"] - offset
         }
         
-        confirmation = check_entry_confirmation(candle, entry_level_spx, direction, break_threshold)
+        # Calculate entry level AT THIS CANDLE'S TIME
+        blocks_from_ref = time_to_blocks.get(candle_time, 0)
+        entry_level_at_time = base_entry_level_spx + (blocks_from_ref * slope)
+        
+        confirmation = check_entry_confirmation(candle, entry_level_at_time, direction, break_threshold)
+        
+        # Store debug info
+        debug_info.append({
+            "time": candle_time,
+            "candle": candle,
+            "entry_level": round(entry_level_at_time, 2),
+            "blocks_from_ref": blocks_from_ref,
+            "result": confirmation.get("reason", "UNKNOWN"),
+            "detail": confirmation.get("detail", confirmation.get("message", ""))
+        })
         
         if confirmation["confirmed"]:
             entry_time = get_next_candle_time(candle_time)
@@ -852,16 +890,19 @@ def find_entry_confirmation(day_candles, entry_level, direction, offset, break_t
             confirmation["entry_time"] = entry_time
             confirmation["time"] = entry_time  # For backward compatibility
             confirmation["candle"] = candle
+            confirmation["entry_level_at_time"] = round(entry_level_at_time, 2)
             confirmation["message"] = f"✅ {candle_time} setup → Enter at {entry_time}"
+            confirmation["debug"] = debug_info
             return confirmation
         
         # If momentum probe, return immediately
         if confirmation.get("reason") == "MOMENTUM_PROBE":
             confirmation["setup_time"] = candle_time
             confirmation["time"] = candle_time
+            confirmation["debug"] = debug_info
             return confirmation
     
-    return {"confirmed": False, "message": "No setup candle found by 10:30 AM", "reason": "NOT_FOUND"}
+    return {"confirmed": False, "message": "No setup candle found by 10:30 AM", "reason": "NOT_FOUND", "debug": debug_info}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HISTORICAL OUTCOME ANALYSIS
@@ -904,8 +945,9 @@ def analyze_historical_outcome(hist_data, validation, ceiling_es, floor_es, targ
     
     # Find setup candle - start from 8:00 AM (can set up for 8:30 entry)
     # Setup candle does rejection work → Enter at NEXT candle's open
+    # IMPORTANT: Pass slope so entry level can be calculated at each candle's time
     entry_conf = find_entry_confirmation(
-        day_candles, entry_level_es, direction, offset, BREAK_THRESHOLD, "08:00"
+        day_candles, entry_level_es, direction, offset, BREAK_THRESHOLD, "08:00", SLOPE
     )
     result["entry_confirmation"] = entry_conf
     
@@ -920,8 +962,19 @@ def analyze_historical_outcome(hist_data, validation, ceiling_es, floor_es, targ
         return result
     
     # Entry confirmed - track from confirmation candle
-    entry_price_spx = entry_level_spx
+    # Use the entry level AT THE ENTRY TIME (not 9:00 AM base level)
     entry_time = entry_conf.get("time", "08:30")
+    setup_time = entry_conf.get("setup_time", "08:30")
+    
+    # Calculate entry level at the actual entry time
+    time_to_blocks = {
+        "08:00": -2, "08:30": -1, "09:00": 0, "09:30": 1,
+        "10:00": 2, "10:30": 3, "11:00": 4
+    }
+    blocks_from_ref = time_to_blocks.get(entry_time, 0)
+    entry_price_spx = entry_level_spx + (blocks_from_ref * SLOPE)
+    
+    result["entry_level_at_time"] = round(entry_price_spx, 2)
     result["timeline"].append({
         "time": entry_time,
         "event": f"ENTRY ({entry_conf.get('candle_color', '')})",
@@ -1687,13 +1740,34 @@ def main():
 {entry_conf_html}
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
 <div style="text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.5)">Direction</div><div style="font-weight:600">{outcome["direction"]}</div></div>
-<div style="text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.5)">Entry Level</div><div style="font-weight:600">{outcome["entry_level_spx"]}</div></div>
+<div style="text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.5)">Entry Level</div><div style="font-weight:600">{outcome.get("entry_level_at_time", outcome["entry_level_spx"])}</div></div>
 <div style="text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.5)">Max Favorable</div><div style="font-weight:600;color:#00d4aa">+{outcome["max_favorable"]:.1f}</div></div>
 <div style="text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.5)">Max Adverse</div><div style="font-weight:600;color:#ff4757">-{outcome["max_adverse"]:.1f}</div></div>
 </div>
 <div style="font-size:12px;color:rgba(255,255,255,0.6)"><strong>Targets Hit:</strong> {targets_hit_str}</div>
 {f'<div class="timeline" style="margin-top:12px">{timeline_html}</div>' if timeline_html else ""}
 </div>''',unsafe_allow_html=True)
+        
+        # Debug expander to show candle-by-candle evaluation
+        debug_info = entry_conf.get("debug", [])
+        if debug_info:
+            with st.expander("🔍 Entry Confirmation Debug"):
+                st.write(f"**Base Entry Level (9AM SPX):** {outcome['entry_level_spx']}")
+                if outcome.get("entry_level_at_time"):
+                    st.write(f"**Actual Entry Level (at entry time):** {outcome['entry_level_at_time']}")
+                st.write(f"**Direction:** {outcome['direction']}")
+                st.write(f"**Slope:** {SLOPE} pts/block")
+                st.write("---")
+                for d in debug_info:
+                    candle = d.get("candle", {})
+                    o, h, l, c = candle.get("open", 0), candle.get("high", 0), candle.get("low", 0), candle.get("close", 0)
+                    is_bullish = c > o
+                    candle_type = "🟢 BULLISH" if is_bullish else "🔴 BEARISH" if c < o else "⚪ DOJI"
+                    blocks = d.get("blocks_from_ref", 0)
+                    st.write(f"**{d['time']}** - {candle_type} | Entry @ {d['entry_level']} (blocks: {blocks:+d})")
+                    st.write(f"  O:{o:.2f} H:{h:.2f} L:{l:.2f} C:{c:.2f}")
+                    st.write(f"  Result: **{d['result']}** - {d['detail']}")
+                    st.write("---")
     
     # ═══════════════════════════════════════════════════════════════════════════
     # AUTO-POPULATED DATA (Historical) - Consistent Grid Layout
