@@ -261,12 +261,38 @@ def fetch_vix_polygon():
 
 @st.cache_data(ttl=15,show_spinner=False)
 def fetch_es_current():
-    """Fetch current ES price - short cache for live updates"""
+    """Fetch current ES price - try multiple sources"""
+    # Try yfinance first
     try:
         es=yf.Ticker("ES=F")
         d=es.history(period="1d",interval="1m")
-        if d is not None and not d.empty:return round(float(d['Close'].iloc[-1]),2)
+        if d is not None and not d.empty:
+            return round(float(d['Close'].iloc[-1]),2)
     except:pass
+    
+    # Try yfinance with 2d period (sometimes 1d fails on weekends)
+    try:
+        es=yf.Ticker("ES=F")
+        d=es.history(period="2d",interval="1m")
+        if d is not None and not d.empty:
+            return round(float(d['Close'].iloc[-1]),2)
+    except:pass
+    
+    # Try yfinance with 5d period as last resort
+    try:
+        es=yf.Ticker("ES=F")
+        d=es.history(period="5d",interval="30m")
+        if d is not None and not d.empty:
+            return round(float(d['Close'].iloc[-1]),2)
+    except:pass
+    
+    return None
+
+def fetch_es_from_spx(offset=18.0):
+    """Derive ES from SPX price + offset"""
+    spx = fetch_spx_polygon()
+    if spx:
+        return round(spx + offset, 2)
     return None
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1471,21 +1497,35 @@ def main():
             if inputs["is_historical"]:
                 es_price=hist_data.get("day_open") if hist_data else None
             else:
-                # Planning mode - ALWAYS try live price first
+                # Planning mode - try multiple sources for live price
                 live_es = fetch_es_current()
                 if live_es:
                     es_price = live_es
-                elif hist_data:
-                    es_price = hist_data.get("prior_close")
-                    st.info(f"📊 Using Friday's close ({es_price}) - live data not available yet")
                 else:
-                    es_price = None
+                    # Try deriving from SPX
+                    derived_es = fetch_es_from_spx(inputs["offset"])
+                    if derived_es:
+                        es_price = derived_es
+                        st.info(f"📊 ES derived from SPX ({es_price}) - direct ES feed unavailable")
+                    elif hist_data:
+                        es_price = hist_data.get("prior_close")
+                        st.info(f"📊 Using Friday's close ({es_price}) - live data not available yet")
+                    else:
+                        es_price = None
             spx_price=round(es_price-inputs["offset"],2) if es_price else None
             vix=fetch_vix_polygon() or 16.0
         else:
             # Live mode (today)
             es_candles=fetch_es_candles(7)
             es_price=fetch_es_current()
+            
+            # If ES fetch failed, try deriving from SPX
+            if es_price is None:
+                derived_es = fetch_es_from_spx(inputs["offset"])
+                if derived_es:
+                    es_price = derived_es
+                    st.info(f"📊 ES derived from SPX - direct ES feed unavailable")
+            
             spx_price=fetch_spx_polygon()
             vix=fetch_vix_polygon() or 16.0
             hist_data=None
