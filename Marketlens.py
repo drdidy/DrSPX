@@ -596,6 +596,16 @@ def validate_830_candle(candle,ceiling,floor):
     Validate the 8:30 candle based on:
     1. Did it break above ceiling or below floor? (using High/Low)
     2. Where did it close?
+    3. For closed inside after breaking: Is the candle color aligned?
+    
+    TREND DAY LOGIC (reversal signal):
+    - Broke above + closed inside + BULLISH = TREND DAY → expect DROP to floor (PUTS)
+    - Broke above + closed inside + BEARISH = WAIT (9 AM may still break up)
+    - Broke below + closed inside + BEARISH = TREND DAY → expect RISE to ceiling (CALLS)  
+    - Broke below + closed inside + BULLISH = WAIT (9 AM may still break down)
+    
+    The candle color confirms the rejection - market tested one side and failed,
+    so it will travel to the opposite side of the channel.
     
     Returns position, validation status, and setup direction
     """
@@ -609,6 +619,8 @@ def validate_830_candle(candle,ceiling,floor):
     closed_above=c>ceiling
     closed_below=c<floor
     closed_inside=floor<=c<=ceiling
+    is_bullish=c>o  # Close > Open = bullish candle
+    is_bearish=c<o  # Close < Open = bearish candle
     
     # Determine what happened during the 8:30 candle
     if broke_below and not broke_above:
@@ -616,7 +628,12 @@ def validate_830_candle(candle,ceiling,floor):
         if closed_below:
             return {"status":"VALID","message":"✅ Broke below floor, closed below","setup":"PUTS","position":"BELOW","edge":floor}
         elif closed_inside:
-            return {"status":"TREND_DAY","message":"⚡ Broke below floor, closed inside - TREND DAY","setup":"BOTH","position":"INSIDE"}
+            if is_bearish:
+                # Bearish candle broke below but closed inside = rejection, will RISE to ceiling
+                return {"status":"TREND_DAY","message":"⚡ TREND DAY: Broke below, rejected, expect rise to ceiling","setup":"CALLS","position":"INSIDE","edge":ceiling}
+            else:
+                # Bullish candle that broke below but closed inside = WAIT for 9 AM
+                return {"status":"WAIT_9AM","message":"⏸️ Broke below, closed inside, BULLISH candle - wait for 9 AM","setup":"WAIT","position":"INSIDE"}
         else:  # closed_above - very wide range candle
             return {"status":"INVALIDATED","message":"❌ Broke below but closed above ceiling","setup":"WAIT","position":"ABOVE"}
     
@@ -625,7 +642,12 @@ def validate_830_candle(candle,ceiling,floor):
         if closed_above:
             return {"status":"VALID","message":"✅ Broke above ceiling, closed above","setup":"CALLS","position":"ABOVE","edge":ceiling}
         elif closed_inside:
-            return {"status":"TREND_DAY","message":"⚡ Broke above ceiling, closed inside - TREND DAY","setup":"BOTH","position":"INSIDE"}
+            if is_bullish:
+                # Bullish candle broke above but closed inside = rejection, will DROP to floor
+                return {"status":"TREND_DAY","message":"⚡ TREND DAY: Broke above, rejected, expect drop to floor","setup":"PUTS","position":"INSIDE","edge":floor}
+            else:
+                # Bearish candle that broke above but closed inside = WAIT for 9 AM
+                return {"status":"WAIT_9AM","message":"⏸️ Broke above, closed inside, BEARISH candle - wait for 9 AM","setup":"WAIT","position":"INSIDE"}
         else:  # closed_below - very wide range candle
             return {"status":"INVALIDATED","message":"❌ Broke above but closed below floor","setup":"WAIT","position":"BELOW"}
     
@@ -636,7 +658,16 @@ def validate_830_candle(candle,ceiling,floor):
         elif closed_below:
             return {"status":"VALID","message":"✅ Wide range, closed below floor","setup":"PUTS","position":"BELOW","edge":floor}
         else:
-            return {"status":"TREND_DAY","message":"⚡ Wide range, closed inside - TREND DAY","setup":"BOTH","position":"INSIDE"}
+            # Closed inside after breaking both = use candle color for direction
+            if is_bullish:
+                # Bullish but closed inside after testing both = drop to floor
+                return {"status":"TREND_DAY","message":"⚡ TREND DAY: Wide range, expect drop to floor","setup":"PUTS","position":"INSIDE","edge":floor}
+            elif is_bearish:
+                # Bearish but closed inside after testing both = rise to ceiling
+                return {"status":"TREND_DAY","message":"⚡ TREND DAY: Wide range, expect rise to ceiling","setup":"CALLS","position":"INSIDE","edge":ceiling}
+            else:
+                # Doji = no clear direction
+                return {"status":"WAIT_9AM","message":"⏸️ Wide range DOJI, closed inside - wait for 9 AM","setup":"WAIT","position":"INSIDE"}
     
     else:
         # Candle stayed inside channel
@@ -1256,15 +1287,13 @@ def main():
         entry_edge_es=validation.get("edge",ceiling_es)
         entry_edge_spx=round(entry_edge_es-offset,2) if entry_edge_es else ceiling_spx
         targets=find_targets(entry_edge_spx,cones_spx,"CALLS") if entry_edge_spx else []
-    elif validation["setup"]=="BOTH":
-        # Trend day - could go either direction
-        direction="TREND_DAY"
-        entry_edge_es=None
-        targets=[]
     else:
         direction="WAIT"
         entry_edge_es=None
         targets=[]
+    
+    # Check if this is a TREND_DAY (for display purposes)
+    is_trend_day=validation["status"]=="TREND_DAY"
     
     # Flow & momentum - use 8:30 candle open for flow bias calculation
     flow_price=candle_830["open"] if candle_830 else current_es
