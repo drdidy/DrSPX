@@ -674,12 +674,127 @@ def validate_830_candle(candle,ceiling,floor):
         return {"status":"INSIDE","message":"⏸️ 8:30 candle stayed inside channel","setup":"WAIT","position":"INSIDE"}
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ENTRY CONFIRMATION
+# ═══════════════════════════════════════════════════════════════════════════════
+def check_entry_confirmation(candle,entry_level,direction):
+    """
+    Check if a candle confirms entry at the entry level.
+    
+    PUTS Entry Confirmation:
+    - Need a BULLISH candle (close > open) that tests the entry level
+    - Candle can wick above entry (testing resistance)
+    - Must close BELOW entry level
+    - This confirms sellers rejected the level
+    
+    CALLS Entry Confirmation:
+    - Need a BEARISH candle (close < open) that tests the entry level
+    - Candle can wick below entry (testing support)
+    - Must close ABOVE entry level
+    - This confirms buyers rejected the level
+    
+    Returns: dict with confirmed status, message, and details
+    """
+    if candle is None or entry_level is None:
+        return {"confirmed":False,"message":"Waiting for candle data","reason":"NO_DATA"}
+    
+    o,h,l,c=candle["open"],candle["high"],candle["low"],candle["close"]
+    is_bullish=c>o
+    is_bearish=c<o
+    
+    if direction=="PUTS":
+        # For PUTS: need bullish candle that touches entry but closes below
+        touched_entry=h>=entry_level-2  # Allow 2 pts tolerance
+        closed_below=c<entry_level
+        
+        if not touched_entry:
+            return {"confirmed":False,"message":"Candle did not reach entry level","reason":"NO_TOUCH",
+                    "detail":f"High {h:.2f} < Entry {entry_level:.2f}"}
+        
+        if not is_bullish:
+            return {"confirmed":False,"message":"Waiting for bullish rejection candle","reason":"WRONG_COLOR",
+                    "detail":"Need bullish candle (close > open) for PUTS entry"}
+        
+        if not closed_below:
+            return {"confirmed":False,"message":"Candle closed above entry - no rejection","reason":"NO_REJECTION",
+                    "detail":f"Close {c:.2f} >= Entry {entry_level:.2f}"}
+        
+        # All conditions met!
+        wick_above=h-entry_level if h>entry_level else 0
+        return {"confirmed":True,"message":"✅ ENTRY CONFIRMED - Bullish rejection candle",
+                "reason":"CONFIRMED","candle_color":"BULLISH",
+                "detail":f"Touched {h:.2f}, closed below at {c:.2f}",
+                "wick_beyond":round(wick_above,2)}
+    
+    elif direction=="CALLS":
+        # For CALLS: need bearish candle that touches entry but closes above
+        touched_entry=l<=entry_level+2  # Allow 2 pts tolerance
+        closed_above=c>entry_level
+        
+        if not touched_entry:
+            return {"confirmed":False,"message":"Candle did not reach entry level","reason":"NO_TOUCH",
+                    "detail":f"Low {l:.2f} > Entry {entry_level:.2f}"}
+        
+        if not is_bearish:
+            return {"confirmed":False,"message":"Waiting for bearish rejection candle","reason":"WRONG_COLOR",
+                    "detail":"Need bearish candle (close < open) for CALLS entry"}
+        
+        if not closed_above:
+            return {"confirmed":False,"message":"Candle closed below entry - no rejection","reason":"NO_REJECTION",
+                    "detail":f"Close {c:.2f} <= Entry {entry_level:.2f}"}
+        
+        # All conditions met!
+        wick_below=entry_level-l if l<entry_level else 0
+        return {"confirmed":True,"message":"✅ ENTRY CONFIRMED - Bearish rejection candle",
+                "reason":"CONFIRMED","candle_color":"BEARISH",
+                "detail":f"Touched {l:.2f}, closed above at {c:.2f}",
+                "wick_beyond":round(wick_below,2)}
+    
+    return {"confirmed":False,"message":"No direction set","reason":"NO_DIRECTION"}
+
+def find_entry_confirmation(day_candles,entry_level,direction,offset,start_time="09:00"):
+    """
+    Scan through day candles to find the first entry confirmation candle.
+    Returns the confirmation details and the candle time.
+    """
+    if day_candles is None or day_candles.empty:
+        return None
+    
+    entry_level_spx=entry_level-offset
+    
+    for idx,row in day_candles.iterrows():
+        candle_time=idx.strftime("%H:%M")
+        
+        # Only check candles after start_time (typically 9:00 AM)
+        if candle_time<start_time:
+            continue
+        
+        candle={
+            "open":row["Open"]-offset,
+            "high":row["High"]-offset,
+            "low":row["Low"]-offset,
+            "close":row["Close"]-offset
+        }
+        
+        confirmation=check_entry_confirmation(candle,entry_level_spx,direction)
+        
+        if confirmation["confirmed"]:
+            confirmation["time"]=candle_time
+            confirmation["candle"]=candle
+            return confirmation
+    
+    return {"confirmed":False,"message":"No entry confirmation found in session","reason":"NOT_FOUND"}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # HISTORICAL OUTCOME ANALYSIS
 # ═══════════════════════════════════════════════════════════════════════════════
 def analyze_historical_outcome(hist_data,validation,ceiling,floor,targets,direction,entry_level_es,offset):
     """
     Analyze what actually happened on a historical date
     All prices displayed in SPX (converted from ES candles)
+    
+    Entry confirmation logic:
+    - PUTS: Wait for bullish candle that touches entry but closes BELOW
+    - CALLS: Wait for bearish candle that touches entry but closes ABOVE
     """
     if "day_candles" not in hist_data:
         return None
@@ -696,7 +811,8 @@ def analyze_historical_outcome(hist_data,validation,ceiling,floor,targets,direct
         "max_favorable":0,
         "max_adverse":0,
         "final_price":round(hist_data.get("day_close",0)-offset,2),
-        "timeline":[]
+        "timeline":[],
+        "entry_confirmation":None
     }
     
     if not result["setup_valid"]:
@@ -704,59 +820,66 @@ def analyze_historical_outcome(hist_data,validation,ceiling,floor,targets,direct
         result["message"]="Setup was not valid"
         return result
     
-    # Track price movement after 9:00 AM
-    # Convert all ES candle prices to SPX for comparison
-    entered=False
-    entry_price_spx=None
+    # Find entry confirmation candle
+    entry_conf=find_entry_confirmation(day_candles,entry_level_es,direction,offset,"09:00")
+    result["entry_confirmation"]=entry_conf
     
+    if not entry_conf.get("confirmed"):
+        result["outcome"]="NO_ENTRY"
+        result["message"]=entry_conf.get("message","No valid entry confirmation")
+        return result
+    
+    # Entry confirmed - track from confirmation candle
+    entered=True
+    entry_price_spx=entry_level_spx  # Use the entry level as entry price
+    entry_time=entry_conf.get("time","09:00")
+    result["timeline"].append({
+        "time":entry_time,
+        "event":f"ENTRY CONFIRMED ({entry_conf.get('candle_color','')}) ",
+        "price":round(entry_price_spx,2)
+    })
+    
+    # Track price movement after entry
+    tracking_started=False
     for idx,row in day_candles.iterrows():
         candle_time=idx.strftime("%H:%M")
+        
+        # Start tracking after entry confirmation time
+        if candle_time<entry_time:
+            continue
+        if candle_time==entry_time:
+            tracking_started=True
+            continue
+        if not tracking_started:
+            continue
         
         # Convert ES candle to SPX
         candle_high_spx=row['High']-offset
         candle_low_spx=row['Low']-offset
         
-        # Entry window: 9:00-9:10
-        if not entered and candle_time>="09:00":
-            # Check if price returned to entry level (in SPX terms)
-            if direction=="PUTS":
-                if candle_high_spx>=entry_level_spx-3:  # Within 3 pts of floor
-                    entered=True
-                    entry_price_spx=min(candle_high_spx,entry_level_spx)
-                    result["timeline"].append({"time":candle_time,"event":"ENTRY","price":round(entry_price_spx,2)})
-            else:  # CALLS
-                if candle_low_spx<=entry_level_spx+3:  # Within 3 pts of ceiling
-                    entered=True
-                    entry_price_spx=max(candle_low_spx,entry_level_spx)
-                    result["timeline"].append({"time":candle_time,"event":"ENTRY","price":round(entry_price_spx,2)})
+        # Track movement (in SPX terms)
+        if direction=="PUTS":
+            favorable=entry_price_spx-candle_low_spx
+            adverse=candle_high_spx-entry_price_spx
+        else:
+            favorable=candle_high_spx-entry_price_spx
+            adverse=entry_price_spx-candle_low_spx
         
-        if entered and entry_price_spx:
-            # Track movement (in SPX terms)
-            if direction=="PUTS":
-                favorable=entry_price_spx-candle_low_spx
-                adverse=candle_high_spx-entry_price_spx
-            else:
-                favorable=candle_high_spx-entry_price_spx
-                adverse=entry_price_spx-candle_low_spx
-            
-            result["max_favorable"]=max(result["max_favorable"],favorable)
-            result["max_adverse"]=max(result["max_adverse"],adverse)
-            
-            # Check targets (targets are already in SPX)
-            for tgt in targets:
-                if tgt["name"] not in [t["name"] for t in result["targets_hit"]]:
-                    if direction=="PUTS" and candle_low_spx<=tgt["level"]:
-                        result["targets_hit"].append({"name":tgt["name"],"level":tgt["level"],"time":candle_time})
-                        result["timeline"].append({"time":candle_time,"event":f"TARGET: {tgt['name']}","price":tgt["level"]})
-                    elif direction=="CALLS" and candle_high_spx>=tgt["level"]:
-                        result["targets_hit"].append({"name":tgt["name"],"level":tgt["level"],"time":candle_time})
-                        result["timeline"].append({"time":candle_time,"event":f"TARGET: {tgt['name']}","price":tgt["level"]})
+        result["max_favorable"]=max(result["max_favorable"],favorable)
+        result["max_adverse"]=max(result["max_adverse"],adverse)
+        
+        # Check targets (targets are already in SPX)
+        for tgt in targets:
+            if tgt["name"] not in [t["name"] for t in result["targets_hit"]]:
+                if direction=="PUTS" and candle_low_spx<=tgt["level"]:
+                    result["targets_hit"].append({"name":tgt["name"],"level":tgt["level"],"time":candle_time})
+                    result["timeline"].append({"time":candle_time,"event":f"TARGET: {tgt['name']}","price":tgt["level"]})
+                elif direction=="CALLS" and candle_high_spx>=tgt["level"]:
+                    result["targets_hit"].append({"name":tgt["name"],"level":tgt["level"],"time":candle_time})
+                    result["timeline"].append({"time":candle_time,"event":f"TARGET: {tgt['name']}","price":tgt["level"]})
     
     # Determine outcome
-    if not entered:
-        result["outcome"]="NO_ENTRY"
-        result["message"]="Price never returned to entry level"
-    elif len(result["targets_hit"])>0:
+    if len(result["targets_hit"])>0:
         result["outcome"]="WIN"
         result["message"]=f"Hit {len(result['targets_hit'])} target(s): {', '.join([t['name'] for t in result['targets_hit']])}"
     elif result["max_favorable"]>10:
@@ -1348,12 +1471,28 @@ def main():
         
         targets_hit_str=", ".join([f"{t['name']} @ {t['time']}" for t in outcome.get("targets_hit",[])]) or "None"
         
+        # Entry confirmation details
+        entry_conf=outcome.get("entry_confirmation",{})
+        if entry_conf.get("confirmed"):
+            entry_conf_html=f'''<div style="background:rgba(0,212,170,0.1);border:1px solid rgba(0,212,170,0.3);border-radius:8px;padding:10px;margin-bottom:12px">
+<div style="font-size:12px;font-weight:600;color:#00d4aa;margin-bottom:4px">✅ Entry Confirmation @ {entry_conf.get("time","")}</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("candle_color","")} rejection candle - {entry_conf.get("detail","")}</div>
+</div>'''
+        elif outcome["outcome"]=="NO_ENTRY":
+            entry_conf_html=f'''<div style="background:rgba(255,165,2,0.1);border:1px solid rgba(255,165,2,0.3);border-radius:8px;padding:10px;margin-bottom:12px">
+<div style="font-size:12px;font-weight:600;color:#ffa502;margin-bottom:4px">⚠️ No Entry Confirmation</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("message","No valid rejection candle found")}</div>
+</div>'''
+        else:
+            entry_conf_html=""
+        
         st.markdown(f'''<div class="result-box {box_class}">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
 <div style="font-size:18px;font-weight:700">{icon} HISTORICAL RESULT</div>
 <div style="font-size:14px;font-weight:600">{outcome["outcome"]}</div>
 </div>
 <div style="font-size:14px;margin-bottom:12px">{outcome["message"]}</div>
+{entry_conf_html}
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
 <div style="text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.5)">Direction</div><div style="font-weight:600">{outcome["direction"]}</div></div>
 <div style="text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.5)">Entry Level</div><div style="font-weight:600">{outcome["entry_level_spx"]}</div></div>
