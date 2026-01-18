@@ -681,51 +681,39 @@ def validate_830_candle(candle,ceiling,floor):
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENTRY CONFIRMATION - Complete Logic
 # ═══════════════════════════════════════════════════════════════════════════════
-def check_entry_confirmation(candle, entry_level, direction, ceiling, floor, break_threshold=6.0):
+def check_entry_confirmation(candle, entry_level, direction, break_threshold=6.0):
     """
-    Check if a candle confirms entry at the entry level.
+    Check if a candle is a valid SETUP candle for entry.
     
-    There are TWO distinct scenarios:
+    If this candle confirms, you ENTER AT THE NEXT CANDLE'S OPEN.
     
-    ═══════════════════════════════════════════════════════════════════════════
-    SCENARIO 1: OVERNIGHT BREAKOUT (price already broke channel before 8:30)
-    ═══════════════════════════════════════════════════════════════════════════
-    
-    PUTS after overnight broke BELOW floor:
-    - 8:30 opens far BELOW channel
-    - Rallies UP (BULLISH candle) back to floor (entry level)
-    - Touches floor and closes BELOW it
-    - ✅ Rejection confirmed → Enter PUTS at 9:00
-    
-    CALLS after overnight broke ABOVE ceiling:
-    - 8:30 opens far ABOVE channel
-    - Sells DOWN (BEARISH candle) back to ceiling (entry level)
-    - Touches ceiling and closes ABOVE it
-    - ✅ Rejection confirmed → Enter CALLS at 9:00
+    Example:
+    - 8:00 AM confirms → Enter at 8:30 AM open
+    - 8:30 AM confirms → Enter at 9:00 AM open
+    - 9:00 AM confirms → Enter at 9:30 AM open
     
     ═══════════════════════════════════════════════════════════════════════════
-    SCENARIO 2: INSIDE CHANNEL (price inside channel at 8:30)
+    PUTS Setup Candle:
     ═══════════════════════════════════════════════════════════════════════════
-    
-    PUTS - Rejection at ceiling:
-    - BULLISH candle rallies to ceiling
-    - Touches ceiling but closes BELOW it
-    - AND did NOT break through by more than 6 pts (threshold)
-    - ✅ Rejection confirmed → Enter PUTS targeting floor
-    
-    CALLS - Rejection at floor:
-    - BEARISH candle sells to floor
-    - Touches floor but closes ABOVE it
-    - AND did NOT break through by more than 6 pts (threshold)
-    - ✅ Rejection confirmed → Enter CALLS targeting ceiling
+    - BULLISH candle (close > open) that rallies TO entry level
+    - Touches entry (high reaches entry within 2 pts)
+    - Closes BELOW entry level
+    - Did NOT break through by more than 6 pts (momentum probe check)
     
     ═══════════════════════════════════════════════════════════════════════════
-    CRITICAL: MOMENTUM PROBE (>6 pts break) - DO NOT ENTER
+    CALLS Setup Candle:
     ═══════════════════════════════════════════════════════════════════════════
+    - BEARISH candle (close < open) that sells TO entry level
+    - Touches entry (low reaches entry within 2 pts)
+    - Closes ABOVE entry level
+    - Did NOT break through by more than 6 pts (momentum probe check)
     
-    If candle breaks through by MORE than 6 pts but closes back inside:
+    ═══════════════════════════════════════════════════════════════════════════
+    MOMENTUM PROBE (>6 pts break) - DO NOT ENTER
+    ═══════════════════════════════════════════════════════════════════════════
+    If candle breaks through by MORE than 6 pts but closes back:
     - This is NOT a rejection - it's a momentum probe
-    - 9:00 AM will likely CONTINUE in the breakout direction
+    - Next candle will likely CONTINUE in the breakout direction
     - DO NOT fade this move!
     
     Returns: dict with confirmed status, message, and details
@@ -738,86 +726,97 @@ def check_entry_confirmation(candle, entry_level, direction, ceiling, floor, bre
     is_bearish = c < o
     
     if direction == "PUTS":
-        # Entry level for PUTS is at the ceiling (or floor if overnight broke below)
-        # We need: BULLISH candle that touches entry and closes BELOW it
-        
-        touched_entry = h >= entry_level - 2  # Allow 2 pts tolerance for touch
+        # PUTS setup: BULLISH candle touches entry and closes BELOW
+        touched_entry = h >= entry_level - 2  # Allow 2 pts tolerance
         closed_below = c < entry_level
-        break_beyond = h - entry_level if h > entry_level else 0  # How far it broke through
+        break_beyond = h - entry_level if h > entry_level else 0
         
         if not touched_entry:
             return {"confirmed": False, "message": "Candle did not reach entry level", "reason": "NO_TOUCH",
                     "detail": f"High {h:.2f} did not reach Entry {entry_level:.2f}"}
         
         if not is_bullish:
-            return {"confirmed": False, "message": "Waiting for bullish rejection candle", "reason": "WRONG_COLOR",
-                    "detail": "Need BULLISH candle (close > open) for PUTS entry"}
+            return {"confirmed": False, "message": "Waiting for bullish setup candle", "reason": "WRONG_COLOR",
+                    "detail": "Need BULLISH candle (close > open) for PUTS setup"}
         
         if not closed_below:
             return {"confirmed": False, "message": "Candle closed above entry - no rejection", "reason": "NO_REJECTION",
                     "detail": f"Close {c:.2f} >= Entry {entry_level:.2f}"}
         
-        # Check for momentum probe (broke through too far)
+        # Check for momentum probe
         if break_beyond > break_threshold:
             return {"confirmed": False, "message": f"⚠️ Momentum probe - broke {break_beyond:.1f} pts through", 
                     "reason": "MOMENTUM_PROBE",
-                    "detail": f"Broke through by {break_beyond:.1f} pts (>{break_threshold}) - 9AM will likely continue UP"}
+                    "detail": f"Broke through by {break_beyond:.1f} pts (>{break_threshold}) - next candle continues UP"}
         
-        # All conditions met - valid rejection!
-        return {"confirmed": True, "message": "✅ ENTRY CONFIRMED - Bullish rejection candle",
+        # Valid setup candle!
+        return {"confirmed": True, "message": "✅ SETUP CONFIRMED - Bullish rejection",
                 "reason": "CONFIRMED", "candle_color": "BULLISH",
-                "detail": f"Touched {h:.2f}, closed below at {c:.2f}" + (f" (wick {break_beyond:.1f} pts beyond)" if break_beyond > 0 else ""),
+                "detail": f"Touched {h:.2f}, closed below at {c:.2f}" + (f" (wick {break_beyond:.1f} pts)" if break_beyond > 0 else ""),
                 "wick_beyond": round(break_beyond, 2)}
     
     elif direction == "CALLS":
-        # Entry level for CALLS is at the floor (or ceiling if overnight broke above)
-        # We need: BEARISH candle that touches entry and closes ABOVE it
-        
-        touched_entry = l <= entry_level + 2  # Allow 2 pts tolerance for touch
+        # CALLS setup: BEARISH candle touches entry and closes ABOVE
+        touched_entry = l <= entry_level + 2  # Allow 2 pts tolerance
         closed_above = c > entry_level
-        break_beyond = entry_level - l if l < entry_level else 0  # How far it broke through
+        break_beyond = entry_level - l if l < entry_level else 0
         
         if not touched_entry:
             return {"confirmed": False, "message": "Candle did not reach entry level", "reason": "NO_TOUCH",
                     "detail": f"Low {l:.2f} did not reach Entry {entry_level:.2f}"}
         
         if not is_bearish:
-            return {"confirmed": False, "message": "Waiting for bearish rejection candle", "reason": "WRONG_COLOR",
-                    "detail": "Need BEARISH candle (close < open) for CALLS entry"}
+            return {"confirmed": False, "message": "Waiting for bearish setup candle", "reason": "WRONG_COLOR",
+                    "detail": "Need BEARISH candle (close < open) for CALLS setup"}
         
         if not closed_above:
             return {"confirmed": False, "message": "Candle closed below entry - no rejection", "reason": "NO_REJECTION",
                     "detail": f"Close {c:.2f} <= Entry {entry_level:.2f}"}
         
-        # Check for momentum probe (broke through too far)
+        # Check for momentum probe
         if break_beyond > break_threshold:
             return {"confirmed": False, "message": f"⚠️ Momentum probe - broke {break_beyond:.1f} pts through",
                     "reason": "MOMENTUM_PROBE", 
-                    "detail": f"Broke through by {break_beyond:.1f} pts (>{break_threshold}) - 9AM will likely continue DOWN"}
+                    "detail": f"Broke through by {break_beyond:.1f} pts (>{break_threshold}) - next candle continues DOWN"}
         
-        # All conditions met - valid rejection!
-        return {"confirmed": True, "message": "✅ ENTRY CONFIRMED - Bearish rejection candle",
+        # Valid setup candle!
+        return {"confirmed": True, "message": "✅ SETUP CONFIRMED - Bearish rejection",
                 "reason": "CONFIRMED", "candle_color": "BEARISH",
-                "detail": f"Touched {l:.2f}, closed above at {c:.2f}" + (f" (wick {break_beyond:.1f} pts beyond)" if break_beyond > 0 else ""),
+                "detail": f"Touched {l:.2f}, closed above at {c:.2f}" + (f" (wick {break_beyond:.1f} pts)" if break_beyond > 0 else ""),
                 "wick_beyond": round(break_beyond, 2)}
     
     return {"confirmed": False, "message": "No direction set", "reason": "NO_DIRECTION"}
 
 
-def find_entry_confirmation(day_candles, entry_level, direction, offset, ceiling_spx, floor_spx, break_threshold=6.0, start_time="08:30"):
+def get_next_candle_time(current_time):
+    """Get the next 30-min candle time"""
+    time_sequence = ["08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00"]
+    try:
+        idx = time_sequence.index(current_time)
+        if idx < len(time_sequence) - 1:
+            return time_sequence[idx + 1]
+    except ValueError:
+        pass
+    return None
+
+
+def find_entry_confirmation(day_candles, entry_level, direction, offset, break_threshold=6.0, start_time="08:00"):
     """
-    Scan through day candles to find the first entry confirmation candle.
+    Scan through candles to find the setup candle.
     
-    IMPORTANT: The 8:30 candle itself CAN be the entry confirmation!
+    ═══════════════════════════════════════════════════════════════════════════
+    KEY RULE: Setup Candle → Entry at NEXT candle's open
+    ═══════════════════════════════════════════════════════════════════════════
     
-    Scenarios where 8:30 confirms:
-    1. Overnight broke below → 8:30 rallies (bullish) to floor, closes below → PUTS
-    2. Overnight broke above → 8:30 sells (bearish) to ceiling, closes above → CALLS
-    3. Inside channel → 8:30 tests ceiling (bullish), closes below, <6pt break → PUTS
-    4. Inside channel → 8:30 tests floor (bearish), closes above, <6pt break → CALLS
+    | Setup Time | Entry Time |
+    |------------|------------|
+    | 8:00 AM    | 8:30 AM    |
+    | 8:30 AM    | 9:00 AM    |
+    | 9:00 AM    | 9:30 AM    |
+    | 9:30 AM    | 10:00 AM   |
     
-    We start checking from 8:30 AM.
-    Returns the confirmation details and the candle time.
+    We start checking from 8:00 AM (pre-RTH can set up for 8:30 entry).
+    Returns the confirmation details with setup_time and entry_time.
     """
     if day_candles is None or day_candles.empty:
         return {"confirmed": False, "message": "No candle data available", "reason": "NO_DATA"}
@@ -827,12 +826,12 @@ def find_entry_confirmation(day_candles, entry_level, direction, offset, ceiling
     for idx, row in day_candles.iterrows():
         candle_time = idx.strftime("%H:%M")
         
-        # Start checking from 8:30 AM
+        # Start checking from start_time (default 8:00 AM)
         if candle_time < start_time:
             continue
         
-        # Stop checking after 10:30 AM - if no confirmation by then, setup is invalid
-        if candle_time > "10:30":
+        # Stop checking after 10:00 AM (latest setup for 10:30 entry)
+        if candle_time > "10:00":
             break
         
         candle = {
@@ -842,19 +841,24 @@ def find_entry_confirmation(day_candles, entry_level, direction, offset, ceiling
             "close": row["Close"] - offset
         }
         
-        confirmation = check_entry_confirmation(candle, entry_level_spx, direction, ceiling_spx, floor_spx, break_threshold)
+        confirmation = check_entry_confirmation(candle, entry_level_spx, direction, break_threshold)
         
         if confirmation["confirmed"]:
-            confirmation["time"] = candle_time
+            entry_time = get_next_candle_time(candle_time)
+            confirmation["setup_time"] = candle_time
+            confirmation["entry_time"] = entry_time
+            confirmation["time"] = entry_time  # For backward compatibility
             confirmation["candle"] = candle
+            confirmation["message"] = f"✅ {candle_time} setup → Enter at {entry_time}"
             return confirmation
         
-        # If we got a momentum probe, return that as the result (don't keep searching)
+        # If momentum probe, return immediately
         if confirmation.get("reason") == "MOMENTUM_PROBE":
+            confirmation["setup_time"] = candle_time
             confirmation["time"] = candle_time
             return confirmation
     
-    return {"confirmed": False, "message": "No entry confirmation found by 10:30 AM", "reason": "NOT_FOUND"}
+    return {"confirmed": False, "message": "No setup candle found by 10:00 AM", "reason": "NOT_FOUND"}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HISTORICAL OUTCOME ANALYSIS
@@ -895,11 +899,10 @@ def analyze_historical_outcome(hist_data, validation, ceiling_es, floor_es, targ
         result["message"] = "Setup was not valid"
         return result
     
-    # Find entry confirmation candle - start from 8:30 as it can be the confirmation candle itself
-    # Pass ceiling and floor for momentum probe detection
+    # Find setup candle - start from 8:00 AM (can set up for 8:30 entry)
+    # Setup candle does rejection work → Enter at NEXT candle's open
     entry_conf = find_entry_confirmation(
-        day_candles, entry_level_es, direction, offset, 
-        ceiling_spx, floor_spx, BREAK_THRESHOLD, "08:30"
+        day_candles, entry_level_es, direction, offset, BREAK_THRESHOLD, "08:00"
     )
     result["entry_confirmation"] = entry_conf
     
@@ -1648,23 +1651,26 @@ def main():
         
         targets_hit_str=", ".join([f"{t['name']} @ {t['time']}" for t in outcome.get("targets_hit",[])]) or "None"
         
-        # Entry confirmation details
+        # Entry confirmation details - now shows setup_time and entry_time
         entry_conf=outcome.get("entry_confirmation",{})
         if entry_conf.get("confirmed"):
+            setup_time = entry_conf.get("setup_time", "")
+            entry_time = entry_conf.get("entry_time", entry_conf.get("time", ""))
             entry_conf_html=f'''<div style="background:rgba(0,212,170,0.1);border:1px solid rgba(0,212,170,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
-<div style="font-size:12px;font-weight:600;color:#00d4aa;margin-bottom:4px">✅ Entry Confirmed @ {entry_conf.get("time","")}</div>
-<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("candle_color","")} rejection candle — {entry_conf.get("detail","")}</div>
+<div style="font-size:12px;font-weight:600;color:#00d4aa;margin-bottom:6px">✅ {setup_time} Setup → {entry_time} Entry</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("candle_color","")} rejection — {entry_conf.get("detail","")}</div>
 </div>'''
         elif outcome["outcome"]=="MOMENTUM_PROBE":
+            setup_time = entry_conf.get("setup_time", entry_conf.get("time", ""))
             entry_conf_html=f'''<div style="background:rgba(255,71,87,0.1);border:1px solid rgba(255,71,87,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
-<div style="font-size:12px;font-weight:600;color:#ff4757;margin-bottom:4px">⚡ Momentum Probe @ {entry_conf.get("time","")}</div>
-<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("detail","Broke through by >6 pts - 9AM continued in breakout direction")}</div>
+<div style="font-size:12px;font-weight:600;color:#ff4757;margin-bottom:4px">⚡ Momentum Probe @ {setup_time}</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("detail","Broke through by >6 pts - next candle continued in breakout direction")}</div>
 <div style="font-size:10px;color:#ff4757;margin-top:6px;font-weight:500">❌ NO ENTRY - Fade would have failed</div>
 </div>'''
         elif outcome["outcome"]=="NO_ENTRY":
             entry_conf_html=f'''<div style="background:rgba(255,165,2,0.1);border:1px solid rgba(255,165,2,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
-<div style="font-size:12px;font-weight:600;color:#ffa502;margin-bottom:4px">⚠️ No Entry Confirmation</div>
-<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("message","No valid rejection candle found by 10:30 AM")}</div>
+<div style="font-size:12px;font-weight:600;color:#ffa502;margin-bottom:4px">⚠️ No Setup Found</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.7)">{entry_conf.get("message","No valid setup candle found by 10:00 AM")}</div>
 </div>'''
         else:
             entry_conf_html=""
