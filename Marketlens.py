@@ -1296,8 +1296,14 @@ def render_sidebar():
         # ─────────────────────────────────────────────────────────────────────
         # ES/SPX OFFSET (always visible)
         # ─────────────────────────────────────────────────────────────────────
-        offset=st.number_input("⚙️ ES→SPX Offset",value=safe_float(saved.get("offset"),18.0),step=0.5,
+        default_offset = safe_float(saved.get("offset"), 18.0)
+        offset = st.number_input("⚙️ ES→SPX Offset", value=default_offset, step=0.5,
                                help="SPX = ES - Offset")
+        
+        # Auto-save offset if changed
+        if offset != default_offset:
+            saved["offset"] = offset
+            save_inputs(saved)
         
         st.markdown("---")
         
@@ -1465,8 +1471,15 @@ def main():
             if inputs["is_historical"]:
                 es_price=hist_data.get("day_open") if hist_data else None
             else:
-                # Planning mode - use most recent ES price
-                es_price=fetch_es_current() or (hist_data.get("prior_close") if hist_data else None)
+                # Planning mode - ALWAYS try live price first
+                live_es = fetch_es_current()
+                if live_es:
+                    es_price = live_es
+                elif hist_data:
+                    es_price = hist_data.get("prior_close")
+                    st.info(f"📊 Using Friday's close ({es_price}) - live data not available yet")
+                else:
+                    es_price = None
             spx_price=round(es_price-inputs["offset"],2) if es_price else None
             vix=fetch_vix_polygon() or 16.0
         else:
@@ -1476,6 +1489,11 @@ def main():
             spx_price=fetch_spx_polygon()
             vix=fetch_vix_polygon() or 16.0
             hist_data=None
+    
+    # Check if we got live data - warn if using fallbacks
+    if es_price is None:
+        st.warning("⚠️ **Could not fetch live ES price.** Using fallback values. Check your internet connection or try refreshing.")
+        es_price = 6050  # Fallback
     
     offset=inputs["offset"]
     
