@@ -1133,74 +1133,147 @@ def safe_float(value,default):
 def render_sidebar():
     saved=load_inputs()
     
+    # Generate time options for 30-min chart (:00 and :30 only)
+    time_options=[]
+    for h in range(24):
+        time_options.append(f"{h:02d}:00")
+        time_options.append(f"{h:02d}:30")
+    
     with st.sidebar:
         st.markdown("## 🔮 SPX Prophet V6.1")
-        st.markdown("*Historical Analysis Mode*")
+        st.markdown("*Structural 0DTE Strategy*")
         
-        trading_date=st.date_input("📅 Date",value=date.today())
+        trading_date=st.date_input("📅 Trading Date",value=date.today())
         is_historical=trading_date<date.today()
         is_future=trading_date>date.today()
-        is_planning=is_future  # Future date = planning mode (fetch prior RTH data)
+        is_planning=is_future
         
         if is_historical:
-            st.info(f"📜 Historical Mode: {trading_date.strftime('%A, %b %d, %Y')}")
+            st.info(f"📜 Historical: {trading_date.strftime('%A, %b %d')}")
         elif is_planning:
-            st.info(f"📋 Planning Mode: {trading_date.strftime('%A, %b %d, %Y')}")
+            st.info(f"📋 Planning: {trading_date.strftime('%A, %b %d')}")
         
         st.markdown("---")
-        st.markdown("### ⚙️ ES/SPX Offset")
-        offset=st.number_input("SPX = ES - Offset",value=safe_float(saved.get("offset"),18.0),step=0.5)
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # ES/SPX OFFSET (always visible)
+        # ─────────────────────────────────────────────────────────────────────
+        offset=st.number_input("⚙️ ES→SPX Offset",value=safe_float(saved.get("offset"),18.0),step=0.5,
+                               help="SPX = ES - Offset")
         
         st.markdown("---")
-        st.markdown("### 📊 Data Mode")
-        if is_historical or is_planning:
-            data_mode=st.radio("Source",["Auto (from ES candles)","Manual Override"],index=0)
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # MODULAR OVERRIDE SECTIONS
+        # ─────────────────────────────────────────────────────────────────────
+        st.markdown("### 📝 Manual Overrides")
+        st.caption("Enable sections to override auto-fetched data")
+        
+        # VIX Override
+        override_vix=st.checkbox("Override VIX",value=False,key="ovix")
+        if override_vix:
+            c1,c2=st.columns(2)
+            vix_high=c1.number_input("VIX High",value=safe_float(saved.get("vix_high"),18.0),step=0.1)
+            vix_low=c2.number_input("VIX Low",value=safe_float(saved.get("vix_low"),15.0),step=0.1)
         else:
-            data_mode=st.radio("Source",["Auto","Manual"],index=0,horizontal=True)
+            vix_high=vix_low=None
         
-        # Manual overrides (collapsed for historical auto mode)
-        if data_mode.startswith("Manual") or not is_historical:
-            with st.expander("Manual Inputs",expanded=not is_historical):
-                st.markdown("**O/N Structure (ES)**")
-                c1,c2=st.columns(2)
-                on_high=c1.number_input("O/N High",value=safe_float(saved.get("on_high"),6075.0),step=0.5)
-                on_low=c2.number_input("O/N Low",value=safe_float(saved.get("on_low"),6040.0),step=0.5)
-                
-                st.markdown("**VIX**")
-                c1,c2=st.columns(2)
-                vix_high=c1.number_input("VIX High",value=safe_float(saved.get("vix_high"),18.0),step=0.1)
-                vix_low=c2.number_input("VIX Low",value=safe_float(saved.get("vix_low"),15.0),step=0.1)
-                
-                st.markdown("**Prior Day (ES)**")
-                c1,c2=st.columns(2)
-                prior_high=c1.number_input("Prior High",value=safe_float(saved.get("prior_high"),6080.0),step=0.5)
-                prior_low=c2.number_input("Prior Low",value=safe_float(saved.get("prior_low"),6030.0),step=0.5)
-                prior_close=st.number_input("Prior Close",value=safe_float(saved.get("prior_close"),6055.0),step=0.5)
+        st.markdown("")
+        
+        # O/N Pivots Override
+        override_on=st.checkbox("Override O/N Pivots",value=False,key="oon")
+        if override_on:
+            st.markdown("**Overnight High**")
+            c1,c2=st.columns([2,1])
+            on_high=c1.number_input("O/N High (ES)",value=safe_float(saved.get("on_high"),6075.0),step=0.5,label_visibility="collapsed")
+            on_high_time_str=c2.selectbox("Time",time_options,index=time_options.index("22:00") if "22:00" in time_options else 0,key="onht",label_visibility="collapsed")
+            
+            st.markdown("**Overnight Low**")
+            c1,c2=st.columns([2,1])
+            on_low=c1.number_input("O/N Low (ES)",value=safe_float(saved.get("on_low"),6040.0),step=0.5,label_visibility="collapsed")
+            on_low_time_str=c2.selectbox("Time",time_options,index=time_options.index("02:00") if "02:00" in time_options else 0,key="onlt",label_visibility="collapsed")
+            
+            # Parse times
+            on_high_hr,on_high_mn=int(on_high_time_str.split(":")[0]),int(on_high_time_str.split(":")[1])
+            on_low_hr,on_low_mn=int(on_low_time_str.split(":")[0]),int(on_low_time_str.split(":")[1])
         else:
-            on_high=on_low=vix_high=vix_low=prior_high=prior_low=prior_close=None
+            on_high=on_low=None
+            on_high_hr=on_high_mn=on_low_hr=on_low_mn=None
+        
+        st.markdown("")
+        
+        # Prior RTH Override (for cones)
+        override_prior=st.checkbox("Override Prior RTH",value=False,key="oprior")
+        if override_prior:
+            st.markdown("**Prior High (highest wick)**")
+            c1,c2=st.columns([2,1])
+            prior_high=c1.number_input("Price (ES)",value=safe_float(saved.get("prior_high"),6080.0),step=0.5,key="ph",label_visibility="collapsed")
+            prior_high_time_str=c2.selectbox("Time",time_options,index=time_options.index("10:00") if "10:00" in time_options else 0,key="pht",label_visibility="collapsed")
+            
+            st.markdown("**Prior Low (lowest close)**")
+            c1,c2=st.columns([2,1])
+            prior_low=c1.number_input("Price (ES)",value=safe_float(saved.get("prior_low"),6030.0),step=0.5,key="pl",label_visibility="collapsed")
+            prior_low_time_str=c2.selectbox("Time",time_options,index=time_options.index("14:00") if "14:00" in time_options else 0,key="plt",label_visibility="collapsed")
+            
+            st.markdown("**Prior Close**")
+            c1,c2=st.columns([2,1])
+            prior_close=c1.number_input("Price (ES)",value=safe_float(saved.get("prior_close"),6055.0),step=0.5,key="pc",label_visibility="collapsed")
+            prior_close_time_str=c2.selectbox("Time",time_options,index=time_options.index("15:00") if "15:00" in time_options else 0,key="pct",label_visibility="collapsed")
+            
+            # Parse times
+            prior_high_hr,prior_high_mn=int(prior_high_time_str.split(":")[0]),int(prior_high_time_str.split(":")[1])
+            prior_low_hr,prior_low_mn=int(prior_low_time_str.split(":")[0]),int(prior_low_time_str.split(":")[1])
+            prior_close_hr,prior_close_mn=int(prior_close_time_str.split(":")[0]),int(prior_close_time_str.split(":")[1])
+        else:
+            prior_high=prior_low=prior_close=None
+            prior_high_hr=prior_high_mn=prior_low_hr=prior_low_mn=prior_close_hr=prior_close_mn=None
         
         st.markdown("---")
-        ref_time_sel=st.selectbox("Reference Time",["8:30 AM","9:00 AM","9:30 AM"],index=1)
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # REFERENCE TIME
+        # ─────────────────────────────────────────────────────────────────────
+        ref_time_sel=st.selectbox("⏰ Reference Time",["8:30 AM","9:00 AM","9:30 AM"],index=1)
         ref_map={"8:30 AM":(8,30),"9:00 AM":(9,0),"9:30 AM":(9,30)}
         ref_hr,ref_mn=ref_map[ref_time_sel]
         
         st.markdown("---")
-        auto_refresh=st.checkbox("Auto Refresh",value=False) if not (is_historical or is_planning) else False
-        debug=st.checkbox("Debug",value=False)
         
-        if st.button("💾 Save",use_container_width=True):
-            save_inputs({"offset":offset,"on_high":on_high,"on_low":on_low,"vix_high":vix_high,"vix_low":vix_low,"prior_high":prior_high,"prior_low":prior_low,"prior_close":prior_close})
-            st.success("✅")
+        # ─────────────────────────────────────────────────────────────────────
+        # OPTIONS
+        # ─────────────────────────────────────────────────────────────────────
+        auto_refresh=st.checkbox("🔄 Auto Refresh (30s)",value=False) if not (is_historical or is_planning) else False
+        debug=st.checkbox("🔧 Debug Mode",value=False)
+        
+        if st.button("💾 Save Inputs",use_container_width=True):
+            save_inputs({
+                "offset":offset,
+                "on_high":on_high,"on_low":on_low,
+                "vix_high":vix_high,"vix_low":vix_low,
+                "prior_high":prior_high,"prior_low":prior_low,"prior_close":prior_close
+            })
+            st.success("✅ Saved")
     
     return {
         "trading_date":trading_date,
         "is_historical":is_historical,
         "is_planning":is_planning,
-        "data_mode":data_mode,
         "offset":offset,
-        "on_high":on_high,"on_low":on_low,
+        # VIX overrides
+        "override_vix":override_vix,
         "vix_high":vix_high,"vix_low":vix_low,
+        # O/N overrides
+        "override_on":override_on,
+        "on_high":on_high,"on_low":on_low,
+        "on_high_time":(on_high_hr,on_high_mn) if override_on else None,
+        "on_low_time":(on_low_hr,on_low_mn) if override_on else None,
+        # Prior RTH overrides
+        "override_prior":override_prior,
         "prior_high":prior_high,"prior_low":prior_low,"prior_close":prior_close,
+        "prior_high_time":(prior_high_hr,prior_high_mn) if override_prior else None,
+        "prior_low_time":(prior_low_hr,prior_low_mn) if override_prior else None,
+        "prior_close_time":(prior_close_hr,prior_close_mn) if override_prior else None,
+        # Other
         "ref_hr":ref_hr,"ref_mn":ref_mn,
         "auto_refresh":auto_refresh,"debug":debug
     }
@@ -1251,105 +1324,123 @@ def main():
     offset=inputs["offset"]
     
     # ─────────────────────────────────────────────────────────────────────────
-    # POPULATE DATA (Auto or Manual)
+    # DETERMINE BASE DATES
     # ─────────────────────────────────────────────────────────────────────────
-    if (inputs["is_historical"] or inputs["is_planning"]) and hist_data and inputs["data_mode"].startswith("Auto"):
-        # Use extracted historical/planning data
+    # For PRIOR RTH (cones): Monday uses Friday
+    prior_rth_day=inputs["trading_date"]-timedelta(days=1)
+    if prior_rth_day.weekday()==6:prior_rth_day=prior_rth_day-timedelta(days=2)  # Sunday→Friday
+    elif prior_rth_day.weekday()==5:prior_rth_day=prior_rth_day-timedelta(days=1)  # Saturday→Friday
+    
+    # For OVERNIGHT: Day before trading date (Sunday for Monday)
+    overnight_day=inputs["trading_date"]-timedelta(days=1)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # POPULATE DATA (Auto-fetch + Modular Overrides)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    # Start with auto-fetched data if available
+    if hist_data:
         syd_h=hist_data.get("sydney_high")
         syd_l=hist_data.get("sydney_low")
         tok_h=hist_data.get("tokyo_high")
         tok_l=hist_data.get("tokyo_low")
         on_high=hist_data.get("on_high")
         on_low=hist_data.get("on_low")
+        on_high_time=hist_data.get("on_high_time")
+        on_low_time=hist_data.get("on_low_time")
         
-        # For planning mode: Sydney/Tokyo/O/N won't have data yet
-        # Use prior day RTH range as proxy for channel levels
-        if inputs["is_planning"] or syd_h is None or tok_h is None:
-            # No overnight data - use prior RTH high/low for channel calculation
-            # Can't determine Sydney vs Tokyo, so default to FALLING (conservative)
-            prior_h=hist_data.get("prior_high_wick",6070)
-            prior_l=hist_data.get("prior_low_close",6050)
-            syd_h=syd_h or prior_h
-            syd_l=syd_l or prior_l
-            tok_h=tok_h or prior_h - 1  # Slightly lower to force FALLING (conservative)
-            tok_l=tok_l or prior_l
-            on_high=on_high or prior_h
-            on_low=on_low or prior_l
-        
-        # Prior day data for cones
         prior_high_wick=hist_data.get("prior_high_wick",6080)
         prior_high_close=hist_data.get("prior_high_close",6075)
         prior_low_close=hist_data.get("prior_low_close",6030)
         prior_close=hist_data.get("prior_close",6055)
+        prior_high_wick_time=hist_data.get("prior_high_wick_time")
+        prior_high_close_time=hist_data.get("prior_high_close_time")
+        prior_low_close_time=hist_data.get("prior_low_close_time")
+        prior_close_time=hist_data.get("prior_close_time")
         
-        if inputs["is_planning"]:
-            candle_830=None  # No 8:30 candle yet for future date
-            current_es=es_price or hist_data.get("prior_close",6050)
-        else:
-            candle_830=hist_data.get("candle_830")
-            current_es=hist_data.get("day_open",es_price or 6050)
-        
-        vix_high=inputs["vix_high"] or 18
-        vix_low=inputs["vix_low"] or 15
-        
-        # Get times with fallbacks - separate overnight_day from prior_rth_day
-        # For PRIOR RTH (cones): Monday uses Friday
-        prior_rth_day=inputs["trading_date"]-timedelta(days=1)
-        if prior_rth_day.weekday()==6:prior_rth_day=prior_rth_day-timedelta(days=2)
-        elif prior_rth_day.weekday()==5:prior_rth_day=prior_rth_day-timedelta(days=1)
-        
-        # For OVERNIGHT: Day before trading date (Sunday for Monday)
-        overnight_day=inputs["trading_date"]-timedelta(days=1)
-        
-        # O/N times use overnight_day
-        on_high_time=hist_data.get("on_high_time") or CT.localize(datetime.combine(overnight_day,time(22,0)))
-        on_low_time=hist_data.get("on_low_time") or CT.localize(datetime.combine(inputs["trading_date"],time(2,0)))
-        
-        # Prior RTH times use prior_rth_day
-        prior_high_wick_time=hist_data.get("prior_high_wick_time") or CT.localize(datetime.combine(prior_rth_day,time(10,0)))
-        prior_high_close_time=hist_data.get("prior_high_close_time") or CT.localize(datetime.combine(prior_rth_day,time(10,0)))
-        prior_low_close_time=hist_data.get("prior_low_close_time") or CT.localize(datetime.combine(prior_rth_day,time(14,0)))
-        prior_close_time=hist_data.get("prior_close_time") or CT.localize(datetime.combine(prior_rth_day,time(15,0)))
+        candle_830=hist_data.get("candle_830") if inputs["is_historical"] else None
+        current_es=hist_data.get("day_open",es_price) if inputs["is_historical"] else (es_price or hist_data.get("prior_close",6050))
     else:
-        # Manual or live mode
-        # In manual mode, we only have O/N High/Low, not separate Sydney/Tokyo
-        # Default to FALLING (conservative) by making Tokyo slightly lower than Sydney
-        on_high=inputs["on_high"] or 6075
-        on_low=inputs["on_low"] or 6040
-        syd_h=on_high
-        syd_l=on_low
-        tok_h=on_high - 1  # Slightly lower to default to FALLING
-        tok_l=on_low
-        
-        # Prior day data for cones (manual mode uses same value for wick and close)
-        prior_high_wick=inputs["prior_high"] or 6080
-        prior_high_close=inputs["prior_high"] or 6080  # In manual mode, same as wick
-        prior_low_close=inputs["prior_low"] or 6030
-        prior_close=inputs["prior_close"] or 6055
-        
-        vix_high=inputs["vix_high"] or 18
-        vix_low=inputs["vix_low"] or 15
+        # No hist_data - use defaults
+        syd_h=syd_l=tok_h=tok_l=on_high=on_low=None
+        on_high_time=on_low_time=None
+        prior_high_wick=prior_high_close=6080
+        prior_low_close=6030
+        prior_close=6055
+        prior_high_wick_time=prior_high_close_time=prior_low_close_time=prior_close_time=None
         candle_830=None
         current_es=es_price or 6050
-        
-        # Default times - handle weekends
-        # For PRIOR RTH (cones): Monday uses Friday
-        prior_rth_day=inputs["trading_date"]-timedelta(days=1)
-        if prior_rth_day.weekday()==6:prior_rth_day=prior_rth_day-timedelta(days=2)  # Sunday→Friday
-        elif prior_rth_day.weekday()==5:prior_rth_day=prior_rth_day-timedelta(days=1)  # Saturday→Friday
-        
-        # For OVERNIGHT: Day before trading date (Sunday for Monday)
-        overnight_day=inputs["trading_date"]-timedelta(days=1)
-        
-        # O/N times use overnight_day (Sunday for Monday)
-        on_high_time=CT.localize(datetime.combine(overnight_day,time(22,0)))
-        on_low_time=CT.localize(datetime.combine(inputs["trading_date"],time(3,0)))
-        
-        # Prior RTH times use prior_rth_day (Friday for Monday)
-        prior_high_wick_time=CT.localize(datetime.combine(prior_rth_day,time(10,0)))
-        prior_high_close_time=CT.localize(datetime.combine(prior_rth_day,time(10,0)))
-        prior_low_close_time=CT.localize(datetime.combine(prior_rth_day,time(14,0)))
-        prior_close_time=CT.localize(datetime.combine(prior_rth_day,time(15,0)))
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # APPLY MANUAL OVERRIDES
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    # VIX Override
+    if inputs["override_vix"] and inputs["vix_high"] is not None:
+        vix_high=inputs["vix_high"]
+        vix_low=inputs["vix_low"]
+    else:
+        vix_high=18
+        vix_low=15
+    
+    # O/N Pivots Override
+    if inputs["override_on"] and inputs["on_high"] is not None:
+        on_high=inputs["on_high"]
+        on_low=inputs["on_low"]
+        # Build times from user input
+        on_h_hr,on_h_mn=inputs["on_high_time"]
+        on_l_hr,on_l_mn=inputs["on_low_time"]
+        # Determine date for time (O/N high usually previous day evening, low current day early AM)
+        if on_h_hr>=17:  # Evening = overnight_day
+            on_high_time=CT.localize(datetime.combine(overnight_day,time(on_h_hr,on_h_mn)))
+        else:  # Early morning = trading_date
+            on_high_time=CT.localize(datetime.combine(inputs["trading_date"],time(on_h_hr,on_h_mn)))
+        if on_l_hr>=17:
+            on_low_time=CT.localize(datetime.combine(overnight_day,time(on_l_hr,on_l_mn)))
+        else:
+            on_low_time=CT.localize(datetime.combine(inputs["trading_date"],time(on_l_hr,on_l_mn)))
+        # When manually overriding O/N, use same for Sydney/Tokyo (default FALLING)
+        syd_h=on_high
+        syd_l=on_low
+        tok_h=on_high-1
+        tok_l=on_low
+    
+    # Prior RTH Override
+    if inputs["override_prior"] and inputs["prior_high"] is not None:
+        prior_high_wick=inputs["prior_high"]
+        prior_high_close=inputs["prior_high"]  # Manual mode uses same for wick and close
+        prior_low_close=inputs["prior_low"]
+        prior_close=inputs["prior_close"]
+        # Build times from user input
+        ph_hr,ph_mn=inputs["prior_high_time"]
+        pl_hr,pl_mn=inputs["prior_low_time"]
+        pc_hr,pc_mn=inputs["prior_close_time"]
+        prior_high_wick_time=CT.localize(datetime.combine(prior_rth_day,time(ph_hr,ph_mn)))
+        prior_high_close_time=prior_high_wick_time
+        prior_low_close_time=CT.localize(datetime.combine(prior_rth_day,time(pl_hr,pl_mn)))
+        prior_close_time=CT.localize(datetime.combine(prior_rth_day,time(pc_hr,pc_mn)))
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FALLBACKS - Fill any remaining None values
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    # O/N values
+    if on_high is None:on_high=prior_high_wick or 6075
+    if on_low is None:on_low=prior_low_close or 6040
+    if on_high_time is None:on_high_time=CT.localize(datetime.combine(overnight_day,time(22,0)))
+    if on_low_time is None:on_low_time=CT.localize(datetime.combine(inputs["trading_date"],time(2,0)))
+    
+    # Sydney/Tokyo (if still None, derive from O/N)
+    if syd_h is None:syd_h=on_high
+    if syd_l is None:syd_l=on_low
+    if tok_h is None:tok_h=on_high-1  # Default FALLING
+    if tok_l is None:tok_l=on_low
+    
+    # Prior RTH times
+    if prior_high_wick_time is None:prior_high_wick_time=CT.localize(datetime.combine(prior_rth_day,time(10,0)))
+    if prior_high_close_time is None:prior_high_close_time=CT.localize(datetime.combine(prior_rth_day,time(10,0)))
+    if prior_low_close_time is None:prior_low_close_time=CT.localize(datetime.combine(prior_rth_day,time(14,0)))
+    if prior_close_time is None:prior_close_time=CT.localize(datetime.combine(prior_rth_day,time(15,0)))
     
     current_spx=round(current_es-offset,2)
     
@@ -1509,54 +1600,88 @@ def main():
 </div>''',unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # AUTO-POPULATED DATA (Historical)
+    # AUTO-POPULATED DATA (Historical) - Consistent Grid Layout
     # ═══════════════════════════════════════════════════════════════════════════
     if inputs["is_historical"] and hist_data:
-        st.markdown("### 📊 Auto-Populated Session Data")
+        st.markdown("### 📊 Session Data")
         
-        col1,col2,col3,col4=st.columns(4)
+        # Get london data
+        lon_h=hist_data.get("london_high","—")
+        lon_l=hist_data.get("london_low","—")
         
-        with col1:
-            st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(59,130,246,0.15)">🌏</div><div><div class="card-title">Sydney</div><div class="card-sub">5PM-8:30PM</div></div></div>
-<div class="pillar"><span>High</span><span style="color:#00d4aa">{syd_h}</span></div>
-<div class="pillar"><span>Low</span><span style="color:#ff4757">{syd_l}</span></div>
-</div>''',unsafe_allow_html=True)
+        # Build consistent 4-column grid
+        session_html=f'''
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:16px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+<div style="width:36px;height:36px;background:rgba(59,130,246,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px">🌏</div>
+<div><div style="font-size:13px;font-weight:600">Sydney</div><div style="font-size:10px;color:rgba(255,255,255,0.4)">5PM-8:30PM</div></div>
+</div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px"><span style="color:rgba(255,255,255,0.5)">High</span><span style="color:#00d4aa;font-weight:500">{syd_h}</span></div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px"><span style="color:rgba(255,255,255,0.5)">Low</span><span style="color:#ff4757;font-weight:500">{syd_l}</span></div>
+</div>
+
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:16px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+<div style="width:36px;height:36px;background:rgba(255,71,87,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px">🗼</div>
+<div><div style="font-size:13px;font-weight:600">Tokyo</div><div style="font-size:10px;color:rgba(255,255,255,0.4)">9PM-1:30AM</div></div>
+</div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px"><span style="color:rgba(255,255,255,0.5)">High</span><span style="color:#00d4aa;font-weight:500">{tok_h}</span></div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px"><span style="color:rgba(255,255,255,0.5)">Low</span><span style="color:#ff4757;font-weight:500">{tok_l}</span></div>
+</div>
+
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:16px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+<div style="width:36px;height:36px;background:rgba(0,212,170,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px">🏛️</div>
+<div><div style="font-size:13px;font-weight:600">London</div><div style="font-size:10px;color:rgba(255,255,255,0.4)">2AM-3AM</div></div>
+</div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px"><span style="color:rgba(255,255,255,0.5)">High</span><span style="color:#00d4aa;font-weight:500">{lon_h}</span></div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px"><span style="color:rgba(255,255,255,0.5)">Low</span><span style="color:#ff4757;font-weight:500">{lon_l}</span></div>
+</div>
+
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:16px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+<div style="width:36px;height:36px;background:rgba(168,85,247,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px">🌙</div>
+<div><div style="font-size:13px;font-weight:600">O/N Total</div><div style="font-size:10px;color:rgba(255,255,255,0.4)">5PM-3AM</div></div>
+</div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px"><span style="color:rgba(255,255,255,0.5)">High</span><span style="color:#00d4aa;font-weight:500">{on_high}</span></div>
+<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px"><span style="color:rgba(255,255,255,0.5)">Low</span><span style="color:#ff4757;font-weight:500">{on_low}</span></div>
+</div>
+</div>'''
         
-        with col2:
-            st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(255,71,87,0.15)">🗼</div><div><div class="card-title">Tokyo</div><div class="card-sub">9PM-1:30AM</div></div></div>
-<div class="pillar"><span>High</span><span style="color:#00d4aa">{tok_h}</span></div>
-<div class="pillar"><span>Low</span><span style="color:#ff4757">{tok_l}</span></div>
-</div>''',unsafe_allow_html=True)
+        st.markdown(session_html,unsafe_allow_html=True)
         
-        with col3:
-            lon_h=hist_data.get("london_high","—")
-            lon_l=hist_data.get("london_low","—")
-            st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(0,212,170,0.15)">🏛️</div><div><div class="card-title">London</div><div class="card-sub">2AM-3AM</div></div></div>
-<div class="pillar"><span>High</span><span style="color:#00d4aa">{lon_h}</span></div>
-<div class="pillar"><span>Low</span><span style="color:#ff4757">{lon_l}</span></div>
-</div>''',unsafe_allow_html=True)
-        
-        with col4:
-            st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(168,85,247,0.15)">🌙</div><div><div class="card-title">O/N Total</div><div class="card-sub">5PM-3AM</div></div></div>
-<div class="pillar"><span>High</span><span style="color:#00d4aa">{on_high}</span></div>
-<div class="pillar"><span>Low</span><span style="color:#ff4757">{on_low}</span></div>
-</div>''',unsafe_allow_html=True)
-        
-        # 8:30 Candle
+        # 8:30 Candle - Full width card
         if candle_830:
             c=candle_830
             candle_color="#00d4aa" if c["close"]>=c["open"] else "#ff4757"
-            st.markdown(f'''<div class="card">
-<div class="card-h"><div class="card-icon" style="background:rgba(34,211,238,0.15)">🕣</div><div><div class="card-title">8:30 AM Candle (ES)</div><div class="card-sub">First 30-min candle</div></div></div>
-<div class="candle-display">
-<div class="candle-item"><div class="candle-label">Open</div><div class="candle-val">{c["open"]}</div></div>
-<div class="candle-item"><div class="candle-label">High</div><div class="candle-val" style="color:#00d4aa">{c["high"]}</div></div>
-<div class="candle-item"><div class="candle-label">Low</div><div class="candle-val" style="color:#ff4757">{c["low"]}</div></div>
-<div class="candle-item"><div class="candle-label">Close</div><div class="candle-val" style="color:{candle_color}">{c["close"]}</div></div>
+            candle_type="BULLISH" if c["close"]>=c["open"] else "BEARISH"
+            st.markdown(f'''
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:16px;margin-bottom:16px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+<div style="display:flex;align-items:center;gap:10px">
+<div style="width:36px;height:36px;background:rgba(34,211,238,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px">🕣</div>
+<div><div style="font-size:13px;font-weight:600">8:30 AM Candle (ES)</div><div style="font-size:10px;color:rgba(255,255,255,0.4)">First 30-min candle</div></div>
+</div>
+<span style="background:{candle_color};color:white;padding:4px 10px;border-radius:8px;font-size:10px;font-weight:600">{candle_type}</span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+<div style="background:rgba(255,255,255,0.02);border-radius:8px;padding:12px;text-align:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">OPEN</div>
+<div style="font-size:16px;font-weight:600;font-family:IBM Plex Mono">{c["open"]}</div>
+</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:8px;padding:12px;text-align:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">HIGH</div>
+<div style="font-size:16px;font-weight:600;font-family:IBM Plex Mono;color:#00d4aa">{c["high"]}</div>
+</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:8px;padding:12px;text-align:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">LOW</div>
+<div style="font-size:16px;font-weight:600;font-family:IBM Plex Mono;color:#ff4757">{c["low"]}</div>
+</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:8px;padding:12px;text-align:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:4px">CLOSE</div>
+<div style="font-size:16px;font-weight:600;font-family:IBM Plex Mono;color:{candle_color}">{c["close"]}</div>
+</div>
 </div>
 </div>''',unsafe_allow_html=True)
     
@@ -1649,138 +1774,134 @@ def main():
     st.markdown(cmd_html,unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # SUPPORTING ANALYSIS - Row 1: Confidence + EMA Alignment
+    # ANALYSIS GRID - 2x2 Layout with Equal Height Cards
     # ═══════════════════════════════════════════════════════════════════════════
     st.markdown("### 📊 Analysis")
     
-    col1,col2=st.columns(2)
+    # Calculate values needed for all cards
+    conf_score=confidence["score"]
+    conf_color="#00d4aa" if conf_score>=70 else "#ffa502" if conf_score>=50 else "#ff4757"
+    conf_label="HIGH" if conf_score>=70 else "MEDIUM" if conf_score>=50 else "LOW"
+    breakdown_html="".join([f'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.04)"><span style="color:rgba(255,255,255,0.5)">{k}</span><span style="font-weight:500">{v}</span></div>' for k,v in confidence["breakdown"]])
     
-    with col1:
-        conf_score=confidence["score"]
-        conf_color="#00d4aa" if conf_score>=70 else "#ffa502" if conf_score>=50 else "#ff4757"
-        conf_label="HIGH" if conf_score>=70 else "MEDIUM" if conf_score>=50 else "LOW"
-        breakdown_html="".join([f'<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.05)"><span style="color:rgba(255,255,255,0.6)">{k}</span><span style="font-weight:500">{v}</span></div>' for k,v in confidence["breakdown"]])
-        st.markdown(f'''<div class="card" style="padding:20px">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    cross_color="#00d4aa" if ema_signals["cross_bullish"] else "#ff4757" if ema_signals["cross_bearish"] else "#ffa502"
+    filter_color="#00d4aa" if ema_signals["above_200"] else "#ff4757" if ema_signals["below_200"] else "#ffa502"
+    filter_text="ABOVE" if ema_signals["above_200"] else "BELOW" if ema_signals["below_200"] else "AT"
+    
+    if direction=="CALLS" and ema_signals["aligned_calls"]:
+        align_text="✅ ALIGNED";align_color="#00d4aa";align_bg="rgba(0,212,170,0.12)"
+    elif direction=="PUTS" and ema_signals["aligned_puts"]:
+        align_text="✅ ALIGNED";align_color="#00d4aa";align_bg="rgba(0,212,170,0.12)"
+    elif direction in ["CALLS","PUTS"]:
+        align_text="⚠️ CONFLICT";align_color="#ffa502";align_bg="rgba(255,165,2,0.12)"
+    else:
+        align_text="— N/A";align_color="#666";align_bg="rgba(255,255,255,0.03)"
+    
+    flow_color="#00d4aa" if "CALLS" in flow["bias"] else "#ff4757" if "PUTS" in flow["bias"] else "#ffa502"
+    meter_pos=(flow["score"]+100)/2
+    flow_label=flow["bias"].replace("_"," ")
+    
+    mom_color="#00d4aa" if "BULL" in momentum["signal"] else "#ff4757" if "BEAR" in momentum["signal"] else "#ffa502"
+    vix_color="#00d4aa" if vix_zone in ["LOW","NORMAL"] else "#ffa502" if vix_zone=="ELEVATED" else "#ff4757"
+    
+    # Build the entire 2x2 grid as one HTML block for consistent sizing
+    analysis_html=f'''
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+
+<!-- ROW 1: Confidence + EMA -->
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px;min-height:280px;display:flex;flex-direction:column">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
 <div style="display:flex;align-items:center;gap:12px">
-<div style="width:48px;height:48px;background:rgba(168,85,247,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px">📊</div>
-<div><div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">Confidence Score</div>
-<div style="font-size:12px;color:rgba(255,255,255,0.5)">Setup quality assessment</div></div>
+<div style="width:44px;height:44px;background:rgba(168,85,247,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px">📊</div>
+<div><div style="font-family:Space Grotesk,sans-serif;font-size:15px;font-weight:600">Confidence Score</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.5)">Setup quality assessment</div></div>
 </div>
 <div style="text-align:right">
-<div style="font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:700;color:{conf_color}">{conf_score}%</div>
-<div style="font-size:11px;font-weight:600;color:{conf_color}">{conf_label} CONFIDENCE</div>
+<div style="font-family:IBM Plex Mono,monospace;font-size:28px;font-weight:700;color:{conf_color}">{conf_score}%</div>
+<div style="font-size:10px;font-weight:600;color:{conf_color}">{conf_label}</div>
 </div>
 </div>
-<div class="conf-bar" style="height:10px;margin-bottom:16px"><div class="conf-fill" style="width:{conf_score}%;background:{conf_color}"></div></div>
-<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:12px">{breakdown_html}</div>
-</div>''',unsafe_allow_html=True)
-    
-    with col2:
-        # EMA Signals Card
-        cross_color="#00d4aa" if ema_signals["cross_bullish"] else "#ff4757" if ema_signals["cross_bearish"] else "#ffa502"
-        filter_color="#00d4aa" if ema_signals["above_200"] else "#ff4757" if ema_signals["below_200"] else "#ffa502"
-        filter_text="ABOVE" if ema_signals["above_200"] else "BELOW" if ema_signals["below_200"] else "AT"
-        
-        if direction=="CALLS" and ema_signals["aligned_calls"]:
-            align_text="✅ FULLY ALIGNED"
-            align_color="#00d4aa"
-            align_bg="rgba(0,212,170,0.15)"
-        elif direction=="PUTS" and ema_signals["aligned_puts"]:
-            align_text="✅ FULLY ALIGNED"
-            align_color="#00d4aa"
-            align_bg="rgba(0,212,170,0.15)"
-        elif direction in ["CALLS","PUTS"]:
-            align_text="⚠️ CONFLICTING SIGNALS"
-            align_color="#ffa502"
-            align_bg="rgba(255,165,2,0.15)"
-        else:
-            align_text="— NO SETUP"
-            align_color="#888"
-            align_bg="rgba(255,255,255,0.05)"
-        
-        st.markdown(f'''<div class="card" style="padding:20px">
+<div style="height:8px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;margin-bottom:16px">
+<div style="height:100%;width:{conf_score}%;background:{conf_color};border-radius:4px"></div>
+</div>
+<div style="flex:1;background:rgba(255,255,255,0.02);border-radius:10px;padding:12px">{breakdown_html}</div>
+</div>
+
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px;min-height:280px;display:flex;flex-direction:column">
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-<div style="width:48px;height:48px;background:rgba(59,130,246,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px">📈</div>
-<div><div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">EMA Confirmation</div>
-<div style="font-size:12px;color:rgba(255,255,255,0.5)">8/21 Cross + 200 EMA Filter</div></div>
+<div style="width:44px;height:44px;background:rgba(59,130,246,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px">📈</div>
+<div><div style="font-family:Space Grotesk,sans-serif;font-size:15px;font-weight:600">EMA Confirmation</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.5)">8/21 Cross + 200 Filter</div></div>
 </div>
-<div style="background:{align_bg};border-radius:10px;padding:12px;text-align:center;margin-bottom:16px">
-<div style="font-size:14px;font-weight:600;color:{align_color}">{align_text}</div>
+<div style="background:{align_bg};border-radius:10px;padding:14px;text-align:center;margin-bottom:16px">
+<div style="font-size:15px;font-weight:600;color:{align_color}">{align_text}</div>
 </div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
-<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">8/21 CROSS</div>
-<div style="font-size:18px;font-weight:600;color:{cross_color}">{ema_signals["cross_signal"]}</div>
-<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px">EMA8: {ema_signals["ema8"] or "—"}</div>
+<div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:16px;text-align:center;display:flex;flex-direction:column;justify-content:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px;letter-spacing:0.5px">8/21 CROSS</div>
+<div style="font-size:20px;font-weight:600;color:{cross_color}">{ema_signals["cross_signal"]}</div>
+<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px">EMA8: {ema_signals["ema8"] or "—"}</div>
 </div>
-<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
-<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">200 EMA FILTER</div>
-<div style="font-size:18px;font-weight:600;color:{filter_color}">{filter_text}</div>
-<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px">EMA200: {ema_signals["ema200"] or "—"}</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:16px;text-align:center;display:flex;flex-direction:column;justify-content:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px;letter-spacing:0.5px">200 EMA</div>
+<div style="font-size:20px;font-weight:600;color:{filter_color}">{filter_text}</div>
+<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px">EMA200: {ema_signals["ema200"] or "—"}</div>
 </div>
 </div>
-</div>''',unsafe_allow_html=True)
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SUPPORTING ANALYSIS - Row 2: Flow Bias + Market Context
-    # ═══════════════════════════════════════════════════════════════════════════
-    col3,col4=st.columns(2)
-    
-    with col3:
-        flow_color="#00d4aa" if "CALLS" in flow["bias"] else "#ff4757" if "PUTS" in flow["bias"] else "#ffa502"
-        meter_pos=(flow["score"]+100)/2
-        flow_label=flow["bias"].replace("_"," ")
-        
-        st.markdown(f'''<div class="card" style="padding:20px">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+</div>
+
+<!-- ROW 2: Flow Bias + Market Context -->
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px;min-height:220px;display:flex;flex-direction:column">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
 <div style="display:flex;align-items:center;gap:12px">
-<div style="width:48px;height:48px;background:rgba(34,211,238,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px">🌊</div>
-<div><div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">Flow Bias</div>
-<div style="font-size:12px;color:rgba(255,255,255,0.5)">Institutional positioning signal</div></div>
+<div style="width:44px;height:44px;background:rgba(34,211,238,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px">🌊</div>
+<div><div style="font-family:Space Grotesk,sans-serif;font-size:15px;font-weight:600">Flow Bias</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.5)">Institutional positioning</div></div>
 </div>
 <div style="text-align:right">
-<div style="font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:700;color:{flow_color}">{flow["score"]:+d}</div>
-<div style="font-size:11px;font-weight:600;color:{flow_color}">{flow_label}</div>
+<div style="font-family:IBM Plex Mono,monospace;font-size:28px;font-weight:700;color:{flow_color}">{flow["score"]:+d}</div>
+<div style="font-size:10px;font-weight:600;color:{flow_color}">{flow_label}</div>
 </div>
 </div>
-<div style="position:relative;margin:20px 0">
-<div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px">
+<div style="flex:1;display:flex;flex-direction:column;justify-content:center">
+<div style="display:flex;justify-content:space-between;font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:6px">
 <span>HEAVY PUTS</span><span>NEUTRAL</span><span>HEAVY CALLS</span>
 </div>
-<div class="flow-meter" style="height:10px"><div class="flow-marker" style="left:{meter_pos}%;width:6px;height:16px;top:-3px"></div></div>
-<div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px">
+<div style="height:10px;background:linear-gradient(90deg,#ff4757,#ffa502 50%,#00d4aa);border-radius:5px;position:relative">
+<div style="position:absolute;top:-4px;left:{meter_pos}%;width:6px;height:18px;background:#fff;border-radius:3px;transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,0.5)"></div>
+</div>
+<div style="display:flex;justify-content:space-between;font-size:9px;color:rgba(255,255,255,0.3);margin-top:6px">
 <span>-100</span><span>0</span><span>+100</span>
 </div>
 </div>
-</div>''',unsafe_allow_html=True)
-    
-    with col4:
-        mom_color="#00d4aa" if "BULL" in momentum["signal"] else "#ff4757" if "BEAR" in momentum["signal"] else "#ffa502"
-        vix_color="#00d4aa" if vix_zone in ["LOW","NORMAL"] else "#ffa502" if vix_zone=="ELEVATED" else "#ff4757"
-        
-        st.markdown(f'''<div class="card" style="padding:20px">
-<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-<div style="width:48px;height:48px;background:rgba(255,165,2,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px">📉</div>
-<div><div style="font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600">Market Context</div>
-<div style="font-size:12px;color:rgba(255,255,255,0.5)">Momentum & volatility</div></div>
 </div>
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
-<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">MOMENTUM</div>
+
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px;min-height:220px;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+<div style="width:44px;height:44px;background:rgba(255,165,2,0.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px">📉</div>
+<div><div style="font-family:Space Grotesk,sans-serif;font-size:15px;font-weight:600">Market Context</div>
+<div style="font-size:11px;color:rgba(255,255,255,0.5)">Momentum & volatility</div></div>
+</div>
+<div style="flex:1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center;display:flex;flex-direction:column;justify-content:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px">MOMENTUM</div>
 <div style="font-size:16px;font-weight:600;color:{mom_color}">{momentum["signal"]}</div>
 </div>
-<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
-<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">RSI (14)</div>
-<div style="font-size:16px;font-weight:600">{momentum["rsi"]}</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center;display:flex;flex-direction:column;justify-content:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px">RSI (14)</div>
+<div style="font-size:18px;font-weight:600">{momentum["rsi"]}</div>
 </div>
-<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center">
-<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:4px">VIX</div>
-<div style="font-size:16px;font-weight:600;color:{vix_color}">{vix:.1f}</div>
+<div style="background:rgba(255,255,255,0.02);border-radius:10px;padding:14px;text-align:center;display:flex;flex-direction:column;justify-content:center">
+<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px">VIX</div>
+<div style="font-size:18px;font-weight:600;color:{vix_color}">{vix:.1f}</div>
 <div style="font-size:9px;color:{vix_color}">{vix_zone}</div>
 </div>
 </div>
-</div>''',unsafe_allow_html=True)
+</div>
+
+</div>'''
+    
+    st.markdown(analysis_html,unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # CONES & LEVELS
