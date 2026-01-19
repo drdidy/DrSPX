@@ -531,15 +531,15 @@ def get_channel_edges(levels,channel_type):
     """
     Get the active ceiling and floor based on channel type.
     If UNDETERMINED, default to FALLING (conservative - tighter channel)
+    Returns: ceiling_level, floor_level, ceiling_display_name, floor_display_name
     """
     if channel_type=="RISING":
-        return levels["ceiling_rising"]["level"],levels["floor_rising"]["level"],"ceiling_rising","floor_rising"
+        return levels["ceiling_rising"]["level"],levels["floor_rising"]["level"],"Rising","Rising"
     elif channel_type=="FALLING":
-        return levels["ceiling_falling"]["level"],levels["floor_falling"]["level"],"ceiling_falling","floor_falling"
+        return levels["ceiling_falling"]["level"],levels["floor_falling"]["level"],"Falling","Falling"
     else:
         # UNDETERMINED: Default to FALLING (conservative approach)
-        # This still shows values but user should treat with caution
-        return levels["ceiling_falling"]["level"],levels["floor_falling"]["level"],"ceiling_falling (default)","floor_falling (default)"
+        return levels["ceiling_falling"]["level"],levels["floor_falling"]["level"],"Falling*","Falling*"
 
 def assess_position(price,ceiling,floor):
     if price>ceiling+BREAK_THRESHOLD:
@@ -1339,6 +1339,16 @@ def render_sidebar():
         st.markdown("### 📝 Manual Overrides")
         st.caption("Enable sections to override auto-fetched data")
         
+        # Current ES Override (useful when data feeds fail)
+        override_es=st.checkbox("Override Current ES",value=False,key="oes")
+        if override_es:
+            manual_es=st.number_input("Current ES Price",value=safe_float(saved.get("manual_es"),6900.0),step=0.25,
+                                      help="Enter current ES futures price")
+        else:
+            manual_es=None
+        
+        st.markdown("")
+        
         # VIX Override
         override_vix=st.checkbox("Override VIX",value=False,key="ovix")
         if override_vix:
@@ -1418,6 +1428,7 @@ def render_sidebar():
         if st.button("💾 Save Inputs",use_container_width=True):
             save_inputs({
                 "offset":offset,
+                "manual_es":manual_es,
                 "on_high":on_high,"on_low":on_low,
                 "vix_high":vix_high,"vix_low":vix_low,
                 "prior_high":prior_high,"prior_low":prior_low,"prior_close":prior_close
@@ -1429,6 +1440,9 @@ def render_sidebar():
         "is_historical":is_historical,
         "is_planning":is_planning,
         "offset":offset,
+        # ES override
+        "override_es":override_es,
+        "manual_es":manual_es,
         # VIX overrides
         "override_vix":override_vix,
         "vix_high":vix_high,"vix_low":vix_low,
@@ -1530,9 +1544,12 @@ def main():
             vix=fetch_vix_polygon() or 16.0
             hist_data=None
     
-    # Check if we got live data - warn if using fallbacks
-    if es_price is None:
-        st.warning("⚠️ **Could not fetch live ES price.** Using fallback values. Check your internet connection or try refreshing.")
+    # Check if manual ES override is enabled
+    if inputs.get("override_es") and inputs.get("manual_es"):
+        es_price = inputs["manual_es"]
+        st.success(f"✅ Using manual ES: {es_price}")
+    elif es_price is None:
+        st.warning("⚠️ **Could not fetch live ES price.** Enable 'Override Current ES' in sidebar to enter manually.")
         es_price = 6050  # Fallback
     
     offset=inputs["offset"]
