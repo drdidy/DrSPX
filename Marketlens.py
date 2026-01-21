@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import yfinance as yf
 from datetime import datetime, timedelta
 import pytz
 
@@ -8,8 +9,8 @@ import pytz
 # 1. CONFIGURATION
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="SPY DATA (POLYGON)",
-    page_icon="🕵️",
+    page_title="SPY DATA | DIAGNOSTIC",
+    page_icon="🛠️",
     layout="centered"
 )
 
@@ -22,7 +23,7 @@ st.markdown("""
         font-family: 'Consolas', monospace;
     }
     
-    /* METRIC BOXES */
+    /* DATA BOXES */
     .data-box {
         background: #161b22;
         border: 1px solid #30363d;
@@ -34,64 +35,87 @@ st.markdown("""
     .data-box label { display: block; font-size: 0.8rem; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; }
     .data-box .value { font-size: 1.8rem; font-weight: bold; color: #fff; margin-top: 5px; }
     
+    /* ALERTS */
+    .stAlert { background-color: #161b22; border: 1px solid #30363d; color: #e0e0e0; }
+    
     /* COLORS */
     .bullish { color: #3fb950 !important; }
     .bearish { color: #f85149 !important; }
     .neutral { color: #e3b341 !important; }
     
-    /* HIDE STREAMLIT ELEMENTS */
     header, footer, #MainMenu {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. DATA ENGINE (POLYGON -> SPY)
+# 2. HELPER FUNCTIONS
 # -----------------------------------------------------------------------------
 TZ_CT = pytz.timezone('US/Central')
-API_KEY = "6ZAi7hZZOUrviEq27ESoH8QP25DMyejQ"
 
 def get_smart_default_date():
-    """Defaults to TOMORROW if market is closed (After 4PM CT)."""
     now = datetime.now(TZ_CT)
-    # If it's late, assume we want to plan for the next day
     if now.hour >= 16: 
         d = now.date() + timedelta(days=1)
-        while d.weekday() > 4: d += timedelta(days=1) # Skip weekends
+        while d.weekday() > 4: d += timedelta(days=1)
         return d
     return now.date()
 
-@st.cache_data(ttl=60)
-def fetch_polygon_spy(date_str):
+# -----------------------------------------------------------------------------
+# 3. POLYGON ENGINE
+# -----------------------------------------------------------------------------
+def fetch_polygon_data(api_key, date_str):
+    """
+    Fetches SPY Snapshot for a specific expiration.
+    Returns a dict with data OR a dict with 'error' message.
+    """
     try:
-        # 1. Get Spot Price (SPY)
-        r_spot = requests.get(f"https://api.polygon.io/v3/snapshot?ticker.any_of=SPY&apiKey={API_KEY}", timeout=3)
+        # 1. Spot Price
+        r_spot = requests.get(f"https://api.polygon.io/v3/snapshot?ticker.any_of=SPY&apiKey={api_key}", timeout=5)
+        if r_spot.status_code != 200:
+            return {"error": f"Spot Price Error: {r_spot.status_code} - {r_spot.text}"}
+            
         spot_data = r_spot.json()
-        spy_price = spot_data['results'][0]['value'] if 'results' in spot_data else 0
+        if 'results' not in spot_data:
+             return {"error": "Spot Price: No results returned."}
+        spy_price = spot_data['results'][0]['value']
 
-        # 2. Get Option Chain (SPY)
-        # Note: SPY options are American style, standard ticker matches underlying
-        url = f"https://api.polygon.io/v3/snapshot/options/SPY?expiration_date={date_str}&limit=1000&apiKey={API_KEY}"
+        # 2. Options Chain
+        # Note: We use the limit=250 default and paginate to be safe on all tiers
+        url = f"https://api.polygon.io/v3/snapshot/options/SPY?expiration_date={date_str}&limit=250&apiKey={api_key}"
         
         results = []
+        page_count = 0
+        
         while url:
-            r = requests.get(url, timeout=5)
+            r = requests.get(url, timeout=8)
+            
+            if r.status_code != 200:
+                return {"error": f"Chain Error: {r.status_code} - {r.text}"}
+                
             data = r.json()
+            
             if 'results' in data:
                 results.extend(data['results'])
+            else:
+                # If first page has no results, stop.
+                if page_count == 0: break
+                
             url = data.get('next_url')
-            if url: url += f"&apiKey={API_KEY}"
+            if url: url += f"&apiKey={api_key}"
+            
+            page_count += 1
+            if page_count > 20: break # Safety break
             
         if not results:
-            return None
+            return {"error": f"No contracts found for {date_str}. (Empty List)"}
 
-        # 3. Calculate Aggregates
+        # 3. Calculate
         c_vol, p_vol = 0, 0
         c_oi, p_oi = 0, 0
         
         for c in results:
             details = c.get('details', {})
             stats = c.get('day', {})
-            
             vol = stats.get('volume', 0)
             oi = c.get('open_interest', 0)
             c_type = details.get('contract_type')
@@ -105,114 +129,94 @@ def fetch_polygon_spy(date_str):
 
         return {
             "price": spy_price,
-            "implied_spx": spy_price * 10, # Proxy Calculation
             "c_vol": c_vol, "p_vol": p_vol,
             "c_oi": c_oi, "p_oi": p_oi,
             "pcr_vol": p_vol / c_vol if c_vol else 0,
             "pcr_oi": p_oi / c_oi if c_oi else 0
         }
     except Exception as e:
-        return None
+        return {"error": f"Exception: {str(e)}"}
 
 # -----------------------------------------------------------------------------
-# 3. UI
+# 4. YFINANCE ENGINE (FALLBACK)
+# -----------------------------------------------------------------------------
+def fetch_yahoo_data(date_str):
+    try:
+        spy = yf.Ticker("SPY")
+        
+        # Spot
+        hist = spy.history(period="1d")
+        if hist.empty: return {"error": "Yahoo: Could not get SPY price."}
+        price = hist['Close'].iloc[-1]
+        
+        # Chain
+        try:
+            chain = spy.option_chain(date_str)
+        except ValueError:
+            return {"error": f"Yahoo: Data not available for {date_str} (or invalid date)."}
+            
+        calls, puts = chain.calls, chain.puts
+        
+        c_vol = calls['volume'].sum()
+        p_vol = puts['volume'].sum()
+        c_oi = calls['openInterest'].sum()
+        p_oi = puts['openInterest'].sum()
+        
+        return {
+            "price": price,
+            "c_vol": c_vol, "p_vol": p_vol,
+            "c_oi": c_oi, "p_oi": p_oi,
+            "pcr_vol": p_vol / c_vol if c_vol else 0,
+            "pcr_oi": p_oi / c_oi if c_oi else 0
+        }
+    except Exception as e:
+        return {"error": f"Yahoo Exception: {str(e)}"}
+
+# -----------------------------------------------------------------------------
+# 5. UI
 # -----------------------------------------------------------------------------
 def main():
-    st.title("SPY OPTION DATA (POLYGON)")
+    st.title("SPY DATA ANALYZER")
     
-    # Date Picker
-    default_date = get_smart_default_date()
-    target_date = st.date_input("EXPIRATION DATE", default_date)
-    
-    if target_date:
-        date_str = target_date.strftime('%Y-%m-%d')
+    # --- CONTROLS ---
+    with st.expander("🔌 CONNECTION SETTINGS", expanded=True):
+        source = st.radio("Data Source", ["Polygon.io (Paid Key)", "Yahoo Finance (Free)"], horizontal=True)
         
-        with st.spinner(f"Fetching SPY Chain for {date_str}..."):
-            data = fetch_polygon_spy(date_str)
-        
-        if not data:
-            st.error(f"No SPY data found for {date_str}.")
-            return
-            
-        # SENTIMENT LOGIC (OI)
-        pcr = data['pcr_oi']
-        if pcr > 1.5:
-            sent = "EXTREME BEARISH"
-            color = "bearish"
-        elif pcr < 0.7:
-            sent = "EXTREME BULLISH"
-            color = "bullish"
-        elif pcr > 1.2:
-            sent = "BEARISH SKEW"
-            color = "bearish"
-        elif pcr < 0.9:
-            sent = "BULLISH SKEW"
-            color = "bullish"
+        if "Polygon" in source:
+            # Pre-filled with the last key you gave me
+            api_key = st.text_input("Polygon API Key", value="6ZAi7hZZOUrviEq27ESoH8QP25DMyejQ", type="password")
+            debug_mode = st.checkbox("Show Raw Error Messages (Debug Mode)")
         else:
-            sent = "NEUTRAL"
-            color = "neutral"
-
-        # --- THE NUMBERS ---
-        st.markdown("### 1. RATIOS & SENTIMENT")
-        c1, c2 = st.columns(2)
-        
-        with c1:
-            st.markdown(f"""
-            <div class="data-box">
-                <label>Put/Call Ratio (OI)</label>
-                <div class="value {color}">{pcr:.2f}</div>
-                <div style="font-size:0.8rem; color:#888">{sent}</div>
-            </div>""", unsafe_allow_html=True)
+            api_key = None
+            debug_mode = False
             
-        with c2:
-            st.markdown(f"""
-            <div class="data-box">
-                <label>Put/Call Ratio (Vol)</label>
-                <div class="value">{data['pcr_vol']:.2f}</div>
-                <div style="font-size:0.8rem; color:#888">Intraday Activity</div>
-            </div>""", unsafe_allow_html=True)
+        default_date = get_smart_default_date()
+        target_date = st.date_input("Expiration Date", default_date)
 
-        st.markdown("### 2. TOTALS (OPEN INTEREST)")
-        c3, c4 = st.columns(2)
-        with c3:
-            st.markdown(f"""
-            <div class="data-box">
-                <label>Total Calls</label>
-                <div class="value bullish">{int(data['c_oi']):,}</div>
-            </div>""", unsafe_allow_html=True)
-        with c4:
-            st.markdown(f"""
-            <div class="data-box">
-                <label>Total Puts</label>
-                <div class="value bearish">{int(data['p_oi']):,}</div>
-            </div>""", unsafe_allow_html=True)
-            
-        st.markdown("### 3. REFERENCE")
-        c5, c6 = st.columns(2)
-        with c5:
-            st.markdown(f"""
-            <div class="data-box">
-                <label>SPY Price</label>
-                <div class="value">${data['price']:.2f}</div>
-            </div>""", unsafe_allow_html=True)
-        with c6:
-             st.markdown(f"""
-            <div class="data-box">
-                <label>Implied SPX</label>
-                <div class="value">{data['implied_spx']:,.2f}</div>
-            </div>""", unsafe_allow_html=True)
+    if not target_date: return
 
-        # Raw Table Toggle
-        with st.expander("Show Raw Data Table"):
-            st.table(pd.DataFrame({
-                "Metric": ["Calls (Vol)", "Puts (Vol)", "Calls (OI)", "Puts (OI)"],
-                "Value": [
-                    f"{int(data['c_vol']):,}", 
-                    f"{int(data['p_vol']):,}", 
-                    f"{int(data['c_oi']):,}", 
-                    f"{int(data['p_oi']):,}"
-                ]
-            }))
+    date_str = target_date.strftime('%Y-%m-%d')
+    st.markdown("---")
 
-if __name__ == "__main__":
-    main()
+    # --- FETCH LOGIC ---
+    data = None
+    
+    with st.spinner(f"Fetching data from {source.split(' ')[0]}..."):
+        if "Polygon" in source:
+            if not api_key:
+                st.error("Please enter an API Key.")
+                return
+            data = fetch_polygon_data(api_key, date_str)
+        else:
+            data = fetch_yahoo_data(date_str)
+
+    # --- ERROR HANDLING ---
+    if data and "error" in data:
+        st.error(f"❌ DATA FAILED: {data['error']}")
+        if "Polygon" in source and not debug_mode:
+            st.info("Tip: Enable 'Debug Mode' above to see the full technical error.")
+        if "Polygon" in source:
+            st.warning("Try switching to 'Yahoo Finance' above to get data immediately.")
+        return
+
+    if not data:
