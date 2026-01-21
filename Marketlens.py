@@ -61,12 +61,18 @@ TZ_CT = pytz.timezone('US/Central')
 def get_current_date():
     return datetime.now(TZ_CT).date()
 
-def get_next_trading_day():
-    """Returns the next likely trading day (skips weekends)."""
-    d = get_current_date() + timedelta(days=1)
-    while d.weekday() > 4: # If Sat/Sun, add day
-        d += timedelta(days=1)
-    return d
+def get_smart_default_date():
+    """
+    If it's after 4:00 PM CT, default to the NEXT trading day for planning.
+    Otherwise, show TODAY.
+    """
+    now = datetime.now(TZ_CT)
+    if now.hour >= 16: # After market close
+        d = now.date() + timedelta(days=1)
+        while d.weekday() > 4: # Skip Sat/Sun
+            d += timedelta(days=1)
+        return d
+    return now.date()
 
 @st.cache_data(ttl=60)
 def fetch_option_data(api_key, date_str):
@@ -162,11 +168,12 @@ def main():
     with c_inputs:
         k1, k2 = st.columns(2)
         with k1:
-            # Default to tomorrow if late at night
-            default_date = get_next_trading_day()
+            # AUTO-DATE LOGIC: Defaults to Tomorrow if late night
+            default_date = get_smart_default_date()
             target_date = st.date_input("Select Expiry to Analyze", default_date)
         with k2:
-            api_key = st.text_input("API Key", value="jrbBZ2y12cJAOp2Buqtlay0TdprcTDIm", type="password")
+            # UPDATED KEY DEFAULT
+            api_key = st.text_input("API Key", value="DCWuTS1R_fukpfjgf7QnXrLTEOS_giq6", type="password")
 
     st.markdown("---")
 
@@ -180,13 +187,17 @@ def main():
 
     if not data:
         st.error(f"❌ No Data Found for {date_str}.")
-        st.info("💡 HINT: If analyzing 'Today' after market close, switch date to **TOMORROW** to see the Open Interest for the next session.")
+        st.info("💡 TIP: Today's 0DTE options expire and disappear after market close. Try selecting **Tomorrow's Date** to see the new Open Interest setup.")
         return
 
     # --- ANALYSIS DASHBOARD ---
     
     # Check if we are looking at future (Planning) or past (Review)
+    # Using simple string comparison for "today" vs "future" logic
     is_future = target_date > get_current_date()
+    
+    # FOR PLANNING (Future): We care about Open Interest (OI) - Where are they positioned?
+    # FOR REVIEW (Today/Past): We care about Volume (Vol) - What did they actually trade?
     focus_metric = "OI" if is_future else "VOL"
     
     # Determine Sentiment based on PCR (Open Interest is key for planning)
@@ -197,13 +208,13 @@ def main():
     if pcr_val > 1.3:
         bias_text = "BEARISH HEDGING"
         bias_color = "bearish"
-        bias_desc = "Market is heavy on Puts (Protection)."
+        bias_desc = "Market is heavily positioned in Puts (Protection/Downside betting)."
     elif pcr_val < 0.7:
         bias_text = "BULLISH POSITIONING"
         bias_color = "bullish"
-        bias_desc = "Market is heavy on Calls (Speculation)."
+        bias_desc = "Market is heavily positioned in Calls (Upside speculation)."
     else:
-        bias_desc = "Put/Call balance is within normal range."
+        bias_desc = "Put/Call balance is within normal structural range."
 
     # --- ROW 1: THE BIG NUMBERS ---
     st.markdown(f"### 📊 ANALYSIS FOR: <span style='color:#fff'>{date_str}</span>", unsafe_allow_html=True)
@@ -253,7 +264,7 @@ def main():
     if not df.empty:
         # Focus on "Near the Money" strikes for better visibility
         center = data['spx_price'] if data['spx_price'] > 0 else 4000
-        # If price is 0 (weekend), use median strike
+        # If price is 0 (weekend/closed), use median strike of the chain to center chart
         if center == 0: center = df['strike'].median()
             
         range_pts = 100
@@ -264,7 +275,7 @@ def main():
         plot_col = 'oi' if is_future else 'volume'
         plot_title = "OPEN INTEREST (Positioning)" if is_future else "VOLUME (Activity)"
         
-        # --- FIXED LINE HERE ---
+        # PIVOT FOR PLOTTING
         pivot = chart_df.pivot_table(index='strike', columns='type', values=plot_col, aggfunc='sum').fillna(0)
         
         fig = go.Figure()
