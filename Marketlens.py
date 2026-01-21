@@ -1,174 +1,107 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# SPXW OPTIONS - PUT/CALL RATIO TESTER
+# Using Polygon REST API to fetch open interest data
+# ═══════════════════════════════════════════════════════════════════════════════
+
 import streamlit as st
+import requests
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from polygon import RESTClient
-from datetime import date, timedelta
+from datetime import date
 
-# --- Page Config ---
-st.set_page_config(page_title="Polygon Options Analyzer", layout="wide")
+st.set_page_config(page_title="SPXW P/C Ratio Tester", page_icon="🔍", layout="wide")
 
-st.title("📊 Options Open Interest & Max Pain Analyzer")
-st.markdown("""
-This tool fetches the **Option Chain Snapshot** from Polygon.io to analyze:
-1. **Open Interest (OI) Walls:** High OI often acts as support/resistance.
-2. **Max Pain:** The strike price where option buyers lose the most money (often a magnet for expiration).
-""")
+POLYGON_API_KEY = "6ZAi7hZZOUrviEq27ESoH8QP25DMyejQ"
 
-# --- Sidebar ---
-st.sidebar.header("Configuration")
+st.title("🔍 SPXW Open Interest Put/Call Ratio")
 
-# 1. API Key Handling
-api_key = st.secrets.get("POLYGON_API_KEY")
-if not api_key:
-    api_key = st.sidebar.text_input("Enter Polygon API Key", type="password")
+ticker = st.text_input("Underlying Symbol", value="SPXW")
+expiration = st.text_input("Expiration (YYYY-MM-DD)", value=date.today().isoformat())
 
-# 2. User Inputs
-ticker = st.sidebar.text_input("Ticker Symbol", value="SPY").upper()
-# Default to next Friday for expiration example
-default_date = date.today() + timedelta((4 - date.today().weekday()) % 7)
-expiry = st.sidebar.date_input("Expiration Date", value=default_date)
+@st.cache_data(ttl=300)
+def fetch_options_chain(symbol, expiry):
+    url = "https://api.polygon.io/v3/reference/options/contracts"
+    params = {
+        "underlying_ticker": symbol.upper(),
+        "expiration_date": expiry,
+        "limit": 1000,
+        "apiKey": POLYGON_API_KEY
+    }
 
-# --- Helper Functions ---
+    all_results = []
+    while True:
+        r = requests.get(url, params=params).json()
+        if "results" not in r:
+            return []
+        all_results.extend(r["results"])
+        if "next_url" in r:
+            url = r["next_url"]
+            params = {"apiKey": POLYGON_API_KEY}
+        else:
+            break
 
-@st.cache_data(ttl=600) # Cache data for 10 mins to save API credits
-def fetch_option_chain(_client, ticker, expiration_date):
-    """Fetches the snapshot for all options expiring on a specific date."""
+    return all_results
+
+
+@st.cache_data(ttl=300)
+def fetch_open_interest(option_ticker):
+    url = f"https://api.polygon.io/v2/snapshot/options/{option_ticker}"
+    r = requests.get(url, params={"apiKey": POLYGON_API_KEY}).json()
     try:
-        # Convert date to string YYYY-MM-DD
-        expiry_str = expiration_date.strftime("%Y-%m-%d")
-        
-        # Polygon API call: Snapshot of the options chain
-        chain_data = []
-        # Note: We iterate because list_snapshot_options_chain yields results
-        for contract in _client.list_snapshot_options_chain(
-            ticker, 
-            params={
-                "expiration_date": expiry_str,
-            }
-        ):
-            chain_data.append({
-                "strike": contract.details.strike_price,
-                "type": contract.details.contract_type, # 'call' or 'put'
-                "open_interest": contract.open_interest or 0,
-                "volume": contract.day.volume or 0,
-                "implied_volatility": contract.greeks.implied_volatility if contract.greeks else 0,
-                "last_price": contract.day.close or 0
-            })
-            
-        return pd.DataFrame(chain_data)
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return pd.DataFrame()
+        return r["results"]["open_interest"]
+    except:
+        return 0
 
-def calculate_max_pain(df):
-    """
-    Calculates Max Pain: The strike price with the lowest cumulative loss for option holders.
-    """
-    if df.empty:
-        return None, None
 
-    strikes = sorted(df['strike'].unique())
-    cash_values = []
+if st.button("Calculate Put/Call Ratio", type="primary"):
 
-    for price_point in strikes:
-        # Calculate Call Loss (Intrinsic Value if stock expires at price_point)
-        # Call Value = max(0, price_point - Strike) * OI
-        call_loss = df[df['type'] == 'call'].apply(
-            lambda x: max(0, price_point - x['strike']) * x['open_interest'], axis=1
-        ).sum()
+    with st.spinner("Fetching options chain..."):
+        chain = fetch_options_chain(ticker, expiration)
 
-        # Calculate Put Loss
-        # Put Value = max(0, Strike - price_point) * OI
-        put_loss = df[df['type'] == 'put'].apply(
-            lambda x: max(0, x['strike'] - price_point) * x['open_interest'], axis=1
-        ).sum()
-
-        total_loss = call_loss + put_loss
-        cash_values.append({"strike": price_point, "total_loss": total_loss})
-
-    pain_df = pd.DataFrame(cash_values)
-    # The "Max Pain" is the strike with the MINIMUM total loss for the market
-    max_pain_strike = pain_df.loc[pain_df['total_loss'].idxmin()]['strike']
-    
-    return max_pain_strike, pain_df
-
-# --- Main Logic ---
-
-if st.sidebar.button("Analyze Options"):
-    if not api_key:
-        st.warning("Please provide a Polygon API Key.")
+    if not chain:
+        st.error("No options returned. Check symbol or expiration.")
         st.stop()
 
-    client = RESTClient(api_key)
+    st.info(f"Found {len(chain)} contracts. Fetching open interest...")
     
-    with st.spinner(f"Fetching Option Chain for {ticker} expiring {expiry}..."):
-        df = fetch_option_chain(client, ticker, expiry)
+    rows = []
+    progress = st.progress(0)
+    
+    for i, opt in enumerate(chain):
+        oi = fetch_open_interest(opt["ticker"])
+        rows.append({
+            "Ticker": opt["ticker"],
+            "Type": opt["contract_type"],
+            "Strike": opt["strike_price"],
+            "OpenInterest": oi
+        })
+        progress.progress((i + 1) / len(chain))
 
-    if not df.empty:
-        # Separate Calls and Puts
-        calls = df[df['type'] == 'call']
-        puts = df[df['type'] == 'put']
+    df = pd.DataFrame(rows)
 
-        # 1. Metrics
-        total_call_oi = calls['open_interest'].sum()
-        total_put_oi = puts['open_interest'].sum()
-        pcr_ratio = total_put_oi / total_call_oi if total_call_oi > 0 else 0
-        max_pain, pain_df = calculate_max_pain(df)
+    total_calls = df[df["Type"] == "call"]["OpenInterest"].sum()
+    total_puts = df[df["Type"] == "put"]["OpenInterest"].sum()
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Call OI", f"{int(total_call_oi):,}")
-        col2.metric("Total Put OI", f"{int(total_put_oi):,}")
-        col3.metric("Put/Call Ratio (OI)", f"{pcr_ratio:.2f}")
-        col4.metric("Max Pain Price", f"${max_pain}")
+    ratio = round(total_puts / total_calls, 4) if total_calls else None
 
-        # 2. Open Interest Bar Chart
-        st.subheader(f"Open Interest by Strike ({expiry})")
+    st.markdown("---")
+    st.subheader("📊 Open Interest Summary")
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Calls OI", f"{total_calls:,}")
+    col2.metric("Total Puts OI", f"{total_puts:,}")
+    
+    if ratio:
+        col3.metric("Put/Call Ratio", f"{ratio:.4f}")
+        st.success(f"✅ Put/Call Ratio = {ratio}")
         
-        # Filter out deep OTM strikes to make chart readable (optional)
-        # We'll take the middle 80% range of strikes or simple min/max based on volume
-        active_strikes = df[df['open_interest'] > 0]
-        if not active_strikes.empty:
-             min_strike = active_strikes['strike'].min()
-             max_strike = active_strikes['strike'].max()
-             # Create a grouped bar chart
-             fig_oi = px.bar(
-                 df, 
-                 x='strike', 
-                 y='open_interest', 
-                 color='type',
-                 title=f"Open Interest Distribution for {ticker}",
-                 color_discrete_map={'call': '#00CC96', 'put': '#EF553B'},
-                 labels={"open_interest": "Open Interest", "strike": "Strike Price"}
-             )
-             fig_oi.update_layout(barmode='group', xaxis_range=[min_strike, max_strike])
-             st.plotly_chart(fig_oi, use_container_width=True)
-
-        # 3. Max Pain Chart
-        if pain_df is not None:
-            st.subheader("Max Pain Curve")
-            st.markdown("The lowest point on this curve represents the price where option writers (market makers) pay out the least amount of money.")
-            
-            fig_pain = go.Figure()
-            fig_pain.add_trace(go.Scatter(
-                x=pain_df['strike'], 
-                y=pain_df['total_loss'],
-                mode='lines',
-                name='Total Option Value'
-            ))
-            # Add vertical line for Max Pain
-            fig_pain.add_vline(x=max_pain, line_dash="dash", line_color="red", annotation_text=f"Max Pain: {max_pain}")
-            
-            fig_pain.update_layout(
-                title="Total Value of Options at Expiration (The 'Pain' Curve)",
-                xaxis_title="Stock Price at Expiration",
-                yaxis_title="Total Value ($)",
-            )
-            st.plotly_chart(fig_pain, use_container_width=True)
-
-        # 4. Raw Data Explorer
-        with st.expander("View Raw Data"):
-            st.dataframe(df)
-
+        # Determine dominant side
+        if total_calls > total_puts:
+            st.info("📊 **CALLS DOMINANT** - MMs may push price DOWN to avoid paying calls")
+        elif total_puts > total_calls:
+            st.warning("📊 **PUTS DOMINANT** - MMs may push price UP to avoid paying puts")
     else:
-        st.error("No data found. Check the ticker, expiration date, or API key permissions.")
+        st.error("Unable to compute ratio")
+
+    st.markdown("---")
+    st.subheader("📋 Options Data")
+    st.dataframe(df.sort_values("Strike"), use_container_width=True)
