@@ -264,4 +264,48 @@ def main():
         plot_col = 'oi' if is_future else 'volume'
         plot_title = "OPEN INTEREST (Positioning)" if is_future else "VOLUME (Activity)"
         
-        pivot = chart_df.pivot_table(index='strike', columns='type', values=plot_col, aggfunc='sum
+        # --- FIXED LINE HERE ---
+        pivot = chart_df.pivot_table(index='strike', columns='type', values=plot_col, aggfunc='sum').fillna(0)
+        
+        fig = go.Figure()
+        
+        # CALLS
+        if 'call' in pivot.columns:
+            fig.add_trace(go.Bar(
+                x=pivot.index, y=pivot['call'],
+                name='CALLS', marker_color='#00ffcc', opacity=0.7
+            ))
+            
+        # PUTS
+        if 'put' in pivot.columns:
+            fig.add_trace(go.Bar(
+                x=pivot.index, y=pivot['put'],
+                name='PUTS', marker_color='#ff0066', opacity=0.7
+            ))
+
+        fig.update_layout(
+            title=f"SPX {plot_title} SKEW",
+            title_font_color="#fff",
+            xaxis_title="Strike Price",
+            yaxis_title=plot_title,
+            barmode='overlay', # Overlay allows comparing heights easily
+            plot_bgcolor='#0a0a0a',
+            paper_bgcolor='#0a0a0a',
+            font=dict(color="#ccc", family="Consolas"),
+            xaxis=dict(gridcolor='#222'),
+            yaxis=dict(gridcolor='#222'),
+            height=500,
+            bargap=0.0
+        )
+        
+        if data['spx_price'] > 0:
+            fig.add_vline(x=data['spx_price'], line_width=1, line_dash="dash", line_color="white")
+            fig.add_annotation(x=data['spx_price'], y=0, text="SPOT", showarrow=True, arrowhead=1, ax=0, ay=-30)
+
+        st.plotly_chart(fig, use_container_width=True)
+        
+    else:
+        st.warning("No strike data available to chart.")
+
+if __name__ == "__main__":
+    main()
