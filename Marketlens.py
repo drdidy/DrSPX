@@ -54,9 +54,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. DATA ENGINE (ROBUST CALCULATOR)
+# 2. DATA ENGINE
 # -----------------------------------------------------------------------------
 TZ_CT = pytz.timezone('US/Central')
+
+# --- SECURE KEY STORAGE (BACKGROUND) ---
+API_KEY = "6ZAi7hZZOUrviEq27ESoH8QP25DMyejQ"
 
 def get_current_date():
     return datetime.now(TZ_CT).date()
@@ -75,14 +78,14 @@ def get_smart_default_date():
     return now.date()
 
 @st.cache_data(ttl=60)
-def fetch_option_data(api_key, date_str):
+def fetch_option_data(date_str):
     """
     Fetches the Option Chain for a specific expiration date.
     Calculates PCR from the raw data.
     """
     # 1. Get Spot Price
     try:
-        r_spot = requests.get(f"https://api.polygon.io/v3/snapshot?ticker.any_of=I:SPX&apiKey={api_key}", timeout=3)
+        r_spot = requests.get(f"https://api.polygon.io/v3/snapshot?ticker.any_of=I:SPX&apiKey={API_KEY}", timeout=3)
         spot_data = r_spot.json()
         spx_price = spot_data['results'][0]['value'] if 'results' in spot_data else 0
     except:
@@ -90,7 +93,7 @@ def fetch_option_data(api_key, date_str):
 
     # 2. Get Option Chain (Aggregates)
     # We use the snapshot endpoint because it gives us OI and Vol in one go.
-    url = f"https://api.polygon.io/v3/snapshot/options/I:SPX?expiration_date={date_str}&limit=1000&apiKey={api_key}"
+    url = f"https://api.polygon.io/v3/snapshot/options/I:SPX?expiration_date={date_str}&limit=1000&apiKey={API_KEY}"
     
     results = []
     try:
@@ -102,7 +105,7 @@ def fetch_option_data(api_key, date_str):
             
             # Pagination
             url = data.get('next_url')
-            if url: url += f"&apiKey={api_key}"
+            if url: url += f"&apiKey={API_KEY}"
             
     except Exception as e:
         return None
@@ -160,30 +163,24 @@ def fetch_option_data(api_key, date_str):
 # -----------------------------------------------------------------------------
 def main():
     # --- HEADER & CONTROLS ---
-    c_head, c_inputs = st.columns([1, 2])
+    # Simplified Layout: No API Key Input
+    c_head, c_inputs = st.columns([2, 1])
     
     with c_head:
         st.markdown("## 🔭 SPX SKEW<br><span style='font-size:0.8rem; color:#888'>FORWARD ANALYZER</span>", unsafe_allow_html=True)
         
     with c_inputs:
-        k1, k2 = st.columns(2)
-        with k1:
-            # AUTO-DATE LOGIC: Defaults to Tomorrow if late night
-            default_date = get_smart_default_date()
-            target_date = st.date_input("Select Expiry to Analyze", default_date)
-        with k2:
-            # UPDATED KEY DEFAULT
-            api_key = st.text_input("API Key", value="DCWuTS1R_fukpfjgf7QnXrLTEOS_giq6", type="password")
+        # AUTO-DATE LOGIC: Defaults to Tomorrow if late night
+        default_date = get_smart_default_date()
+        target_date = st.date_input("Select Expiry to Analyze", default_date)
 
     st.markdown("---")
 
     # --- DATA FETCH ---
-    if not api_key: return
-    
     date_str = target_date.strftime('%Y-%m-%d')
     
-    with st.spinner(f"Pulling Option Chain for {date_str}..."):
-        data = fetch_option_data(api_key, date_str)
+    with st.spinner(f"Scanning Option Chain for {date_str}..."):
+        data = fetch_option_data(date_str)
 
     if not data:
         st.error(f"❌ No Data Found for {date_str}.")
@@ -193,7 +190,6 @@ def main():
     # --- ANALYSIS DASHBOARD ---
     
     # Check if we are looking at future (Planning) or past (Review)
-    # Using simple string comparison for "today" vs "future" logic
     is_future = target_date > get_current_date()
     
     # FOR PLANNING (Future): We care about Open Interest (OI) - Where are they positioned?
