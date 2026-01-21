@@ -1,92 +1,41 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# POLYGON SPXW OPTIONS API TESTER
-# Testing SPXW (0DTE/Weekly SPX Options) data availability
+# MASSIVE API - SPXW OPTIONS TESTER
+# Using the Massive Python client to fetch 0DTE SPX options data
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
-import requests
-import json
 from datetime import date, timedelta
+import pandas as pd
 
-st.set_page_config(page_title="SPXW Options Tester", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Massive SPXW Tester", page_icon="🔍", layout="wide")
 
-st.title("🔍 Polygon SPXW Options API Tester")
-st.markdown("Testing what **SPXW** (0DTE/Weekly SPX) options data is available")
+st.title("🔍 Massive API - SPXW Options Tester")
+st.markdown("Testing SPXW (0DTE SPX Options) data using Massive Python client")
 
-POLYGON_KEY = "6ZAi7hZZOUrviEq27ESoH8QP25DMyejQ"
-BASE = "https://api.polygon.io"
+# Your API key
+API_KEY = "6ZAi7hZZOUrviEq27ESoH8QP25DMyejQ"
 
 # Date selector
 test_date = st.date_input("Expiry Date to Test", value=date.today())
-exp_str = test_date.strftime("%Y-%m-%d")
+exp_str = test_date.isoformat()
 
 st.markdown("---")
 
-if st.button("🚀 Run SPXW Tests", type="primary"):
+if st.button("🚀 Fetch SPXW Options Data", type="primary"):
     
-    # ═══════════════════════════════════════════════════════════════════════════
-    # TEST 1: SPXW Options Contracts Reference
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown("### Test 1: SPXW Options Contracts Reference")
-    with st.spinner("Testing..."):
-        try:
-            url = f"{BASE}/v3/reference/options/contracts?underlying_ticker=SPXW&expiration_date={exp_str}&limit=10&apiKey={POLYGON_KEY}"
-            r = requests.get(url, timeout=15)
-            st.write(f"**URL:** `{url.replace(POLYGON_KEY, 'XXXXX')}`")
-            st.write(f"**Status:** {r.status_code}")
-            if r.status_code == 200:
-                data = r.json()
-                st.success(f"✅ Success! Found {data.get('count', 0)} contracts")
-                with st.expander("View Response"):
-                    st.json(data)
-            else:
-                st.error(f"❌ Failed: {r.text[:500]}")
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
-    
-    st.markdown("---")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # TEST 2: SPXW Options Snapshot
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown("### Test 2: SPXW Options Snapshot (Sample)")
-    with st.spinner("Testing..."):
-        try:
-            url = f"{BASE}/v3/snapshot/options/SPXW?expiration_date={exp_str}&limit=10&apiKey={POLYGON_KEY}"
-            r = requests.get(url, timeout=15)
-            st.write(f"**URL:** `{url.replace(POLYGON_KEY, 'XXXXX')}`")
-            st.write(f"**Status:** {r.status_code}")
-            if r.status_code == 200:
-                data = r.json()
-                results = data.get("results", [])
-                st.success(f"✅ Success! Found {len(results)} options in sample")
-                if results:
-                    st.write("**Sample option structure:**")
-                    st.json(results[0])
-            else:
-                st.error(f"❌ Failed: {r.text[:500]}")
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
-    
-    st.markdown("---")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # TEST 3: Full SPXW Chain with OI Calculation
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown("### Test 3: Full SPXW Chain - Put/Call Open Interest")
-    with st.spinner("Fetching full chain (this may take a moment)..."):
-        try:
-            # May need to paginate - start with no limit
-            url = f"{BASE}/v3/snapshot/options/SPXW?expiration_date={exp_str}&apiKey={POLYGON_KEY}"
-            r = requests.get(url, timeout=30)
-            st.write(f"**URL:** `{url.replace(POLYGON_KEY, 'XXXXX')}`")
-            st.write(f"**Status:** {r.status_code}")
+    try:
+        from massive import RESTClient
+        
+        with st.spinner(f"Fetching 0DTE options for SPXW expiring on {exp_str}..."):
+            client = RESTClient(API_KEY)
             
-            if r.status_code == 200:
-                data = r.json()
-                results = data.get("results", [])
+            try:
+                params = {
+                    "expiration_date": exp_str,
+                    "limit": 1000  # Get more contracts
+                }
                 
-                # Count and sum
+                options_chain = []
                 calls = []
                 puts = []
                 calls_oi = 0
@@ -94,151 +43,169 @@ if st.button("🚀 Run SPXW Tests", type="primary"):
                 calls_vol = 0
                 puts_vol = 0
                 
-                for o in results:
-                    details = o.get("details", {})
-                    day = o.get("day", {})
-                    contract_type = details.get("contract_type", "").upper()
-                    oi = day.get("open_interest", 0) or 0
-                    vol = day.get("volume", 0) or 0
+                # Try SPXW first (weekly/0DTE options)
+                st.info("Fetching SPXW (weekly/0DTE options)...")
+                
+                for contract in client.list_snapshot_options_chain("SPXW", params=params):
+                    options_chain.append(contract)
+                    
+                    contract_type = contract.details.contract_type.upper() if contract.details else ""
+                    strike = contract.details.strike_price if contract.details else 0
+                    oi = contract.day.open_interest if contract.day else 0
+                    vol = contract.day.volume if contract.day else 0
                     
                     if contract_type == "CALL":
-                        calls.append(o)
-                        calls_oi += oi
-                        calls_vol += vol
+                        calls.append({
+                            "ticker": contract.ticker,
+                            "strike": strike,
+                            "oi": oi or 0,
+                            "volume": vol or 0
+                        })
+                        calls_oi += (oi or 0)
+                        calls_vol += (vol or 0)
                     elif contract_type == "PUT":
-                        puts.append(o)
-                        puts_oi += oi
-                        puts_vol += vol
+                        puts.append({
+                            "ticker": contract.ticker,
+                            "strike": strike,
+                            "oi": oi or 0,
+                            "volume": vol or 0
+                        })
+                        puts_oi += (oi or 0)
+                        puts_vol += (vol or 0)
                 
-                st.success(f"✅ Success! Fetched {len(results)} options")
+                st.success(f"✅ Retrieved {len(options_chain)} contracts!")
                 
-                # Display metrics
-                st.markdown("#### 📊 Summary")
+                # ═══════════════════════════════════════════════════════════════
+                # SUMMARY METRICS
+                # ═══════════════════════════════════════════════════════════════
+                st.markdown("### 📊 Summary")
+                
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Total Contracts", len(results))
+                col1.metric("Total Contracts", len(options_chain))
                 col2.metric("Calls", len(calls))
                 col3.metric("Puts", len(puts))
                 
                 total_oi = calls_oi + puts_oi
-                if total_oi > 0:
-                    pc_ratio = puts_oi / calls_oi if calls_oi > 0 else 999
-                    col4.metric("P/C Ratio (OI)", f"{pc_ratio:.2f}")
+                pc_ratio_oi = puts_oi / calls_oi if calls_oi > 0 else 0
+                col4.metric("P/C Ratio (OI)", f"{pc_ratio_oi:.2f}")
                 
-                st.markdown("#### 📈 Open Interest")
+                # ═══════════════════════════════════════════════════════════════
+                # OPEN INTEREST
+                # ═══════════════════════════════════════════════════════════════
+                st.markdown("### 📈 Open Interest")
+                
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Calls OI", f"{calls_oi:,}")
                 col2.metric("Puts OI", f"{puts_oi:,}")
                 col3.metric("Total OI", f"{total_oi:,}")
                 
-                # Determine dominant side
-                if calls_oi > puts_oi:
-                    st.info(f"📊 **CALLS DOMINANT** - Calls OI ({calls_oi:,}) > Puts OI ({puts_oi:,})")
-                elif puts_oi > calls_oi:
-                    st.info(f"📊 **PUTS DOMINANT** - Puts OI ({puts_oi:,}) > Calls OI ({calls_oi:,})")
-                else:
-                    st.info("📊 **NEUTRAL** - Calls OI = Puts OI")
+                # Visual bar
+                if total_oi > 0:
+                    calls_pct = calls_oi / total_oi * 100
+                    puts_pct = puts_oi / total_oi * 100
+                    
+                    st.markdown(f"""
+                    <div style="display:flex;height:30px;border-radius:8px;overflow:hidden;margin:10px 0">
+                        <div style="background:linear-gradient(90deg,#00d4aa,#00b894);width:{calls_pct}%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:white">
+                            CALLS {calls_pct:.1f}%
+                        </div>
+                        <div style="background:linear-gradient(90deg,#ff4757,#ee3b4d);width:{puts_pct}%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:white">
+                            PUTS {puts_pct:.1f}%
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
-                st.markdown("#### 📉 Volume")
+                # Dominant side
+                if calls_oi > puts_oi:
+                    st.success(f"📊 **CALLS DOMINANT** - MMs may push price DOWN to avoid paying calls")
+                elif puts_oi > calls_oi:
+                    st.error(f"📊 **PUTS DOMINANT** - MMs may push price UP to avoid paying puts")
+                else:
+                    st.info("📊 **NEUTRAL** - No clear dominant side")
+                
+                # ═══════════════════════════════════════════════════════════════
+                # VOLUME
+                # ═══════════════════════════════════════════════════════════════
+                st.markdown("### 📉 Volume")
+                
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Calls Volume", f"{calls_vol:,}")
                 col2.metric("Puts Volume", f"{puts_vol:,}")
-                col3.metric("P/C Ratio (Vol)", f"{puts_vol/calls_vol:.2f}" if calls_vol > 0 else "N/A")
+                pc_ratio_vol = puts_vol / calls_vol if calls_vol > 0 else 0
+                col3.metric("P/C Ratio (Vol)", f"{pc_ratio_vol:.2f}")
                 
-                # Show OI distribution by strike
-                st.markdown("#### 🎯 OI by Strike (Top 10)")
+                # ═══════════════════════════════════════════════════════════════
+                # TOP STRIKES BY OI
+                # ═══════════════════════════════════════════════════════════════
+                st.markdown("### 🎯 Top Strikes by Open Interest")
+                
+                # Aggregate by strike
                 strike_data = {}
-                for o in results:
-                    details = o.get("details", {})
-                    day = o.get("day", {})
-                    strike = details.get("strike_price", 0)
-                    contract_type = details.get("contract_type", "").upper()
-                    oi = day.get("open_interest", 0) or 0
-                    
+                for c in calls:
+                    strike = c["strike"]
                     if strike not in strike_data:
-                        strike_data[strike] = {"calls_oi": 0, "puts_oi": 0}
-                    
-                    if contract_type == "CALL":
-                        strike_data[strike]["calls_oi"] += oi
-                    else:
-                        strike_data[strike]["puts_oi"] += oi
+                        strike_data[strike] = {"calls_oi": 0, "puts_oi": 0, "calls_vol": 0, "puts_vol": 0}
+                    strike_data[strike]["calls_oi"] += c["oi"]
+                    strike_data[strike]["calls_vol"] += c["volume"]
+                
+                for p in puts:
+                    strike = p["strike"]
+                    if strike not in strike_data:
+                        strike_data[strike] = {"calls_oi": 0, "puts_oi": 0, "calls_vol": 0, "puts_vol": 0}
+                    strike_data[strike]["puts_oi"] += p["oi"]
+                    strike_data[strike]["puts_vol"] += p["volume"]
                 
                 # Sort by total OI
-                sorted_strikes = sorted(strike_data.items(), 
-                                       key=lambda x: x[1]["calls_oi"] + x[1]["puts_oi"], 
-                                       reverse=True)[:10]
+                sorted_strikes = sorted(
+                    strike_data.items(),
+                    key=lambda x: x[1]["calls_oi"] + x[1]["puts_oi"],
+                    reverse=True
+                )[:15]
                 
                 if sorted_strikes:
-                    import pandas as pd
                     df = pd.DataFrame([
-                        {"Strike": k, "Calls OI": v["calls_oi"], "Puts OI": v["puts_oi"], 
-                         "Total OI": v["calls_oi"] + v["puts_oi"]}
+                        {
+                            "Strike": k,
+                            "Calls OI": v["calls_oi"],
+                            "Puts OI": v["puts_oi"],
+                            "Total OI": v["calls_oi"] + v["puts_oi"],
+                            "Net (C-P)": v["calls_oi"] - v["puts_oi"]
+                        }
                         for k, v in sorted_strikes
                     ])
                     st.dataframe(df, use_container_width=True)
+                    
+                    # Find max pain (strike with highest total OI)
+                    max_pain_strike = sorted_strikes[0][0]
+                    st.info(f"🎯 **Highest OI Strike (potential magnet):** {max_pain_strike}")
                 
-                with st.expander("View Sample Call Data"):
-                    if calls:
-                        st.json(calls[0])
+                # ═══════════════════════════════════════════════════════════════
+                # RAW DATA SAMPLE
+                # ═══════════════════════════════════════════════════════════════
+                with st.expander("View Raw Contract Data (First 5)"):
+                    for i, contract in enumerate(options_chain[:5]):
+                        st.write(f"**Contract {i+1}:** {contract.ticker}")
+                        st.write(f"  - Strike: {contract.details.strike_price if contract.details else 'N/A'}")
+                        st.write(f"  - Type: {contract.details.contract_type if contract.details else 'N/A'}")
+                        st.write(f"  - OI: {contract.day.open_interest if contract.day else 'N/A'}")
+                        st.write(f"  - Volume: {contract.day.volume if contract.day else 'N/A'}")
+                        st.write("---")
                 
-                with st.expander("View Sample Put Data"):
-                    if puts:
-                        st.json(puts[0])
-                        
-            else:
-                st.error(f"❌ Failed: {r.text[:500]}")
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
-    
-    st.markdown("---")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # TEST 4: SPX & VIX Index Values
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown("### Test 4: SPX & VIX Current Values")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        with st.spinner("Fetching SPX..."):
-            try:
-                url = f"{BASE}/v3/snapshot?ticker.any_of=I:SPX&apiKey={POLYGON_KEY}"
-                r = requests.get(url, timeout=15)
-                if r.status_code == 200:
-                    data = r.json()
-                    results = data.get("results", [])
-                    if results:
-                        res = results[0]
-                        value = res.get("value") or res.get("session", {}).get("close")
-                        st.metric("SPX", f"{value:,.2f}" if value else "N/A")
-                else:
-                    st.error(f"SPX fetch failed: {r.status_code}")
-            except Exception as e:
-                st.error(f"SPX error: {e}")
-    
-    with col2:
-        with st.spinner("Fetching VIX..."):
-            try:
-                url = f"{BASE}/v3/snapshot?ticker.any_of=I:VIX&apiKey={POLYGON_KEY}"
-                r = requests.get(url, timeout=15)
-                if r.status_code == 200:
-                    data = r.json()
-                    results = data.get("results", [])
-                    if results:
-                        res = results[0]
-                        value = res.get("value") or res.get("session", {}).get("close")
-                        st.metric("VIX", f"{value:.2f}" if value else "N/A")
-                else:
-                    st.error(f"VIX fetch failed: {r.status_code}")
-            except Exception as e:
-                st.error(f"VIX error: {e}")
+            finally:
+                client.close()
+                
+    except ImportError:
+        st.error("❌ Could not import 'massive' package. Install it with: `pip install massive`")
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
+        import traceback
+        st.code(traceback.format_exc())
 
 st.markdown("---")
-st.markdown("### 📋 What I Need to Know")
+st.markdown("### 📋 What This Tells Us")
 st.markdown("""
-Share screenshots showing:
-1. ✅ Whether SPXW data is available
-2. ✅ The Open Interest numbers (Calls OI vs Puts OI)
-3. ✅ The P/C Ratio
-4. ✅ Any error messages
+- **CALLS DOMINANT** → MMs are short calls → They want price to stay DOWN → May break support
+- **PUTS DOMINANT** → MMs are short puts → They want price to stay UP → May break resistance
 
-This will help me integrate the P/C ratio into SPX Prophet V7 to identify MM positioning!
+Share the results and I'll integrate this into SPX Prophet V7!
 """)
