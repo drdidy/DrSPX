@@ -1,211 +1,174 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# MASSIVE API - SPXW OPTIONS TESTER
-# Using the Massive Python client to fetch 0DTE SPX options data
-# ═══════════════════════════════════════════════════════════════════════════════
-
 import streamlit as st
-from datetime import date, timedelta
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from polygon import RESTClient
+from datetime import date, timedelta
 
-st.set_page_config(page_title="Massive SPXW Tester", page_icon="🔍", layout="wide")
+# --- Page Config ---
+st.set_page_config(page_title="Polygon Options Analyzer", layout="wide")
 
-st.title("🔍 Massive API - SPXW Options Tester")
-st.markdown("Testing SPXW (0DTE SPX Options) data using Massive Python client")
-
-# Your API key
-API_KEY = "6ZAi7hZZOUrviEq27ESoH8QP25DMyejQ"
-
-# Date selector
-test_date = st.date_input("Expiry Date to Test", value=date.today())
-exp_str = test_date.isoformat()
-
-st.markdown("---")
-
-if st.button("🚀 Fetch SPXW Options Data", type="primary"):
-    
-    try:
-        from massive import RESTClient
-        
-        with st.spinner(f"Fetching 0DTE options for SPXW expiring on {exp_str}..."):
-            client = RESTClient(API_KEY)
-            
-            try:
-                params = {
-                    "expiration_date": exp_str,
-                    "limit": 1000  # Get more contracts
-                }
-                
-                options_chain = []
-                calls = []
-                puts = []
-                calls_oi = 0
-                puts_oi = 0
-                calls_vol = 0
-                puts_vol = 0
-                
-                # Try SPXW first (weekly/0DTE options)
-                st.info("Fetching SPXW (weekly/0DTE options)...")
-                
-                for contract in client.list_snapshot_options_chain("SPXW", params=params):
-                    options_chain.append(contract)
-                    
-                    contract_type = contract.details.contract_type.upper() if contract.details else ""
-                    strike = contract.details.strike_price if contract.details else 0
-                    oi = contract.day.open_interest if contract.day else 0
-                    vol = contract.day.volume if contract.day else 0
-                    
-                    if contract_type == "CALL":
-                        calls.append({
-                            "ticker": contract.ticker,
-                            "strike": strike,
-                            "oi": oi or 0,
-                            "volume": vol or 0
-                        })
-                        calls_oi += (oi or 0)
-                        calls_vol += (vol or 0)
-                    elif contract_type == "PUT":
-                        puts.append({
-                            "ticker": contract.ticker,
-                            "strike": strike,
-                            "oi": oi or 0,
-                            "volume": vol or 0
-                        })
-                        puts_oi += (oi or 0)
-                        puts_vol += (vol or 0)
-                
-                st.success(f"✅ Retrieved {len(options_chain)} contracts!")
-                
-                # ═══════════════════════════════════════════════════════════════
-                # SUMMARY METRICS
-                # ═══════════════════════════════════════════════════════════════
-                st.markdown("### 📊 Summary")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Total Contracts", len(options_chain))
-                col2.metric("Calls", len(calls))
-                col3.metric("Puts", len(puts))
-                
-                total_oi = calls_oi + puts_oi
-                pc_ratio_oi = puts_oi / calls_oi if calls_oi > 0 else 0
-                col4.metric("P/C Ratio (OI)", f"{pc_ratio_oi:.2f}")
-                
-                # ═══════════════════════════════════════════════════════════════
-                # OPEN INTEREST
-                # ═══════════════════════════════════════════════════════════════
-                st.markdown("### 📈 Open Interest")
-                
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Calls OI", f"{calls_oi:,}")
-                col2.metric("Puts OI", f"{puts_oi:,}")
-                col3.metric("Total OI", f"{total_oi:,}")
-                
-                # Visual bar
-                if total_oi > 0:
-                    calls_pct = calls_oi / total_oi * 100
-                    puts_pct = puts_oi / total_oi * 100
-                    
-                    st.markdown(f"""
-                    <div style="display:flex;height:30px;border-radius:8px;overflow:hidden;margin:10px 0">
-                        <div style="background:linear-gradient(90deg,#00d4aa,#00b894);width:{calls_pct}%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:white">
-                            CALLS {calls_pct:.1f}%
-                        </div>
-                        <div style="background:linear-gradient(90deg,#ff4757,#ee3b4d);width:{puts_pct}%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:white">
-                            PUTS {puts_pct:.1f}%
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # Dominant side
-                if calls_oi > puts_oi:
-                    st.success(f"📊 **CALLS DOMINANT** - MMs may push price DOWN to avoid paying calls")
-                elif puts_oi > calls_oi:
-                    st.error(f"📊 **PUTS DOMINANT** - MMs may push price UP to avoid paying puts")
-                else:
-                    st.info("📊 **NEUTRAL** - No clear dominant side")
-                
-                # ═══════════════════════════════════════════════════════════════
-                # VOLUME
-                # ═══════════════════════════════════════════════════════════════
-                st.markdown("### 📉 Volume")
-                
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Calls Volume", f"{calls_vol:,}")
-                col2.metric("Puts Volume", f"{puts_vol:,}")
-                pc_ratio_vol = puts_vol / calls_vol if calls_vol > 0 else 0
-                col3.metric("P/C Ratio (Vol)", f"{pc_ratio_vol:.2f}")
-                
-                # ═══════════════════════════════════════════════════════════════
-                # TOP STRIKES BY OI
-                # ═══════════════════════════════════════════════════════════════
-                st.markdown("### 🎯 Top Strikes by Open Interest")
-                
-                # Aggregate by strike
-                strike_data = {}
-                for c in calls:
-                    strike = c["strike"]
-                    if strike not in strike_data:
-                        strike_data[strike] = {"calls_oi": 0, "puts_oi": 0, "calls_vol": 0, "puts_vol": 0}
-                    strike_data[strike]["calls_oi"] += c["oi"]
-                    strike_data[strike]["calls_vol"] += c["volume"]
-                
-                for p in puts:
-                    strike = p["strike"]
-                    if strike not in strike_data:
-                        strike_data[strike] = {"calls_oi": 0, "puts_oi": 0, "calls_vol": 0, "puts_vol": 0}
-                    strike_data[strike]["puts_oi"] += p["oi"]
-                    strike_data[strike]["puts_vol"] += p["volume"]
-                
-                # Sort by total OI
-                sorted_strikes = sorted(
-                    strike_data.items(),
-                    key=lambda x: x[1]["calls_oi"] + x[1]["puts_oi"],
-                    reverse=True
-                )[:15]
-                
-                if sorted_strikes:
-                    df = pd.DataFrame([
-                        {
-                            "Strike": k,
-                            "Calls OI": v["calls_oi"],
-                            "Puts OI": v["puts_oi"],
-                            "Total OI": v["calls_oi"] + v["puts_oi"],
-                            "Net (C-P)": v["calls_oi"] - v["puts_oi"]
-                        }
-                        for k, v in sorted_strikes
-                    ])
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # Find max pain (strike with highest total OI)
-                    max_pain_strike = sorted_strikes[0][0]
-                    st.info(f"🎯 **Highest OI Strike (potential magnet):** {max_pain_strike}")
-                
-                # ═══════════════════════════════════════════════════════════════
-                # RAW DATA SAMPLE
-                # ═══════════════════════════════════════════════════════════════
-                with st.expander("View Raw Contract Data (First 5)"):
-                    for i, contract in enumerate(options_chain[:5]):
-                        st.write(f"**Contract {i+1}:** {contract.ticker}")
-                        st.write(f"  - Strike: {contract.details.strike_price if contract.details else 'N/A'}")
-                        st.write(f"  - Type: {contract.details.contract_type if contract.details else 'N/A'}")
-                        st.write(f"  - OI: {contract.day.open_interest if contract.day else 'N/A'}")
-                        st.write(f"  - Volume: {contract.day.volume if contract.day else 'N/A'}")
-                        st.write("---")
-                
-            finally:
-                client.close()
-                
-    except ImportError:
-        st.error("❌ Could not import 'massive' package. Install it with: `pip install massive`")
-    except Exception as e:
-        st.error(f"❌ Error: {e}")
-        import traceback
-        st.code(traceback.format_exc())
-
-st.markdown("---")
-st.markdown("### 📋 What This Tells Us")
+st.title("📊 Options Open Interest & Max Pain Analyzer")
 st.markdown("""
-- **CALLS DOMINANT** → MMs are short calls → They want price to stay DOWN → May break support
-- **PUTS DOMINANT** → MMs are short puts → They want price to stay UP → May break resistance
-
-Share the results and I'll integrate this into SPX Prophet V7!
+This tool fetches the **Option Chain Snapshot** from Polygon.io to analyze:
+1. **Open Interest (OI) Walls:** High OI often acts as support/resistance.
+2. **Max Pain:** The strike price where option buyers lose the most money (often a magnet for expiration).
 """)
+
+# --- Sidebar ---
+st.sidebar.header("Configuration")
+
+# 1. API Key Handling
+api_key = st.secrets.get("POLYGON_API_KEY")
+if not api_key:
+    api_key = st.sidebar.text_input("Enter Polygon API Key", type="password")
+
+# 2. User Inputs
+ticker = st.sidebar.text_input("Ticker Symbol", value="SPY").upper()
+# Default to next Friday for expiration example
+default_date = date.today() + timedelta((4 - date.today().weekday()) % 7)
+expiry = st.sidebar.date_input("Expiration Date", value=default_date)
+
+# --- Helper Functions ---
+
+@st.cache_data(ttl=600) # Cache data for 10 mins to save API credits
+def fetch_option_chain(_client, ticker, expiration_date):
+    """Fetches the snapshot for all options expiring on a specific date."""
+    try:
+        # Convert date to string YYYY-MM-DD
+        expiry_str = expiration_date.strftime("%Y-%m-%d")
+        
+        # Polygon API call: Snapshot of the options chain
+        chain_data = []
+        # Note: We iterate because list_snapshot_options_chain yields results
+        for contract in _client.list_snapshot_options_chain(
+            ticker, 
+            params={
+                "expiration_date": expiry_str,
+            }
+        ):
+            chain_data.append({
+                "strike": contract.details.strike_price,
+                "type": contract.details.contract_type, # 'call' or 'put'
+                "open_interest": contract.open_interest or 0,
+                "volume": contract.day.volume or 0,
+                "implied_volatility": contract.greeks.implied_volatility if contract.greeks else 0,
+                "last_price": contract.day.close or 0
+            })
+            
+        return pd.DataFrame(chain_data)
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
+        return pd.DataFrame()
+
+def calculate_max_pain(df):
+    """
+    Calculates Max Pain: The strike price with the lowest cumulative loss for option holders.
+    """
+    if df.empty:
+        return None, None
+
+    strikes = sorted(df['strike'].unique())
+    cash_values = []
+
+    for price_point in strikes:
+        # Calculate Call Loss (Intrinsic Value if stock expires at price_point)
+        # Call Value = max(0, price_point - Strike) * OI
+        call_loss = df[df['type'] == 'call'].apply(
+            lambda x: max(0, price_point - x['strike']) * x['open_interest'], axis=1
+        ).sum()
+
+        # Calculate Put Loss
+        # Put Value = max(0, Strike - price_point) * OI
+        put_loss = df[df['type'] == 'put'].apply(
+            lambda x: max(0, x['strike'] - price_point) * x['open_interest'], axis=1
+        ).sum()
+
+        total_loss = call_loss + put_loss
+        cash_values.append({"strike": price_point, "total_loss": total_loss})
+
+    pain_df = pd.DataFrame(cash_values)
+    # The "Max Pain" is the strike with the MINIMUM total loss for the market
+    max_pain_strike = pain_df.loc[pain_df['total_loss'].idxmin()]['strike']
+    
+    return max_pain_strike, pain_df
+
+# --- Main Logic ---
+
+if st.sidebar.button("Analyze Options"):
+    if not api_key:
+        st.warning("Please provide a Polygon API Key.")
+        st.stop()
+
+    client = RESTClient(api_key)
+    
+    with st.spinner(f"Fetching Option Chain for {ticker} expiring {expiry}..."):
+        df = fetch_option_chain(client, ticker, expiry)
+
+    if not df.empty:
+        # Separate Calls and Puts
+        calls = df[df['type'] == 'call']
+        puts = df[df['type'] == 'put']
+
+        # 1. Metrics
+        total_call_oi = calls['open_interest'].sum()
+        total_put_oi = puts['open_interest'].sum()
+        pcr_ratio = total_put_oi / total_call_oi if total_call_oi > 0 else 0
+        max_pain, pain_df = calculate_max_pain(df)
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Call OI", f"{int(total_call_oi):,}")
+        col2.metric("Total Put OI", f"{int(total_put_oi):,}")
+        col3.metric("Put/Call Ratio (OI)", f"{pcr_ratio:.2f}")
+        col4.metric("Max Pain Price", f"${max_pain}")
+
+        # 2. Open Interest Bar Chart
+        st.subheader(f"Open Interest by Strike ({expiry})")
+        
+        # Filter out deep OTM strikes to make chart readable (optional)
+        # We'll take the middle 80% range of strikes or simple min/max based on volume
+        active_strikes = df[df['open_interest'] > 0]
+        if not active_strikes.empty:
+             min_strike = active_strikes['strike'].min()
+             max_strike = active_strikes['strike'].max()
+             # Create a grouped bar chart
+             fig_oi = px.bar(
+                 df, 
+                 x='strike', 
+                 y='open_interest', 
+                 color='type',
+                 title=f"Open Interest Distribution for {ticker}",
+                 color_discrete_map={'call': '#00CC96', 'put': '#EF553B'},
+                 labels={"open_interest": "Open Interest", "strike": "Strike Price"}
+             )
+             fig_oi.update_layout(barmode='group', xaxis_range=[min_strike, max_strike])
+             st.plotly_chart(fig_oi, use_container_width=True)
+
+        # 3. Max Pain Chart
+        if pain_df is not None:
+            st.subheader("Max Pain Curve")
+            st.markdown("The lowest point on this curve represents the price where option writers (market makers) pay out the least amount of money.")
+            
+            fig_pain = go.Figure()
+            fig_pain.add_trace(go.Scatter(
+                x=pain_df['strike'], 
+                y=pain_df['total_loss'],
+                mode='lines',
+                name='Total Option Value'
+            ))
+            # Add vertical line for Max Pain
+            fig_pain.add_vline(x=max_pain, line_dash="dash", line_color="red", annotation_text=f"Max Pain: {max_pain}")
+            
+            fig_pain.update_layout(
+                title="Total Value of Options at Expiration (The 'Pain' Curve)",
+                xaxis_title="Stock Price at Expiration",
+                yaxis_title="Total Value ($)",
+            )
+            st.plotly_chart(fig_pain, use_container_width=True)
+
+        # 4. Raw Data Explorer
+        with st.expander("View Raw Data"):
+            st.dataframe(df)
+
+    else:
+        st.error("No data found. Check the ticker, expiration date, or API key permissions.")
