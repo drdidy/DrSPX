@@ -1,418 +1,321 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-import numpy as np
-import pytz
-from datetime import datetime, timedelta, time
+import plotly.graph_objects as go
 import requests
+from datetime import datetime, timedelta
+import pytz
 
 # -----------------------------------------------------------------------------
-# 1. VISUAL CORE (CSS ENGINE)
+# 1. VISUAL ENGINE
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="SPX PROPHET | ULTIMATE",
-    page_icon="🦅",
+    page_title="SPX SKEW | TIME MACHINE",
+    page_icon="⏳",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# --- THE "GLASS & NEON" STYLESHEET ---
 st.markdown("""
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-    /* ANIMATED BACKGROUND */
-    @keyframes gradient {
-        0% {background-position: 0% 50%;}
-        50% {background-position: 100% 50%;}
-        100% {background-position: 0% 50%;}
-    }
-    
+    /* CORE THEME */
     .stApp {
-        background: linear-gradient(-45deg, #0f0c29, #302b63, #24243e, #000000);
-        background-size: 400% 400%;
-        animation: gradient 15s ease infinite;
-        font-family: 'Inter', sans-serif;
-        color: #fff;
-    }
-
-    /* GLASSMORPHISM CARD */
-    .glass-panel {
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: 16px;
-        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-        backdrop-filter: blur(12.6px);
-        -webkit-backdrop-filter: blur(12.6px);
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        padding: 24px;
-        margin-bottom: 20px;
-        transition: transform 0.2s;
+        background-color: #050505;
+        color: #e0e0e0;
+        font-family: 'JetBrains Mono', monospace;
     }
     
-    .glass-panel:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 0 20px rgba(0, 243, 255, 0.15);
-        border: 1px solid rgba(0, 243, 255, 0.3);
-    }
-
-    /* NEON TEXT UTILS */
-    .neon-blue { color: #00f3ff; text-shadow: 0 0 10px rgba(0, 243, 255, 0.6); }
-    .neon-pink { color: #ff00ff; text-shadow: 0 0 10px rgba(255, 0, 255, 0.6); }
-    .neon-gold { color: #ffd700; text-shadow: 0 0 10px rgba(255, 215, 0, 0.6); }
-    .neon-red { color: #ff3333; text-shadow: 0 0 10px rgba(255, 51, 51, 0.6); }
-
-    /* ANIMATIONS */
-    @keyframes pulse-glow {
-        0% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0.4); }
-        70% { box-shadow: 0 0 0 10px rgba(0, 243, 255, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(0, 243, 255, 0); }
-    }
-    
-    .live-indicator {
-        width: 12px; height: 12px;
-        background: #00f3ff;
-        border-radius: 50%;
-        display: inline-block;
-        margin-right: 8px;
-        animation: pulse-glow 2s infinite;
-    }
-
-    /* METRIC STYLING */
-    .hero-metric { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-top: 5px; }
-    .metric-sub { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 2px; color: rgba(255,255,255,0.6); }
-    
-    /* CUSTOM INPUT STYLING */
-    div[data-testid="stExpander"] {
-        background: rgba(0,0,0,0.4);
+    /* GLASS PANELS */
+    .glass-metric {
+        background: rgba(20, 20, 20, 0.6);
         border: 1px solid #333;
-        border-radius: 12px;
+        border-radius: 8px;
+        padding: 20px;
+        backdrop-filter: blur(10px);
+        margin-bottom: 15px;
     }
     
-    /* HIDE DEFAULT STREAMLIT ELEMENTS */
+    /* COLORS */
+    .bullish { color: #00f3ff; text-shadow: 0 0 10px rgba(0, 243, 255, 0.4); }
+    .bearish { color: #ff0055; text-shadow: 0 0 10px rgba(255, 0, 85, 0.4); }
+    .neutral { color: #ffd700; }
+    
+    /* METRICS */
+    .metric-value { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-top: 5px; }
+    .metric-label { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 2px; color: #888; }
+    
+    /* HIDE DEFAULT STREAMLIT UI */
     header {visibility: hidden;}
     footer {visibility: hidden;}
     #MainMenu {visibility: hidden;}
-    
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. LOGIC ENGINE (CORRECTED)
+# 2. DATA ENGINE
 # -----------------------------------------------------------------------------
-SLOPE = 0.48
 TZ_CT = pytz.timezone('US/Central')
 
-def get_current_time_ct():
-    return datetime.now(TZ_CT)
+def get_current_date():
+    return datetime.now(TZ_CT).date()
 
-def get_polygon_price(ticker, api_key):
-    if not api_key: return None
-    poly_ticker = f"I:{ticker}" if ticker in ['SPX', 'VIX'] else ticker
-    url = f"https://api.polygon.io/v3/snapshot?ticker.any_of={poly_ticker}&apiKey={api_key}"
+@st.cache_data(ttl=60)
+def fetch_live_skew(api_key, date_str):
+    """
+    Fetches REAL-TIME Snapshot for TODAY.
+    Includes Volume AND Open Interest.
+    """
+    url = f"https://api.polygon.io/v3/snapshot/options/I:SPX?expiration_date={date_str}&limit=1000&apiKey={api_key}"
+    
+    results = []
     try:
-        r = requests.get(url, timeout=3)
-        data = r.json()
-        if 'results' in data and len(data['results']) > 0:
-            return data['results'][0]['value']
-    except:
+        while url:
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            if 'results' in data:
+                results.extend(data['results'])
+            url = data.get('next_url')
+            if url: url += f"&apiKey={api_key}"
+    except Exception as e:
         return None
-    return None
+        
+    if not results: return None
+    
+    # Process Live Data
+    calls_vol, puts_vol = 0, 0
+    calls_oi, puts_oi = 0, 0
+    strike_data = []
+    
+    for c in results:
+        details = c.get('details', {})
+        stats = c.get('day', {})
+        
+        vol = stats.get('volume', 0)
+        oi = c.get('open_interest', 0)
+        strike = details.get('strike_price')
+        ctype = details.get('contract_type')
+        
+        if vol > 0 or oi > 0:
+            if ctype == 'call':
+                calls_vol += vol
+                calls_oi += oi
+            else:
+                puts_vol += vol
+                puts_oi += oi
+                
+            strike_data.append({'strike': strike, 'type': ctype, 'volume': vol})
+            
+    return {
+        "mode": "LIVE SNAPSHOT",
+        "pcr_vol": puts_vol / calls_vol if calls_vol else 0,
+        "pcr_oi": puts_oi / calls_oi if calls_oi else 0,
+        "total_call_vol": calls_vol,
+        "total_put_vol": puts_vol,
+        "df": pd.DataFrame(strike_data)
+    }
 
 @st.cache_data(ttl=300)
-def fetch_raw_data(ticker="ES=F"):
-    end_date = datetime.now() + timedelta(days=1)
-    start_date = end_date - timedelta(days=7)
-    df = yf.download(ticker, start=start_date, end=end_date, interval="30m", progress=False)
-    if not df.empty:
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        df.index = df.index.tz_convert(TZ_CT)
-    return df
+def fetch_historical_skew(api_key, date_obj):
+    """
+    Fetches HISTORICAL End-of-Day Volume for a specific date.
+    Uses 'Grouped Daily' endpoint to get actual trade volumes.
+    """
+    date_str = date_obj.strftime('%Y-%m-%d')
+    short_date = date_obj.strftime('%y%m%d') # For ticker parsing (e.g., 231027)
+    
+    # 1. Get Grouped Daily for ALL Options (This is a large payload, but necessary for history)
+    url = f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/options/{date_str}?adjusted=true&apiKey={api_key}"
+    
+    try:
+        r = requests.get(url, timeout=10)
+        data = r.json()
+    except:
+        return None
+
+    if 'results' not in data:
+        return None
+        
+    # 2. Filter for SPXW 0DTEs locally
+    # Ticker format: O:SPXW250120C04200000
+    # Logic: Must contain 'SPX' and the specific date string
+    
+    calls_vol, puts_vol = 0, 0
+    strike_data = []
+    
+    # Target identifiers
+    target_date_str = short_date 
+    
+    for row in data['results']:
+        ticker = row.get('T', '')
+        
+        # Strict Filter: Must be SPX/SPXW and expire on Selected Date
+        if ('SPX' in ticker) and (target_date_str in ticker):
+            
+            # Parse Contract Details from Ticker String
+            # Example: O:SPXW231027C04200000
+            try:
+                # Find C or P
+                type_char = 'C' if f"{target_date_str}C" in ticker else 'P' if f"{target_date_str}P" in ticker else None
+                if not type_char: continue
+                
+                # Extract Strike (Last 8 chars / 1000)
+                strike_str = ticker[-8:]
+                strike = float(strike_str) / 1000
+                
+                vol = row.get('v', 0)
+                
+                if vol > 0:
+                    if type_char == 'C':
+                        calls_vol += vol
+                    else:
+                        puts_vol += vol
+                    
+                    strike_data.append({'strike': strike, 'type': 'call' if type_char=='C' else 'put', 'volume': vol})
+            except:
+                continue
+
+    if calls_vol == 0 and puts_vol == 0:
+        return None
+
+    return {
+        "mode": "HISTORICAL EOD",
+        "pcr_vol": puts_vol / calls_vol if calls_vol else 0,
+        "pcr_oi": None, # OI not available in Grouped Daily
+        "total_call_vol": calls_vol,
+        "total_put_vol": puts_vol,
+        "df": pd.DataFrame(strike_data)
+    }
+
+def get_spx_close(api_key, date_str):
+    """Gets SPX price for context."""
+    url = f"https://api.polygon.io/v1/open-close/I:SPX/{date_str}?adjusted=true&apiKey={api_key}"
+    try:
+        r = requests.get(url)
+        data = r.json()
+        return data.get('close', 0)
+    except:
+        return 0
 
 # -----------------------------------------------------------------------------
 # 3. UI LAYOUT
 # -----------------------------------------------------------------------------
 def main():
-    # --- HEADER ---
-    c1, c2 = st.columns([3, 1])
+    # --- CONTROLS ---
+    c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        st.markdown("""
-        <div style="display: flex; align-items: center; gap: 15px;">
-            <i class="fa-solid fa-meteor fa-2x neon-blue"></i>
-            <div>
-                <h1 style="margin:0; font-size: 2.2rem; font-weight: 900; background: -webkit-linear-gradient(#eee, #333); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">SPX PROPHET</h1>
-                <div style="font-size: 0.8rem; letter-spacing: 4px; color: #00f3ff; text-shadow: 0 0 5px rgba(0,243,255,0.5);">ULTIMATE EDITION</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("## <i class='fa-solid fa-clock-rotate-left'></i> SPX SKEW <span style='color:#555;'>TIME MACHINE</span>", unsafe_allow_html=True)
     with c2:
-        ct_now = get_current_time_ct().strftime('%H:%M:%S')
-        st.markdown(f"""
-        <div class="glass-panel" style="padding: 10px; text-align: right; margin-bottom: 0;">
-            <div style="font-size: 0.7rem; color: #888;">CHICAGO TIME</div>
-            <div style="font-size: 1.2rem; font-weight: bold;">{ct_now}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        api_key = st.text_input("Polygon API Key", value="jrbBZ2y12cJAOp2Buqtlay0TdprcTDIm", type="password")
+    with c3:
+        target_date = st.date_input("Select Analysis Date", get_current_date())
 
-    # --- MISSION CONTROL (EXPANDER) ---
-    with st.expander("⚙️ MISSION CONTROL & OVERRIDES", expanded=True):
-        col_ctrl1, col_ctrl2, col_ctrl3 = st.columns(3)
-        with col_ctrl1:
-            st.markdown("##### 📡 DATA & API")
-            poly_key = st.text_input("Polygon Key", value="jrbBZ2y12cJAOp2Buqtlay0TdprcTDIm", type="password")
-            trade_mode = st.radio("Mode", ["Live Trading", "Planning Mode"], horizontal=True)
-        with col_ctrl2:
-            st.markdown("##### 📅 CONFIGURATION")
-            selected_date = st.date_input("Trade Date", get_current_time_ct().date())
-            spx_offset = st.number_input("ES-SPX Offset", 35.0, step=0.5)
-        with col_ctrl3:
-            st.markdown("##### ⚠️ MANUAL OVERRIDE SYSTEM")
-            enable_override = st.checkbox("ACTIVATE MANUAL INPUTS")
-            
-        if enable_override:
-            st.markdown("---")
-            m1, m2, m3, m4 = st.columns(4)
-            with m1:
-                man_syd_high = st.number_input("Sydney High", 0.0)
-                man_syd_low = st.number_input("Sydney Low", 0.0)
-            with m2:
-                man_tok_high = st.number_input("Tokyo High", 0.0)
-                man_tok_low = st.number_input("Tokyo Low", 0.0)
-            with m3:
-                man_on_high = st.number_input("O/N High", 0.0)
-                man_on_low = st.number_input("O/N Low", 0.0)
-            with m4:
-                man_h_ago = st.number_input("High (Hours Ago)", 4.0)
-                man_l_ago = st.number_input("Low (Hours Ago)", 6.0)
+    if not api_key: return
 
-    # --- DATA PROCESSING ---
-    df = fetch_raw_data()
+    # --- LOGIC BRANCH ---
+    today = get_current_date()
     
-    # Defaults
-    channel_type = "WAITING"
-    on_high, on_low = 0, 0
-    on_high_time, on_low_time = None, None
-    syd_h, syd_l, tok_h, tok_l = 0, 0, 0, 0
-
-    # 1. AUTO LOGIC
-    if not enable_override and not df.empty:
-        trade_date = selected_date
-        sydney_start = TZ_CT.localize(datetime.combine(trade_date - timedelta(days=1), time(17, 0)))
-        sydney_end = TZ_CT.localize(datetime.combine(trade_date - timedelta(days=1), time(22, 0)))
-        tokyo_start = TZ_CT.localize(datetime.combine(trade_date - timedelta(days=1), time(19, 0)))
-        tokyo_end = TZ_CT.localize(datetime.combine(trade_date, time(2, 0)))
-        on_start = sydney_start
-        on_end = TZ_CT.localize(datetime.combine(trade_date, time(8, 30)))
+    if target_date > today:
+        st.error("🔮 We cannot predict the future (yet). Select today or a past date.")
+        return
         
-        sydney_df = df[(df.index >= sydney_start) & (df.index < sydney_end)]
-        tokyo_df = df[(df.index >= tokyo_start) & (df.index < tokyo_end)]
-        on_df = df[(df.index >= on_start) & (df.index < on_end)]
-        
-        if not on_df.empty:
-            syd_h = sydney_df['High'].max() if not sydney_df.empty else 0
-            syd_l = sydney_df['Low'].min() if not sydney_df.empty else 0
-            tok_h = tokyo_df['High'].max() if not tokyo_df.empty else 0
-            tok_l = tokyo_df['Low'].min() if not tokyo_df.empty else 0
-            on_high = on_df['High'].max()
-            on_low = on_df['Low'].min()
-            on_high_time = on_df['High'].idxmax()
-            on_low_time = on_df['Low'].idxmin()
-
-    # 2. MANUAL LOGIC
-    elif enable_override:
-        syd_h, syd_l = man_syd_high, man_syd_low
-        tok_h, tok_l = man_tok_high, man_tok_low
-        on_high, on_low = man_on_high, man_on_low
-        now = get_current_time_ct()
-        on_high_time = now - timedelta(hours=man_h_ago)
-        on_low_time = now - timedelta(hours=man_l_ago)
-
-    # 3. CHANNEL DETERMINATION
-    if tok_h > syd_h and tok_l >= syd_l: channel_type = "RISING"
-    elif tok_l < syd_l and tok_h <= syd_h: channel_type = "FALLING"
-    elif tok_h > syd_h and tok_l < syd_l: channel_type = "EXPANDING"
-    elif tok_h < syd_h and tok_l > syd_l: channel_type = "CONTRACTING"
-    else: channel_type = "WAITING"
-
-    # --- LIVE DATA GRID ---
-    live_spx = get_polygon_price("SPX", poly_key)
-    live_vix = get_polygon_price("VIX", poly_key)
+    date_str = target_date.strftime('%Y-%m-%d')
+    spx_price = get_spx_close(api_key, date_str)
     
-    # Fallbacks
-    if trade_mode == "Planning Mode" or live_spx is None:
-        live_spx = on_high - spx_offset if on_high > 0 else 4000
-        live_vix = 15.0
-        
-    # --- LEVEL CALCULATION ---
-    spx_ceil, spx_floor = 0.0, 0.0
-    if channel_type not in ["WAITING", "CONTRACTING"] and on_high > 0:
-        now = get_current_time_ct()
-        candles_h = (now - on_high_time).total_seconds() / 1800
-        candles_l = (now - on_low_time).total_seconds() / 1800
-        
-        # Slope Logic
-        if channel_type in ["RISING", "EXPANDING"]:
-            curr_ceil = on_high + (SLOPE * candles_h)
-        else: # FALLING
-            curr_ceil = on_high - (SLOPE * candles_h)
-            
-        if channel_type in ["RISING"]:
-            curr_floor = on_low + (SLOPE * candles_l)
-        else: # FALLING / EXPANDING
-            curr_floor = on_low - (SLOPE * candles_l)
-            
-        spx_ceil = curr_ceil - spx_offset
-        spx_floor = curr_floor - spx_offset
+    with st.spinner(f"Retrieving actual options data for {date_str}..."):
+        if target_date == today:
+            data = fetch_live_skew(api_key, date_str)
+        else:
+            data = fetch_historical_skew(api_key, target_date)
 
-    # --- UI: MAIN METRICS ROW ---
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
+    if not data:
+        st.warning(f"No SPX options data found for {date_str}. (Market Closed?)")
+        return
+
+    # --- DASHBOARD ---
+    st.markdown(f"### 📅 REPORT FOR: <span style='color:#fff'>{date_str}</span> <span style='font-size:0.8rem; color:#888'>({data['mode']})</span>", unsafe_allow_html=True)
+
+    # PCR Logic
+    pcr = data['pcr_vol']
+    if pcr > 1.2:
+        sent_color, sent_text = "bearish", "BEARISH SKEW"
+    elif pcr < 0.7:
+        sent_color, sent_text = "bullish", "BULLISH SKEW"
+    else:
+        sent_color, sent_text = "neutral", "NEUTRAL FLOW"
+
+    # METRICS ROW
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
         st.markdown(f"""
-        <div class="glass-panel">
-            <div class="metric-sub"><span class="live-indicator"></span>SPX INDEX</div>
-            <div class="hero-metric">{live_spx:,.2f}</div>
+        <div class="glass-metric">
+            <div class="metric-label">Put/Call Ratio (Vol)</div>
+            <div class="metric-value {sent_color}">{pcr:.2f}</div>
+            <div style="font-size:0.8rem; margin-top:5px;">{sent_text}</div>
         </div>
         """, unsafe_allow_html=True)
-        
-    with col2:
-        vix_col = "neon-pink" if live_vix > 20 else "neon-blue"
+    with m2:
         st.markdown(f"""
-        <div class="glass-panel">
-            <div class="metric-sub"><i class="fa-solid fa-wave-square"></i> VIX</div>
-            <div class="hero-metric {vix_col}">{live_vix:.2f}</div>
+        <div class="glass-metric">
+            <div class="metric-label">Total Put Vol</div>
+            <div class="metric-value bearish">{data['total_put_vol']:,}</div>
         </div>
         """, unsafe_allow_html=True)
-        
-    with col3:
+    with m3:
         st.markdown(f"""
-        <div class="glass-panel" style="border-bottom: 3px solid #ff3333;">
-            <div class="metric-sub">RESISTANCE / CEILING</div>
-            <div class="hero-metric" style="color: #ff9999;">{spx_ceil:,.2f}</div>
+        <div class="glass-metric">
+            <div class="metric-label">Total Call Vol</div>
+            <div class="metric-value bullish">{data['total_call_vol']:,}</div>
         </div>
         """, unsafe_allow_html=True)
-        
-    with col4:
+    with m4:
         st.markdown(f"""
-        <div class="glass-panel" style="border-bottom: 3px solid #00f3ff;">
-            <div class="metric-sub">SUPPORT / FLOOR</div>
-            <div class="hero-metric" style="color: #ccffff;">{spx_floor:,.2f}</div>
+        <div class="glass-metric">
+            <div class="metric-label">SPX Price</div>
+            <div class="metric-value" style="color:#fff">{spx_price:,.2f}</div>
         </div>
         """, unsafe_allow_html=True)
 
-    # --- STRATEGIC ANALYSIS ENGINE (THE FIX) ---
+    # --- CHARTING ---
+    st.markdown("### 📊 VOLUMETRIC SKEW")
     
-    st.markdown("### 🧠 ALGORITHMIC ANALYSIS")
-    
-    if channel_type == "CONTRACTING":
-        st.markdown("""
-        <div class="glass-panel" style="background: rgba(255, 0, 0, 0.15); border: 1px solid red; text-align: center;">
-            <h1 class="neon-red"><i class="fa-solid fa-ban"></i> NO TRADE DETECTED</h1>
-            <p style="font-size: 1.2rem;">MARKET IS CONTRACTING (Tokyo Inside Sydney). SIT ON HANDS.</p>
-        </div>
-        """, unsafe_allow_html=True)
+    df = data['df']
+    if not df.empty:
+        # Smart Zoom: Show range around the closing price
+        center_price = spx_price if spx_price > 0 else 4000
+        min_s = center_price - 75
+        max_s = center_price + 75
         
-    elif channel_type != "WAITING":
-        # 1. DETERMINE POSITION RELATIVE TO CHANNEL
-        position = "INSIDE"
-        pos_color = "neon-gold"
+        mask = (df['strike'] >= min_s) & (df['strike'] <= max_s)
+        chart_df = df[mask]
         
-        if live_spx > spx_ceil:
-            position = "ABOVE"
-            pos_color = "neon-red"
-        elif live_spx < spx_floor:
-            position = "BELOW"
-            pos_color = "neon-blue"
-            
-        # 2. DETERMINE STRATEGY BASED ON (SHAPE + POSITION) [Source: Tables 6.2, 6.3]
-        strategy_text = ""
-        setup_type = "WAIT"
+        pivot = chart_df.pivot_table(index='strike', columns='type', values='volume', aggfunc='sum').fillna(0)
         
-        if channel_type == "RISING":
-            # RISING Logic
-            if position == "ABOVE":
-                setup_type = "CALLS"
-                strategy_text = "Wait for Pullback to FLOOR -> Enter CALLS"
-            elif position == "BELOW":
-                setup_type = "PUTS"
-                strategy_text = "Wait for Rally to FLOOR (Must Close Below) -> Enter PUTS"
-            else: # INSIDE
-                strategy_text = "Wait for price to touch edges. Break Up = Calls. Break Down = Puts."
-                
-        elif channel_type == "FALLING":
-            # FALLING Logic
-            if position == "ABOVE":
-                setup_type = "CALLS"
-                strategy_text = "Wait for Drop to CEILING (Must Close Above) -> Enter CALLS"
-            elif position == "BELOW":
-                setup_type = "PUTS"
-                strategy_text = "Wait for Rally to CEILING -> Enter PUTS"
-            else: # INSIDE
-                strategy_text = "Wait for price to touch edges."
-                
-        elif channel_type == "EXPANDING":
-            strategy_text = "BALANCED DAY. Trade both edges. Ceiling = Puts. Floor = Calls."
+        fig = go.Figure()
+        if 'call' in pivot.columns:
+            fig.add_trace(go.Bar(x=pivot.index, y=pivot['call'], name='CALLS', marker_color='#00f3ff'))
+        if 'put' in pivot.columns:
+            fig.add_trace(go.Bar(x=pivot.index, y=pivot['put'], name='PUTS', marker_color='#ff0055'))
 
-        # DISPLAY LOGIC
-        c_an1, c_an2 = st.columns([1, 2])
-        
-        with c_an1:
-            # Channel Shape Card
-            st.markdown(f"""
-            <div class="glass-panel" style="text-align: center; height: 100%;">
-                <div class="metric-sub">CHANNEL SHAPE</div>
-                <div style="font-size: 2rem; font-weight: 900; margin: 15px 0;">{channel_type}</div>
-                <div class="metric-sub" style="color: #888;">Does NOT determine bias alone</div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        with c_an2:
-            # The "Oracle" Card
-            st.markdown(f"""
-            <div class="glass-panel" style="height: 100%; border-left: 5px solid { '#00f3ff' if setup_type=='CALLS' else '#ff00ff' if setup_type=='PUTS' else '#ffd700' };">
-                <div style="display: flex; justify-content: space-between;">
-                    <div>
-                        <div class="metric-sub">CURRENT POSITION</div>
-                        <div class="{pos_color}" style="font-size: 1.5rem; font-weight: bold;">{position} CHANNEL</div>
-                    </div>
-                    <div style="text-align: right;">
-                        <div class="metric-sub">SETUP BIAS</div>
-                        <div style="font-size: 1.5rem; font-weight: bold;">{setup_type}</div>
-                    </div>
-                </div>
-                <hr style="border-color: rgba(255,255,255,0.1);">
-                <div style="font-size: 1.3rem; line-height: 1.6;">
-                    <i class="fa-solid fa-chess-knight"></i> {strategy_text}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        # STRIKES ROW
-        st.markdown("### 🎯 0DTE TARGET STRIKES")
-        c_st1, c_st2 = st.columns(2)
-        
-        call_strike = round((live_spx + 20) / 5) * 5
-        put_strike = round((live_spx - 20) / 5) * 5
-        
-        with c_st1:
-            st.markdown(f"""
-            <div class="glass-panel" style="display: flex; align-items: center; justify-content: space-between;">
-                <div>
-                    <div class="metric-sub neon-blue">CALL STRIKE (OTM)</div>
-                    <div style="font-size: 0.8rem; color: #888;">Entry Condition: Green Candle Close > Trigger</div>
-                </div>
-                <div style="font-size: 2.5rem; font-weight: bold;">{call_strike}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        with c_st2:
-            st.markdown(f"""
-            <div class="glass-panel" style="display: flex; align-items: center; justify-content: space-between;">
-                <div>
-                    <div class="metric-sub neon-pink">PUT STRIKE (OTM)</div>
-                    <div style="font-size: 0.8rem; color: #888;">Entry Condition: Red Candle Close < Trigger</div>
-                </div>
-                <div style="font-size: 2.5rem; font-weight: bold;">{put_strike}</div>
-            </div>
-            """, unsafe_allow_html=True)
+        fig.update_layout(
+            title=f"Volume Distribution ({date_str})",
+            title_font_color="#888",
+            xaxis_title="Strike Price",
+            yaxis_title="Volume",
+            barmode='group',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color="#e0e0e0"),
+            xaxis=dict(gridcolor='#222'),
+            yaxis=dict(gridcolor='#222'),
+            height=500,
+            bargap=0.1
+        )
+        if spx_price > 0:
+            fig.add_vline(x=spx_price, line_width=2, line_dash="dash", line_color="white", annotation_text="CLOSE")
+
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No volume data in the visible strike range.")
 
 if __name__ == "__main__":
     main()
