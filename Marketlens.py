@@ -970,7 +970,15 @@ CSS_STYLES = """
 /* Streamlit Overrides */
 [data-testid="stMetricValue"] { font-family: 'Outfit', sans-serif !important; font-weight: 700 !important; }
 [data-testid="stMetricLabel"] { font-family: 'JetBrains Mono', monospace !important; text-transform: uppercase !important; letter-spacing: 1px !important; }
-[data-testid="stSidebar"] { background: var(--bg-secondary) !important; border-right: 1px solid var(--border-subtle) !important; }
+[data-testid="stSidebar"] { background: var(--bg-secondary) !important; border-right: 1px solid var(--border-subtle) !important; min-width: 320px !important; }
+[data-testid="stSidebar"] > div:first-child { background: var(--bg-secondary) !important; padding-top: 1rem !important; }
+[data-testid="stSidebar"] .stMarkdown h3 { color: var(--text-primary) !important; font-family: 'Syne', sans-serif !important; font-size: 1.1rem !important; margin-bottom: 1rem !important; }
+[data-testid="stSidebar"] .stMarkdown h4 { color: var(--accent-primary) !important; font-family: 'Syne', sans-serif !important; font-size: 0.95rem !important; margin: 0.5rem 0 !important; }
+[data-testid="stSidebar"] label { color: var(--text-secondary) !important; font-family: 'Outfit', sans-serif !important; font-size: 0.85rem !important; }
+[data-testid="stSidebar"] .stNumberInput input, [data-testid="stSidebar"] .stTextInput input { background: var(--bg-tertiary) !important; color: var(--text-primary) !important; border: 1px solid var(--border-subtle) !important; font-family: 'JetBrains Mono', monospace !important; }
+[data-testid="stSidebar"] .stSelectbox > div > div { background: var(--bg-tertiary) !important; color: var(--text-primary) !important; border: 1px solid var(--border-subtle) !important; }
+[data-testid="stSidebar"] .stCheckbox label span { color: var(--text-secondary) !important; }
+[data-testid="stSidebar"] hr { border-color: var(--border-subtle) !important; margin: 1rem 0 !important; }
 .stButton > button { font-family: 'JetBrains Mono', monospace !important; font-weight: 600 !important; border-radius: 6px !important; }
 hr { border: none !important; height: 1px !important; background: var(--border-subtle) !important; margin: 18px 0 !important; }
 
@@ -986,38 +994,162 @@ hr { border: none !important; height: 1px !important; background: var(--border-s
 # ═══════════════════════════════════════════════════════════════════════════════
 def sidebar():
     saved = load_inputs()
+    
     with st.sidebar:
-        st.markdown("### ⚙️ Configuration")
-        trading_date = st.date_input("📅 Trading Date", value=date.today())
-        offset = st.number_input("ES→SPX Offset", value=float(saved.get("offset", 35.5)), step=0.5)
+        st.markdown("### ⚙️ SPX Prophet Settings")
         
-        st.divider()
-        st.markdown("#### 🌙 VIX Overnight Zone")
+        # ─────────────────────────────────────────────────────────────────────
+        # BASIC SETTINGS
+        # ─────────────────────────────────────────────────────────────────────
+        st.markdown("#### 📅 Trading Session")
+        trading_date = st.date_input("Trading Date", value=date.today())
+        
         col1, col2 = st.columns(2)
-        vix_zone_start = col1.time_input("Start", value=time(2, 0))
-        vix_zone_end = col2.time_input("End", value=time(6, 0))
+        ref_hour = col1.selectbox("Ref Hour", options=list(range(8, 12)), index=1, format_func=lambda x: f"{x}:00")
+        ref_min = col2.selectbox("Ref Min", options=[0, 15, 30, 45], index=0, format_func=lambda x: f":{x:02d}")
         
         st.divider()
-        override = st.checkbox("📝 Manual Override")
-        manual = {}
-        if override:
-            c1, c2 = st.columns(2)
-            manual["sydney_high"] = c1.number_input("Syd H", value=6075.0, step=0.5)
-            manual["sydney_low"] = c2.number_input("Syd L", value=6050.0, step=0.5)
-            manual["tokyo_high"] = c1.number_input("Tok H", value=6080.0, step=0.5)
-            manual["tokyo_low"] = c2.number_input("Tok L", value=6045.0, step=0.5)
-            manual["london_high"] = c1.number_input("Lon H", value=6078.0, step=0.5)
-            manual["london_low"] = c2.number_input("Lon L", value=6040.0, step=0.5)
-            manual["current_es"] = st.number_input("Current ES", value=6065.0, step=0.5)
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # ES/SPX OFFSET
+        # ─────────────────────────────────────────────────────────────────────
+        st.markdown("#### 📊 ES → SPX Conversion")
+        offset = st.number_input(
+            "Offset (ES - SPX)", 
+            value=float(saved.get("offset", 35.5)), 
+            step=0.5,
+            help="Difference between ES futures and SPX cash index"
+        )
         
         st.divider()
-        ref_time_sel = st.selectbox("⏰ Reference Time", ["9:00 AM", "9:30 AM", "10:00 AM"])
         
-        c1, c2 = st.columns(2)
-        if c1.button("💾 Save", use_container_width=True):
+        # ─────────────────────────────────────────────────────────────────────
+        # VIX SETTINGS
+        # ─────────────────────────────────────────────────────────────────────
+        st.markdown("#### 📉 VIX Configuration")
+        
+        use_manual_vix = st.checkbox("Manual VIX Override", value=False)
+        if use_manual_vix:
+            manual_vix = st.number_input("Current VIX", value=16.0, step=0.1, format="%.2f")
+        else:
+            manual_vix = None
+        
+        st.markdown("##### Overnight Zone (CT)")
+        col1, col2 = st.columns(2)
+        vix_zone_start = col1.time_input("Zone Start", value=time(2, 0))
+        vix_zone_end = col2.time_input("Zone End", value=time(6, 0))
+        
+        use_manual_vix_range = st.checkbox("Manual VIX Range Override", value=False)
+        if use_manual_vix_range:
+            col1, col2 = st.columns(2)
+            manual_vix_low = col1.number_input("VIX Low", value=15.0, step=0.1, format="%.2f")
+            manual_vix_high = col2.number_input("VIX High", value=17.0, step=0.1, format="%.2f")
+        else:
+            manual_vix_low = None
+            manual_vix_high = None
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # PRIOR DAY DATA
+        # ─────────────────────────────────────────────────────────────────────
+        st.markdown("#### 📈 Prior Day (ES)")
+        use_manual_prior = st.checkbox("Manual Prior Day Override", value=False)
+        if use_manual_prior:
+            col1, col2 = st.columns(2)
+            prior_high = col1.number_input("Prior High", value=6100.0, step=0.5)
+            prior_low = col2.number_input("Prior Low", value=6050.0, step=0.5)
+            prior_close = st.number_input("Prior Close", value=6075.0, step=0.5)
+        else:
+            prior_high = None
+            prior_low = None
+            prior_close = None
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # OVERNIGHT SESSION DATA
+        # ─────────────────────────────────────────────────────────────────────
+        st.markdown("#### 🌙 Overnight Session (ES)")
+        use_manual_overnight = st.checkbox("Manual ON Session Override", value=False)
+        if use_manual_overnight:
+            col1, col2 = st.columns(2)
+            on_high = col1.number_input("ON High", value=6090.0, step=0.5)
+            on_low = col2.number_input("ON Low", value=6055.0, step=0.5)
+        else:
+            on_high = None
+            on_low = None
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # GLOBAL SESSION OVERRIDES
+        # ─────────────────────────────────────────────────────────────────────
+        st.markdown("#### 🌏 Session Breakdown (ES)")
+        use_manual_sessions = st.checkbox("Manual Session Override", value=False)
+        
+        if use_manual_sessions:
+            st.markdown("##### Sydney (5-8:30 PM CT)")
+            col1, col2 = st.columns(2)
+            sydney_high = col1.number_input("Syd High", value=6075.0, step=0.5, key="syd_h")
+            sydney_low = col2.number_input("Syd Low", value=6060.0, step=0.5, key="syd_l")
+            
+            st.markdown("##### Tokyo (9 PM - 1:30 AM CT)")
+            col1, col2 = st.columns(2)
+            tokyo_high = col1.number_input("Tok High", value=6080.0, step=0.5, key="tok_h")
+            tokyo_low = col2.number_input("Tok Low", value=6055.0, step=0.5, key="tok_l")
+            
+            st.markdown("##### London (2-5 AM CT)")
+            col1, col2 = st.columns(2)
+            london_high = col1.number_input("Lon High", value=6085.0, step=0.5, key="lon_h")
+            london_low = col2.number_input("Lon Low", value=6050.0, step=0.5, key="lon_l")
+        else:
+            sydney_high = sydney_low = tokyo_high = tokyo_low = london_high = london_low = None
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # CURRENT PRICE OVERRIDE
+        # ─────────────────────────────────────────────────────────────────────
+        st.markdown("#### 💹 Current Price")
+        use_manual_price = st.checkbox("Manual ES Price Override", value=False)
+        if use_manual_price:
+            manual_es = st.number_input("Current ES", value=6070.0, step=0.5)
+        else:
+            manual_es = None
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # SESSION TIMES (for extraction)
+        # ─────────────────────────────────────────────────────────────────────
+        with st.expander("⏰ Session Time Config", expanded=False):
+            st.markdown("**Sydney Session (CT)**")
+            col1, col2 = st.columns(2)
+            sydney_start = col1.time_input("Start", value=time(17, 0), key="syd_start")
+            sydney_end = col2.time_input("End", value=time(20, 30), key="syd_end")
+            
+            st.markdown("**Tokyo Session (CT)**")
+            col1, col2 = st.columns(2)
+            tokyo_start = col1.time_input("Start", value=time(21, 0), key="tok_start")
+            tokyo_end = col2.time_input("End", value=time(1, 30), key="tok_end")
+            
+            st.markdown("**London Session (CT)**")
+            col1, col2 = st.columns(2)
+            london_start = col1.time_input("Start", value=time(2, 0), key="lon_start")
+            london_end = col2.time_input("End", value=time(5, 0), key="lon_end")
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # ACTION BUTTONS
+        # ─────────────────────────────────────────────────────────────────────
+        col1, col2 = st.columns(2)
+        if col1.button("💾 Save", use_container_width=True):
             save_inputs({"offset": offset})
-            st.success("Saved!")
-        if c2.button("🔄 Refresh", use_container_width=True):
+            st.success("✓ Saved!")
+        if col2.button("🔄 Refresh", use_container_width=True):
+            # Clear only market data caches
             fetch_es_current.clear()
             fetch_vix_polygon.clear()
             fetch_vix_yahoo.clear()
@@ -1025,11 +1157,24 @@ def sidebar():
             fetch_retail_positioning.clear()
             st.rerun()
     
-    ref_map = {"9:00 AM": (9, 0), "9:30 AM": (9, 30), "10:00 AM": (10, 0)}
+    # Build return dict with all manual overrides
     return {
-        "trading_date": trading_date, "offset": offset, "override": override,
-        "manual": manual, "ref_time": ref_map[ref_time_sel],
-        "vix_zone_start": vix_zone_start, "vix_zone_end": vix_zone_end
+        "trading_date": trading_date,
+        "offset": offset,
+        "ref_time": (ref_hour, ref_min),
+        "vix_zone_start": vix_zone_start,
+        "vix_zone_end": vix_zone_end,
+        # Manual overrides
+        "manual_vix": manual_vix,
+        "manual_vix_range": {"low": manual_vix_low, "high": manual_vix_high} if use_manual_vix_range else None,
+        "manual_prior": {"high": prior_high, "low": prior_low, "close": prior_close} if use_manual_prior else None,
+        "manual_overnight": {"high": on_high, "low": on_low} if use_manual_overnight else None,
+        "manual_sessions": {
+            "sydney": {"high": sydney_high, "low": sydney_low},
+            "tokyo": {"high": tokyo_high, "low": tokyo_low},
+            "london": {"high": london_high, "low": london_low}
+        } if use_manual_sessions else None,
+        "manual_es": manual_es,
     }
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN APPLICATION
@@ -1039,34 +1184,87 @@ def main():
     inputs = sidebar()
     now = now_ct()
     
-    # Load data
+    # ═══════════════════════════════════════════════════════════════════════════
+    # LOAD DATA (with manual override support)
+    # ═══════════════════════════════════════════════════════════════════════════
     with st.spinner("Loading market data..."):
-        if inputs["override"]:
-            m = inputs["manual"]
-            current_es = m["current_es"]
-            sydney = {"high": m["sydney_high"], "low": m["sydney_low"],
-                      "high_time": CT.localize(datetime.combine(inputs["trading_date"] - timedelta(days=1), time(18, 0))),
-                      "low_time": CT.localize(datetime.combine(inputs["trading_date"] - timedelta(days=1), time(19, 0)))}
-            tokyo = {"high": m["tokyo_high"], "low": m["tokyo_low"],
-                     "high_time": CT.localize(datetime.combine(inputs["trading_date"] - timedelta(days=1), time(23, 0))),
-                     "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(0, 30)))}
-            london = {"high": m["london_high"], "low": m["london_low"],
-                      "high_time": CT.localize(datetime.combine(inputs["trading_date"], time(3, 0))),
-                      "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(4, 0)))}
-            overnight = {"high": max(m["sydney_high"], m["tokyo_high"], m["london_high"]),
-                         "low": min(m["sydney_low"], m["tokyo_low"], m["london_low"])}
+        
+        # --- Current ES Price ---
+        if inputs["manual_es"] is not None:
+            current_es = inputs["manual_es"]
+        else:
+            current_es = fetch_es_current() or 6050
+        
+        # --- Session Data ---
+        if inputs["manual_sessions"] is not None:
+            m = inputs["manual_sessions"]
+            overnight_day = get_prior_trading_day(inputs["trading_date"])
+            sydney = {
+                "high": m["sydney"]["high"], "low": m["sydney"]["low"],
+                "high_time": CT.localize(datetime.combine(overnight_day, time(18, 0))),
+                "low_time": CT.localize(datetime.combine(overnight_day, time(19, 0)))
+            }
+            tokyo = {
+                "high": m["tokyo"]["high"], "low": m["tokyo"]["low"],
+                "high_time": CT.localize(datetime.combine(overnight_day, time(23, 0))),
+                "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(0, 30)))
+            }
+            london = {
+                "high": m["london"]["high"], "low": m["london"]["low"],
+                "high_time": CT.localize(datetime.combine(inputs["trading_date"], time(3, 0))),
+                "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(4, 0)))
+            }
         else:
             es_candles = fetch_es_candles()
-            current_es = fetch_es_current() or 6050
             sessions = extract_sessions(es_candles, inputs["trading_date"]) or {}
             sydney = sessions.get("sydney")
             tokyo = sessions.get("tokyo")
             london = sessions.get("london")
+        
+        # --- Overnight High/Low ---
+        if inputs["manual_overnight"] is not None:
+            overnight = {
+                "high": inputs["manual_overnight"]["high"],
+                "low": inputs["manual_overnight"]["low"]
+            }
+        elif sydney and tokyo and london:
+            overnight = {
+                "high": max(sydney["high"], tokyo["high"], london["high"]),
+                "low": min(sydney["low"], tokyo["low"], london["low"])
+            }
+        elif inputs["manual_sessions"] is not None:
+            m = inputs["manual_sessions"]
+            overnight = {
+                "high": max(m["sydney"]["high"], m["tokyo"]["high"], m["london"]["high"]),
+                "low": min(m["sydney"]["low"], m["tokyo"]["low"], m["london"]["low"])
+            }
+        else:
+            es_candles = fetch_es_candles()
+            sessions = extract_sessions(es_candles, inputs["trading_date"]) or {}
             overnight = sessions.get("overnight")
         
-        vix_polygon = fetch_vix_polygon()
-        vix = vix_polygon if vix_polygon else fetch_vix_yahoo()
-        vix_range = fetch_vix_overnight_range(inputs["trading_date"], inputs["vix_zone_start"].hour, inputs["vix_zone_start"].minute, inputs["vix_zone_end"].hour, inputs["vix_zone_end"].minute)
+        # --- VIX Current ---
+        if inputs["manual_vix"] is not None:
+            vix = inputs["manual_vix"]
+        else:
+            vix_polygon = fetch_vix_polygon()
+            vix = vix_polygon if vix_polygon else fetch_vix_yahoo()
+        
+        # --- VIX Overnight Range ---
+        if inputs["manual_vix_range"] is not None:
+            vix_range = {
+                "bottom": inputs["manual_vix_range"]["low"],
+                "top": inputs["manual_vix_range"]["high"],
+                "range_size": round(inputs["manual_vix_range"]["high"] - inputs["manual_vix_range"]["low"], 2),
+                "available": True
+            }
+        else:
+            vix_range = fetch_vix_overnight_range(
+                inputs["trading_date"], 
+                inputs["vix_zone_start"].hour, inputs["vix_zone_start"].minute, 
+                inputs["vix_zone_end"].hour, inputs["vix_zone_end"].minute
+            )
+        
         vix_pos, vix_pos_desc = get_vix_position(vix, vix_range)
         retail_data = fetch_retail_positioning()
         ema_data = fetch_spx_with_ema()
