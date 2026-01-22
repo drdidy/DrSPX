@@ -970,15 +970,18 @@ CSS_STYLES = """
 /* Streamlit Overrides */
 [data-testid="stMetricValue"] { font-family: 'Outfit', sans-serif !important; font-weight: 700 !important; }
 [data-testid="stMetricLabel"] { font-family: 'JetBrains Mono', monospace !important; text-transform: uppercase !important; letter-spacing: 1px !important; }
-[data-testid="stSidebar"] { background: var(--bg-secondary) !important; border-right: 1px solid var(--border-subtle) !important; min-width: 320px !important; }
-[data-testid="stSidebar"] > div:first-child { background: var(--bg-secondary) !important; padding-top: 1rem !important; }
-[data-testid="stSidebar"] .stMarkdown h3 { color: var(--text-primary) !important; font-family: 'Syne', sans-serif !important; font-size: 1.1rem !important; margin-bottom: 1rem !important; }
-[data-testid="stSidebar"] .stMarkdown h4 { color: var(--accent-primary) !important; font-family: 'Syne', sans-serif !important; font-size: 0.95rem !important; margin: 0.5rem 0 !important; }
-[data-testid="stSidebar"] label { color: var(--text-secondary) !important; font-family: 'Outfit', sans-serif !important; font-size: 0.85rem !important; }
-[data-testid="stSidebar"] .stNumberInput input, [data-testid="stSidebar"] .stTextInput input { background: var(--bg-tertiary) !important; color: var(--text-primary) !important; border: 1px solid var(--border-subtle) !important; font-family: 'JetBrains Mono', monospace !important; }
-[data-testid="stSidebar"] .stSelectbox > div > div { background: var(--bg-tertiary) !important; color: var(--text-primary) !important; border: 1px solid var(--border-subtle) !important; }
-[data-testid="stSidebar"] .stCheckbox label span { color: var(--text-secondary) !important; }
-[data-testid="stSidebar"] hr { border-color: var(--border-subtle) !important; margin: 1rem 0 !important; }
+
+/* Sidebar Styling */
+section[data-testid="stSidebar"] { background-color: #0a0e17 !important; }
+section[data-testid="stSidebar"] > div { background-color: #0a0e17 !important; }
+section[data-testid="stSidebar"] h3 { color: #ffffff !important; font-family: 'Syne', sans-serif !important; }
+section[data-testid="stSidebar"] h4 { color: #00f5d4 !important; font-family: 'Syne', sans-serif !important; font-size: 0.95rem !important; }
+section[data-testid="stSidebar"] h5 { color: rgba(255,255,255,0.7) !important; font-family: 'Outfit', sans-serif !important; font-size: 0.85rem !important; }
+section[data-testid="stSidebar"] label { color: rgba(255,255,255,0.7) !important; font-family: 'Outfit', sans-serif !important; }
+section[data-testid="stSidebar"] input { background-color: #0f1520 !important; color: #ffffff !important; border: 1px solid rgba(255,255,255,0.1) !important; }
+section[data-testid="stSidebar"] .stSelectbox > div > div { background-color: #0f1520 !important; color: #ffffff !important; }
+section[data-testid="stSidebar"] p { color: rgba(255,255,255,0.6) !important; }
+
 .stButton > button { font-family: 'JetBrains Mono', monospace !important; font-weight: 600 !important; border-radius: 6px !important; }
 hr { border: none !important; height: 1px !important; background: var(--border-subtle) !important; margin: 18px 0 !important; }
 
