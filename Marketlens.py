@@ -967,6 +967,24 @@ CSS_STYLES = """
 .live-dot { width: 6px; height: 6px; background: var(--calls-primary); border-radius: 50%; animation: livePulse 1.5s ease-in-out infinite; box-shadow: 0 0 6px var(--calls-primary); }
 @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
+/* Quick Action Bar */
+.quick-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    margin-bottom: 12px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+}
+.action-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    letter-spacing: 0.5px;
+}
+
 /* Streamlit Overrides */
 [data-testid="stMetricValue"] { font-family: 'Outfit', sans-serif !important; font-weight: 700 !important; }
 [data-testid="stMetricLabel"] { font-family: 'JetBrains Mono', monospace !important; text-transform: uppercase !important; letter-spacing: 1px !important; }
@@ -1308,6 +1326,31 @@ def main():
         </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # QUICK ACTION BAR (opens sidebar)
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.markdown("""
+    <div class="quick-action-bar">
+        <div class="action-hint">◀ Open sidebar for settings & manual overrides</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("⚙️ Settings", use_container_width=True, help="Open sidebar for all settings"):
+            st.sidebar.markdown("")  # This triggers sidebar to open
+    with col2:
+        if st.button("📝 Manual Input", use_container_width=True, help="Open sidebar for manual overrides"):
+            st.sidebar.markdown("")
+    with col3:
+        if st.button("🔄 Refresh Data", use_container_width=True, help="Refresh all market data"):
+            fetch_es_current.clear()
+            fetch_vix_polygon.clear()
+            fetch_vix_yahoo.clear()
+            fetch_spx_with_ema.clear()
+            fetch_retail_positioning.clear()
+            st.rerun()
     
     # ═══════════════════════════════════════════════════════════════════════════
     # MARKET SNAPSHOT
