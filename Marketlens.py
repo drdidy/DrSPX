@@ -144,24 +144,18 @@ def fetch_vix():
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_mm_bias():
     """
-    Combined MM Bias Analysis using:
-    1. VIX Term Structure (VIX vs VIX3M)
-    2. VVIX (VIX of VIX) - Volatility of volatility
+    MM Bias Analysis using VIX Term Structure
     
-    Returns combined score and bias direction
+    VIX vs VIX3M spread indicates market positioning:
+    - Contango (VIX < VIX3M): Complacency → Calls heavy → MMs push DOWN
+    - Backwardation (VIX > VIX3M): Fear → Puts heavy → MMs push UP
     """
     results = {
-        "vix": None, "vix3m": None, "vix_structure": None, "vix_score": 0,
-        "vvix": None, "vvix_score": 0,
-        "total_score": 0, "bias": MMBias.NEUTRAL,
-        "components": []
+        "vix": None, "vix3m": None, "spread": None,
+        "vix_structure": None, "score": 0,
+        "bias": MMBias.NEUTRAL, "interpretation": ""
     }
     
-    # ═══════════════════════════════════════════════════════════════════════════
-    # 1. VIX TERM STRUCTURE
-    # Contango (VIX < VIX3M): Complacency → Calls heavy → MMs push DOWN (-ve score)
-    # Backwardation (VIX > VIX3M): Fear → Puts heavy → MMs push UP (+ve score)
-    # ═══════════════════════════════════════════════════════════════════════════
     try:
         vix_data = yf.Ticker("^VIX").history(period="2d")
         vix3m_data = yf.Ticker("^VIX3M").history(period="2d")
@@ -169,69 +163,53 @@ def fetch_mm_bias():
         if not vix_data.empty and not vix3m_data.empty:
             vix = round(float(vix_data['Close'].iloc[-1]), 2)
             vix3m = round(float(vix3m_data['Close'].iloc[-1]), 2)
-            results["vix"] = vix
-            results["vix3m"] = vix3m
-            
-            spread = vix - vix3m
+            spread = round(vix - vix3m, 2)
             spread_pct = (spread / vix3m) * 100 if vix3m > 0 else 0
             
-            if spread < -1:
-                results["vix_structure"] = "CONTANGO"
-                results["vix_score"] = max(-50, int(spread_pct * 5))
-                results["components"].append(f"VIX Contango ({spread:+.1f}): Calls heavy → MMs push DOWN")
-            elif spread > 1:
-                results["vix_structure"] = "BACKWARDATION"
-                results["vix_score"] = min(50, int(spread_pct * 5))
-                results["components"].append(f"VIX Backwardation ({spread:+.1f}): Puts heavy → MMs push UP")
-            else:
-                results["vix_structure"] = "FLAT"
-                results["vix_score"] = 0
-                results["components"].append(f"VIX Term Structure FLAT ({spread:+.1f})")
-    except:
-        results["components"].append("VIX data error")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # 2. VVIX (VIX of VIX) - Volatility of Volatility
-    # High VVIX (>110): Fear/uncertainty → Puts heavy → MMs push UP (+ve score)
-    # Normal VVIX (90-110): Neutral
-    # Low VVIX (<90): Complacency → Calls heavy → MMs push DOWN (-ve score)
-    # ═══════════════════════════════════════════════════════════════════════════
-    try:
-        vvix_data = yf.Ticker("^VVIX").history(period="5d")
-        
-        if not vvix_data.empty:
-            vvix = round(float(vvix_data['Close'].iloc[-1]), 2)
-            results["vvix"] = vvix
+            results["vix"] = vix
+            results["vix3m"] = vix3m
+            results["spread"] = spread
             
-            if vvix < 85:
-                results["vvix_score"] = -50
-                results["components"].append(f"VVIX {vvix:.0f} (Extreme Low): Complacency → MMs push DOWN")
-            elif vvix < 95:
-                results["vvix_score"] = -25
-                results["components"].append(f"VVIX {vvix:.0f} (Low): Mild complacency → MMs push DOWN")
-            elif vvix <= 110:
-                results["vvix_score"] = 0
-                results["components"].append(f"VVIX {vvix:.0f}: Neutral")
-            elif vvix <= 125:
-                results["vvix_score"] = 25
-                results["components"].append(f"VVIX {vvix:.0f} (Elevated): Fear rising → MMs push UP")
+            # Scoring based on spread magnitude
+            # Deep contango = strong calls heavy
+            # Deep backwardation = strong puts heavy
+            if spread <= -3:
+                results["vix_structure"] = "DEEP CONTANGO"
+                results["score"] = -100
+                results["bias"] = MMBias.CALLS_HEAVY
+                results["interpretation"] = f"Deep Contango ({spread:+.1f}): Extreme complacency. Retail heavily long calls. MMs will push price DOWN to floor."
+            elif spread <= -1.5:
+                results["vix_structure"] = "CONTANGO"
+                results["score"] = -50
+                results["bias"] = MMBias.CALLS_HEAVY
+                results["interpretation"] = f"Contango ({spread:+.1f}): Complacency. Calls heavy positioning. MMs likely push price DOWN."
+            elif spread < 0:
+                results["vix_structure"] = "MILD CONTANGO"
+                results["score"] = -25
+                results["bias"] = MMBias.NEUTRAL
+                results["interpretation"] = f"Mild Contango ({spread:+.1f}): Slight call bias but not extreme. Watch for direction."
+            elif spread <= 1.5:
+                results["vix_structure"] = "FLAT"
+                results["score"] = 0
+                results["bias"] = MMBias.NEUTRAL
+                results["interpretation"] = f"Flat ({spread:+.1f}): Balanced positioning. No strong MM directional bias."
+            elif spread <= 3:
+                results["vix_structure"] = "MILD BACKWARDATION"
+                results["score"] = 25
+                results["bias"] = MMBias.NEUTRAL
+                results["interpretation"] = f"Mild Backwardation ({spread:+.1f}): Slight put bias. Watch for upside."
+            elif spread <= 5:
+                results["vix_structure"] = "BACKWARDATION"
+                results["score"] = 50
+                results["bias"] = MMBias.PUTS_HEAVY
+                results["interpretation"] = f"Backwardation ({spread:+.1f}): Fear rising. Puts heavy. MMs likely push price UP."
             else:
-                results["vvix_score"] = 50
-                results["components"].append(f"VVIX {vvix:.0f} (High): Extreme fear → MMs push UP")
-    except:
-        results["components"].append("VVIX data unavailable")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # COMBINED SCORE
-    # ═══════════════════════════════════════════════════════════════════════════
-    results["total_score"] = results["vix_score"] + results["vvix_score"]
-    
-    if results["total_score"] <= -25:
-        results["bias"] = MMBias.CALLS_HEAVY
-    elif results["total_score"] >= 25:
-        results["bias"] = MMBias.PUTS_HEAVY
-    else:
-        results["bias"] = MMBias.NEUTRAL
+                results["vix_structure"] = "DEEP BACKWARDATION"
+                results["score"] = 100
+                results["bias"] = MMBias.PUTS_HEAVY
+                results["interpretation"] = f"Deep Backwardation ({spread:+.1f}): Extreme fear. Retail heavily long puts. MMs will push price UP to ceiling."
+    except Exception as e:
+        results["interpretation"] = f"VIX data unavailable: {str(e)}"
     
     return results
 
@@ -578,54 +556,41 @@ def main():
     
     st.divider()
     
-    # MM Bias - Combined Analysis
-    st.subheader("🏦 Market Maker Bias Analysis")
+    # MM Bias - VIX Term Structure Analysis
+    st.subheader("🏦 Market Maker Bias")
     
     # Extract data
     vix_val = mm_data.get("vix")
     vix3m_val = mm_data.get("vix3m")
+    spread = mm_data.get("spread")
     vix_structure = mm_data.get("vix_structure", "N/A")
-    vix_score = mm_data.get("vix_score", 0)
-    vvix_val = mm_data.get("vvix")
-    vvix_score = mm_data.get("vvix_score", 0)
-    total_score = mm_data.get("total_score", 0)
-    components = mm_data.get("components", [])
+    score = mm_data.get("score", 0)
+    interpretation = mm_data.get("interpretation", "")
     
     # Display metrics
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("VIX", f"{vix_val:.2f}" if vix_val else "N/A")
     c2.metric("VIX3M", f"{vix3m_val:.2f}" if vix3m_val else "N/A")
-    c3.metric("VVIX", f"{vvix_val:.0f}" if vvix_val else "N/A")
-    c4.metric("Combined Score", f"{total_score:+d}")
-    
-    # Show component analysis
-    st.markdown("**Component Analysis:**")
-    for comp in components:
-        if "DOWN" in comp:
-            st.markdown(f"🔴 {comp}")
-        elif "UP" in comp:
-            st.markdown(f"🟢 {comp}")
-        else:
-            st.markdown(f"⚪ {comp}")
+    c3.metric("Spread", f"{spread:+.2f}" if spread is not None else "N/A")
+    c4.metric("Structure", vix_structure)
     
     # Visual score bar
-    st.markdown("**Bias Score:**")
-    # Normalize score to 0-100 for progress bar (score ranges -100 to +100)
-    normalized = (total_score + 100) / 200  # 0 = full bearish, 1 = full bullish
-    if total_score < 0:
-        st.progress(normalized, text=f"← CALLS HEAVY ({total_score:+d}) | MMs push DOWN")
-    elif total_score > 0:
-        st.progress(normalized, text=f"PUTS HEAVY ({total_score:+d}) → | MMs push UP")
+    normalized = (score + 100) / 200
+    if score < -25:
+        st.progress(normalized, text=f"← CALLS HEAVY ({score:+d}) | MMs push DOWN to FLOOR")
+    elif score > 25:
+        st.progress(normalized, text=f"PUTS HEAVY ({score:+d}) → | MMs push UP to CEILING")
     else:
-        st.progress(0.5, text=f"NEUTRAL (0)")
+        st.progress(normalized, text=f"NEUTRAL ({score:+d})")
     
-    # Final interpretation
-    if mm_bias == MMBias.CALLS_HEAVY:
-        st.error("📉 **CALLS HEAVY** — MMs will push price DOWN toward floor")
-    elif mm_bias == MMBias.PUTS_HEAVY:
-        st.success("📈 **PUTS HEAVY** — MMs will push price UP toward ceiling")
-    else:
-        st.info("⚖️ **NEUTRAL** — No strong directional bias")
+    # Interpretation
+    if interpretation:
+        if mm_bias == MMBias.CALLS_HEAVY:
+            st.error(f"📉 {interpretation}")
+        elif mm_bias == MMBias.PUTS_HEAVY:
+            st.success(f"📈 {interpretation}")
+        else:
+            st.info(f"⚖️ {interpretation}")
     
     st.divider()
     
@@ -675,12 +640,9 @@ def main():
                 "mm_data": {
                     "vix": mm_data.get("vix"),
                     "vix3m": mm_data.get("vix3m"),
+                    "spread": mm_data.get("spread"),
                     "vix_structure": mm_data.get("vix_structure"),
-                    "vix_score": mm_data.get("vix_score"),
-                    "vvix": mm_data.get("vvix"),
-                    "vvix_score": mm_data.get("vvix_score"),
-                    "total_score": mm_data.get("total_score"),
-                    "components": mm_data.get("components")
+                    "score": mm_data.get("score")
                 }
             })
 
