@@ -689,7 +689,7 @@ CSS_STYLES = """
 
 .brand-tagline {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     color: var(--text-secondary);
     letter-spacing: 3px;
     margin-top: 6px;
@@ -753,12 +753,12 @@ CSS_STYLES = """
     background: var(--bg-glass);
     border: 1px solid var(--border-subtle);
     border-radius: 7px;
-    font-size: 0.9rem;
+    font-size: 1rem;
 }
 
 .section-title {
     font-family: 'Syne', sans-serif;
-    font-size: 0.95rem;
+    font-size: 1rem;
     font-weight: 600;
     color: var(--text-primary);
     margin: 0;
@@ -782,7 +782,7 @@ CSS_STYLES = """
 
 .metric-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.6rem;
+    font-size: 0.75rem;
     color: var(--text-tertiary);
     text-transform: uppercase;
     letter-spacing: 1.5px;
@@ -804,7 +804,7 @@ CSS_STYLES = """
 
 .metric-delta {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
+    font-size: 0.75rem;
     color: var(--text-secondary);
     margin-top: 4px;
 }
@@ -817,7 +817,7 @@ CSS_STYLES = """
     padding: 8px 16px;
     border-radius: 50px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-size: 0.8rem;
     font-weight: 600;
     letter-spacing: 1px;
     text-transform: uppercase;
@@ -835,7 +835,7 @@ CSS_STYLES = """
     padding: 10px 18px;
     border-radius: 8px;
     font-family: 'Syne', sans-serif;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     font-weight: 700;
     letter-spacing: 1px;
     text-transform: uppercase;
@@ -868,7 +868,7 @@ CSS_STYLES = """
 .levels-container { background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 18px; }
 .level-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px dashed var(--border-subtle); }
 .level-row:last-child { border-bottom: none; }
-.level-label { display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }
+.level-label { display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }
 .level-label.ceiling { color: var(--puts-primary); }
 .level-label.current { color: var(--accent-gold); }
 .level-label.floor { color: var(--calls-primary); }
@@ -876,21 +876,21 @@ CSS_STYLES = """
 .level-value.ceiling { color: var(--puts-primary); }
 .level-value.current { color: var(--accent-gold); }
 .level-value.floor { color: var(--calls-primary); }
-.level-note { font-family: 'Outfit', sans-serif; font-size: 0.65rem; color: var(--text-tertiary); }
+.level-note { font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-tertiary); }
 
 /* Confluence Cards */
 .confluence-card { background: var(--bg-glass); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 16px; }
 .confluence-card-calls { border-top: 3px solid var(--calls-primary); }
 .confluence-card-puts { border-top: 3px solid var(--puts-primary); }
 .confluence-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.confluence-title { font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600; color: var(--text-primary); }
+.confluence-title { font-family: 'Syne', sans-serif; font-size: 0.875rem; font-weight: 600; color: var(--text-primary); }
 .confluence-score { font-family: 'Outfit', sans-serif; font-size: 1.6rem; font-weight: 800; padding: 5px 12px; border-radius: 6px; }
 .confluence-score.high { background: var(--calls-secondary); color: var(--calls-primary); }
 .confluence-score.medium { background: rgba(255,215,0,0.15); color: var(--accent-gold); }
 .confluence-score.low { background: var(--puts-secondary); color: var(--puts-primary); }
-.confluence-factor { display: flex; align-items: center; gap: 8px; padding: 7px 0; font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
+.confluence-factor { display: flex; align-items: center; gap: 8px; padding: 7px 0; font-family: 'Outfit', sans-serif; font-size: 0.875rem; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); }
 .confluence-factor:last-child { border-bottom: none; }
-.factor-check { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.6rem; }
+.factor-check { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.75rem; }
 .factor-check.active { background: var(--calls-secondary); color: var(--calls-primary); }
 .factor-check.inactive { background: rgba(255,255,255,0.05); color: var(--text-muted); }
 
@@ -901,7 +901,7 @@ CSS_STYLES = """
 .trade-card-puts::before { background: linear-gradient(90deg, var(--puts-primary) 0%, rgba(255,71,87,0.3) 100%); }
 .trade-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .trade-name { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
-.trade-confidence { padding: 4px 10px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
+.trade-confidence { padding: 4px 10px; border-radius: 20px; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
 .trade-confidence-high { background: var(--calls-secondary); color: var(--calls-primary); border: 1px solid var(--calls-primary); }
 .trade-confidence-medium { background: rgba(255,215,0,0.15); color: var(--accent-gold); border: 1px solid var(--accent-gold); }
 .trade-confidence-low { background: rgba(255,255,255,0.05); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
@@ -910,38 +910,38 @@ CSS_STYLES = """
 .trade-contract-puts { background: var(--puts-secondary); color: var(--puts-primary); border: 1px solid rgba(255,71,87,0.3); }
 .trade-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
 .trade-metric { background: var(--bg-tertiary); border-radius: 8px; padding: 12px; text-align: center; }
-.trade-metric-label { font-family: 'JetBrains Mono', monospace; font-size: 0.55rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.trade-metric-label { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
 .trade-metric-value { font-family: 'Outfit', sans-serif; font-size: 1rem; font-weight: 700; color: var(--text-primary); }
 .trade-targets { background: var(--bg-tertiary); border-radius: 8px; padding: 12px; }
-.targets-header { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; }
+.targets-header { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; }
 .targets-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .target-item { text-align: center; padding: 8px; border-radius: 6px; background: var(--bg-glass); border: 1px solid var(--border-subtle); }
-.target-label { font-size: 0.65rem; color: var(--text-tertiary); margin-bottom: 2px; }
-.target-price { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
-.target-profit { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--calls-primary); margin-top: 2px; }
+.target-label { font-size: 0.75rem; color: var(--text-tertiary); margin-bottom: 2px; }
+.target-price { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+.target-profit { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--calls-primary); margin-top: 2px; }
 .trade-trigger { margin-top: 12px; padding: 10px 14px; background: rgba(255,255,255,0.03); border-radius: 6px; border-left: 3px solid var(--accent-primary); }
-.trigger-label { font-family: 'JetBrains Mono', monospace; font-size: 0.55rem; color: var(--accent-primary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
-.trigger-text { font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-secondary); }
+.trigger-label { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent-primary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+.trigger-text { font-family: 'Outfit', sans-serif; font-size: 0.875rem; color: var(--text-secondary); }
 
 /* Session Cards */
 .session-card { background: var(--bg-glass); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 14px; text-align: center; transition: all 0.3s ease; }
 .session-card:hover { transform: translateY(-2px); border-color: var(--border-accent); }
 .session-icon { font-size: 1.4rem; margin-bottom: 6px; }
-.session-name { font-family: 'Syne', sans-serif; font-size: 0.75rem; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.session-name { font-family: 'Syne', sans-serif; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
 .session-data { display: flex; flex-direction: column; gap: 5px; }
-.session-value { display: flex; align-items: center; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; }
+.session-value { display: flex; align-items: center; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
 .session-high { color: var(--puts-primary); }
 .session-low { color: var(--calls-primary); }
 
 /* Indicator Cards */
 .indicator-card { background: var(--bg-glass); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 16px; }
 .indicator-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
-.indicator-icon { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); border-radius: 5px; font-size: 0.8rem; }
-.indicator-title { font-family: 'Syne', sans-serif; font-size: 0.8rem; font-weight: 600; color: var(--text-primary); }
-.indicator-row { display: flex; justify-content: space-between; padding: 5px 0; font-family: 'Outfit', sans-serif; font-size: 0.75rem; }
+.indicator-icon { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); border-radius: 5px; font-size: 0.9rem; }
+.indicator-title { font-family: 'Syne', sans-serif; font-size: 0.9rem; font-weight: 600; color: var(--text-primary); }
+.indicator-row { display: flex; justify-content: space-between; padding: 5px 0; font-family: 'Outfit', sans-serif; font-size: 0.85rem; }
 .indicator-label { color: var(--text-tertiary); }
 .indicator-value { color: var(--text-primary); font-weight: 500; }
-.indicator-status { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 5px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; font-weight: 600; margin-top: 8px; }
+.indicator-status { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 5px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 600; margin-top: 8px; }
 .indicator-status-bullish { background: var(--calls-secondary); color: var(--calls-primary); }
 .indicator-status-bearish { background: var(--puts-secondary); color: var(--puts-primary); }
 
@@ -953,8 +953,8 @@ CSS_STYLES = """
 .alert-box-info { background: linear-gradient(135deg, rgba(77,171,247,0.1) 0%, rgba(77,171,247,0.03) 100%); border: 1px solid rgba(77,171,247,0.3); }
 .alert-icon { font-size: 1.1rem; flex-shrink: 0; }
 .alert-content { flex: 1; }
-.alert-title { font-family: 'Syne', sans-serif; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
-.alert-text { font-family: 'Outfit', sans-serif; font-size: 0.75rem; color: var(--text-secondary); }
+.alert-title { font-family: 'Syne', sans-serif; font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+.alert-text { font-family: 'Outfit', sans-serif; font-size: 0.85rem; color: var(--text-secondary); }
 
 /* No Trade Card */
 .no-trade-card { background: linear-gradient(135deg, rgba(255,71,87,0.1) 0%, rgba(255,71,87,0.02) 100%); border: 1px solid rgba(255,71,87,0.3); border-radius: 16px; padding: 30px; text-align: center; }
@@ -1131,16 +1131,16 @@ def main():
     with col1:
         chan_class = channel_type.value.lower()
         chan_icon = {"ASCENDING": "↗", "DESCENDING": "↘", "EXPANDING": "⟷", "CONTRACTING": "⟶"}.get(channel_type.value, "○")
-        st.markdown(f'<div class="glass-card"><div class="channel-badge channel-badge-{chan_class}"><span style="font-size:1.2rem;">{chan_icon}</span><span>{channel_type.value}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.8rem;">{channel_reason}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card"><div class="channel-badge channel-badge-{chan_class}"><span style="font-size:1.2rem;">{chan_icon}</span><span>{channel_type.value}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{channel_reason}</p></div>', unsafe_allow_html=True)
     with col2:
         ema_class = "calls" if ema_data["above_200"] else "puts"
         ema_icon = "↑" if ema_data["above_200"] else "↓"
         ema_text = "Above 200 EMA" if ema_data["above_200"] else "Below 200 EMA"
-        st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{ema_class}"><span>{ema_icon}</span><span>{ema_text}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.8rem;">{"Supports CALLS" if ema_data["above_200"] else "Supports PUTS"}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{ema_class}"><span>{ema_icon}</span><span>{ema_text}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{"Supports CALLS" if ema_data["above_200"] else "Supports PUTS"}</p></div>', unsafe_allow_html=True)
     with col3:
         cross_class = "calls" if ema_data["ema_cross"] == "BULLISH" else "puts"
         cross_icon = "✓" if ema_data["ema_cross"] == "BULLISH" else "✗"
-        st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{cross_class}"><span>{cross_icon}</span><span>8/21 {ema_data["ema_cross"]}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.8rem;">{"8 EMA > 21 EMA" if ema_data["ema_cross"] == "BULLISH" else "8 EMA < 21 EMA"}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{cross_class}"><span>{cross_icon}</span><span>8/21 {ema_data["ema_cross"]}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{"8 EMA > 21 EMA" if ema_data["ema_cross"] == "BULLISH" else "8 EMA < 21 EMA"}</p></div>', unsafe_allow_html=True)
     
     # Retail positioning alert
     if retail_data["positioning"] != "BALANCED":
@@ -1232,18 +1232,18 @@ def main():
         st.markdown(f'''
         <div class="glass-card glass-card-{tc}" style="opacity:0.85;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-                <div style="font-family:'Syne',sans-serif;font-size:1rem;font-weight:600;">{di} {a["name"]}</div>
+                <div style="font-family:'Syne',sans-serif;font-size:1.05rem;font-weight:600;">{di} {a["name"]}</div>
                 <div class="trade-confidence trade-confidence-low">{a["confidence"]}</div>
             </div>
             <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
                 <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;color:var(--{tc}-primary);">{a["contract"]} @ ${a["entry_premium"]:.2f}</div>
                 <div style="display:flex;gap:14px;">
-                    <span style="font-size:0.8rem;color:var(--text-secondary);">50%: <span style="color:var(--calls-primary);">${a["target_50"]:.2f}</span></span>
-                    <span style="font-size:0.8rem;color:var(--text-secondary);">75%: <span style="color:var(--calls-primary);">${a["target_75"]:.2f}</span></span>
-                    <span style="font-size:0.8rem;color:var(--text-secondary);">100%: <span style="color:var(--calls-primary);">${a["target_100"]:.2f}</span></span>
+                    <span style="font-size:0.875rem;color:var(--text-secondary);">50%: <span style="color:var(--calls-primary);">${a["target_50"]:.2f}</span></span>
+                    <span style="font-size:0.875rem;color:var(--text-secondary);">75%: <span style="color:var(--calls-primary);">${a["target_75"]:.2f}</span></span>
+                    <span style="font-size:0.875rem;color:var(--text-secondary);">100%: <span style="color:var(--calls-primary);">${a["target_100"]:.2f}</span></span>
                 </div>
             </div>
-            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle);font-size:0.8rem;color:var(--text-tertiary);"><strong style="color:var(--accent-primary);">Trigger:</strong> {a["trigger"]}</div>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle);font-size:0.875rem;color:var(--text-tertiary);"><strong style="color:var(--accent-primary);">Trigger:</strong> {a["trigger"]}</div>
         </div>
         ''', unsafe_allow_html=True)
     
@@ -1261,7 +1261,7 @@ def main():
                 l_mark = " ⬇" if lower_pivot and lower_pivot == data.get("low") else ""
                 st.markdown(f'<div class="session-card"><div class="session-icon">{icon}</div><div class="session-name">{name}</div><div class="session-data"><div class="session-value"><span style="color:var(--text-tertiary);">H</span><span class="session-high">{data["high"]:,.2f}{h_mark}</span></div><div class="session-value"><span style="color:var(--text-tertiary);">L</span><span class="session-low">{data["low"]:,.2f}{l_mark}</span></div></div></div>', unsafe_allow_html=True)
             else:
-                st.markdown(f'<div class="session-card" style="opacity:0.5;"><div class="session-icon">{icon}</div><div class="session-name">{name}</div><div class="session-data"><div style="color:var(--text-muted);font-size:0.75rem;">No data</div></div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="session-card" style="opacity:0.5;"><div class="session-icon">{icon}</div><div class="session-name">{name}</div><div class="session-data"><div style="color:var(--text-muted);font-size:0.85rem;">No data</div></div></div>', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # INDICATORS
@@ -1281,10 +1281,10 @@ def main():
             sc = "bearish" if vix_pos == VIXPosition.ABOVE_RANGE else "bullish"
             st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📉</div><div class="indicator-title">VIX Overnight</div></div><div class="indicator-row"><span class="indicator-label">Range</span><span class="indicator-value">{vix_range["bottom"]} - {vix_range["top"]}</span></div><div class="indicator-row"><span class="indicator-label">Current</span><span class="indicator-value">{vix}</span></div><div class="indicator-status indicator-status-{sc}">{vix_icon_ind} {vix_pos.value}</div></div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📉</div><div class="indicator-title">VIX Overnight</div></div><div class="indicator-row"><span class="indicator-label">Current</span><span class="indicator-value">{vix}</span></div><div style="margin-top:8px;color:var(--text-muted);font-size:0.75rem;">Range data unavailable</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📉</div><div class="indicator-title">VIX Overnight</div></div><div class="indicator-row"><span class="indicator-label">Current</span><span class="indicator-value">{vix}</span></div><div style="margin-top:8px;color:var(--text-muted);font-size:0.85rem;">Range data unavailable</div></div>', unsafe_allow_html=True)
     
     # Footer
-    st.markdown('<div style="margin-top:40px;padding:20px 0;border-top:1px solid var(--border-subtle);text-align:center;"><p style="font-family:\'JetBrains Mono\',monospace;font-size:0.65rem;color:var(--text-muted);letter-spacing:2px;">SPX PROPHET • STRUCTURAL 0DTE TRADING SYSTEM</p></div>', unsafe_allow_html=True)
+    st.markdown('<div style="margin-top:40px;padding:20px 0;border-top:1px solid var(--border-subtle);text-align:center;"><p style="font-family:\'JetBrains Mono\',monospace;font-size:0.75rem;color:var(--text-muted);letter-spacing:2px;">SPX PROPHET • STRUCTURAL 0DTE TRADING SYSTEM</p></div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
