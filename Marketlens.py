@@ -410,22 +410,63 @@ def determine_channel(sydney, tokyo, london=None):
     true_high, high_time, high_session = highest
     true_low, low_time, low_session = lowest
     
-    tokyo_expanded_high = tokyo["high"] > sydney["high"]
-    tokyo_expanded_low = tokyo["low"] < sydney["low"]
-    london_expanded_high = london["high"] > max(sydney["high"], tokyo["high"]) if london else False
-    london_expanded_low = london["low"] < min(sydney["low"], tokyo["low"]) if london else False
+    # Check session-to-session expansions
+    tokyo_high_expansion = tokyo["high"] - sydney["high"]  # How much Tokyo exceeded Sydney's high
+    tokyo_low_expansion = sydney["low"] - tokyo["low"]      # How much Tokyo went below Sydney's low
+    
+    tokyo_expanded_high = tokyo_high_expansion > 0
+    tokyo_expanded_low = tokyo_low_expansion > 0
+    
+    london_high_expansion = 0
+    london_low_expansion = 0
+    london_expanded_high = False
+    london_expanded_low = False
+    
+    if london:
+        prior_high = max(sydney["high"], tokyo["high"])
+        prior_low = min(sydney["low"], tokyo["low"])
+        london_high_expansion = london["high"] - prior_high  # How much London exceeded prior high
+        london_low_expansion = prior_low - london["low"]      # How much London went below prior low
+        london_expanded_high = london_high_expansion > 0
+        london_expanded_low = london_low_expansion > 0
     
     expanded_high = tokyo_expanded_high or london_expanded_high
     expanded_low = tokyo_expanded_low or london_expanded_low
     
+    # Check for dominant expansion (>6 points in one direction)
+    max_high_expansion = max(tokyo_high_expansion, london_high_expansion)
+    max_low_expansion = max(tokyo_low_expansion, london_low_expansion)
+    
     if expanded_high and expanded_low:
-        return ChannelType.EXPANDING, "Range expanded both ways", true_high, true_low, high_time, low_time
+        # Both directions expanded initially = EXPANDING
+        # BUT if a subsequent session breaks >6 pts beyond previous session's extreme → directional
+        
+        # Check if London broke out significantly from Tokyo (or Sydney if no Tokyo expansion)
+        if london:
+            # London's expansion beyond the prior high/low
+            if london_high_expansion > 6:
+                # London went >6 pts above prior high → ASCENDING
+                return ChannelType.ASCENDING, f"London broke out +{london_high_expansion:.1f} pts above prior high", true_high, true_low, high_time, low_time
+            elif london_low_expansion > 6:
+                # London went >6 pts below prior low → DESCENDING
+                return ChannelType.DESCENDING, f"London broke down +{london_low_expansion:.1f} pts below prior low", true_high, true_low, high_time, low_time
+        
+        # Check if Tokyo broke out significantly from Sydney
+        if tokyo_high_expansion > 6:
+            # Tokyo went >6 pts above Sydney high → ASCENDING
+            return ChannelType.ASCENDING, f"Tokyo broke out +{tokyo_high_expansion:.1f} pts above Sydney high", true_high, true_low, high_time, low_time
+        elif tokyo_low_expansion > 6:
+            # Tokyo went >6 pts below Sydney low → DESCENDING
+            return ChannelType.DESCENDING, f"Tokyo broke down +{tokyo_low_expansion:.1f} pts below Sydney low", true_high, true_low, high_time, low_time
+        
+        # True expanding - no session broke >6 pts beyond previous
+        return ChannelType.EXPANDING, f"Range expanded both ways (no >6pt breakout)", true_high, true_low, high_time, low_time
     elif not expanded_high and not expanded_low:
         return ChannelType.CONTRACTING, "Range contracted", true_high, true_low, high_time, low_time
     elif expanded_high:
-        return ChannelType.ASCENDING, f"{high_session} made higher high", true_high, true_low, high_time, low_time
+        return ChannelType.ASCENDING, f"{high_session} made higher high (+{max_high_expansion:.1f} pts)", true_high, true_low, high_time, low_time
     else:
-        return ChannelType.DESCENDING, f"{low_session} made lower low", true_high, true_low, high_time, low_time
+        return ChannelType.DESCENDING, f"{low_session} made lower low (+{max_low_expansion:.1f} pts)", true_high, true_low, high_time, low_time
 
 def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time, channel_type):
     if upper_pivot is None or lower_pivot is None:
