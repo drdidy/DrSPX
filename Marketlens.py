@@ -270,6 +270,90 @@ def fetch_retail_positioning():
     except:
         pass
     return result
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRIOR DAY RTH DATA
+# ═══════════════════════════════════════════════════════════════════════════════
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_prior_day_rth(trading_date):
+    """Fetch prior day's RTH (Regular Trading Hours) data for ES futures.
+    RTH is 8:30 AM - 3:00 PM CT (9:30 AM - 4:00 PM ET)
+    
+    Returns:
+    - highest_wick: The highest high (wick) of any RTH candle
+    - lowest_close: The lowest close of any RTH candle
+    """
+    result = {
+        "highest_wick": None, "highest_wick_time": None,
+        "lowest_close": None, "lowest_close_time": None,
+        "high": None, "low": None, "close": None,  # Keep for display
+        "available": False
+    }
+    try:
+        prior_day = get_prior_trading_day(trading_date)
+        date_str = prior_day.strftime("%Y-%m-%d")
+        
+        # Fetch 5-minute candles for ES futures
+        url = f"{POLYGON_BASE_URL}/v2/aggs/ticker/C:ESH25/range/5/minute/{date_str}/{date_str}"
+        params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": POLYGON_API_KEY}
+        response = requests.get(url, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("results") and len(data["results"]) > 0:
+                df = pd.DataFrame(data["results"])
+                df['datetime'] = pd.to_datetime(df['t'], unit='ms', utc=True).dt.tz_convert(CT)
+                
+                # RTH hours: 8:30 AM - 3:00 PM CT
+                rth_start = CT.localize(datetime.combine(prior_day, time(8, 30)))
+                rth_end = CT.localize(datetime.combine(prior_day, time(15, 0)))
+                
+                rth_df = df[(df['datetime'] >= rth_start) & (df['datetime'] <= rth_end)]
+                
+                if not rth_df.empty and len(rth_df) > 5:
+                    # Highest Wick = highest high of any candle
+                    high_idx = rth_df['h'].idxmax()
+                    result["highest_wick"] = round(float(rth_df.loc[high_idx, 'h']), 2)
+                    result["highest_wick_time"] = rth_df.loc[high_idx, 'datetime']
+                    
+                    # Lowest Close = lowest close of any candle (NOT lowest wick)
+                    lowest_close_idx = rth_df['c'].idxmin()
+                    result["lowest_close"] = round(float(rth_df.loc[lowest_close_idx, 'c']), 2)
+                    result["lowest_close_time"] = rth_df.loc[lowest_close_idx, 'datetime']
+                    
+                    # Also store overall H/L/C for display
+                    result["high"] = result["highest_wick"]
+                    result["low"] = round(float(rth_df['l'].min()), 2)
+                    result["close"] = round(float(rth_df.iloc[-1]['c']), 2)
+                    result["available"] = True
+    except:
+        pass
+    return result
+
+def calc_prior_day_targets(prior_rth, ref_time, position, overnight_ceiling, overnight_floor):
+    """Calculate targets from prior day when price is outside overnight cone.
+    - Above overnight: Target ascending (+0.48/30min) from prior day HIGHEST WICK
+    - Below overnight: Target descending (-0.48/30min) from prior day LOWEST CLOSE
+    """
+    if not prior_rth["available"]:
+        return None, None, None
+    
+    if position == Position.ABOVE and prior_rth["highest_wick"] is not None:
+        # Ascending target from prior day highest wick
+        blocks = blocks_between(prior_rth["highest_wick_time"], ref_time) if prior_rth["highest_wick_time"] else 0
+        target = round(prior_rth["highest_wick"] + SLOPE * blocks, 2)
+        return target, "ASCENDING", f"Prior RTH Highest Wick ({prior_rth['highest_wick']:.2f}) + {blocks} blocks × {SLOPE}"
+    
+    elif position == Position.BELOW and prior_rth["lowest_close"] is not None:
+        # Descending target from prior day lowest close
+        blocks = blocks_between(prior_rth["lowest_close_time"], ref_time) if prior_rth["lowest_close_time"] else 0
+        target = round(prior_rth["lowest_close"] - SLOPE * blocks, 2)
+        return target, "DESCENDING", f"Prior RTH Lowest Close ({prior_rth['lowest_close']:.2f}) - {blocks} blocks × {SLOPE}"
+    
+    return None, None, None
+    
+    return None, None, None
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION EXTRACTION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -878,6 +962,96 @@ CSS_STYLES = """
 .level-value.floor { color: var(--calls-primary); }
 .level-note { font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-tertiary); }
 
+/* Prior Day Target */
+.prior-day-target {
+    background: var(--bg-glass);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 18px;
+    margin-top: 16px;
+    position: relative;
+    overflow: hidden;
+}
+.prior-day-target::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+}
+.prior-day-target-calls::before { background: linear-gradient(90deg, var(--calls-primary), transparent); }
+.prior-day-target-puts::before { background: linear-gradient(90deg, var(--puts-primary), transparent); }
+.prior-target-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.prior-target-icon { font-size: 1.2rem; }
+.prior-target-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.prior-target-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.prior-target-badge.calls { background: var(--calls-secondary); color: var(--calls-primary); }
+.prior-target-badge.puts { background: var(--puts-secondary); color: var(--puts-primary); }
+.prior-target-value {
+    font-family: 'Outfit', sans-serif;
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--accent-primary);
+    margin-bottom: 8px;
+}
+.prior-target-details {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.prior-target-sep { color: var(--text-muted); }
+.prior-target-note {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    font-style: italic;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-subtle);
+}
+
+/* Prior Day Info (when inside cone) */
+.prior-day-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    margin-top: 12px;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+.prior-day-label {
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 0.75rem;
+}
+.prior-day-sep { color: var(--text-muted); }
+
 /* Confluence Cards */
 .confluence-card { background: var(--bg-glass); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 16px; }
 .confluence-card-calls { border-top: 3px solid var(--calls-primary); }
@@ -1072,18 +1246,18 @@ def sidebar():
         st.divider()
         
         # ─────────────────────────────────────────────────────────────────────
-        # PRIOR DAY DATA
+        # PRIOR DAY RTH DATA
         # ─────────────────────────────────────────────────────────────────────
-        st.markdown("#### 📈 Prior Day (ES)")
+        st.markdown("#### 📈 Prior Day RTH (ES)")
         use_manual_prior = st.checkbox("Manual Prior Day Override", value=False)
         if use_manual_prior:
             col1, col2 = st.columns(2)
-            prior_high = col1.number_input("Prior High", value=6100.0, step=0.5)
-            prior_low = col2.number_input("Prior Low", value=6050.0, step=0.5)
-            prior_close = st.number_input("Prior Close", value=6075.0, step=0.5)
+            prior_highest_wick = col1.number_input("Highest Wick", value=6100.0, step=0.5, help="Highest high of any RTH candle")
+            prior_lowest_close = col2.number_input("Lowest Close", value=6050.0, step=0.5, help="Lowest close of any RTH candle")
+            prior_close = st.number_input("RTH Close", value=6075.0, step=0.5, help="Final RTH close")
         else:
-            prior_high = None
-            prior_low = None
+            prior_highest_wick = None
+            prior_lowest_close = None
             prior_close = None
         
         st.divider()
@@ -1176,6 +1350,7 @@ def sidebar():
             fetch_vix_yahoo.clear()
             fetch_spx_with_ema.clear()
             fetch_retail_positioning.clear()
+            fetch_prior_day_rth.clear()
             st.rerun()
     
     # Build return dict with all manual overrides
@@ -1188,7 +1363,7 @@ def sidebar():
         # Manual overrides
         "manual_vix": manual_vix,
         "manual_vix_range": {"low": manual_vix_low, "high": manual_vix_high} if use_manual_vix_range else None,
-        "manual_prior": {"high": prior_high, "low": prior_low, "close": prior_close} if use_manual_prior else None,
+        "manual_prior": {"highest_wick": prior_highest_wick, "lowest_close": prior_lowest_close, "close": prior_close} if use_manual_prior else None,
         "manual_overnight": {"high": on_high, "low": on_low} if use_manual_overnight else None,
         "manual_sessions": {
             "sydney": {"high": sydney_high, "low": sydney_low},
@@ -1289,6 +1464,22 @@ def main():
         vix_pos, vix_pos_desc = get_vix_position(vix, vix_range)
         retail_data = fetch_retail_positioning()
         ema_data = fetch_spx_with_ema()
+        
+        # --- Prior Day RTH Data ---
+        if inputs["manual_prior"] is not None:
+            prior_day = get_prior_trading_day(inputs["trading_date"])
+            prior_rth = {
+                "highest_wick": inputs["manual_prior"]["highest_wick"],
+                "highest_wick_time": CT.localize(datetime.combine(prior_day, time(12, 0))),
+                "lowest_close": inputs["manual_prior"]["lowest_close"],
+                "lowest_close_time": CT.localize(datetime.combine(prior_day, time(12, 0))),
+                "high": inputs["manual_prior"]["highest_wick"],
+                "low": inputs["manual_prior"]["lowest_close"],
+                "close": inputs["manual_prior"]["close"],
+                "available": True
+            }
+        else:
+            prior_rth = fetch_prior_day_rth(inputs["trading_date"])
     
     offset = inputs["offset"]
     current_spx = round(current_es - offset, 2)
@@ -1302,6 +1493,13 @@ def main():
     ceiling_spx = round(ceiling_es - offset, 2)
     floor_spx = round(floor_es - offset, 2)
     position = get_position(current_es, ceiling_es, floor_es)
+    
+    # Calculate prior day target if outside overnight cone
+    prior_target_es, prior_target_direction, prior_target_reason = calc_prior_day_targets(
+        prior_rth, ref_time_dt, position, ceiling_es, floor_es
+    )
+    prior_target_spx = round(prior_target_es - offset, 2) if prior_target_es else None
+    
     decision = analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, retail_data["bias"], ema_data["ema_bias"], vix_pos, vix)
     
     # ═══════════════════════════════════════════════════════════════════════════
@@ -1332,11 +1530,10 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     col1, col2, col3 = st.columns([2, 1, 2])
     with col1:
-        st.markdown("""
+        st.markdown(f"""
         <div style="display:flex;align-items:center;gap:8px;padding:10px 0;">
-            <span style="font-size:1.2rem;">◀</span>
-            <span style="font-family:'Outfit',sans-serif;font-size:0.85rem;color:rgba(255,255,255,0.6);">
-                Open <strong style="color:#00f5d4;">Sidebar</strong> for Settings & Manual Overrides
+            <span style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:rgba(255,255,255,0.5);">
+                📅 {inputs["trading_date"].strftime("%A, %B %d, %Y")}
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -1347,12 +1544,13 @@ def main():
             fetch_vix_yahoo.clear()
             fetch_spx_with_ema.clear()
             fetch_retail_positioning.clear()
+            fetch_prior_day_rth.clear()
             st.rerun()
     with col3:
         st.markdown(f"""
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 0;">
-            <span style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:rgba(255,255,255,0.4);">
-                {now.strftime("%A, %B %d, %Y")}
+            <span style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:rgba(255,255,255,0.5);">
+                ⏰ {now.strftime("%I:%M %p CT")}
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -1434,6 +1632,50 @@ def main():
         <div class="level-row"><div class="level-label floor"><span>▼</span><span>FLOOR</span></div><div class="level-value floor">{floor_spx:,.2f}</div><div class="level-note">CALLS entry • {dist_floor} pts away</div></div>
     </div>
     ''', unsafe_allow_html=True)
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PRIOR DAY TARGET (when outside overnight cone)
+    # ═══════════════════════════════════════════════════════════════════════════
+    if position != Position.INSIDE and prior_target_spx:
+        target_color = "calls" if position == Position.ABOVE else "puts"
+        target_icon = "🎯"
+        if position == Position.ABOVE:
+            direction_text = "ASCENDING from Highest Wick"
+            anchor_label = "Highest Wick"
+            anchor_value = prior_rth['highest_wick']
+        else:
+            direction_text = "DESCENDING from Lowest Close"
+            anchor_label = "Lowest Close"
+            anchor_value = prior_rth['lowest_close']
+        dist_target = round(abs(prior_target_spx - current_spx), 1)
+        
+        st.markdown(f'''
+        <div class="prior-day-target prior-day-target-{target_color}">
+            <div class="prior-target-header">
+                <span class="prior-target-icon">{target_icon}</span>
+                <span class="prior-target-title">Prior Day Cone Target</span>
+                <span class="prior-target-badge {target_color}">{direction_text}</span>
+            </div>
+            <div class="prior-target-value">{prior_target_spx:,.2f}</div>
+            <div class="prior-target-details">
+                <span>{dist_target} pts from current</span>
+                <span class="prior-target-sep">•</span>
+                <span>Prior RTH {anchor_label}: {anchor_value:,.2f}</span>
+            </div>
+            <div class="prior-target-note">Price outside ON cone → drawn to prior day {'+0.48' if position == Position.ABOVE else '-0.48'}/30min line</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    elif prior_rth["available"]:
+        st.markdown(f'''
+        <div class="prior-day-info">
+            <span class="prior-day-label">Prior RTH:</span>
+            <span>Highest Wick: {prior_rth['highest_wick']:,.2f}</span>
+            <span class="prior-day-sep">|</span>
+            <span>Lowest Close: {prior_rth['lowest_close']:,.2f}</span>
+            <span class="prior-day-sep">|</span>
+            <span>Close: {prior_rth['close']:,.2f}</span>
+        </div>
+        ''', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # PRIMARY TRADE
