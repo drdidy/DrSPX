@@ -417,23 +417,49 @@ def determine_channel(sydney, tokyo, london=None):
             return ChannelType.DESCENDING, f"Tokyo Low ({tokyo['low']}) < Sydney Low ({sydney['low']})", true_high, true_low, high_time, low_time
 
 def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time, channel_type):
-    """Calculate ceiling/floor with 0.48 slope from TRUE pivots"""
+    """
+    Calculate ceiling/floor at reference time (9 AM) with 0.48 slope from TRUE pivots.
+    
+    The slope is ALWAYS applied to project the line forward to 9 AM.
+    
+    ASCENDING:   Both lines slope UP (+0.48 per 30-min block)
+    DESCENDING:  Both lines slope DOWN (-0.48 per 30-min block)
+    EXPANDING:   Upper slopes UP (+0.48), Lower slopes DOWN (-0.48) - lines diverge
+    CONTRACTING: Upper slopes DOWN (-0.48), Lower slopes UP (+0.48) - lines converge
+    """
     if upper_pivot is None or lower_pivot is None:
         return None, None
     
-    blocks_high = blocks_between(upper_time, ref_time)
-    blocks_low = blocks_between(lower_time, ref_time)
+    # Calculate blocks from pivot times to reference time
+    if upper_time is not None and ref_time is not None:
+        blocks_high = blocks_between(upper_time, ref_time)
+    else:
+        blocks_high = 0
+        
+    if lower_time is not None and ref_time is not None:
+        blocks_low = blocks_between(lower_time, ref_time)
+    else:
+        blocks_low = 0
     
     if channel_type == ChannelType.ASCENDING:
+        # Both lines rise: +0.48 per block
         ceiling = round(upper_pivot + SLOPE * blocks_high, 2)
         floor = round(lower_pivot + SLOPE * blocks_low, 2)
     elif channel_type == ChannelType.DESCENDING:
+        # Both lines fall: -0.48 per block
         ceiling = round(upper_pivot - SLOPE * blocks_high, 2)
         floor = round(lower_pivot - SLOPE * blocks_low, 2)
+    elif channel_type == ChannelType.EXPANDING:
+        # Upper rises, lower falls (lines diverge)
+        ceiling = round(upper_pivot + SLOPE * blocks_high, 2)
+        floor = round(lower_pivot - SLOPE * blocks_low, 2)
+    elif channel_type == ChannelType.CONTRACTING:
+        # Upper falls, lower rises (lines converge)
+        ceiling = round(upper_pivot - SLOPE * blocks_high, 2)
+        floor = round(lower_pivot + SLOPE * blocks_low, 2)
     else:
+        # Undetermined - no slope
         ceiling, floor = upper_pivot, lower_pivot
-    
-    return ceiling, floor
     
     return ceiling, floor
 
