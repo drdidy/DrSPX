@@ -147,94 +147,116 @@ def fetch_vix():
 def fetch_put_call_ratio(target_date=None):
     """
     Fetch Put/Call Open Interest from Polygon for MM bias
-    For pre-market planning, uses the target trading date's options
     OI is updated overnight after market close
+    If target date OI is 0, falls back to most recent available
     """
     if target_date is None:
         target_date = date.today()
     
-    # For pre-market planning, we want the NEXT trading day's 0DTE options
-    # If it's a weekend, adjust to Monday
+    # Handle weekends
     if target_date.weekday() == 5:  # Saturday
         target_date = target_date + timedelta(days=2)
     elif target_date.weekday() == 6:  # Sunday
         target_date = target_date + timedelta(days=1)
     
-    expiration_date = target_date.isoformat()
+    # Try target date first, then today, then yesterday
+    dates_to_try = [
+        target_date,
+        date.today(),
+        date.today() - timedelta(days=1)
+    ]
+    # Remove duplicates while preserving order
+    dates_to_try = list(dict.fromkeys(dates_to_try))
     
-    url = "https://api.polygon.io/v3/snapshot/options/SPY"
-    params = {
-        "expiration_date": expiration_date,
-        "limit": 250,
-        "apiKey": POLYGON_OPTIONS_KEY
-    }
-    
-    all_results = []
-    error_msg = None
-    debug_sample = None
-    
-    try:
-        while True:
-            r = requests.get(url, params=params, timeout=30)
-            if r.status_code != 200:
-                error_msg = f"API status {r.status_code}"
-                break
-            data = r.json()
-            if "results" not in data:
-                error_msg = data.get("message", "No results in response")
-                break
-            all_results.extend(data["results"])
-            if debug_sample is None and data["results"]:
-                debug_sample = data["results"][0]
-            if "next_url" in data:
-                url = data["next_url"]
-                params = {"apiKey": POLYGON_OPTIONS_KEY}
+    for try_date in dates_to_try:
+        # Skip weekends
+        if try_date.weekday() >= 5:
+            continue
+            
+        expiration_date = try_date.isoformat()
+        
+        url = "https://api.polygon.io/v3/snapshot/options/SPY"
+        params = {
+            "expiration_date": expiration_date,
+            "limit": 250,
+            "apiKey": POLYGON_OPTIONS_KEY
+        }
+        
+        all_results = []
+        error_msg = None
+        debug_sample = None
+        
+        try:
+            while True:
+                r = requests.get(url, params=params, timeout=30)
+                if r.status_code != 200:
+                    error_msg = f"API status {r.status_code}"
+                    break
+                data = r.json()
+                if "results" not in data:
+                    error_msg = data.get("message", "No results")
+                    break
+                all_results.extend(data["results"])
+                if debug_sample is None and data["results"]:
+                    debug_sample = data["results"][0]
+                if "next_url" in data:
+                    url = data["next_url"]
+                    params = {"apiKey": POLYGON_OPTIONS_KEY}
+                else:
+                    break
+        except Exception as e:
+            error_msg = str(e)
+            continue
+        
+        # Calculate totals
+        total_calls_oi = 0
+        total_puts_oi = 0
+        
+        for opt in all_results:
+            details = opt.get("details", {})
+            day = opt.get("day", {})
+            contract_type = details.get("contract_type", "").lower()
+            oi = day.get("open_interest", 0) or 0
+            
+            if contract_type == "call":
+                total_calls_oi += oi
+            elif contract_type == "put":
+                total_puts_oi += oi
+        
+        # If we found OI data, use it
+        if total_calls_oi > 0 or total_puts_oi > 0:
+            if total_calls_oi > 0:
+                ratio = round(total_puts_oi / total_calls_oi, 4)
             else:
-                break
-    except Exception as e:
-        error_msg = str(e)
+                ratio = 1.0
+            
+            if total_calls_oi > total_puts_oi * 1.1:
+                bias = MMBias.CALLS_HEAVY
+            elif total_puts_oi > total_calls_oi * 1.1:
+                bias = MMBias.PUTS_HEAVY
+            else:
+                bias = MMBias.NEUTRAL
+            
+            return {
+                "calls_oi": total_calls_oi,
+                "puts_oi": total_puts_oi,
+                "ratio": ratio,
+                "bias": bias,
+                "error": None,
+                "contracts_found": len(all_results),
+                "expiration_used": expiration_date,
+                "debug_sample": debug_sample
+            }
     
-    # Calculate totals using Open Interest
-    total_calls_oi = 0
-    total_puts_oi = 0
-    
-    for opt in all_results:
-        details = opt.get("details", {})
-        day = opt.get("day", {})
-        contract_type = details.get("contract_type", "").lower()
-        
-        # Open Interest is in day.open_interest
-        oi = day.get("open_interest", 0) or 0
-        
-        if contract_type == "call":
-            total_calls_oi += oi
-        elif contract_type == "put":
-            total_puts_oi += oi
-    
-    # Calculate ratio and bias based on OI
-    if total_calls_oi > 0:
-        ratio = round(total_puts_oi / total_calls_oi, 4)
-    else:
-        ratio = 1.0
-    
-    # MM Bias Logic:
-    # Calls > Puts = Retail is bullish = MMs will push DOWN
-    # Puts > Calls = Retail is bearish = MMs will push UP
-    if total_calls_oi > total_puts_oi * 1.1:
-        bias = MMBias.CALLS_HEAVY
-    elif total_puts_oi > total_calls_oi * 1.1:
-        bias = MMBias.PUTS_HEAVY
-    else:
-        bias = MMBias.NEUTRAL
-    
+    # No OI found for any date
     return {
-        "calls_oi": total_calls_oi,
-        "puts_oi": total_puts_oi,
-        "ratio": ratio,
-        "bias": bias,
-        "error": error_msg,
-        "contracts_found": len(all_results),
-        "expiration_used": expiration_date,
+        "calls_oi": 0,
+        "puts_oi": 0,
+        "ratio": 1.0,
+        "bias": MMBias.NEUTRAL,
+        "error": "No OI data found for recent dates",
+        "contracts_found": len(all_results) if all_results else 0,
+        "expiration_used": expiration_date if expiration_date else "",
         "debug_sample": debug_sample
     }
 
