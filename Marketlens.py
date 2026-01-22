@@ -497,7 +497,7 @@ CSS_STYLES = """
     font-family: 'Outfit', sans-serif;
 }
 
-#MainMenu, footer, header, .stDeployButton {display: none !important; visibility: hidden !important;}
+#MainMenu, footer, .stDeployButton {display: none !important; visibility: hidden !important;}
 
 ::-webkit-scrollbar {width: 6px; height: 6px;}
 ::-webkit-scrollbar-track {background: var(--bg-secondary);}
