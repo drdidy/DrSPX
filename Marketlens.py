@@ -275,14 +275,18 @@ def extract_sessions(es_candles, trading_date):
     else:
         df.index = df.index.tz_convert(CT)
     
-    # Session times (CT)
+    # Session times (CT) - UPDATED to include full London
+    # Sydney: 5:00 PM - 8:30 PM CT
+    # Tokyo:  9:00 PM - 1:30 AM CT  
+    # London: 2:00 AM - 5:00 AM CT
+    # Full overnight: 5:00 PM - 8:30 AM CT
     sessions = {
         "sydney": (CT.localize(datetime.combine(overnight_day, time(17, 0))),
                    CT.localize(datetime.combine(overnight_day, time(20, 30)))),
         "tokyo": (CT.localize(datetime.combine(overnight_day, time(21, 0))),
                   CT.localize(datetime.combine(trading_date, time(1, 30)))),
         "london": (CT.localize(datetime.combine(trading_date, time(2, 0))),
-                   CT.localize(datetime.combine(trading_date, time(4, 0)))),
+                   CT.localize(datetime.combine(trading_date, time(5, 0)))),  # 5 AM CT
         "overnight": (CT.localize(datetime.combine(overnight_day, time(17, 0))),
                       CT.localize(datetime.combine(trading_date, time(8, 30))))
     }
@@ -316,47 +320,120 @@ def extract_sessions(es_candles, trading_date):
     return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CHANNEL LOGIC
+# CHANNEL LOGIC - Now includes Sydney, Tokyo, AND London
 # ═══════════════════════════════════════════════════════════════════════════════
-def determine_channel(sydney, tokyo):
+def determine_channel(sydney, tokyo, london=None):
     """
-    ASCENDING:   Tokyo High > Sydney High
-    DESCENDING:  Tokyo Low < Sydney Low
-    EXPANDING:   Both
-    CONTRACTING: Neither
+    Channel is determined by the PROGRESSION of highs/lows across sessions.
+    
+    The KEY insight: Channel type can CHANGE after London!
+    
+    Logic:
+    1. Start with Sydney as baseline
+    2. Tokyo makes higher high OR lower low → initial channel
+    3. London can CONFIRM or REVERSE the channel:
+       - If Sydney-Tokyo was ascending but London makes lower low → DESCENDING
+       - If Sydney-Tokyo was descending but London makes higher high → ASCENDING
+    
+    Pivots are the TRUE high and TRUE low that define the channel:
+    - ASCENDING:  Upper pivot = highest high, Lower pivot = lowest low (both rise)
+    - DESCENDING: Upper pivot = highest high, Lower pivot = lowest low (both fall)
+    
+    Returns: channel_type, reason, upper_pivot, lower_pivot, upper_time, lower_time
     """
     if not sydney or not tokyo:
-        return ChannelType.UNDETERMINED, "Missing data"
+        return ChannelType.UNDETERMINED, "Missing data", None, None, None, None
     
-    higher_high = tokyo["high"] > sydney["high"]
-    lower_low = tokyo["low"] < sydney["low"]
+    # Gather all session highs/lows with times
+    all_highs = [
+        (sydney["high"], sydney.get("high_time"), "Sydney"),
+        (tokyo["high"], tokyo.get("high_time"), "Tokyo")
+    ]
+    all_lows = [
+        (sydney["low"], sydney.get("low_time"), "Sydney"),
+        (tokyo["low"], tokyo.get("low_time"), "Tokyo")
+    ]
     
-    if higher_high and lower_low:
-        return ChannelType.EXPANDING, f"Tokyo expanded both (H:{tokyo['high']}>{sydney['high']}, L:{tokyo['low']}<{sydney['low']})"
-    elif not higher_high and not lower_low:
-        return ChannelType.CONTRACTING, f"Tokyo contracted (H:{tokyo['high']}≤{sydney['high']}, L:{tokyo['low']}≥{sydney['low']})"
-    elif higher_high:
-        return ChannelType.ASCENDING, f"Tokyo High ({tokyo['high']}) > Sydney High ({sydney['high']})"
+    if london:
+        all_highs.append((london["high"], london.get("high_time"), "London"))
+        all_lows.append((london["low"], london.get("low_time"), "London"))
+    
+    # Find TRUE high and TRUE low across all sessions
+    highest = max(all_highs, key=lambda x: x[0])
+    lowest = min(all_lows, key=lambda x: x[0])
+    
+    true_high, high_time, high_session = highest
+    true_low, low_time, low_session = lowest
+    
+    # Determine channel by comparing WHEN high/low occurred
+    # If high came AFTER low → ASCENDING (market trending up)
+    # If low came AFTER high → DESCENDING (market trending down)
+    
+    # Session order: Sydney(1) → Tokyo(2) → London(3)
+    session_order = {"Sydney": 1, "Tokyo": 2, "London": 3}
+    
+    high_order = session_order.get(high_session, 0)
+    low_order = session_order.get(low_session, 0)
+    
+    # Also check if it's expanding or contracting
+    sydney_range = sydney["high"] - sydney["low"]
+    
+    # Calculate overnight range progression
+    tokyo_expanded_high = tokyo["high"] > sydney["high"]
+    tokyo_expanded_low = tokyo["low"] < sydney["low"]
+    
+    london_expanded_high = london["high"] > max(sydney["high"], tokyo["high"]) if london else False
+    london_expanded_low = london["low"] < min(sydney["low"], tokyo["low"]) if london else False
+    
+    # Determine final channel type
+    if london:
+        # With London data - use the full picture
+        both_expanded = (tokyo_expanded_high or london_expanded_high) and (tokyo_expanded_low or london_expanded_low)
+        neither_expanded = not (tokyo_expanded_high or london_expanded_high) and not (tokyo_expanded_low or london_expanded_low)
+        
+        if both_expanded:
+            reason = f"EXPANDING: Range expanded both directions (H:{true_high} from {high_session}, L:{true_low} from {low_session})"
+            return ChannelType.EXPANDING, reason, true_high, true_low, high_time, low_time
+        elif neither_expanded:
+            reason = f"CONTRACTING: All sessions within Sydney range"
+            return ChannelType.CONTRACTING, reason, true_high, true_low, high_time, low_time
+        elif high_order > low_order:
+            # High came later → ASCENDING
+            reason = f"ASCENDING: {high_session} High ({true_high}) came after {low_session} Low ({true_low})"
+            return ChannelType.ASCENDING, reason, true_high, true_low, high_time, low_time
+        else:
+            # Low came later → DESCENDING
+            reason = f"DESCENDING: {low_session} Low ({true_low}) came after {high_session} High ({true_high})"
+            return ChannelType.DESCENDING, reason, true_high, true_low, high_time, low_time
     else:
-        return ChannelType.DESCENDING, f"Tokyo Low ({tokyo['low']}) < Sydney Low ({sydney['low']})"
+        # Without London - original Sydney/Tokyo logic
+        if tokyo_expanded_high and tokyo_expanded_low:
+            return ChannelType.EXPANDING, f"Tokyo expanded both", true_high, true_low, high_time, low_time
+        elif not tokyo_expanded_high and not tokyo_expanded_low:
+            return ChannelType.CONTRACTING, f"Tokyo contracted", true_high, true_low, high_time, low_time
+        elif tokyo_expanded_high:
+            return ChannelType.ASCENDING, f"Tokyo High ({tokyo['high']}) > Sydney High ({sydney['high']})", true_high, true_low, high_time, low_time
+        else:
+            return ChannelType.DESCENDING, f"Tokyo Low ({tokyo['low']}) < Sydney Low ({sydney['low']})", true_high, true_low, high_time, low_time
 
-def calc_channel_levels(overnight, ref_time, channel_type):
-    """Calculate ceiling/floor with 0.48 slope"""
-    if not overnight:
+def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time, channel_type):
+    """Calculate ceiling/floor with 0.48 slope from TRUE pivots"""
+    if upper_pivot is None or lower_pivot is None:
         return None, None
     
-    on_high, on_low = overnight["high"], overnight["low"]
-    blocks_high = blocks_between(overnight.get("high_time"), ref_time)
-    blocks_low = blocks_between(overnight.get("low_time"), ref_time)
+    blocks_high = blocks_between(upper_time, ref_time)
+    blocks_low = blocks_between(lower_time, ref_time)
     
     if channel_type == ChannelType.ASCENDING:
-        ceiling = round(on_high + SLOPE * blocks_high, 2)
-        floor = round(on_low + SLOPE * blocks_low, 2)
+        ceiling = round(upper_pivot + SLOPE * blocks_high, 2)
+        floor = round(lower_pivot + SLOPE * blocks_low, 2)
     elif channel_type == ChannelType.DESCENDING:
-        ceiling = round(on_high - SLOPE * blocks_high, 2)
-        floor = round(on_low - SLOPE * blocks_low, 2)
+        ceiling = round(upper_pivot - SLOPE * blocks_high, 2)
+        floor = round(lower_pivot - SLOPE * blocks_low, 2)
     else:
-        ceiling, floor = on_high, on_low
+        ceiling, floor = upper_pivot, lower_pivot
+    
+    return ceiling, floor
     
     return ceiling, floor
 
@@ -778,11 +855,14 @@ def sidebar():
         override = st.checkbox("📝 Manual Session Override")
         manual = {}
         if override:
+            st.caption("Enter session highs/lows (ES values)")
             c1, c2 = st.columns(2)
             manual["sydney_high"] = c1.number_input("Sydney High", value=6075.0, step=0.5)
             manual["sydney_low"] = c2.number_input("Sydney Low", value=6050.0, step=0.5)
             manual["tokyo_high"] = c1.number_input("Tokyo High", value=6080.0, step=0.5)
             manual["tokyo_low"] = c2.number_input("Tokyo Low", value=6045.0, step=0.5)
+            manual["london_high"] = c1.number_input("London High", value=6078.0, step=0.5)
+            manual["london_low"] = c2.number_input("London Low", value=6040.0, step=0.5)
             manual["current_es"] = st.number_input("Current ES", value=6065.0, step=0.5)
         
         st.divider()
@@ -830,22 +910,25 @@ def main():
         m = inputs["manual"]
         sydney = {"high": m["sydney_high"], "low": m["sydney_low"]}
         tokyo = {"high": m["tokyo_high"], "low": m["tokyo_low"]}
+        london = {"high": m["london_high"], "low": m["london_low"]}
         overnight = {
-            "high": max(m["sydney_high"], m["tokyo_high"]),
-            "low": min(m["sydney_low"], m["tokyo_low"]),
+            "high": max(m["sydney_high"], m["tokyo_high"], m["london_high"]),
+            "low": min(m["sydney_low"], m["tokyo_low"], m["london_low"]),
             "high_time": CT.localize(datetime.combine(inputs["trading_date"] - timedelta(days=1), time(22, 0))),
             "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(2, 0)))
         }
+        sessions = {}  # Empty for override mode
     else:
         sessions = extract_sessions(es_candles, inputs["trading_date"]) or {}
         sydney = sessions.get("sydney")
         tokyo = sessions.get("tokyo")
         overnight = sessions.get("overnight")
+        london = sessions.get("london")
     
-    # Channel
-    channel_type, channel_reason = determine_channel(sydney, tokyo)
+    # Channel - Now includes Sydney, Tokyo, AND London
+    channel_type, channel_reason, upper_pivot, lower_pivot, upper_time, lower_time = determine_channel(sydney, tokyo, london)
     ref_time = CT.localize(datetime.combine(inputs["trading_date"], time(*inputs["ref_time"])))
-    ceiling_es, floor_es = calc_channel_levels(overnight, ref_time, channel_type)
+    ceiling_es, floor_es = calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time, channel_type)
     
     if ceiling_es is None:
         ceiling_es, floor_es = 6080, 6040
@@ -979,26 +1062,55 @@ def main():
     
     # NO TRADE Warning
     if channel_type == ChannelType.CONTRACTING:
-        st.warning("⚠️ **NO TRADE — CONTRACTING CHANNEL**\n\nTokyo contracted inside Sydney. Wait for expansion.")
+        st.warning("⚠️ **NO TRADE — CONTRACTING CHANNEL**\n\nAll sessions contracted. Wait for expansion.")
     
     st.divider()
     
-    # Sessions
-    st.subheader("🌏 Session Data")
+    # Sessions with pivot highlights
+    st.subheader("🌏 Session Data (Sydney → Tokyo → London)")
     c1, c2, c3, c4 = st.columns(4)
     
-    def show_session(col, name, emoji, data):
+    def show_session(col, name, emoji, data, is_high_pivot=False, is_low_pivot=False):
         with col:
             st.markdown(f"**{emoji} {name}**")
             if data:
-                st.write(f"High: **{data['high']}**")
-                st.write(f"Low: **{data['low']}**")
+                high_marker = " ⬆️ UPPER PIVOT" if is_high_pivot else ""
+                low_marker = " ⬇️ LOWER PIVOT" if is_low_pivot else ""
+                st.write(f"High: **{data['high']}**{high_marker}")
+                st.write(f"Low: **{data['low']}**{low_marker}")
             else:
                 st.write("No data")
     
-    show_session(c1, "Sydney", "🦘", sydney)
-    show_session(c2, "Tokyo", "🗼", tokyo)
-    show_session(c3, "London", "🏛️", sessions.get("london") if not inputs["override"] else None)
+    # Determine which session has the pivots
+    def get_pivot_session(pivot_time, sessions_dict):
+        if pivot_time is None:
+            return None
+        for name, data in sessions_dict.items():
+            if data and data.get("high_time") == pivot_time:
+                return name
+            if data and data.get("low_time") == pivot_time:
+                return name
+        return None
+    
+    # Build sessions dict for pivot lookup
+    sessions_lookup = {
+        "sydney": sydney,
+        "tokyo": tokyo,
+        "london": sessions.get("london") if not inputs["override"] else None
+    }
+    
+    # Find which sessions have the pivots
+    sydney_has_high = sydney and upper_pivot == sydney.get("high") if upper_pivot else False
+    sydney_has_low = sydney and lower_pivot == sydney.get("low") if lower_pivot else False
+    tokyo_has_high = tokyo and upper_pivot == tokyo.get("high") if upper_pivot else False
+    tokyo_has_low = tokyo and lower_pivot == tokyo.get("low") if lower_pivot else False
+    london_data = sessions.get("london") if not inputs["override"] else None
+    london_has_high = london_data and upper_pivot == london_data.get("high") if upper_pivot and london_data else False
+    london_has_low = london_data and lower_pivot == london_data.get("low") if lower_pivot and london_data else False
+    
+    show_session(c1, "Sydney", "🦘", sydney, sydney_has_high, sydney_has_low)
+    show_session(c2, "Tokyo", "🗼", tokyo, tokyo_has_high, tokyo_has_low)
+    show_session(c3, "London", "🏛️", london_data, london_has_high, london_has_low)
     show_session(c4, "Overnight", "🌙", overnight)
     
     st.divider()
