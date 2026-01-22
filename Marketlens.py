@@ -6,7 +6,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import requests
 import pytz
 import json
 import os
@@ -22,7 +21,6 @@ st.set_page_config(page_title="SPX Prophet V7", page_icon="🔮", layout="wide")
 
 CT = pytz.timezone("America/Chicago")
 ET = pytz.timezone("America/New_York")
-POLYGON_OPTIONS_KEY = "6ZAi7hZZOUrviEq27ESoH8QP25DMyejQ"
 SLOPE = 0.48
 SAVE_FILE = "spx_prophet_v7_inputs.json"
 
@@ -144,83 +142,100 @@ def fetch_vix():
     return 16.0
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_put_call_ratio(target_date=None):
+def fetch_mm_bias():
     """
-    Fetch Put/Call Open Interest from Polygon
-    Uses TODAY's date for expiration (like working tester)
-    """
-    # Use TODAY's date - this is what the working tester used
-    expiration_date = date.today().isoformat()
+    Combined MM Bias Analysis using:
+    1. VIX Term Structure (VIX vs VIX3M)
+    2. CBOE Put/Call Ratio
     
-    url = "https://api.polygon.io/v3/snapshot/options/SPY"
-    params = {
-        "expiration_date": expiration_date,
-        "limit": 250,
-        "apiKey": POLYGON_OPTIONS_KEY
+    Returns combined score and bias direction
+    """
+    results = {
+        "vix": None, "vix3m": None, "vix_structure": None, "vix_score": 0,
+        "pc_ratio": None, "pc_score": 0,
+        "total_score": 0, "bias": MMBias.NEUTRAL,
+        "components": []
     }
     
-    all_results = []
-    error_msg = None
-    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 1. VIX TERM STRUCTURE
+    # Contango (VIX < VIX3M): Complacency → Calls heavy → MMs push DOWN (-ve score)
+    # Backwardation (VIX > VIX3M): Fear → Puts heavy → MMs push UP (+ve score)
+    # ═══════════════════════════════════════════════════════════════════════════
     try:
-        while True:
-            r = requests.get(url, params=params, timeout=30)
-            if r.status_code != 200:
-                error_msg = f"API status {r.status_code}"
-                break
-            data = r.json()
-            if "results" not in data:
-                error_msg = data.get("message", "No results")
-                break
-            all_results.extend(data["results"])
-            if "next_url" in data:
-                url = data["next_url"]
-                params = {"apiKey": POLYGON_OPTIONS_KEY}
+        vix_data = yf.Ticker("^VIX").history(period="2d")
+        vix3m_data = yf.Ticker("^VIX3M").history(period="2d")
+        
+        if not vix_data.empty and not vix3m_data.empty:
+            vix = round(float(vix_data['Close'].iloc[-1]), 2)
+            vix3m = round(float(vix3m_data['Close'].iloc[-1]), 2)
+            results["vix"] = vix
+            results["vix3m"] = vix3m
+            
+            spread = vix - vix3m
+            spread_pct = (spread / vix3m) * 100 if vix3m > 0 else 0
+            
+            if spread < -1:
+                results["vix_structure"] = "CONTANGO"
+                results["vix_score"] = max(-50, int(spread_pct * 5))
+                results["components"].append(f"VIX Contango ({spread:+.1f}): Calls heavy → MMs push DOWN")
+            elif spread > 1:
+                results["vix_structure"] = "BACKWARDATION"
+                results["vix_score"] = min(50, int(spread_pct * 5))
+                results["components"].append(f"VIX Backwardation ({spread:+.1f}): Puts heavy → MMs push UP")
             else:
-                break
-    except Exception as e:
-        error_msg = str(e)
+                results["vix_structure"] = "FLAT"
+                results["vix_score"] = 0
+                results["components"].append(f"VIX Term Structure FLAT ({spread:+.1f})")
+    except:
+        results["components"].append("VIX data error")
     
-    # Extract OI - exact same as working tester
-    total_calls_oi = 0
-    total_puts_oi = 0
-    debug_sample = all_results[0] if all_results else None
-    
-    for opt in all_results:
-        details = opt.get("details", {})
-        day = opt.get("day", {})
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 2. CBOE PUT/CALL RATIO
+    # Below 0.7: Extreme calls → MMs push DOWN
+    # 0.7-0.85: Calls heavy → MMs push DOWN
+    # 0.85-1.0: Neutral
+    # 1.0-1.2: Puts heavy → MMs push UP
+    # Above 1.2: Extreme puts → MMs push UP
+    # ═══════════════════════════════════════════════════════════════════════════
+    try:
+        pc_data = yf.Ticker("^PCALL").history(period="5d")
         
-        contract_type = details.get("contract_type", "").lower()
-        oi = day.get("open_interest", 0) or 0
-        
-        if contract_type == "call":
-            total_calls_oi += oi
-        elif contract_type == "put":
-            total_puts_oi += oi
+        if not pc_data.empty:
+            pc_ratio = round(float(pc_data['Close'].iloc[-1]), 3)
+            results["pc_ratio"] = pc_ratio
+            
+            if pc_ratio < 0.7:
+                results["pc_score"] = -50
+                results["components"].append(f"P/C Ratio {pc_ratio:.2f} (Extreme Calls): MMs push DOWN")
+            elif pc_ratio < 0.85:
+                results["pc_score"] = -25
+                results["components"].append(f"P/C Ratio {pc_ratio:.2f} (Calls Heavy): MMs push DOWN")
+            elif pc_ratio <= 1.0:
+                results["pc_score"] = 0
+                results["components"].append(f"P/C Ratio {pc_ratio:.2f}: Neutral")
+            elif pc_ratio <= 1.2:
+                results["pc_score"] = 25
+                results["components"].append(f"P/C Ratio {pc_ratio:.2f} (Puts Heavy): MMs push UP")
+            else:
+                results["pc_score"] = 50
+                results["components"].append(f"P/C Ratio {pc_ratio:.2f} (Extreme Puts): MMs push UP")
+    except:
+        results["components"].append("P/C Ratio unavailable")
     
-    # Calculate ratio and bias
-    if total_calls_oi > 0:
-        ratio = round(total_puts_oi / total_calls_oi, 4)
+    # ═══════════════════════════════════════════════════════════════════════════
+    # COMBINED SCORE
+    # ═══════════════════════════════════════════════════════════════════════════
+    results["total_score"] = results["vix_score"] + results["pc_score"]
+    
+    if results["total_score"] <= -25:
+        results["bias"] = MMBias.CALLS_HEAVY
+    elif results["total_score"] >= 25:
+        results["bias"] = MMBias.PUTS_HEAVY
     else:
-        ratio = 1.0
+        results["bias"] = MMBias.NEUTRAL
     
-    if total_calls_oi > total_puts_oi * 1.1:
-        bias = MMBias.CALLS_HEAVY
-    elif total_puts_oi > total_calls_oi * 1.1:
-        bias = MMBias.PUTS_HEAVY
-    else:
-        bias = MMBias.NEUTRAL
-    
-    return {
-        "calls_oi": total_calls_oi,
-        "puts_oi": total_puts_oi,
-        "ratio": ratio,
-        "bias": bias,
-        "error": error_msg if (total_calls_oi == 0 and total_puts_oi == 0) else None,
-        "contracts_found": len(all_results),
-        "expiration_used": expiration_date,
-        "debug_sample": debug_sample
-    }
+    return results
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION EXTRACTION
@@ -448,14 +463,6 @@ def sidebar():
             manual["current_es"] = st.number_input("Current ES", value=6065.0, step=0.5)
         
         st.divider()
-        pc_override = st.checkbox("📊 Manual P/C Override")
-        pc_manual = {}
-        if pc_override:
-            c1, c2 = st.columns(2)
-            pc_manual["calls_oi"] = c1.number_input("Calls OI", value=500000, step=10000)
-            pc_manual["puts_oi"] = c2.number_input("Puts OI", value=400000, step=10000)
-        
-        st.divider()
         ref_time = st.selectbox("⏰ Reference Time", ["9:00 AM", "9:30 AM", "10:00 AM"])
         debug = st.checkbox("🔧 Debug Mode")
         
@@ -470,8 +477,7 @@ def sidebar():
     ref_map = {"9:00 AM": (9, 0), "9:30 AM": (9, 30), "10:00 AM": (10, 0)}
     return {
         "trading_date": trading_date, "offset": offset, "override": override,
-        "manual": manual, "pc_override": pc_override, "pc_manual": pc_manual,
-        "ref_time": ref_map[ref_time], "debug": debug
+        "manual": manual, "ref_time": ref_map[ref_time], "debug": debug
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -490,20 +496,8 @@ def main():
             current_es = fetch_es_current() or 6050
         vix = fetch_vix()
         
-        # P/C data - use manual if enabled, otherwise fetch for trading date
-        if inputs["pc_override"] and inputs["pc_manual"]:
-            calls_oi = inputs["pc_manual"]["calls_oi"]
-            puts_oi = inputs["pc_manual"]["puts_oi"]
-            ratio = round(puts_oi / calls_oi, 4) if calls_oi > 0 else 1.0
-            if calls_oi > puts_oi * 1.1:
-                mm_bias = MMBias.CALLS_HEAVY
-            elif puts_oi > calls_oi * 1.1:
-                mm_bias = MMBias.PUTS_HEAVY
-            else:
-                mm_bias = MMBias.NEUTRAL
-            pc_data = {"calls_oi": calls_oi, "puts_oi": puts_oi, "ratio": ratio, "bias": mm_bias, "error": None}
-        else:
-            pc_data = fetch_put_call_ratio(inputs["trading_date"])
+        # MM Bias - combined VIX Term Structure + P/C Ratio
+        mm_data = fetch_mm_bias()
     
     offset = inputs["offset"]
     current_spx = round(current_es - offset, 2)
@@ -536,8 +530,7 @@ def main():
     ceiling_spx = round(ceiling_es - offset, 2)
     floor_spx = round(floor_es - offset, 2)
     position = get_position(current_es, ceiling_es, floor_es)
-    mm_bias = pc_data["bias"]
-    pc_error = pc_data.get("error")
+    mm_bias = mm_data["bias"]
     
     hours_to_expiry = max(0.5, (CT.localize(datetime.combine(inputs["trading_date"], time(15, 0))) - now).total_seconds() / 3600)
     
@@ -587,30 +580,48 @@ def main():
     
     st.divider()
     
-    # MM Bias
-    st.subheader("🏦 Market Maker Bias")
-    calls_oi = pc_data.get("calls_oi", 0)
-    puts_oi = pc_data.get("puts_oi", 0)
-    ratio = pc_data["ratio"]
-    total = calls_oi + puts_oi
-    contracts_found = pc_data.get("contracts_found", 0)
-    exp_used = pc_data.get("expiration_used", "")
+    # MM Bias - Combined Analysis
+    st.subheader("🏦 Market Maker Bias Analysis")
     
-    # Show error if API failed
-    if pc_error and total == 0:
-        st.warning(f"⚠️ P/C API Error: {pc_error}\n\nUse **Manual P/C Override** in sidebar to enter data manually.")
-    elif contracts_found > 0:
-        st.caption(f"📊 Found {contracts_found:,} contracts for {exp_used} | Using Open Interest for MM bias")
+    # Extract data
+    vix_val = mm_data.get("vix")
+    vix3m_val = mm_data.get("vix3m")
+    vix_structure = mm_data.get("vix_structure", "N/A")
+    vix_score = mm_data.get("vix_score", 0)
+    pc_ratio = mm_data.get("pc_ratio")
+    pc_score = mm_data.get("pc_score", 0)
+    total_score = mm_data.get("total_score", 0)
+    components = mm_data.get("components", [])
     
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Calls OI", f"{calls_oi:,}")
-    c2.metric("Puts OI", f"{puts_oi:,}")
-    c3.metric("P/C Ratio", f"{ratio:.2f}")
+    # Display metrics
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("VIX", f"{vix_val:.2f}" if vix_val else "N/A")
+    c2.metric("VIX3M", f"{vix3m_val:.2f}" if vix3m_val else "N/A")
+    c3.metric("P/C Ratio", f"{pc_ratio:.2f}" if pc_ratio else "N/A")
+    c4.metric("Combined Score", f"{total_score:+d}")
     
-    if total > 0:
-        calls_pct = calls_oi / total
-        st.progress(calls_pct, text=f"CALLS {calls_pct*100:.0f}% | PUTS {(1-calls_pct)*100:.0f}%")
+    # Show component analysis
+    st.markdown("**Component Analysis:**")
+    for comp in components:
+        if "DOWN" in comp:
+            st.markdown(f"🔴 {comp}")
+        elif "UP" in comp:
+            st.markdown(f"🟢 {comp}")
+        else:
+            st.markdown(f"⚪ {comp}")
     
+    # Visual score bar
+    st.markdown("**Bias Score:**")
+    # Normalize score to 0-100 for progress bar (score ranges -100 to +100)
+    normalized = (total_score + 100) / 200  # 0 = full bearish, 1 = full bullish
+    if total_score < 0:
+        st.progress(normalized, text=f"← CALLS HEAVY ({total_score:+d}) | MMs push DOWN")
+    elif total_score > 0:
+        st.progress(normalized, text=f"PUTS HEAVY ({total_score:+d}) → | MMs push UP")
+    else:
+        st.progress(0.5, text=f"NEUTRAL (0)")
+    
+    # Final interpretation
     if mm_bias == MMBias.CALLS_HEAVY:
         st.error("📉 **CALLS HEAVY** — MMs will push price DOWN toward floor")
     elif mm_bias == MMBias.PUTS_HEAVY:
@@ -663,8 +674,16 @@ def main():
                 "sydney": sydney, "tokyo": tokyo, "overnight": overnight,
                 "channel": channel_type.value, "ceiling_es": ceiling_es, "floor_es": floor_es,
                 "position": position.value, "mm_bias": mm_bias.value,
-                "pc_data": {"calls": calls_oi, "puts": puts_oi, "ratio": ratio, "contracts": pc_data.get("contracts_found", 0)},
-                "pc_debug_sample": pc_data.get("debug_sample")
+                "mm_data": {
+                    "vix": mm_data.get("vix"),
+                    "vix3m": mm_data.get("vix3m"),
+                    "vix_structure": mm_data.get("vix_structure"),
+                    "vix_score": mm_data.get("vix_score"),
+                    "pc_ratio": mm_data.get("pc_ratio"),
+                    "pc_score": mm_data.get("pc_score"),
+                    "total_score": mm_data.get("total_score"),
+                    "components": mm_data.get("components")
+                }
             })
 
 if __name__ == "__main__":
