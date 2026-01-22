@@ -141,7 +141,7 @@ def fetch_es_current():
         pass
     return None
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def fetch_es_candles(days=7):
     try:
         es = yf.Ticker("ES=F")
@@ -374,7 +374,7 @@ def extract_sessions(es_candles, trading_date):
         "tokyo": (CT.localize(datetime.combine(overnight_day, time(21, 0))),
                   CT.localize(datetime.combine(trading_date, time(1, 30)))),
         "london": (CT.localize(datetime.combine(trading_date, time(2, 0))),
-                   CT.localize(datetime.combine(trading_date, time(5, 0)))),
+                   CT.localize(datetime.combine(trading_date, time(5, 30)))),  # London ends at 5:30 AM CT
         "overnight": (CT.localize(datetime.combine(overnight_day, time(17, 0))),
                       CT.localize(datetime.combine(trading_date, time(8, 30))))
     }
