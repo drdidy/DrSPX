@@ -1328,29 +1328,34 @@ def main():
     """, unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # QUICK ACTION BAR (opens sidebar)
+    # QUICK ACTION BAR
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown("""
-    <div class="quick-action-bar">
-        <div class="action-hint">◀ Open sidebar for settings & manual overrides</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = st.columns([2, 1, 2])
     with col1:
-        if st.button("⚙️ Settings", use_container_width=True, help="Open sidebar for all settings"):
-            st.sidebar.markdown("")  # This triggers sidebar to open
+        st.markdown("""
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 0;">
+            <span style="font-size:1.2rem;">◀</span>
+            <span style="font-family:'Outfit',sans-serif;font-size:0.85rem;color:rgba(255,255,255,0.6);">
+                Open <strong style="color:#00f5d4;">Sidebar</strong> for Settings & Manual Overrides
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
     with col2:
-        if st.button("📝 Manual Input", use_container_width=True, help="Open sidebar for manual overrides"):
-            st.sidebar.markdown("")
-    with col3:
-        if st.button("🔄 Refresh Data", use_container_width=True, help="Refresh all market data"):
+        if st.button("🔄 Refresh", use_container_width=True, help="Refresh all market data"):
             fetch_es_current.clear()
             fetch_vix_polygon.clear()
             fetch_vix_yahoo.clear()
             fetch_spx_with_ema.clear()
             fetch_retail_positioning.clear()
             st.rerun()
+    with col3:
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 0;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:rgba(255,255,255,0.4);">
+                {now.strftime("%A, %B %d, %Y")}
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # MARKET SNAPSHOT
