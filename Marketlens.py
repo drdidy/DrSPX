@@ -1,6 +1,16 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # SPX PROPHET V7.0 - STRUCTURAL 0DTE TRADING SYSTEM
 # ═══════════════════════════════════════════════════════════════════════════════
+# 
+# A complete system for 0DTE SPX options trading based on overnight structure.
+#
+# CORE CONCEPT:
+# - Overnight sessions (Sydney → Tokyo → London) create a structural channel
+# - Channel type determines market bias and trade direction
+# - MM positioning (via VIX term structure) can override normal setups
+# - Entry at channel boundaries, targets at cone projections
+#
+# ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
 import pandas as pd
@@ -10,38 +20,44 @@ import pytz
 import json
 import os
 import math
-import time as time_module
 from datetime import datetime, date, time, timedelta
 from enum import Enum
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CONFIG
+# CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(page_title="SPX Prophet V7", page_icon="🔮", layout="wide")
 
 CT = pytz.timezone("America/Chicago")
 ET = pytz.timezone("America/New_York")
-SLOPE = 0.48
+SLOPE = 0.48  # Points per 30-minute block
 SAVE_FILE = "spx_prophet_v7_inputs.json"
+
+# Session times (CT)
+SESSION_TIMES = {
+    "sydney": {"start": (17, 0), "end": (20, 30)},   # 5:00 PM - 8:30 PM
+    "tokyo":  {"start": (21, 0), "end": (1, 30)},    # 9:00 PM - 1:30 AM
+    "london": {"start": (2, 0),  "end": (5, 0)},     # 2:00 AM - 5:00 AM
+}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENUMS
 # ═══════════════════════════════════════════════════════════════════════════════
 class ChannelType(Enum):
-    ASCENDING = "ASCENDING"
-    DESCENDING = "DESCENDING"
-    EXPANDING = "EXPANDING"
-    CONTRACTING = "CONTRACTING"
+    ASCENDING = "ASCENDING"       # Tokyo/London made higher high → bullish
+    DESCENDING = "DESCENDING"     # Tokyo/London made lower low → bearish  
+    EXPANDING = "EXPANDING"       # Both higher high AND lower low → volatile
+    CONTRACTING = "CONTRACTING"   # Neither → no directional bias
     UNDETERMINED = "UNDETERMINED"
 
 class Position(Enum):
-    ABOVE = "ABOVE"
-    INSIDE = "INSIDE"
-    BELOW = "BELOW"
+    ABOVE = "ABOVE"    # Price above ceiling
+    INSIDE = "INSIDE"  # Price between ceiling and floor
+    BELOW = "BELOW"    # Price below floor
 
 class MMBias(Enum):
-    CALLS_HEAVY = "CALLS_HEAVY"
-    PUTS_HEAVY = "PUTS_HEAVY"
+    CALLS_HEAVY = "CALLS_HEAVY"  # Retail long calls → MMs push DOWN
+    PUTS_HEAVY = "PUTS_HEAVY"    # Retail long puts → MMs push UP
     NEUTRAL = "NEUTRAL"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -51,6 +67,7 @@ def now_ct():
     return datetime.now(CT)
 
 def blocks_between(start, end):
+    """Calculate number of 30-minute blocks between two times."""
     if start is None or end is None or end <= start:
         return 0
     return max(0, int((end - start).total_seconds() / 1800))
@@ -72,9 +89,10 @@ def load_inputs():
     return {}
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# BLACK-SCHOLES WITH 0DTE IV ADJUSTMENT
+# BLACK-SCHOLES PRICING (Calibrated to real 0DTE market)
 # ═══════════════════════════════════════════════════════════════════════════════
 def norm_cdf(x):
+    """Standard normal cumulative distribution function."""
     a1, a2, a3, a4, a5 = 0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429
     p, sign = 0.3275911, 1 if x >= 0 else -1
     x = abs(x) / math.sqrt(2)
@@ -83,6 +101,7 @@ def norm_cdf(x):
     return 0.5 * (1.0 + sign * y)
 
 def black_scholes(S, K, T, r, sigma, opt_type):
+    """Calculate option price using Black-Scholes model."""
     if T <= 0:
         return max(0, S - K) if opt_type == "CALL" else max(0, K - S)
     d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
@@ -95,18 +114,9 @@ def calc_0dte_iv(vix, spot, strike, hours_to_expiry):
     """
     Calculate realistic 0DTE implied volatility.
     
-    Based on real market observation:
-    - Barchart SPX IV: 32.73% when VIX: ~20 = ratio of ~1.6x
-    - 0DTE tends to run slightly higher due to gamma risk
-    - Morning (more time) = slightly lower IV than afternoon
-    - OTM strikes have higher IV (smile effect)
-    
-    Calibrated to real market data (Jan 2026):
-    - Base multiplier: 1.6-1.8x VIX
-    - Smile adjustment: +0.5% per 10 pts OTM
+    Calibrated to real market: Barchart SPX IV ~32.73% when VIX ~20 (ratio ~1.6x)
     """
-    # Base IV from VIX - calibrated to real market
-    # Morning (6hrs): 1.6x, Midday (4hrs): 1.7x, Afternoon (2hrs): 1.8x
+    # Base multiplier varies by time to expiry
     if hours_to_expiry > 5:
         base_mult = 1.6
     elif hours_to_expiry > 3:
@@ -116,34 +126,14 @@ def calc_0dte_iv(vix, spot, strike, hours_to_expiry):
     
     base_iv = (vix / 100) * base_mult
     
-    # IV Smile adjustment - OTM strikes have higher IV
-    # Approximately +0.5% (0.005) per 10 points OTM
+    # IV Smile: OTM strikes have higher IV (+0.5% per 10 pts OTM)
     distance_otm = abs(spot - strike)
     smile_add = (distance_otm / 10) * 0.005
     
-    # Total IV (floor at 15% minimum for 0DTE)
-    total_iv = max(base_iv + smile_add, 0.15)
-    
-    return total_iv
-
-def get_strike(entry_level, direction):
-    if direction == "CALLS":
-        return int(round((entry_level + 15) / 5) * 5)
-    return int(round((entry_level - 15) / 5) * 5)
-
-def estimate_premium(entry_spx, direction, vix, hours_to_expiry):
-    strike = get_strike(entry_spx, direction)
-    opt_type = "CALL" if direction == "CALLS" else "PUT"
-    iv = calc_0dte_iv(vix, entry_spx, strike, hours_to_expiry)
-    T = max(0.0001, hours_to_expiry / (365 * 24))
-    premium = black_scholes(entry_spx, strike, T, 0.05, iv, opt_type)
-    return max(round(premium, 2), 0.10), strike
+    return max(base_iv + smile_add, 0.15)
 
 def estimate_0dte_premium(spot, strike, hours_to_expiry, vix, opt_type):
-    """
-    Standalone function for 0DTE premium estimation.
-    Used by Decision Engine for contract pricing.
-    """
+    """Estimate 0DTE option premium using calibrated Black-Scholes."""
     iv = calc_0dte_iv(vix, spot, strike, hours_to_expiry)
     T = max(0.0001, hours_to_expiry / (365 * 24))
     premium = black_scholes(spot, strike, T, 0.05, iv, opt_type)
@@ -154,6 +144,7 @@ def estimate_0dte_premium(spot, strike, hours_to_expiry, vix, opt_type):
 # ═══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_es_current():
+    """Fetch current ES futures price."""
     try:
         es = yf.Ticker("ES=F")
         d = es.history(period="2d", interval="5m")
@@ -165,6 +156,7 @@ def fetch_es_current():
 
 @st.cache_data(ttl=120, show_spinner=False)
 def fetch_es_candles(days=7):
+    """Fetch ES futures 30-minute candles."""
     try:
         es = yf.Ticker("ES=F")
         data = es.history(period=f"{days}d", interval="30m")
@@ -176,6 +168,7 @@ def fetch_es_candles(days=7):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_vix():
+    """Fetch current VIX value."""
     try:
         vix = yf.Ticker("^VIX")
         data = vix.history(period="2d")
@@ -183,14 +176,14 @@ def fetch_vix():
             return round(float(data['Close'].iloc[-1]), 2)
     except:
         pass
-    return 16.0
+    return 16.0  # Default
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_mm_bias():
     """
-    MM Bias Analysis using VIX Term Structure
+    Analyze Market Maker positioning via VIX Term Structure.
     
-    VIX vs VIX3M spread indicates market positioning:
+    VIX vs VIX3M spread indicates retail positioning:
     - Contango (VIX < VIX3M): Complacency → Calls heavy → MMs push DOWN
     - Backwardation (VIX > VIX3M): Fear → Puts heavy → MMs push UP
     """
@@ -208,52 +201,49 @@ def fetch_mm_bias():
             vix = round(float(vix_data['Close'].iloc[-1]), 2)
             vix3m = round(float(vix3m_data['Close'].iloc[-1]), 2)
             spread = round(vix - vix3m, 2)
-            spread_pct = (spread / vix3m) * 100 if vix3m > 0 else 0
             
             results["vix"] = vix
             results["vix3m"] = vix3m
             results["spread"] = spread
             
-            # Scoring based on spread magnitude
-            # Deep contango = strong calls heavy
-            # Deep backwardation = strong puts heavy
+            # Score based on spread magnitude
             if spread <= -3:
                 results["vix_structure"] = "DEEP CONTANGO"
                 results["score"] = -100
                 results["bias"] = MMBias.CALLS_HEAVY
-                results["interpretation"] = f"Deep Contango ({spread:+.1f}): Extreme complacency. Retail heavily long calls. MMs will push price DOWN to floor."
+                results["interpretation"] = f"Deep Contango ({spread:+.1f}): Extreme complacency. MMs push DOWN."
             elif spread <= -1.5:
                 results["vix_structure"] = "CONTANGO"
                 results["score"] = -50
                 results["bias"] = MMBias.CALLS_HEAVY
-                results["interpretation"] = f"Contango ({spread:+.1f}): Complacency. Calls heavy positioning. MMs likely push price DOWN."
+                results["interpretation"] = f"Contango ({spread:+.1f}): Calls heavy. MMs likely push DOWN."
             elif spread < 0:
                 results["vix_structure"] = "MILD CONTANGO"
                 results["score"] = -25
                 results["bias"] = MMBias.NEUTRAL
-                results["interpretation"] = f"Mild Contango ({spread:+.1f}): Slight call bias but not extreme. Watch for direction."
+                results["interpretation"] = f"Mild Contango ({spread:+.1f}): Slight call bias."
             elif spread <= 1.5:
                 results["vix_structure"] = "FLAT"
                 results["score"] = 0
                 results["bias"] = MMBias.NEUTRAL
-                results["interpretation"] = f"Flat ({spread:+.1f}): Balanced positioning. No strong MM directional bias."
+                results["interpretation"] = f"Flat ({spread:+.1f}): Balanced positioning."
             elif spread <= 3:
                 results["vix_structure"] = "MILD BACKWARDATION"
                 results["score"] = 25
                 results["bias"] = MMBias.NEUTRAL
-                results["interpretation"] = f"Mild Backwardation ({spread:+.1f}): Slight put bias. Watch for upside."
+                results["interpretation"] = f"Mild Backwardation ({spread:+.1f}): Slight put bias."
             elif spread <= 5:
                 results["vix_structure"] = "BACKWARDATION"
                 results["score"] = 50
                 results["bias"] = MMBias.PUTS_HEAVY
-                results["interpretation"] = f"Backwardation ({spread:+.1f}): Fear rising. Puts heavy. MMs likely push price UP."
+                results["interpretation"] = f"Backwardation ({spread:+.1f}): Puts heavy. MMs push UP."
             else:
                 results["vix_structure"] = "DEEP BACKWARDATION"
                 results["score"] = 100
                 results["bias"] = MMBias.PUTS_HEAVY
-                results["interpretation"] = f"Deep Backwardation ({spread:+.1f}): Extreme fear. Retail heavily long puts. MMs will push price UP to ceiling."
-    except Exception as e:
-        results["interpretation"] = f"VIX data unavailable: {str(e)}"
+                results["interpretation"] = f"Deep Backwardation ({spread:+.1f}): Extreme fear. MMs push UP."
+    except:
+        results["interpretation"] = "Unable to fetch VIX data"
     
     return results
 
@@ -261,12 +251,21 @@ def fetch_mm_bias():
 # SESSION EXTRACTION
 # ═══════════════════════════════════════════════════════════════════════════════
 def extract_sessions(es_candles, trading_date):
+    """
+    Extract session highs/lows from overnight candles.
+    
+    Sessions (CT):
+    - Sydney: 5:00 PM - 8:30 PM (previous day)
+    - Tokyo:  9:00 PM - 1:30 AM
+    - London: 2:00 AM - 5:00 AM
+    - Prior RTH: 8:30 AM - 3:00 PM (previous day)
+    """
     if es_candles is None or es_candles.empty:
         return None
     
     result = {}
     overnight_day = trading_date - timedelta(days=1)
-    if overnight_day.weekday() >= 5:
+    if overnight_day.weekday() >= 5:  # Weekend adjustment
         overnight_day -= timedelta(days=(overnight_day.weekday() - 4))
     
     df = es_candles.copy()
@@ -275,22 +274,19 @@ def extract_sessions(es_candles, trading_date):
     else:
         df.index = df.index.tz_convert(CT)
     
-    # Session times (CT) - UPDATED to include full London
-    # Sydney: 5:00 PM - 8:30 PM CT
-    # Tokyo:  9:00 PM - 1:30 AM CT  
-    # London: 2:00 AM - 5:00 AM CT
-    # Full overnight: 5:00 PM - 8:30 AM CT
+    # Define session windows
     sessions = {
         "sydney": (CT.localize(datetime.combine(overnight_day, time(17, 0))),
                    CT.localize(datetime.combine(overnight_day, time(20, 30)))),
         "tokyo": (CT.localize(datetime.combine(overnight_day, time(21, 0))),
                   CT.localize(datetime.combine(trading_date, time(1, 30)))),
         "london": (CT.localize(datetime.combine(trading_date, time(2, 0))),
-                   CT.localize(datetime.combine(trading_date, time(5, 0)))),  # 5 AM CT
+                   CT.localize(datetime.combine(trading_date, time(5, 0)))),
         "overnight": (CT.localize(datetime.combine(overnight_day, time(17, 0))),
                       CT.localize(datetime.combine(trading_date, time(8, 30))))
     }
     
+    # Extract high/low for each session
     for name, (start, end) in sessions.items():
         mask = (df.index >= start) & (df.index <= end)
         data = df[mask]
@@ -302,7 +298,7 @@ def extract_sessions(es_candles, trading_date):
                 "low_time": data['Low'].idxmin()
             }
     
-    # Prior RTH
+    # Prior RTH session
     prior_day = trading_date - timedelta(days=1)
     if prior_day.weekday() >= 5:
         prior_day -= timedelta(days=(prior_day.weekday() - 4))
@@ -320,31 +316,29 @@ def extract_sessions(es_candles, trading_date):
     return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CHANNEL LOGIC - Now includes Sydney, Tokyo, AND London
+# CHANNEL DETERMINATION
 # ═══════════════════════════════════════════════════════════════════════════════
 def determine_channel(sydney, tokyo, london=None):
     """
-    Channel is determined by the PROGRESSION of highs/lows across sessions.
-    
-    The KEY insight: Channel type can CHANGE after London!
+    Determine channel type from overnight session progression.
     
     Logic:
-    1. Start with Sydney as baseline
-    2. Tokyo makes higher high OR lower low → initial channel
-    3. London can CONFIRM or REVERSE the channel:
-       - If Sydney-Tokyo was ascending but London makes lower low → DESCENDING
-       - If Sydney-Tokyo was descending but London makes higher high → ASCENDING
+    1. Compare Sydney → Tokyo → London highs and lows
+    2. Find TRUE high and TRUE low (which session made them)
+    3. Determine channel by whether range expanded/contracted and direction
     
-    Pivots are the TRUE high and TRUE low that define the channel:
-    - ASCENDING:  Upper pivot = highest high, Lower pivot = lowest low (both rise)
-    - DESCENDING: Upper pivot = highest high, Lower pivot = lowest low (both fall)
+    Channel Types:
+    - ASCENDING:   Later session made higher high (market trending up)
+    - DESCENDING:  Later session made lower low (market trending down)
+    - EXPANDING:   Both higher high AND lower low (volatile)
+    - CONTRACTING: Neither (no directional bias)
     
-    Returns: channel_type, reason, upper_pivot, lower_pivot, upper_time, lower_time
+    Returns: (channel_type, reason, upper_pivot, lower_pivot, upper_time, lower_time)
     """
     if not sydney or not tokyo:
         return ChannelType.UNDETERMINED, "Missing data", None, None, None, None
     
-    # Gather all session highs/lows with times
+    # Gather all session highs/lows
     all_highs = [
         (sydney["high"], sydney.get("high_time"), "Sydney"),
         (tokyo["high"], tokyo.get("high_time"), "Tokyo")
@@ -358,146 +352,106 @@ def determine_channel(sydney, tokyo, london=None):
         all_highs.append((london["high"], london.get("high_time"), "London"))
         all_lows.append((london["low"], london.get("low_time"), "London"))
     
-    # Find TRUE high and TRUE low across all sessions
+    # Find TRUE high and low
     highest = max(all_highs, key=lambda x: x[0])
     lowest = min(all_lows, key=lambda x: x[0])
     
     true_high, high_time, high_session = highest
     true_low, low_time, low_session = lowest
     
-    # Determine channel by comparing WHEN high/low occurred
-    # If high came AFTER low → ASCENDING (market trending up)
-    # If low came AFTER high → DESCENDING (market trending down)
-    
-    # Session order: Sydney(1) → Tokyo(2) → London(3)
-    session_order = {"Sydney": 1, "Tokyo": 2, "London": 3}
-    
-    high_order = session_order.get(high_session, 0)
-    low_order = session_order.get(low_session, 0)
-    
-    # Also check if it's expanding or contracting
-    sydney_range = sydney["high"] - sydney["low"]
-    
-    # Calculate overnight range progression
+    # Check expansion/contraction vs Sydney baseline
     tokyo_expanded_high = tokyo["high"] > sydney["high"]
     tokyo_expanded_low = tokyo["low"] < sydney["low"]
     
     london_expanded_high = london["high"] > max(sydney["high"], tokyo["high"]) if london else False
     london_expanded_low = london["low"] < min(sydney["low"], tokyo["low"]) if london else False
     
-    # Determine final channel type
+    # Determine channel type
     if london:
-        # With London data - use the full picture
-        both_expanded = (tokyo_expanded_high or london_expanded_high) and (tokyo_expanded_low or london_expanded_low)
-        neither_expanded = not (tokyo_expanded_high or london_expanded_high) and not (tokyo_expanded_low or london_expanded_low)
-        
-        if both_expanded:
-            reason = f"EXPANDING: Range expanded both directions (H:{true_high} from {high_session}, L:{true_low} from {low_session})"
-            return ChannelType.EXPANDING, reason, true_high, true_low, high_time, low_time
-        elif neither_expanded:
-            reason = f"CONTRACTING: All sessions within Sydney range"
-            return ChannelType.CONTRACTING, reason, true_high, true_low, high_time, low_time
-        elif high_order > low_order:
-            # High came later → ASCENDING
-            reason = f"ASCENDING: {high_session} High ({true_high}) came after {low_session} Low ({true_low})"
-            return ChannelType.ASCENDING, reason, true_high, true_low, high_time, low_time
-        else:
-            # Low came later → DESCENDING
-            reason = f"DESCENDING: {low_session} Low ({true_low}) came after {high_session} High ({true_high})"
-            return ChannelType.DESCENDING, reason, true_high, true_low, high_time, low_time
+        expanded_high = tokyo_expanded_high or london_expanded_high
+        expanded_low = tokyo_expanded_low or london_expanded_low
     else:
-        # Without London - original Sydney/Tokyo logic
-        if tokyo_expanded_high and tokyo_expanded_low:
-            return ChannelType.EXPANDING, f"Tokyo expanded both", true_high, true_low, high_time, low_time
-        elif not tokyo_expanded_high and not tokyo_expanded_low:
-            return ChannelType.CONTRACTING, f"Tokyo contracted", true_high, true_low, high_time, low_time
-        elif tokyo_expanded_high:
-            return ChannelType.ASCENDING, f"Tokyo High ({tokyo['high']}) > Sydney High ({sydney['high']})", true_high, true_low, high_time, low_time
-        else:
-            return ChannelType.DESCENDING, f"Tokyo Low ({tokyo['low']}) < Sydney Low ({sydney['low']})", true_high, true_low, high_time, low_time
+        expanded_high = tokyo_expanded_high
+        expanded_low = tokyo_expanded_low
+    
+    if expanded_high and expanded_low:
+        reason = f"EXPANDING: Range expanded both ways (H:{true_high} from {high_session}, L:{true_low} from {low_session})"
+        return ChannelType.EXPANDING, reason, true_high, true_low, high_time, low_time
+    elif not expanded_high and not expanded_low:
+        reason = f"CONTRACTING: Range stayed within Sydney"
+        return ChannelType.CONTRACTING, reason, true_high, true_low, high_time, low_time
+    elif expanded_high:
+        reason = f"ASCENDING: {high_session} made higher high ({true_high})"
+        return ChannelType.ASCENDING, reason, true_high, true_low, high_time, low_time
+    else:
+        reason = f"DESCENDING: {low_session} made lower low ({true_low})"
+        return ChannelType.DESCENDING, reason, true_high, true_low, high_time, low_time
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CHANNEL LEVEL CALCULATION
+# ═══════════════════════════════════════════════════════════════════════════════
 def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time, channel_type):
     """
-    Calculate ceiling/floor at reference time (9 AM) with 0.48 slope from TRUE pivots.
+    Calculate ceiling/floor at reference time (9 AM) by projecting slope from pivots.
     
-    The slope is ALWAYS applied to project the line forward to 9 AM.
-    
-    ASCENDING:   Both lines slope UP (+0.48 per 30-min block)
-    DESCENDING:  Both lines slope DOWN (-0.48 per 30-min block)
-    EXPANDING:   Upper slopes UP (+0.48), Lower slopes DOWN (-0.48) - lines diverge
-    CONTRACTING: Upper slopes DOWN (-0.48), Lower slopes UP (+0.48) - lines converge
+    SLOPE RULES (0.48 points per 30-min block):
+    - ASCENDING:   Ceiling +0.48, Floor +0.48 (both rise)
+    - DESCENDING:  Ceiling -0.48, Floor -0.48 (both fall)
+    - EXPANDING:   Ceiling +0.48, Floor -0.48 (diverge)
+    - CONTRACTING: Ceiling -0.48, Floor +0.48 (converge)
     """
     if upper_pivot is None or lower_pivot is None:
         return None, None
     
     # Calculate blocks from pivot times to reference time
-    if upper_time is not None and ref_time is not None:
-        blocks_high = blocks_between(upper_time, ref_time)
-    else:
-        blocks_high = 0
-        
-    if lower_time is not None and ref_time is not None:
-        blocks_low = blocks_between(lower_time, ref_time)
-    else:
-        blocks_low = 0
+    blocks_high = blocks_between(upper_time, ref_time) if upper_time and ref_time else 0
+    blocks_low = blocks_between(lower_time, ref_time) if lower_time and ref_time else 0
     
     if channel_type == ChannelType.ASCENDING:
-        # Both lines rise: +0.48 per block
         ceiling = round(upper_pivot + SLOPE * blocks_high, 2)
         floor = round(lower_pivot + SLOPE * blocks_low, 2)
     elif channel_type == ChannelType.DESCENDING:
-        # Both lines fall: -0.48 per block
         ceiling = round(upper_pivot - SLOPE * blocks_high, 2)
         floor = round(lower_pivot - SLOPE * blocks_low, 2)
     elif channel_type == ChannelType.EXPANDING:
-        # Upper rises, lower falls (lines diverge)
         ceiling = round(upper_pivot + SLOPE * blocks_high, 2)
         floor = round(lower_pivot - SLOPE * blocks_low, 2)
     elif channel_type == ChannelType.CONTRACTING:
-        # Upper falls, lower rises (lines converge)
         ceiling = round(upper_pivot - SLOPE * blocks_high, 2)
         floor = round(lower_pivot + SLOPE * blocks_low, 2)
     else:
-        # Undetermined - no slope
         ceiling, floor = upper_pivot, lower_pivot
     
     return ceiling, floor
 
-
 def calc_prior_rth_cone(prior_high, prior_low, prior_high_time, prior_low_time, ref_time, channel_type):
     """
-    Calculate cone projections from prior RTH session.
+    Calculate profit target cones from prior RTH session.
     
-    The cone projects where price "should" be based on:
-    - Prior RTH High/Low as anchor points
-    - 0.48 slope per 30-min block
-    - Channel direction (ascending/descending)
-    
-    Returns: (upper_cone, lower_cone, blocks_from_high, blocks_from_low)
+    These serve as dynamic profit targets for breakout trades.
     """
     if prior_high is None or prior_low is None:
         return None, None, 0, 0
     
-    blocks_from_high = blocks_between(prior_high_time, ref_time)
-    blocks_from_low = blocks_between(prior_low_time, ref_time)
+    blocks_high = blocks_between(prior_high_time, ref_time) if prior_high_time and ref_time else 0
+    blocks_low = blocks_between(prior_low_time, ref_time) if prior_low_time and ref_time else 0
     
     if channel_type == ChannelType.ASCENDING:
-        # Both lines rise
-        upper_cone = round(prior_high + SLOPE * blocks_from_high, 2)
-        lower_cone = round(prior_low + SLOPE * blocks_from_low, 2)
+        upper_cone = round(prior_high + SLOPE * blocks_high, 2)
+        lower_cone = round(prior_low + SLOPE * blocks_low, 2)
     elif channel_type == ChannelType.DESCENDING:
-        # Both lines fall
-        upper_cone = round(prior_high - SLOPE * blocks_from_high, 2)
-        lower_cone = round(prior_low - SLOPE * blocks_from_low, 2)
+        upper_cone = round(prior_high - SLOPE * blocks_high, 2)
+        lower_cone = round(prior_low - SLOPE * blocks_low, 2)
+    elif channel_type == ChannelType.EXPANDING:
+        upper_cone = round(prior_high + SLOPE * blocks_high, 2)
+        lower_cone = round(prior_low - SLOPE * blocks_low, 2)
     else:
-        # Expanding/Contracting - use static levels
-        upper_cone = prior_high
-        lower_cone = prior_low
+        upper_cone, lower_cone = prior_high, prior_low
     
-    return upper_cone, lower_cone, blocks_from_high, blocks_from_low
-
+    return upper_cone, lower_cone, blocks_high, blocks_low
 
 def get_position(price, ceiling, floor):
+    """Determine current price position relative to channel."""
     if price > ceiling:
         return Position.ABOVE
     elif price < floor:
@@ -505,112 +459,15 @@ def get_position(price, ceiling, floor):
     return Position.INSIDE
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SCENARIO GENERATION
-# ═══════════════════════════════════════════════════════════════════════════════
-def generate_scenarios(channel_type, position, ceiling_es, floor_es, mm_bias, offset, vix, hours_to_expiry, upper_cone_spx=None, lower_cone_spx=None):
-    scenarios = []
-    ceiling_spx = round(ceiling_es - offset, 2)
-    floor_spx = round(floor_es - offset, 2)
-    
-    # Use cone targets if available, otherwise use fixed offset
-    calls_target = upper_cone_spx if upper_cone_spx else ceiling_spx + 25
-    puts_target = lower_cone_spx if lower_cone_spx else floor_spx - 25
-    
-    def add(condition, action, entry_spx, direction, target_spx, trigger, notes, confidence="HIGH"):
-        premium, strike = estimate_premium(entry_spx, direction, vix, hours_to_expiry) if direction != "NO_TRADE" else (0, 0)
-        scenarios.append({
-            "condition": condition, "action": action,
-            "entry_spx": entry_spx, "direction": direction,
-            "target_spx": target_spx, "trigger": trigger,
-            "notes": notes, "confidence": confidence,
-            "premium": premium, "strike": strike
-        })
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # ASCENDING CHANNEL
-    # ═══════════════════════════════════════════════════════════════════════════
-    if channel_type == ChannelType.ASCENDING:
-        if position == Position.ABOVE:
-            # Normal: Drop to ceiling for support
-            add("ABOVE (Normal)", "Drop to ceiling for support", ceiling_spx, "CALLS", calls_target,
-                "Price drops to ceiling and holds (closes above)", f"Ceiling is support in ascending → Target: Upper Cone ({calls_target})")
-            
-            # If CALLS > PUTS: MMs don't want to pay calls, push price DOWN
-            if mm_bias == MMBias.CALLS_HEAVY:
-                add("ABOVE + CALLS HEAVY", "Ceiling becomes resistance, rally back to ceiling", ceiling_spx, "PUTS", floor_spx,
-                    "Price breaks through ceiling, rallies back to ceiling, rejection", "MMs avoid paying calls → Push to floor", "HIGH")
-                add("ABOVE + CALLS HEAVY (Alt)", "Drop all the way to floor", floor_spx, "CALLS", ceiling_spx,
-                    "If price reaches floor, enter CALLS", "Bounce from floor back to ceiling", "MEDIUM")
-        
-        elif position == Position.INSIDE:
-            add("INSIDE → Breaks UP", "Retrace to ceiling", ceiling_spx, "CALLS", calls_target,
-                "30-min close above ceiling, then retrace to ceiling", f"Ceiling becomes support → Target: Upper Cone ({calls_target})")
-            add("INSIDE → Breaks DOWN", "Rally back to floor", floor_spx, "PUTS", puts_target,
-                "30-min close below floor, then rally back to floor", f"Floor becomes resistance → Target: Lower Cone ({puts_target})")
-            add("INSIDE → Touches floor, closes inside", "Floor rejection", floor_spx, "CALLS", ceiling_spx,
-                "Candle touches floor but closes above it", "Floor holding = bullish in ascending")
-        
-        elif position == Position.BELOW:
-            add("BELOW (Normal)", "Rally to floor, close below", floor_spx, "PUTS", puts_target,
-                "Price rallies to floor, touches it, closes below", f"Floor is resistance when below → Target: Lower Cone ({puts_target})")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # DESCENDING CHANNEL
-    # ═══════════════════════════════════════════════════════════════════════════
-    elif channel_type == ChannelType.DESCENDING:
-        if position == Position.BELOW:
-            # Normal: Rally to floor for resistance
-            add("BELOW (Normal)", "Rally to floor for resistance", floor_spx, "PUTS", puts_target,
-                "Price rallies to floor and fails (closes below)", f"Floor is resistance in descending → Target: Lower Cone ({puts_target})")
-            
-            # If PUTS > CALLS: MMs don't want to pay puts, push price UP
-            if mm_bias == MMBias.PUTS_HEAVY:
-                add("BELOW + PUTS HEAVY", "Floor becomes support, drop back to floor", floor_spx, "CALLS", ceiling_spx,
-                    "Price breaks through floor, drops back to floor, holds", "MMs avoid paying puts → Push to ceiling", "HIGH")
-                add("BELOW + PUTS HEAVY (Alt)", "Rally all the way to ceiling", ceiling_spx, "PUTS", floor_spx,
-                    "If price reaches ceiling, enter PUTS", "Fade rally from ceiling", "MEDIUM")
-        
-        elif position == Position.INSIDE:
-            add("INSIDE → Breaks DOWN", "Retrace to floor", floor_spx, "PUTS", puts_target,
-                "30-min close below floor, then retrace to floor", f"Floor becomes resistance → Target: Lower Cone ({puts_target})")
-            add("INSIDE → Breaks UP", "Drop back to ceiling", ceiling_spx, "CALLS", calls_target,
-                "30-min close above ceiling, then drop back to ceiling", f"Ceiling becomes support → Target: Upper Cone ({calls_target})")
-            add("INSIDE → Touches ceiling, closes inside", "Ceiling rejection", ceiling_spx, "PUTS", floor_spx,
-                "Candle touches ceiling but closes below it", "Ceiling holding = bearish in descending")
-        
-        elif position == Position.ABOVE:
-            add("ABOVE (Normal)", "Drop to ceiling, close above", ceiling_spx, "CALLS", calls_target,
-                "Price drops to ceiling, touches it, closes above", f"Ceiling is support when above → Target: Upper Cone ({calls_target})")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # EXPANDING - Trade Boundaries (fade extremes)
-    # ═══════════════════════════════════════════════════════════════════════════
-    elif channel_type == ChannelType.EXPANDING:
-        add("EXPANDING → At Ceiling", "Fade the extreme", ceiling_spx, "PUTS", floor_spx,
-            "Price reaches ceiling → PUTS to floor", "Expanding channel = fade extremes", "MEDIUM")
-        add("EXPANDING → At Floor", "Fade the extreme", floor_spx, "CALLS", ceiling_spx,
-            "Price reaches floor → CALLS to ceiling", "Expanding channel = fade extremes", "MEDIUM")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # CONTRACTING - NO TRADE
-    # ═══════════════════════════════════════════════════════════════════════════
-    elif channel_type == ChannelType.CONTRACTING:
-        add("CONTRACTING", "NO TRADE - Wait for expansion", 0, "NO_TRADE", 0,
-            "Do not trade contracting channels", "Tokyo inside Sydney = no directional bias", "N/A")
-    
-    return scenarios
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # DECISION ENGINE - The Brain
 # ═══════════════════════════════════════════════════════════════════════════════
 def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, mm_bias, 
-                         upper_cone_spx, lower_cone_spx, vix, hours_to_expiry):
+                         upper_cone_spx, lower_cone_spx, vix):
     """
-    Analyzes current market state and returns PRIMARY and ALTERNATE scenarios.
+    Analyze market state and generate PRIMARY and ALTERNATE trade scenarios.
     
-    Returns dict with:
-    - primary: Most likely trade setup
+    Returns:
+    - primary: Most likely trade setup with contract details
     - alternate: Backup if primary fails
     - no_trade: True if should not trade
     - context: Market structure summary
@@ -633,36 +490,30 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, mm_b
         pos_desc = f"BELOW floor by {round(floor_spx - current_spx, 1)} pts"
     else:
         position = Position.INSIDE
-        dist_to_ceil = round(ceiling_spx - current_spx, 1)
-        dist_to_floor = round(current_spx - floor_spx, 1)
-        pos_desc = f"INSIDE channel (↑{dist_to_ceil} to ceiling, ↓{dist_to_floor} to floor)"
+        dist_ceil = round(ceiling_spx - current_spx, 1)
+        dist_floor = round(current_spx - floor_spx, 1)
+        pos_desc = f"INSIDE (↑{dist_ceil} to ceiling, ↓{dist_floor} to floor)"
     
-    # Use cone targets or defaults
+    # Default targets
     calls_target = upper_cone_spx if upper_cone_spx else ceiling_spx + 25
     puts_target = lower_cone_spx if lower_cone_spx else floor_spx - 25
     
-    # Build context
-    result["context"] = f"{channel_type.value} | {pos_desc} | MM Bias: {mm_bias.value}"
+    result["context"] = f"{channel_type.value} | {pos_desc} | MM: {mm_bias.value}"
     
     def make_scenario(name, direction, entry, stop, target, trigger, rationale, confidence):
+        """Build a complete trade scenario with contract details."""
         if direction == "CALLS":
             potential = round(target - entry, 1)
-            # OTM strike ~20 points above entry for calls
-            strike = int(math.ceil((entry + 20) / 5) * 5)
+            strike = int(math.ceil((entry + 20) / 5) * 5)  # 20 pts OTM, round up
             opt_type = "CALL"
         else:
             potential = round(entry - target, 1)
-            # OTM strike ~20 points below entry for puts
-            strike = int(math.floor((entry - 20) / 5) * 5)
+            strike = int(math.floor((entry - 20) / 5) * 5)  # 20 pts OTM, round down
             opt_type = "PUT"
         
-        # Calculate premium at entry (9:00-9:10 AM = ~6 hours to expiry)
+        # Calculate premiums at entry (9 AM, 6 hrs to expiry) and target (11 AM, 4 hrs)
         entry_premium = estimate_0dte_premium(entry, strike, 6.0, vix, opt_type)
-        
-        # Calculate premium at target (~2 hours later, 4 hours left)
         target_premium = estimate_0dte_premium(target, strike, 4.0, vix, opt_type)
-        
-        # Dollar profit per contract (x100 multiplier)
         dollar_profit = round((target_premium - entry_premium) * 100, 0)
         
         return {
@@ -676,7 +527,6 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, mm_b
             "confidence": confidence,
             "potential_pts": potential,
             "rr_ratio": round(potential / 5.0, 1) if potential > 0 else 0,
-            # Contract details
             "strike": strike,
             "contract": f"SPX {strike}{'C' if direction == 'CALLS' else 'P'} 0DTE",
             "entry_premium": entry_premium,
@@ -689,12 +539,12 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, mm_b
     # ═══════════════════════════════════════════════════════════════════════════
     if channel_type == ChannelType.CONTRACTING:
         result["no_trade"] = True
-        result["no_trade_reason"] = "CONTRACTING channel - Tokyo inside Sydney. No directional bias. Wait for expansion."
+        result["no_trade_reason"] = "CONTRACTING channel - No directional bias. Wait for expansion."
         return result
     
     if channel_type == ChannelType.UNDETERMINED:
         result["no_trade"] = True
-        result["no_trade_reason"] = "Cannot determine channel type. Check data inputs."
+        result["no_trade_reason"] = "Cannot determine channel. Check data inputs."
         return result
     
     # ═══════════════════════════════════════════════════════════════════════════
@@ -704,143 +554,103 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, mm_b
         
         if position == Position.ABOVE:
             if mm_bias == MMBias.CALLS_HEAVY:
-                # MMs will push DOWN
                 result["primary"] = make_scenario(
-                    "MM Reversal Play",
-                    "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
-                    "Wait for price to rally back to ceiling → Enter PUTS on rejection (30-min close below ceiling)",
-                    "CALLS HEAVY: MMs avoid paying calls → Will push price DOWN to floor",
-                    "HIGH"
+                    "MM Reversal", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+                    "Price rallies to ceiling → PUTS on rejection",
+                    "CALLS HEAVY: MMs push DOWN to avoid paying calls", "HIGH"
                 )
                 result["alternate"] = make_scenario(
-                    "Continuation if Floor Reached",
-                    "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
-                    "If price drops all the way to floor → Enter CALLS on support (30-min close above floor)",
-                    "Floor bounce back to ceiling",
-                    "MEDIUM"
+                    "Floor Bounce", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+                    "If price reaches floor → CALLS on support",
+                    "Floor bounce back to ceiling", "MEDIUM"
                 )
             else:
-                # Normal - ceiling is support
                 result["primary"] = make_scenario(
-                    "Ceiling Support",
-                    "CALLS", ceiling_spx, ceiling_spx - 5, calls_target,
-                    "Wait for price to drop to ceiling → Enter CALLS on support (30-min close above ceiling)",
-                    "ASCENDING + ABOVE: Ceiling acts as support in uptrend",
-                    "HIGH"
+                    "Ceiling Support", "CALLS", ceiling_spx, ceiling_spx - 5, calls_target,
+                    "Price dips to ceiling → CALLS on support",
+                    "ASCENDING + ABOVE: Ceiling is support", "HIGH"
                 )
                 result["alternate"] = make_scenario(
-                    "Breakdown if Ceiling Fails",
-                    "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
-                    "If ceiling breaks → Wait for rally back to ceiling → Enter PUTS on rejection",
-                    "Failed support becomes resistance",
-                    "MEDIUM"
+                    "Ceiling Fails", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+                    "If ceiling breaks → PUTS on rejection",
+                    "Failed support becomes resistance", "MEDIUM"
                 )
         
         elif position == Position.INSIDE:
-            # Inside channel - primary is floor bounce, alternate is breakout
             result["primary"] = make_scenario(
-                "Floor Rejection",
-                "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
-                "Wait for price to touch floor → Enter CALLS if candle closes ABOVE floor",
-                "ASCENDING + INSIDE: Floor rejection is bullish",
-                "HIGH"
+                "Floor Rejection", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+                "Price touches floor → CALLS if closes above",
+                "ASCENDING: Floor rejection is bullish", "HIGH"
             )
             result["alternate"] = make_scenario(
-                "Ceiling Breakout",
-                "CALLS", ceiling_spx, ceiling_spx - 5, calls_target,
-                "If price breaks above ceiling → Wait for retrace to ceiling → Enter CALLS",
-                "Ceiling becomes support after breakout → Target: Upper Cone",
-                "MEDIUM"
+                "Ceiling Breakout", "CALLS", ceiling_spx, ceiling_spx - 5, calls_target,
+                "If breaks ceiling → CALLS on retrace to ceiling",
+                "Ceiling becomes support → Target: Upper Cone", "MEDIUM"
             )
         
         elif position == Position.BELOW:
-            # Below ascending channel - bearish
             result["primary"] = make_scenario(
-                "Floor Resistance",
-                "PUTS", floor_spx, floor_spx + 5, puts_target,
-                "Wait for price to rally to floor → Enter PUTS on rejection (30-min close below floor)",
-                "ASCENDING + BELOW: Floor is resistance, market showing weakness",
-                "HIGH"
+                "Floor Resistance", "PUTS", floor_spx, floor_spx + 5, puts_target,
+                "Price rallies to floor → PUTS on rejection",
+                "ASCENDING + BELOW: Floor is resistance (bearish)", "HIGH"
             )
             result["alternate"] = make_scenario(
-                "Reclaim Floor",
-                "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
-                "If price reclaims floor (30-min close above) → Enter CALLS",
-                "Back inside channel = bullish",
-                "MEDIUM"
+                "Reclaim Floor", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+                "If reclaims floor → CALLS",
+                "Back inside channel = bullish", "MEDIUM"
             )
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # DESCENDING CHANNEL SCENARIOS
+    # DESCENDING CHANNEL SCENARIOS  
     # ═══════════════════════════════════════════════════════════════════════════
     elif channel_type == ChannelType.DESCENDING:
         
         if position == Position.BELOW:
             if mm_bias == MMBias.PUTS_HEAVY:
-                # MMs will push UP
                 result["primary"] = make_scenario(
-                    "MM Reversal Play",
-                    "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
-                    "Wait for price to drop back to floor → Enter CALLS on support (30-min close above floor)",
-                    "PUTS HEAVY: MMs avoid paying puts → Will push price UP to ceiling",
-                    "HIGH"
+                    "MM Reversal", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+                    "Price drops to floor → CALLS on support",
+                    "PUTS HEAVY: MMs push UP to avoid paying puts", "HIGH"
                 )
                 result["alternate"] = make_scenario(
-                    "Continuation if Ceiling Reached",
-                    "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
-                    "If price rallies all the way to ceiling → Enter PUTS on resistance",
-                    "Fade the rally from ceiling",
-                    "MEDIUM"
+                    "Ceiling Fade", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+                    "If rallies to ceiling → PUTS on resistance",
+                    "Fade the rally", "MEDIUM"
                 )
             else:
-                # Normal - floor is resistance
                 result["primary"] = make_scenario(
-                    "Floor Resistance",
-                    "PUTS", floor_spx, floor_spx + 5, puts_target,
-                    "Wait for price to rally to floor → Enter PUTS on rejection (30-min close below floor)",
-                    "DESCENDING + BELOW: Floor acts as resistance in downtrend",
-                    "HIGH"
+                    "Floor Resistance", "PUTS", floor_spx, floor_spx + 5, puts_target,
+                    "Price rallies to floor → PUTS on rejection",
+                    "DESCENDING + BELOW: Floor is resistance", "HIGH"
                 )
                 result["alternate"] = make_scenario(
-                    "Breakup if Floor Reclaimed",
-                    "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
-                    "If floor reclaimed → Enter CALLS on support",
-                    "Failed resistance becomes support",
-                    "MEDIUM"
+                    "Floor Reclaimed", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+                    "If reclaims floor → CALLS",
+                    "Failed resistance becomes support", "MEDIUM"
                 )
         
         elif position == Position.INSIDE:
-            # Inside channel - primary is ceiling rejection, alternate is breakdown
             result["primary"] = make_scenario(
-                "Ceiling Rejection",
-                "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
-                "Wait for price to touch ceiling → Enter PUTS if candle closes BELOW ceiling",
-                "DESCENDING + INSIDE: Ceiling rejection is bearish",
-                "HIGH"
+                "Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+                "Price touches ceiling → PUTS if closes below",
+                "DESCENDING: Ceiling rejection is bearish", "HIGH"
             )
             result["alternate"] = make_scenario(
-                "Floor Breakdown",
-                "PUTS", floor_spx, floor_spx + 5, puts_target,
-                "If price breaks below floor → Wait for retrace to floor → Enter PUTS",
-                "Floor becomes resistance after breakdown → Target: Lower Cone",
-                "MEDIUM"
+                "Floor Breakdown", "PUTS", floor_spx, floor_spx + 5, puts_target,
+                "If breaks floor → PUTS on retrace to floor",
+                "Floor becomes resistance → Target: Lower Cone", "MEDIUM"
             )
         
         elif position == Position.ABOVE:
-            # Above descending channel - bullish
             result["primary"] = make_scenario(
-                "Ceiling Support",
-                "CALLS", ceiling_spx, ceiling_spx - 5, calls_target,
-                "Wait for price to drop to ceiling → Enter CALLS on support (30-min close above ceiling)",
-                "DESCENDING + ABOVE: Ceiling is support, market showing strength",
-                "HIGH"
+                "Ceiling Support", "CALLS", ceiling_spx, ceiling_spx - 5, calls_target,
+                "Price drops to ceiling → CALLS on support",
+                "DESCENDING + ABOVE: Ceiling is support (bullish)", "HIGH"
             )
             result["alternate"] = make_scenario(
-                "Lose Ceiling",
-                "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
-                "If ceiling breaks (30-min close below) → Enter PUTS",
-                "Back inside channel = bearish",
-                "MEDIUM"
+                "Lose Ceiling", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+                "If ceiling breaks → PUTS",
+                "Back inside channel = bearish", "MEDIUM"
             )
     
     # ═══════════════════════════════════════════════════════════════════════════
@@ -848,18 +658,14 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, mm_b
     # ═══════════════════════════════════════════════════════════════════════════
     elif channel_type == ChannelType.EXPANDING:
         result["primary"] = make_scenario(
-            "Fade Ceiling",
-            "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
-            "If price reaches ceiling → Enter PUTS to fade the extreme",
-            "EXPANDING: Volatile, fade extremes",
-            "MEDIUM"
+            "Fade Ceiling", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+            "Price reaches ceiling → PUTS to fade extreme",
+            "EXPANDING: Volatile, fade extremes", "MEDIUM"
         )
         result["alternate"] = make_scenario(
-            "Fade Floor",
-            "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
-            "If price reaches floor → Enter CALLS to fade the extreme",
-            "EXPANDING: Volatile, fade extremes",
-            "MEDIUM"
+            "Fade Floor", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+            "Price reaches floor → CALLS to fade extreme",
+            "EXPANDING: Volatile, fade extremes", "MEDIUM"
         )
     
     return result
@@ -875,25 +681,24 @@ def sidebar():
         st.divider()
         
         trading_date = st.date_input("📅 Trading Date", value=date.today())
-        offset = st.number_input("⚙️ ES→SPX Offset", value=float(saved.get("offset", 18.0)), step=0.5)
+        offset = st.number_input("⚙️ ES→SPX Offset", value=float(saved.get("offset", 35.5)), step=0.5)
         
         st.divider()
-        override = st.checkbox("📝 Manual Session Override")
+        override = st.checkbox("📝 Manual Override")
         manual = {}
         if override:
-            st.caption("Enter session highs/lows (ES values)")
+            st.caption("Enter ES values:")
             c1, c2 = st.columns(2)
-            manual["sydney_high"] = c1.number_input("Sydney High", value=6075.0, step=0.5)
-            manual["sydney_low"] = c2.number_input("Sydney Low", value=6050.0, step=0.5)
-            manual["tokyo_high"] = c1.number_input("Tokyo High", value=6080.0, step=0.5)
-            manual["tokyo_low"] = c2.number_input("Tokyo Low", value=6045.0, step=0.5)
-            manual["london_high"] = c1.number_input("London High", value=6078.0, step=0.5)
-            manual["london_low"] = c2.number_input("London Low", value=6040.0, step=0.5)
+            manual["sydney_high"] = c1.number_input("Sydney H", value=6075.0, step=0.5)
+            manual["sydney_low"] = c2.number_input("Sydney L", value=6050.0, step=0.5)
+            manual["tokyo_high"] = c1.number_input("Tokyo H", value=6080.0, step=0.5)
+            manual["tokyo_low"] = c2.number_input("Tokyo L", value=6045.0, step=0.5)
+            manual["london_high"] = c1.number_input("London H", value=6078.0, step=0.5)
+            manual["london_low"] = c2.number_input("London L", value=6040.0, step=0.5)
             manual["current_es"] = st.number_input("Current ES", value=6065.0, step=0.5)
         
         st.divider()
         ref_time = st.selectbox("⏰ Reference Time", ["9:00 AM", "9:30 AM", "10:00 AM"])
-        debug = st.checkbox("🔧 Debug Mode")
         
         c1, c2 = st.columns(2)
         if c1.button("💾 Save", use_container_width=True):
@@ -906,7 +711,7 @@ def sidebar():
     ref_map = {"9:00 AM": (9, 0), "9:30 AM": (9, 30), "10:00 AM": (10, 0)}
     return {
         "trading_date": trading_date, "offset": offset, "override": override,
-        "manual": manual, "ref_time": ref_map[ref_time], "debug": debug
+        "manual": manual, "ref_time": ref_map[ref_time]
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -916,43 +721,49 @@ def main():
     inputs = sidebar()
     now = now_ct()
     
-    # Fetch data
-    with st.spinner("Loading..."):
-        es_candles = fetch_es_candles(7)
-        if inputs["override"] and inputs["manual"].get("current_es"):
-            current_es = inputs["manual"]["current_es"]
+    # ═══════════════════════════════════════════════════════════════════════════
+    # DATA LOADING
+    # ═══════════════════════════════════════════════════════════════════════════
+    with st.spinner("Loading market data..."):
+        if inputs["override"]:
+            m = inputs["manual"]
+            current_es = m["current_es"]
+            sydney = {"high": m["sydney_high"], "low": m["sydney_low"],
+                      "high_time": CT.localize(datetime.combine(inputs["trading_date"] - timedelta(days=1), time(18, 0))),
+                      "low_time": CT.localize(datetime.combine(inputs["trading_date"] - timedelta(days=1), time(19, 0)))}
+            tokyo = {"high": m["tokyo_high"], "low": m["tokyo_low"],
+                     "high_time": CT.localize(datetime.combine(inputs["trading_date"] - timedelta(days=1), time(23, 0))),
+                     "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(0, 30)))}
+            london = {"high": m["london_high"], "low": m["london_low"],
+                      "high_time": CT.localize(datetime.combine(inputs["trading_date"], time(3, 0))),
+                      "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(4, 0)))}
+            overnight = {
+                "high": max(m["sydney_high"], m["tokyo_high"], m["london_high"]),
+                "low": min(m["sydney_low"], m["tokyo_low"], m["london_low"])
+            }
+            sessions = {}
+            es_candles = None
         else:
+            es_candles = fetch_es_candles()
             current_es = fetch_es_current() or 6050
-        vix = fetch_vix()
+            sessions = extract_sessions(es_candles, inputs["trading_date"]) or {}
+            sydney = sessions.get("sydney")
+            tokyo = sessions.get("tokyo")
+            london = sessions.get("london")
+            overnight = sessions.get("overnight")
         
-        # MM Bias - combined VIX Term Structure + P/C Ratio
+        vix = fetch_vix()
         mm_data = fetch_mm_bias()
     
     offset = inputs["offset"]
     current_spx = round(current_es - offset, 2)
     
-    # Sessions
-    if inputs["override"]:
-        m = inputs["manual"]
-        sydney = {"high": m["sydney_high"], "low": m["sydney_low"]}
-        tokyo = {"high": m["tokyo_high"], "low": m["tokyo_low"]}
-        london = {"high": m["london_high"], "low": m["london_low"]}
-        overnight = {
-            "high": max(m["sydney_high"], m["tokyo_high"], m["london_high"]),
-            "low": min(m["sydney_low"], m["tokyo_low"], m["london_low"]),
-            "high_time": CT.localize(datetime.combine(inputs["trading_date"] - timedelta(days=1), time(22, 0))),
-            "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(2, 0)))
-        }
-        sessions = {}  # Empty for override mode
-    else:
-        sessions = extract_sessions(es_candles, inputs["trading_date"]) or {}
-        sydney = sessions.get("sydney")
-        tokyo = sessions.get("tokyo")
-        overnight = sessions.get("overnight")
-        london = sessions.get("london")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CHANNEL CALCULATION
+    # ═══════════════════════════════════════════════════════════════════════════
+    channel_type, channel_reason, upper_pivot, lower_pivot, upper_time, lower_time = \
+        determine_channel(sydney, tokyo, london)
     
-    # Channel - Now includes Sydney, Tokyo, AND London
-    channel_type, channel_reason, upper_pivot, lower_pivot, upper_time, lower_time = determine_channel(sydney, tokyo, london)
     ref_time = CT.localize(datetime.combine(inputs["trading_date"], time(*inputs["ref_time"])))
     ceiling_es, floor_es = calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time, channel_type)
     
@@ -964,332 +775,164 @@ def main():
     position = get_position(current_es, ceiling_es, floor_es)
     mm_bias = mm_data["bias"]
     
-    # Prior RTH Cone Projections
-    if not inputs["override"]:
-        sessions = sessions if 'sessions' in dir() else extract_sessions(es_candles, inputs["trading_date"]) or {}
-        prior_high = sessions.get("prior_high")
-        prior_low = sessions.get("prior_low")
-        prior_high_time = sessions.get("prior_high_time")
-        prior_low_time = sessions.get("prior_low_time")
-        prior_close = sessions.get("prior_close")
-        
-        upper_cone_es, lower_cone_es, blocks_from_high, blocks_from_low = calc_prior_rth_cone(
+    # Prior RTH Cone Targets
+    prior_high = sessions.get("prior_high") if sessions else None
+    prior_low = sessions.get("prior_low") if sessions else None
+    prior_high_time = sessions.get("prior_high_time") if sessions else None
+    prior_low_time = sessions.get("prior_low_time") if sessions else None
+    
+    if prior_high:
+        upper_cone_es, lower_cone_es, _, _ = calc_prior_rth_cone(
             prior_high, prior_low, prior_high_time, prior_low_time, ref_time, channel_type
         )
-        if upper_cone_es:
-            upper_cone_spx = round(upper_cone_es - offset, 2)
-            lower_cone_spx = round(lower_cone_es - offset, 2)
-        else:
-            upper_cone_spx = lower_cone_spx = None
-            prior_high = prior_low = prior_close = None
-            blocks_from_high = blocks_from_low = 0
+        upper_cone_spx = round(upper_cone_es - offset, 2) if upper_cone_es else None
+        lower_cone_spx = round(lower_cone_es - offset, 2) if lower_cone_es else None
     else:
-        # Manual override - no prior RTH data
-        prior_high = prior_low = prior_close = None
         upper_cone_spx = lower_cone_spx = None
-        upper_cone_es = lower_cone_es = None
-        blocks_from_high = blocks_from_low = 0
-    
-    hours_to_expiry = max(0.5, (CT.localize(datetime.combine(inputs["trading_date"], time(15, 0))) - now).total_seconds() / 3600)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # DECISION ENGINE - Get trading decision
+    # DECISION ENGINE
     # ═══════════════════════════════════════════════════════════════════════════
     decision = analyze_market_state(
         current_spx, ceiling_spx, floor_spx, channel_type, mm_bias,
-        upper_cone_spx, lower_cone_spx, vix, hours_to_expiry
+        upper_cone_spx, lower_cone_spx, vix
     )
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # UI
+    # UI - HEADER
     # ═══════════════════════════════════════════════════════════════════════════
     st.title("🔮 SPX Prophet V7")
-    st.caption("Three Pillars. One Vision. Total Clarity.")
+    st.caption("Overnight Structure → Channel → Trade Decision")
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # TRADE DECISION - Top Priority Display
+    # UI - TRADE DECISION (Most Important - Top of Page)
     # ═══════════════════════════════════════════════════════════════════════════
-    
     if decision["no_trade"]:
         st.error(f"### 🚫 NO TRADE")
-        st.warning(f"{decision['no_trade_reason']}")
+        st.warning(decision["no_trade_reason"])
     else:
-        # Context bar
         st.info(f"📊 **{decision['context']}**")
         
-        # PRIMARY SCENARIO
-        primary = decision["primary"]
-        if primary:
-            dir_icon = "🟢" if primary["direction"] == "CALLS" else "🔴"
-            
-            st.markdown(f"### {dir_icon} PRIMARY: {primary['name']}")
+        # PRIMARY
+        p = decision["primary"]
+        if p:
+            icon = "🟢" if p["direction"] == "CALLS" else "🔴"
+            st.markdown(f"### {icon} PRIMARY: {p['name']}")
             
             with st.container(border=True):
-                # Contract info - most important
-                st.markdown(f"#### 📋 Contract: `{primary['contract']}`")
+                st.markdown(f"#### 📋 `{p['contract']}`")
                 
-                # Premium and profit row
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Entry Premium", f"${primary['entry_premium']:.2f}", "@ 9:00-9:10 AM")
-                c2.metric("Target Premium", f"${primary['target_premium']:.2f}")
-                c3.metric("Profit/Contract", f"${primary['dollar_profit']:.0f}")
-                c4.metric("R:R", f"{primary['rr_ratio']}:1")
+                c1.metric("Entry Premium", f"${p['entry_premium']:.2f}", "@ 9:00 AM")
+                c2.metric("Target Premium", f"${p['target_premium']:.2f}")
+                c3.metric("Profit/Contract", f"${p['dollar_profit']:.0f}")
+                c4.metric("R:R", f"{p['rr_ratio']}:1")
                 
                 st.divider()
                 
-                # SPX Levels
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("SPX Entry", f"{primary['entry']}")
-                c2.metric("SPX Stop", f"{primary['stop']}")
-                c3.metric("SPX Target", f"{primary['target']}")
-                c4.metric("Move", f"+{primary['potential_pts']} pts")
+                c1.metric("SPX Entry", f"{p['entry']}")
+                c2.metric("SPX Stop", f"{p['stop']}")
+                c3.metric("SPX Target", f"{p['target']}")
+                c4.metric("Potential", f"+{p['potential_pts']} pts")
                 
-                st.markdown(f"**🎯 Trigger:** {primary['trigger']}")
-                st.caption(f"💡 {primary['rationale']} | Confidence: **{primary['confidence']}**")
+                st.markdown(f"**🎯 Trigger:** {p['trigger']}")
+                st.caption(f"💡 {p['rationale']} | Confidence: **{p['confidence']}**")
         
-        # ALTERNATE SCENARIO
-        alternate = decision["alternate"]
-        if alternate:
-            dir_icon = "🟢" if alternate["direction"] == "CALLS" else "🔴"
-            
-            with st.expander(f"↩️ ALTERNATE: {alternate['name']} — `{alternate['contract']}` @ ${alternate['entry_premium']:.2f}"):
-                # Contract info
+        # ALTERNATE (collapsed)
+        a = decision["alternate"]
+        if a:
+            icon = "🟢" if a["direction"] == "CALLS" else "🔴"
+            with st.expander(f"↩️ ALTERNATE: {a['name']} — `{a['contract']}` @ ${a['entry_premium']:.2f}"):
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Entry Premium", f"${alternate['entry_premium']:.2f}")
-                c2.metric("Target Premium", f"${alternate['target_premium']:.2f}")
-                c3.metric("Profit/Contract", f"${alternate['dollar_profit']:.0f}")
-                c4.metric("R:R", f"{alternate['rr_ratio']}:1")
+                c1.metric("Entry", f"${a['entry_premium']:.2f}")
+                c2.metric("Target", f"${a['target_premium']:.2f}")
+                c3.metric("Profit", f"${a['dollar_profit']:.0f}")
+                c4.metric("R:R", f"{a['rr_ratio']}:1")
                 
-                # SPX Levels
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric("SPX Entry", f"{alternate['entry']}")
-                c2.metric("SPX Stop", f"{alternate['stop']}")
-                c3.metric("SPX Target", f"{alternate['target']}")
-                c4.metric("Move", f"+{alternate['potential_pts']} pts")
+                c1.metric("SPX Entry", f"{a['entry']}")
+                c2.metric("Stop", f"{a['stop']}")
+                c3.metric("Target", f"{a['target']}")
+                c4.metric("Move", f"+{a['potential_pts']} pts")
                 
-                st.markdown(f"**🎯 Trigger:** {alternate['trigger']}")
-                st.caption(f"💡 {alternate['rationale']} | Confidence: **{alternate['confidence']}**")
+                st.markdown(f"**🎯 Trigger:** {a['trigger']}")
+                st.caption(f"💡 {a['rationale']}")
     
     st.divider()
     
-    # Channel Banner
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UI - CHANNEL & MARKET DATA
+    # ═══════════════════════════════════════════════════════════════════════════
     colors = {
-        ChannelType.ASCENDING: ("🟢", "green"),
-        ChannelType.DESCENDING: ("🔴", "red"),
-        ChannelType.EXPANDING: ("🟣", "violet"),
-        ChannelType.CONTRACTING: ("🟡", "orange")
+        ChannelType.ASCENDING: "🟢",
+        ChannelType.DESCENDING: "🔴", 
+        ChannelType.EXPANDING: "🟣",
+        ChannelType.CONTRACTING: "🟡"
     }
-    icon, color = colors.get(channel_type, ("⚪", "gray"))
+    icon = colors.get(channel_type, "⚪")
     
     col1, col2, col3 = st.columns([2, 1, 1])
     col1.metric(f"{icon} Channel", channel_type.value, channel_reason)
     col2.metric("SPX", f"{current_spx:,.2f}", f"ES {current_es:,.2f}")
     col3.metric("Position", position.value)
     
-    # NO TRADE Warning
-    if channel_type == ChannelType.CONTRACTING:
-        st.warning("⚠️ **NO TRADE — CONTRACTING CHANNEL**\n\nAll sessions contracted. Wait for expansion.")
-    
     st.divider()
     
-    # Sessions with pivot highlights
-    st.subheader("🌏 Session Data (Sydney → Tokyo → London)")
+    # Sessions
+    st.subheader("🌏 Sessions (Sydney → Tokyo → London)")
     c1, c2, c3, c4 = st.columns(4)
     
-    def show_session(col, name, emoji, data, is_high_pivot=False, is_low_pivot=False):
+    def show_session(col, name, emoji, data, is_upper=False, is_lower=False):
         with col:
             st.markdown(f"**{emoji} {name}**")
             if data:
-                high_marker = " ⬆️ UPPER PIVOT" if is_high_pivot else ""
-                low_marker = " ⬇️ LOWER PIVOT" if is_low_pivot else ""
-                st.write(f"High: **{data['high']}**{high_marker}")
-                st.write(f"Low: **{data['low']}**{low_marker}")
+                h_mark = " ⬆️" if is_upper else ""
+                l_mark = " ⬇️" if is_lower else ""
+                st.write(f"High: **{data['high']}**{h_mark}")
+                st.write(f"Low: **{data['low']}**{l_mark}")
             else:
                 st.write("No data")
     
-    # Determine which session has the pivots
-    def get_pivot_session(pivot_time, sessions_dict):
-        if pivot_time is None:
-            return None
-        for name, data in sessions_dict.items():
-            if data and data.get("high_time") == pivot_time:
-                return name
-            if data and data.get("low_time") == pivot_time:
-                return name
-        return None
+    # Determine which session has pivots
+    syd_upper = sydney and upper_pivot == sydney.get("high") if upper_pivot and sydney else False
+    syd_lower = sydney and lower_pivot == sydney.get("low") if lower_pivot and sydney else False
+    tok_upper = tokyo and upper_pivot == tokyo.get("high") if upper_pivot and tokyo else False
+    tok_lower = tokyo and lower_pivot == tokyo.get("low") if lower_pivot and tokyo else False
+    lon_upper = london and upper_pivot == london.get("high") if upper_pivot and london else False
+    lon_lower = london and lower_pivot == london.get("low") if lower_pivot and london else False
     
-    # Build sessions dict for pivot lookup
-    sessions_lookup = {
-        "sydney": sydney,
-        "tokyo": tokyo,
-        "london": sessions.get("london") if not inputs["override"] else None
-    }
-    
-    # Find which sessions have the pivots
-    sydney_has_high = sydney and upper_pivot == sydney.get("high") if upper_pivot else False
-    sydney_has_low = sydney and lower_pivot == sydney.get("low") if lower_pivot else False
-    tokyo_has_high = tokyo and upper_pivot == tokyo.get("high") if upper_pivot else False
-    tokyo_has_low = tokyo and lower_pivot == tokyo.get("low") if lower_pivot else False
-    london_data = sessions.get("london") if not inputs["override"] else None
-    london_has_high = london_data and upper_pivot == london_data.get("high") if upper_pivot and london_data else False
-    london_has_low = london_data and lower_pivot == london_data.get("low") if lower_pivot and london_data else False
-    
-    show_session(c1, "Sydney", "🦘", sydney, sydney_has_high, sydney_has_low)
-    show_session(c2, "Tokyo", "🗼", tokyo, tokyo_has_high, tokyo_has_low)
-    show_session(c3, "London", "🏛️", london_data, london_has_high, london_has_low)
+    show_session(c1, "Sydney", "🦘", sydney, syd_upper, syd_lower)
+    show_session(c2, "Tokyo", "🗼", tokyo, tok_upper, tok_lower)
+    show_session(c3, "London", "🏛️", london, lon_upper, lon_lower)
     show_session(c4, "Overnight", "🌙", overnight)
     
     st.divider()
     
-    # MM Bias - VIX Term Structure Analysis
-    st.subheader("🏦 Market Maker Bias")
-    
-    # Extract data
-    vix_val = mm_data.get("vix")
-    vix3m_val = mm_data.get("vix3m")
-    spread = mm_data.get("spread")
-    vix_structure = mm_data.get("vix_structure", "N/A")
-    score = mm_data.get("score", 0)
-    interpretation = mm_data.get("interpretation", "")
-    
-    # Display metrics
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("VIX", f"{vix_val:.2f}" if vix_val else "N/A")
-    c2.metric("VIX3M", f"{vix3m_val:.2f}" if vix3m_val else "N/A")
-    c3.metric("Spread", f"{spread:+.2f}" if spread is not None else "N/A")
-    c4.metric("Structure", vix_structure)
-    
-    # Visual score bar
-    normalized = (score + 100) / 200
-    if score < -25:
-        st.progress(normalized, text=f"← CALLS HEAVY ({score:+d}) | MMs push DOWN to FLOOR")
-    elif score > 25:
-        st.progress(normalized, text=f"PUTS HEAVY ({score:+d}) → | MMs push UP to CEILING")
-    else:
-        st.progress(normalized, text=f"NEUTRAL ({score:+d})")
-    
-    # Interpretation
-    if interpretation:
-        if mm_bias == MMBias.CALLS_HEAVY:
-            st.error(f"📉 {interpretation}")
-        elif mm_bias == MMBias.PUTS_HEAVY:
-            st.success(f"📈 {interpretation}")
-        else:
-            st.info(f"⚖️ {interpretation}")
-    
-    st.divider()
-    
     # Channel Levels
-    st.subheader("📊 Channel Levels @ 9:00 AM")
+    st.subheader(f"📊 Channel Levels @ {inputs['ref_time'][0]}:{inputs['ref_time'][1]:02d} AM")
     c1, c2 = st.columns(2)
     c1.metric("🟢 Ceiling", f"{ceiling_spx}", f"ES {ceiling_es}")
     c2.metric("🔴 Floor", f"{floor_spx}", f"ES {floor_es}")
     
     st.divider()
     
-    # Prior RTH Cone Projections
-    st.subheader("📐 Prior RTH Cone Projections")
+    # MM Bias
+    st.subheader("🏦 Market Maker Bias")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("VIX", f"{mm_data.get('vix', 'N/A')}")
+    c2.metric("VIX3M", f"{mm_data.get('vix3m', 'N/A')}")
+    c3.metric("Spread", f"{mm_data.get('spread', 'N/A'):+.2f}" if mm_data.get('spread') else "N/A")
+    c4.metric("Structure", mm_data.get("vix_structure", "N/A"))
     
-    if upper_cone_spx is not None and prior_high is not None:
-        # Show prior RTH data
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Prior RTH High", f"{round(prior_high - offset, 2)}", f"ES {prior_high}")
-        c2.metric("Prior RTH Low", f"{round(prior_low - offset, 2)}", f"ES {prior_low}")
-        if prior_close:
-            c3.metric("Prior Close", f"{round(prior_close - offset, 2)}", f"ES {prior_close}")
-        
-        # Show projected cone levels as PROFIT TARGETS
-        st.markdown("**🎯 Projected Profit Targets @ Reference Time:**")
-        c1, c2 = st.columns(2)
-        c1.metric("🟢 CALLS Target (Upper Cone)", f"{upper_cone_spx}", f"ES {upper_cone_es} | +{blocks_from_high} blocks")
-        c2.metric("🔴 PUTS Target (Lower Cone)", f"{lower_cone_spx}", f"ES {lower_cone_es} | +{blocks_from_low} blocks")
-        
-        # Explain the targets
-        st.markdown("""
-        **How to Use:**
-        - **CALLS**: When price breaks ABOVE ceiling → Target = **Upper Cone** (Prior RTH High projected)
-        - **PUTS**: When price breaks BELOW floor → Target = **Lower Cone** (Prior RTH Low projected)
-        """)
-        
-        # Show potential profit in points
-        calls_potential = round(upper_cone_spx - ceiling_spx, 2)
-        puts_potential = round(floor_spx - lower_cone_spx, 2)
-        
-        c1, c2 = st.columns(2)
-        if calls_potential > 0:
-            c1.success(f"📈 CALLS Potential: +{calls_potential} pts (Ceiling → Upper Cone)")
+    interp = mm_data.get("interpretation", "")
+    if interp:
+        if mm_bias == MMBias.CALLS_HEAVY:
+            st.error(f"📉 {interp}")
+        elif mm_bias == MMBias.PUTS_HEAVY:
+            st.success(f"📈 {interp}")
         else:
-            c1.warning(f"⚠️ Upper Cone below Ceiling ({calls_potential} pts) - Limited upside")
-        
-        if puts_potential > 0:
-            c2.success(f"📉 PUTS Potential: +{puts_potential} pts (Floor → Lower Cone)")
-        else:
-            c2.warning(f"⚠️ Lower Cone above Floor ({puts_potential} pts) - Limited downside")
-        
-        # Current price context
-        st.markdown("**Current Position vs Targets:**")
-        if current_spx > ceiling_spx:
-            pts_to_target = round(upper_cone_spx - current_spx, 2)
-            if pts_to_target > 0:
-                st.info(f"Price ABOVE ceiling → {pts_to_target} pts to CALLS target ({upper_cone_spx})")
-            else:
-                st.warning(f"Price has EXCEEDED upper cone target by {abs(pts_to_target)} pts - Consider taking profits")
-        elif current_spx < floor_spx:
-            pts_to_target = round(current_spx - lower_cone_spx, 2)
-            if pts_to_target > 0:
-                st.info(f"Price BELOW floor → {pts_to_target} pts to PUTS target ({lower_cone_spx})")
-            else:
-                st.warning(f"Price has EXCEEDED lower cone target by {abs(pts_to_target)} pts - Consider taking profits")
-        else:
-            st.info(f"Price INSIDE channel → Wait for breakout to use cone targets")
-    else:
-        st.warning("Prior RTH data not available. Enable historical data or use manual override.")
-    
-    st.divider()
-    
-    # Scenarios
-    if channel_type != ChannelType.CONTRACTING:
-        st.subheader("🎯 Trade Scenarios")
-        scenarios = generate_scenarios(channel_type, position, ceiling_es, floor_es, mm_bias, offset, vix, hours_to_expiry, upper_cone_spx, lower_cone_spx)
-        
-        for s in scenarios:
-            direction = s["direction"]
-            if direction == "CALLS":
-                box = st.container(border=True)
-                box.markdown(f"### 🟢 {s['condition']}")
-            elif direction == "PUTS":
-                box = st.container(border=True)
-                box.markdown(f"### 🔴 {s['condition']}")
-            else:
-                box = st.container(border=True)
-                box.markdown(f"### ⚠️ {s['condition']}")
-            
-            with box:
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Entry", f"{s['entry_spx']}")
-                c2.metric("Strike", f"{s['strike']}")
-                c3.metric("Premium", f"${s['premium']:.2f}")
-                c4.metric("Target", f"{s['target_spx']}")
-                
-                st.markdown(f"**Action:** {s['action']}")
-                st.markdown(f"**Trigger:** {s['trigger']}")
-                st.caption(f"💡 {s['notes']} | Confidence: {s['confidence']}")
-    
-    # Debug
-    if inputs["debug"]:
-        with st.expander("🔧 Debug"):
-            st.json({
-                "sydney": sydney, "tokyo": tokyo, "overnight": overnight,
-                "channel": channel_type.value, "ceiling_es": ceiling_es, "floor_es": floor_es,
-                "position": position.value, "mm_bias": mm_bias.value,
-                "mm_data": {
-                    "vix": mm_data.get("vix"),
-                    "vix3m": mm_data.get("vix3m"),
-                    "spread": mm_data.get("spread"),
-                    "vix_structure": mm_data.get("vix_structure"),
-                    "score": mm_data.get("score")
-                }
-            })
+            st.info(f"⚖️ {interp}")
 
 if __name__ == "__main__":
     main()
