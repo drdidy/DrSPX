@@ -146,13 +146,13 @@ def fetch_mm_bias():
     """
     Combined MM Bias Analysis using:
     1. VIX Term Structure (VIX vs VIX3M)
-    2. CBOE Put/Call Ratio
+    2. VVIX (VIX of VIX) - Volatility of volatility
     
     Returns combined score and bias direction
     """
     results = {
         "vix": None, "vix3m": None, "vix_structure": None, "vix_score": 0,
-        "pc_ratio": None, "pc_score": 0,
+        "vvix": None, "vvix_score": 0,
         "total_score": 0, "bias": MMBias.NEUTRAL,
         "components": []
     }
@@ -191,42 +191,40 @@ def fetch_mm_bias():
         results["components"].append("VIX data error")
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # 2. CBOE PUT/CALL RATIO
-    # Below 0.7: Extreme calls → MMs push DOWN
-    # 0.7-0.85: Calls heavy → MMs push DOWN
-    # 0.85-1.0: Neutral
-    # 1.0-1.2: Puts heavy → MMs push UP
-    # Above 1.2: Extreme puts → MMs push UP
+    # 2. VVIX (VIX of VIX) - Volatility of Volatility
+    # High VVIX (>110): Fear/uncertainty → Puts heavy → MMs push UP (+ve score)
+    # Normal VVIX (90-110): Neutral
+    # Low VVIX (<90): Complacency → Calls heavy → MMs push DOWN (-ve score)
     # ═══════════════════════════════════════════════════════════════════════════
     try:
-        pc_data = yf.Ticker("^PCALL").history(period="5d")
+        vvix_data = yf.Ticker("^VVIX").history(period="5d")
         
-        if not pc_data.empty:
-            pc_ratio = round(float(pc_data['Close'].iloc[-1]), 3)
-            results["pc_ratio"] = pc_ratio
+        if not vvix_data.empty:
+            vvix = round(float(vvix_data['Close'].iloc[-1]), 2)
+            results["vvix"] = vvix
             
-            if pc_ratio < 0.7:
-                results["pc_score"] = -50
-                results["components"].append(f"P/C Ratio {pc_ratio:.2f} (Extreme Calls): MMs push DOWN")
-            elif pc_ratio < 0.85:
-                results["pc_score"] = -25
-                results["components"].append(f"P/C Ratio {pc_ratio:.2f} (Calls Heavy): MMs push DOWN")
-            elif pc_ratio <= 1.0:
-                results["pc_score"] = 0
-                results["components"].append(f"P/C Ratio {pc_ratio:.2f}: Neutral")
-            elif pc_ratio <= 1.2:
-                results["pc_score"] = 25
-                results["components"].append(f"P/C Ratio {pc_ratio:.2f} (Puts Heavy): MMs push UP")
+            if vvix < 85:
+                results["vvix_score"] = -50
+                results["components"].append(f"VVIX {vvix:.0f} (Extreme Low): Complacency → MMs push DOWN")
+            elif vvix < 95:
+                results["vvix_score"] = -25
+                results["components"].append(f"VVIX {vvix:.0f} (Low): Mild complacency → MMs push DOWN")
+            elif vvix <= 110:
+                results["vvix_score"] = 0
+                results["components"].append(f"VVIX {vvix:.0f}: Neutral")
+            elif vvix <= 125:
+                results["vvix_score"] = 25
+                results["components"].append(f"VVIX {vvix:.0f} (Elevated): Fear rising → MMs push UP")
             else:
-                results["pc_score"] = 50
-                results["components"].append(f"P/C Ratio {pc_ratio:.2f} (Extreme Puts): MMs push UP")
+                results["vvix_score"] = 50
+                results["components"].append(f"VVIX {vvix:.0f} (High): Extreme fear → MMs push UP")
     except:
-        results["components"].append("P/C Ratio unavailable")
+        results["components"].append("VVIX data unavailable")
     
     # ═══════════════════════════════════════════════════════════════════════════
     # COMBINED SCORE
     # ═══════════════════════════════════════════════════════════════════════════
-    results["total_score"] = results["vix_score"] + results["pc_score"]
+    results["total_score"] = results["vix_score"] + results["vvix_score"]
     
     if results["total_score"] <= -25:
         results["bias"] = MMBias.CALLS_HEAVY
@@ -588,8 +586,8 @@ def main():
     vix3m_val = mm_data.get("vix3m")
     vix_structure = mm_data.get("vix_structure", "N/A")
     vix_score = mm_data.get("vix_score", 0)
-    pc_ratio = mm_data.get("pc_ratio")
-    pc_score = mm_data.get("pc_score", 0)
+    vvix_val = mm_data.get("vvix")
+    vvix_score = mm_data.get("vvix_score", 0)
     total_score = mm_data.get("total_score", 0)
     components = mm_data.get("components", [])
     
@@ -597,7 +595,7 @@ def main():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("VIX", f"{vix_val:.2f}" if vix_val else "N/A")
     c2.metric("VIX3M", f"{vix3m_val:.2f}" if vix3m_val else "N/A")
-    c3.metric("P/C Ratio", f"{pc_ratio:.2f}" if pc_ratio else "N/A")
+    c3.metric("VVIX", f"{vvix_val:.0f}" if vvix_val else "N/A")
     c4.metric("Combined Score", f"{total_score:+d}")
     
     # Show component analysis
@@ -679,8 +677,8 @@ def main():
                     "vix3m": mm_data.get("vix3m"),
                     "vix_structure": mm_data.get("vix_structure"),
                     "vix_score": mm_data.get("vix_score"),
-                    "pc_ratio": mm_data.get("pc_ratio"),
-                    "pc_score": mm_data.get("pc_score"),
+                    "vvix": mm_data.get("vvix"),
+                    "vvix_score": mm_data.get("vvix_score"),
                     "total_score": mm_data.get("total_score"),
                     "components": mm_data.get("components")
                 }
