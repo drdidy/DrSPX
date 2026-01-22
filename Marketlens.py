@@ -144,10 +144,23 @@ def fetch_vix():
     return 16.0
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_put_call_ratio(expiration_date=None):
-    """Fetch Put/Call OI from Polygon - exact format from working tester"""
-    if expiration_date is None:
-        expiration_date = date.today().isoformat()
+def fetch_put_call_ratio(target_date=None):
+    """
+    Fetch Put/Call Open Interest from Polygon for MM bias
+    For pre-market planning, uses the target trading date's options
+    OI is updated overnight after market close
+    """
+    if target_date is None:
+        target_date = date.today()
+    
+    # For pre-market planning, we want the NEXT trading day's 0DTE options
+    # If it's a weekend, adjust to Monday
+    if target_date.weekday() == 5:  # Saturday
+        target_date = target_date + timedelta(days=2)
+    elif target_date.weekday() == 6:  # Sunday
+        target_date = target_date + timedelta(days=1)
+    
+    expiration_date = target_date.isoformat()
     
     url = "https://api.polygon.io/v3/snapshot/options/SPY"
     params = {
@@ -158,6 +171,7 @@ def fetch_put_call_ratio(expiration_date=None):
     
     all_results = []
     error_msg = None
+    debug_sample = None
     
     try:
         while True:
@@ -170,6 +184,8 @@ def fetch_put_call_ratio(expiration_date=None):
                 error_msg = data.get("message", "No results in response")
                 break
             all_results.extend(data["results"])
+            if debug_sample is None and data["results"]:
+                debug_sample = data["results"][0]
             if "next_url" in data:
                 url = data["next_url"]
                 params = {"apiKey": POLYGON_OPTIONS_KEY}
@@ -178,7 +194,7 @@ def fetch_put_call_ratio(expiration_date=None):
     except Exception as e:
         error_msg = str(e)
     
-    # Calculate totals
+    # Calculate totals using Open Interest
     total_calls_oi = 0
     total_puts_oi = 0
     
@@ -186,6 +202,8 @@ def fetch_put_call_ratio(expiration_date=None):
         details = opt.get("details", {})
         day = opt.get("day", {})
         contract_type = details.get("contract_type", "").lower()
+        
+        # Open Interest is in day.open_interest
         oi = day.get("open_interest", 0) or 0
         
         if contract_type == "call":
@@ -193,12 +211,15 @@ def fetch_put_call_ratio(expiration_date=None):
         elif contract_type == "put":
             total_puts_oi += oi
     
-    # Calculate ratio and bias
+    # Calculate ratio and bias based on OI
     if total_calls_oi > 0:
         ratio = round(total_puts_oi / total_calls_oi, 4)
     else:
         ratio = 1.0
     
+    # MM Bias Logic:
+    # Calls > Puts = Retail is bullish = MMs will push DOWN
+    # Puts > Calls = Retail is bearish = MMs will push UP
     if total_calls_oi > total_puts_oi * 1.1:
         bias = MMBias.CALLS_HEAVY
     elif total_puts_oi > total_calls_oi * 1.1:
@@ -212,7 +233,9 @@ def fetch_put_call_ratio(expiration_date=None):
         "ratio": ratio,
         "bias": bias,
         "error": error_msg,
-        "contracts_found": len(all_results)
+        "contracts_found": len(all_results),
+        "expiration_used": expiration_date,
+        "debug_sample": debug_sample
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -483,7 +506,7 @@ def main():
             current_es = fetch_es_current() or 6050
         vix = fetch_vix()
         
-        # P/C data - use manual if enabled, otherwise fetch
+        # P/C data - use manual if enabled, otherwise fetch for trading date
         if inputs["pc_override"] and inputs["pc_manual"]:
             calls_oi = inputs["pc_manual"]["calls_oi"]
             puts_oi = inputs["pc_manual"]["puts_oi"]
@@ -496,7 +519,7 @@ def main():
                 mm_bias = MMBias.NEUTRAL
             pc_data = {"calls_oi": calls_oi, "puts_oi": puts_oi, "ratio": ratio, "bias": mm_bias, "error": None}
         else:
-            pc_data = fetch_put_call_ratio()
+            pc_data = fetch_put_call_ratio(inputs["trading_date"])
     
     offset = inputs["offset"]
     current_spx = round(current_es - offset, 2)
@@ -582,16 +605,18 @@ def main():
     
     # MM Bias
     st.subheader("🏦 Market Maker Bias")
-    calls_oi, puts_oi = pc_data["calls_oi"], pc_data["puts_oi"]
+    calls_oi = pc_data.get("calls_oi", 0)
+    puts_oi = pc_data.get("puts_oi", 0)
     ratio = pc_data["ratio"]
     total = calls_oi + puts_oi
     contracts_found = pc_data.get("contracts_found", 0)
+    exp_used = pc_data.get("expiration_used", "")
     
     # Show error if API failed
     if pc_error and total == 0:
         st.warning(f"⚠️ P/C API Error: {pc_error}\n\nUse **Manual P/C Override** in sidebar to enter data manually.")
     elif contracts_found > 0:
-        st.caption(f"📊 Found {contracts_found:,} option contracts")
+        st.caption(f"📊 Found {contracts_found:,} contracts for {exp_used} | Using Open Interest for MM bias")
     
     c1, c2, c3 = st.columns(3)
     c1.metric("Calls OI", f"{calls_oi:,}")
@@ -654,7 +679,8 @@ def main():
                 "sydney": sydney, "tokyo": tokyo, "overnight": overnight,
                 "channel": channel_type.value, "ceiling_es": ceiling_es, "floor_es": floor_es,
                 "position": position.value, "mm_bias": mm_bias.value,
-                "pc_data": {"calls": calls_oi, "puts": puts_oi, "ratio": ratio}
+                "pc_data": {"calls": calls_oi, "puts": puts_oi, "ratio": ratio, "contracts": pc_data.get("contracts_found", 0)},
+                "pc_debug_sample": pc_data.get("debug_sample")
             })
 
 if __name__ == "__main__":
