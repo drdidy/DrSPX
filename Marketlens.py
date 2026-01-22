@@ -146,117 +146,79 @@ def fetch_vix():
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_put_call_ratio(target_date=None):
     """
-    Fetch Put/Call Open Interest from Polygon for MM bias
-    OI is updated overnight after market close
-    If target date OI is 0, falls back to most recent available
+    Fetch Put/Call Open Interest from Polygon
+    Uses TODAY's date for expiration (like working tester)
     """
-    if target_date is None:
-        target_date = date.today()
+    # Use TODAY's date - this is what the working tester used
+    expiration_date = date.today().isoformat()
     
-    # Handle weekends
-    if target_date.weekday() == 5:  # Saturday
-        target_date = target_date + timedelta(days=2)
-    elif target_date.weekday() == 6:  # Sunday
-        target_date = target_date + timedelta(days=1)
+    url = "https://api.polygon.io/v3/snapshot/options/SPY"
+    params = {
+        "expiration_date": expiration_date,
+        "limit": 250,
+        "apiKey": POLYGON_OPTIONS_KEY
+    }
     
-    # Try target date first, then today, then yesterday
-    dates_to_try = [
-        target_date,
-        date.today(),
-        date.today() - timedelta(days=1)
-    ]
-    # Remove duplicates while preserving order
-    dates_to_try = list(dict.fromkeys(dates_to_try))
+    all_results = []
+    error_msg = None
     
-    for try_date in dates_to_try:
-        # Skip weekends
-        if try_date.weekday() >= 5:
-            continue
-            
-        expiration_date = try_date.isoformat()
-        
-        url = "https://api.polygon.io/v3/snapshot/options/SPY"
-        params = {
-            "expiration_date": expiration_date,
-            "limit": 250,
-            "apiKey": POLYGON_OPTIONS_KEY
-        }
-        
-        all_results = []
-        error_msg = None
-        debug_sample = None
-        
-        try:
-            while True:
-                r = requests.get(url, params=params, timeout=30)
-                if r.status_code != 200:
-                    error_msg = f"API status {r.status_code}"
-                    break
-                data = r.json()
-                if "results" not in data:
-                    error_msg = data.get("message", "No results")
-                    break
-                all_results.extend(data["results"])
-                if debug_sample is None and data["results"]:
-                    debug_sample = data["results"][0]
-                if "next_url" in data:
-                    url = data["next_url"]
-                    params = {"apiKey": POLYGON_OPTIONS_KEY}
-                else:
-                    break
-        except Exception as e:
-            error_msg = str(e)
-            continue
-        
-        # Calculate totals
-        total_calls_oi = 0
-        total_puts_oi = 0
-        
-        for opt in all_results:
-            details = opt.get("details", {})
-            day = opt.get("day", {})
-            contract_type = details.get("contract_type", "").lower()
-            oi = day.get("open_interest", 0) or 0
-            
-            if contract_type == "call":
-                total_calls_oi += oi
-            elif contract_type == "put":
-                total_puts_oi += oi
-        
-        # If we found OI data, use it
-        if total_calls_oi > 0 or total_puts_oi > 0:
-            if total_calls_oi > 0:
-                ratio = round(total_puts_oi / total_calls_oi, 4)
+    try:
+        while True:
+            r = requests.get(url, params=params, timeout=30)
+            if r.status_code != 200:
+                error_msg = f"API status {r.status_code}"
+                break
+            data = r.json()
+            if "results" not in data:
+                error_msg = data.get("message", "No results")
+                break
+            all_results.extend(data["results"])
+            if "next_url" in data:
+                url = data["next_url"]
+                params = {"apiKey": POLYGON_OPTIONS_KEY}
             else:
-                ratio = 1.0
-            
-            if total_calls_oi > total_puts_oi * 1.1:
-                bias = MMBias.CALLS_HEAVY
-            elif total_puts_oi > total_calls_oi * 1.1:
-                bias = MMBias.PUTS_HEAVY
-            else:
-                bias = MMBias.NEUTRAL
-            
-            return {
-                "calls_oi": total_calls_oi,
-                "puts_oi": total_puts_oi,
-                "ratio": ratio,
-                "bias": bias,
-                "error": None,
-                "contracts_found": len(all_results),
-                "expiration_used": expiration_date,
-                "debug_sample": debug_sample
-            }
+                break
+    except Exception as e:
+        error_msg = str(e)
     
-    # No OI found for any date
+    # Extract OI - exact same as working tester
+    total_calls_oi = 0
+    total_puts_oi = 0
+    debug_sample = all_results[0] if all_results else None
+    
+    for opt in all_results:
+        details = opt.get("details", {})
+        day = opt.get("day", {})
+        
+        contract_type = details.get("contract_type", "").lower()
+        oi = day.get("open_interest", 0) or 0
+        
+        if contract_type == "call":
+            total_calls_oi += oi
+        elif contract_type == "put":
+            total_puts_oi += oi
+    
+    # Calculate ratio and bias
+    if total_calls_oi > 0:
+        ratio = round(total_puts_oi / total_calls_oi, 4)
+    else:
+        ratio = 1.0
+    
+    if total_calls_oi > total_puts_oi * 1.1:
+        bias = MMBias.CALLS_HEAVY
+    elif total_puts_oi > total_calls_oi * 1.1:
+        bias = MMBias.PUTS_HEAVY
+    else:
+        bias = MMBias.NEUTRAL
+    
     return {
-        "calls_oi": 0,
-        "puts_oi": 0,
-        "ratio": 1.0,
-        "bias": MMBias.NEUTRAL,
-        "error": "No OI data found for recent dates",
-        "contracts_found": len(all_results) if all_results else 0,
-        "expiration_used": expiration_date if expiration_date else "",
+        "calls_oi": total_calls_oi,
+        "puts_oi": total_puts_oi,
+        "ratio": ratio,
+        "bias": bias,
+        "error": error_msg if (total_calls_oi == 0 and total_puts_oi == 0) else None,
+        "contracts_found": len(all_results),
+        "expiration_used": expiration_date,
         "debug_sample": debug_sample
     }
 
