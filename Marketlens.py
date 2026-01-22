@@ -145,45 +145,75 @@ def fetch_vix():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_put_call_ratio(expiration_date=None):
-    """Fetch Put/Call OI from Polygon"""
+    """Fetch Put/Call OI from Polygon - exact format from working tester"""
     if expiration_date is None:
         expiration_date = date.today().isoformat()
     
-    url = f"https://api.polygon.io/v3/snapshot/options/SPY"
-    params = {"expiration_date": expiration_date, "limit": 250, "apiKey": POLYGON_OPTIONS_KEY}
+    url = "https://api.polygon.io/v3/snapshot/options/SPY"
+    params = {
+        "expiration_date": expiration_date,
+        "limit": 250,
+        "apiKey": POLYGON_OPTIONS_KEY
+    }
     
-    total_calls, total_puts = 0, 0
+    all_results = []
+    error_msg = None
+    
     try:
         while True:
             r = requests.get(url, params=params, timeout=30)
             if r.status_code != 200:
+                error_msg = f"API status {r.status_code}"
                 break
             data = r.json()
             if "results" not in data:
+                error_msg = data.get("message", "No results in response")
                 break
-            for opt in data["results"]:
-                ct = opt.get("details", {}).get("contract_type", "").lower()
-                oi = opt.get("day", {}).get("open_interest", 0) or 0
-                if ct == "call":
-                    total_calls += oi
-                elif ct == "put":
-                    total_puts += oi
+            all_results.extend(data["results"])
             if "next_url" in data:
                 url = data["next_url"]
                 params = {"apiKey": POLYGON_OPTIONS_KEY}
             else:
                 break
+    except Exception as e:
+        error_msg = str(e)
+    
+    # Calculate totals
+    total_calls_oi = 0
+    total_puts_oi = 0
+    
+    for opt in all_results:
+        details = opt.get("details", {})
+        day = opt.get("day", {})
+        contract_type = details.get("contract_type", "").lower()
+        oi = day.get("open_interest", 0) or 0
         
-        ratio = round(total_puts / total_calls, 4) if total_calls > 0 else 1.0
-        if total_calls > total_puts * 1.1:
-            bias = MMBias.CALLS_HEAVY
-        elif total_puts > total_calls * 1.1:
-            bias = MMBias.PUTS_HEAVY
-        else:
-            bias = MMBias.NEUTRAL
-        return {"calls_oi": total_calls, "puts_oi": total_puts, "ratio": ratio, "bias": bias}
-    except:
-        return {"calls_oi": 0, "puts_oi": 0, "ratio": 1.0, "bias": MMBias.NEUTRAL}
+        if contract_type == "call":
+            total_calls_oi += oi
+        elif contract_type == "put":
+            total_puts_oi += oi
+    
+    # Calculate ratio and bias
+    if total_calls_oi > 0:
+        ratio = round(total_puts_oi / total_calls_oi, 4)
+    else:
+        ratio = 1.0
+    
+    if total_calls_oi > total_puts_oi * 1.1:
+        bias = MMBias.CALLS_HEAVY
+    elif total_puts_oi > total_calls_oi * 1.1:
+        bias = MMBias.PUTS_HEAVY
+    else:
+        bias = MMBias.NEUTRAL
+    
+    return {
+        "calls_oi": total_calls_oi,
+        "puts_oi": total_puts_oi,
+        "ratio": ratio,
+        "bias": bias,
+        "error": error_msg,
+        "contracts_found": len(all_results)
+    }
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION EXTRACTION
@@ -400,7 +430,7 @@ def sidebar():
         offset = st.number_input("⚙️ ES→SPX Offset", value=float(saved.get("offset", 18.0)), step=0.5)
         
         st.divider()
-        override = st.checkbox("📝 Manual Override")
+        override = st.checkbox("📝 Manual Session Override")
         manual = {}
         if override:
             c1, c2 = st.columns(2)
@@ -409,6 +439,14 @@ def sidebar():
             manual["tokyo_high"] = c1.number_input("Tokyo High", value=6080.0, step=0.5)
             manual["tokyo_low"] = c2.number_input("Tokyo Low", value=6045.0, step=0.5)
             manual["current_es"] = st.number_input("Current ES", value=6065.0, step=0.5)
+        
+        st.divider()
+        pc_override = st.checkbox("📊 Manual P/C Override")
+        pc_manual = {}
+        if pc_override:
+            c1, c2 = st.columns(2)
+            pc_manual["calls_oi"] = c1.number_input("Calls OI", value=500000, step=10000)
+            pc_manual["puts_oi"] = c2.number_input("Puts OI", value=400000, step=10000)
         
         st.divider()
         ref_time = st.selectbox("⏰ Reference Time", ["9:00 AM", "9:30 AM", "10:00 AM"])
@@ -425,7 +463,8 @@ def sidebar():
     ref_map = {"9:00 AM": (9, 0), "9:30 AM": (9, 30), "10:00 AM": (10, 0)}
     return {
         "trading_date": trading_date, "offset": offset, "override": override,
-        "manual": manual, "ref_time": ref_map[ref_time], "debug": debug
+        "manual": manual, "pc_override": pc_override, "pc_manual": pc_manual,
+        "ref_time": ref_map[ref_time], "debug": debug
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -443,7 +482,21 @@ def main():
         else:
             current_es = fetch_es_current() or 6050
         vix = fetch_vix()
-        pc_data = fetch_put_call_ratio()
+        
+        # P/C data - use manual if enabled, otherwise fetch
+        if inputs["pc_override"] and inputs["pc_manual"]:
+            calls_oi = inputs["pc_manual"]["calls_oi"]
+            puts_oi = inputs["pc_manual"]["puts_oi"]
+            ratio = round(puts_oi / calls_oi, 4) if calls_oi > 0 else 1.0
+            if calls_oi > puts_oi * 1.1:
+                mm_bias = MMBias.CALLS_HEAVY
+            elif puts_oi > calls_oi * 1.1:
+                mm_bias = MMBias.PUTS_HEAVY
+            else:
+                mm_bias = MMBias.NEUTRAL
+            pc_data = {"calls_oi": calls_oi, "puts_oi": puts_oi, "ratio": ratio, "bias": mm_bias, "error": None}
+        else:
+            pc_data = fetch_put_call_ratio()
     
     offset = inputs["offset"]
     current_spx = round(current_es - offset, 2)
@@ -477,6 +530,7 @@ def main():
     floor_spx = round(floor_es - offset, 2)
     position = get_position(current_es, ceiling_es, floor_es)
     mm_bias = pc_data["bias"]
+    pc_error = pc_data.get("error")
     
     hours_to_expiry = max(0.5, (CT.localize(datetime.combine(inputs["trading_date"], time(15, 0))) - now).total_seconds() / 3600)
     
@@ -531,6 +585,13 @@ def main():
     calls_oi, puts_oi = pc_data["calls_oi"], pc_data["puts_oi"]
     ratio = pc_data["ratio"]
     total = calls_oi + puts_oi
+    contracts_found = pc_data.get("contracts_found", 0)
+    
+    # Show error if API failed
+    if pc_error and total == 0:
+        st.warning(f"⚠️ P/C API Error: {pc_error}\n\nUse **Manual P/C Override** in sidebar to enter data manually.")
+    elif contracts_found > 0:
+        st.caption(f"📊 Found {contracts_found:,} option contracts")
     
     c1, c2, c3 = st.columns(3)
     c1.metric("Calls OI", f"{calls_oi:,}")
