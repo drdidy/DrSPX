@@ -566,7 +566,7 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type,
     result = {
         "no_trade": False,
         "no_trade_reason": None,
-        "confluence": [],  # List of supporting factors
+        "confluence": [],
         "primary": None,
         "alternate": None
     }
@@ -582,35 +582,46 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type,
         position = Position.INSIDE
         pos_desc = f"INSIDE channel"
     
-    # Default targets
-    calls_target = upper_cone_spx if upper_cone_spx else ceiling_spx + 25
-    puts_target = lower_cone_spx if lower_cone_spx else floor_spx - 25
-    
-    def make_scenario(name, direction, entry, stop, target, trigger, rationale, confidence):
+    def make_scenario(name, direction, entry, stop, trigger, rationale, confidence):
+        """Build a complete trade scenario with contract details and % profit targets."""
         if direction == "CALLS":
-            potential = round(target - entry, 1)
-            strike = int(math.ceil((entry + 20) / 5) * 5)
+            strike = int(math.ceil((entry + 20) / 5) * 5)  # 20 pts OTM, round up
             opt_type = "CALL"
         else:
-            potential = round(entry - target, 1)
-            strike = int(math.floor((entry - 20) / 5) * 5)
+            strike = int(math.floor((entry - 20) / 5) * 5)  # 20 pts OTM, round down
             opt_type = "PUT"
         
+        # Calculate entry premium (9 AM, 6 hrs to expiry)
         entry_premium = estimate_0dte_premium(entry, strike, 6.0, vix, opt_type)
-        target_premium = estimate_0dte_premium(target, strike, 4.0, vix, opt_type)
-        dollar_profit = round((target_premium - entry_premium) * 100, 0)
+        
+        # Profit targets based on % gain (realistic for 0DTE)
+        target_50 = round(entry_premium * 1.50, 2)   # 50% profit
+        target_75 = round(entry_premium * 1.75, 2)   # 75% profit
+        target_100 = round(entry_premium * 2.00, 2)  # 100% profit (double)
+        
+        # Dollar profit per contract at each target
+        profit_50 = round((target_50 - entry_premium) * 100, 0)
+        profit_75 = round((target_75 - entry_premium) * 100, 0)
+        profit_100 = round((target_100 - entry_premium) * 100, 0)
         
         return {
-            "name": name, "direction": direction,
-            "entry": entry, "stop": stop, "target": target,
-            "trigger": trigger, "rationale": rationale, "confidence": confidence,
-            "potential_pts": potential,
-            "rr_ratio": round(potential / 5.0, 1) if potential > 0 else 0,
+            "name": name, 
+            "direction": direction,
+            "entry": entry, 
+            "stop": stop,
+            "trigger": trigger, 
+            "rationale": rationale, 
+            "confidence": confidence,
             "strike": strike,
             "contract": f"SPX {strike}{'C' if direction == 'CALLS' else 'P'} 0DTE",
             "entry_premium": entry_premium,
-            "target_premium": target_premium,
-            "dollar_profit": dollar_profit
+            # Profit targets
+            "target_50": target_50,
+            "target_75": target_75,
+            "target_100": target_100,
+            "profit_50": profit_50,
+            "profit_75": profit_75,
+            "profit_100": profit_100
         }
     
     # Check confluence
@@ -656,33 +667,33 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type,
         if position == Position.INSIDE or position == Position.BELOW:
             conf = "HIGH" if len(calls_support) >= 3 else "MEDIUM" if len(calls_support) >= 2 else "LOW"
             result["primary"] = make_scenario(
-                "Floor Bounce", "CALLS", floor_spx, floor_spx - 5, calls_target,
+                "Floor Bounce", "CALLS", floor_spx, floor_spx - 5,
                 "Price touches floor → CALLS on support",
                 f"Confluence: {', '.join(calls_support)}" if calls_support else "ASCENDING structure",
                 conf
             )
             result["alternate"] = make_scenario(
-                "Floor Break", "PUTS", floor_spx, floor_spx + 5, puts_target,
+                "Floor Break", "PUTS", floor_spx, floor_spx + 5,
                 "If floor breaks → PUTS",
                 "Failed support becomes resistance", "LOW"
             )
         else:  # ABOVE
             if mm_bias == Bias.CALLS:  # MMs push down
                 result["primary"] = make_scenario(
-                    "MM Reversal", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+                    "MM Reversal", "PUTS", ceiling_spx, ceiling_spx + 5,
                     "Price at ceiling → PUTS (MM pushing down)",
                     f"Confluence: {', '.join(puts_support)}" if puts_support else "MM pressure",
                     "HIGH"
                 )
             else:
                 result["primary"] = make_scenario(
-                    "Ceiling Support", "CALLS", ceiling_spx, ceiling_spx - 5, calls_target,
+                    "Ceiling Support", "CALLS", ceiling_spx, ceiling_spx - 5,
                     "Price pulls back to ceiling → CALLS on support",
                     f"Confluence: {', '.join(calls_support)}" if calls_support else "Breakout continuation",
                     "MEDIUM"
                 )
             result["alternate"] = make_scenario(
-                "Ceiling Fails", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+                "Ceiling Fails", "PUTS", ceiling_spx, ceiling_spx + 5,
                 "If ceiling breaks down → PUTS", "Failed support", "LOW"
             )
     
@@ -690,45 +701,45 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type,
         if position == Position.INSIDE or position == Position.ABOVE:
             conf = "HIGH" if len(puts_support) >= 3 else "MEDIUM" if len(puts_support) >= 2 else "LOW"
             result["primary"] = make_scenario(
-                "Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, puts_target,
+                "Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5,
                 "Price touches ceiling → PUTS on resistance",
                 f"Confluence: {', '.join(puts_support)}" if puts_support else "DESCENDING structure",
                 conf
             )
             result["alternate"] = make_scenario(
-                "Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5, calls_target,
+                "Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5,
                 "If ceiling breaks up → CALLS",
                 "Failed resistance becomes support", "LOW"
             )
         else:  # BELOW
             if mm_bias == Bias.PUTS:  # MMs push up
                 result["primary"] = make_scenario(
-                    "MM Reversal", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+                    "MM Reversal", "CALLS", floor_spx, floor_spx - 5,
                     "Price at floor → CALLS (MM pushing up)",
                     f"Confluence: {', '.join(calls_support)}" if calls_support else "MM pressure",
                     "HIGH"
                 )
             else:
                 result["primary"] = make_scenario(
-                    "Floor Resistance", "PUTS", floor_spx, floor_spx + 5, puts_target,
+                    "Floor Resistance", "PUTS", floor_spx, floor_spx + 5,
                     "Price rallies to floor → PUTS on resistance",
                     f"Confluence: {', '.join(puts_support)}" if puts_support else "Breakdown continuation",
                     "MEDIUM"
                 )
             result["alternate"] = make_scenario(
-                "Floor Reclaim", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+                "Floor Reclaim", "CALLS", floor_spx, floor_spx - 5,
                 "If reclaims floor → CALLS", "Back inside channel", "LOW"
             )
     
     elif channel_type == ChannelType.EXPANDING:
         # Fade extremes
         result["primary"] = make_scenario(
-            "Fade Ceiling", "PUTS", ceiling_spx, ceiling_spx + 5, floor_spx,
+            "Fade Ceiling", "PUTS", ceiling_spx, ceiling_spx + 5,
             "Price at ceiling → PUTS to fade",
             "EXPANDING: Fade extremes", "MEDIUM"
         )
         result["alternate"] = make_scenario(
-            "Fade Floor", "CALLS", floor_spx, floor_spx - 5, ceiling_spx,
+            "Fade Floor", "CALLS", floor_spx, floor_spx - 5,
             "Price at floor → CALLS to fade",
             "EXPANDING: Fade extremes", "MEDIUM"
         )
@@ -902,30 +913,31 @@ def main():
             with st.container(border=True):
                 st.markdown(f"#### 📋 `{p['contract']}`")
                 
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Entry", f"${p['entry_premium']:.2f}")
-                c2.metric("Target", f"${p['target_premium']:.2f}")
-                c3.metric("Profit", f"${p['dollar_profit']:.0f}")
-                c4.metric("R:R", f"{p['rr_ratio']}:1")
+                # Entry & Stop
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Entry Premium", f"${p['entry_premium']:.2f}")
+                c2.metric("SPX Entry", f"{p['entry']}")
+                c3.metric("SPX Stop", f"{p['stop']}")
                 
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("SPX Entry", f"{p['entry']}")
-                c2.metric("Stop", f"{p['stop']}")
-                c3.metric("Target", f"{p['target']}")
-                c4.metric("Move", f"+{p['potential_pts']} pts")
+                # Profit Targets Table
+                st.markdown("**🎯 Profit Targets:**")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("50% Profit", f"${p['target_50']:.2f}", f"+${p['profit_50']:.0f}")
+                c2.metric("75% Profit", f"${p['target_75']:.2f}", f"+${p['profit_75']:.0f}")
+                c3.metric("100% Profit", f"${p['target_100']:.2f}", f"+${p['profit_100']:.0f}")
                 
-                st.markdown(f"**🎯 {p['trigger']}**")
+                st.markdown(f"**📍 Trigger:** {p['trigger']}")
                 st.caption(p['rationale'])
         
         # ALTERNATE
         a = decision["alternate"]
         if a:
-            with st.expander(f"↩️ ALTERNATE: {a['name']} — `{a['contract']}`"):
+            with st.expander(f"↩️ ALTERNATE: {a['name']} — `{a['contract']}` @ ${a['entry_premium']:.2f}"):
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Entry", f"${a['entry_premium']:.2f}")
-                c2.metric("Target", f"${a['target_premium']:.2f}")
-                c3.metric("Profit", f"${a['dollar_profit']:.0f}")
-                st.markdown(f"**🎯 {a['trigger']}**")
+                c1.metric("50%", f"${a['target_50']:.2f}", f"+${a['profit_50']:.0f}")
+                c2.metric("75%", f"${a['target_75']:.2f}", f"+${a['profit_75']:.0f}")
+                c3.metric("100%", f"${a['target_100']:.2f}", f"+${a['profit_100']:.0f}")
+                st.markdown(f"**📍 {a['trigger']}**")
     
     st.divider()
     
