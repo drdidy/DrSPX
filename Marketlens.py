@@ -154,21 +154,23 @@ def fetch_es_candles(days=7):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_spx_with_ema():
+    """Fetch SPX with EMAs based on 30-minute chart."""
     result = {
         "price": None, "ema_200": None, "ema_8": None, "ema_21": None,
         "above_200": None, "ema_cross": None, "ema_bias": Bias.NEUTRAL
     }
     try:
         spx = yf.Ticker("^GSPC")
-        daily = spx.history(period="1y", interval="1d")
-        if daily is not None and not daily.empty and len(daily) > 200:
-            result["price"] = round(float(daily['Close'].iloc[-1]), 2)
-            daily['EMA_200'] = daily['Close'].ewm(span=200, adjust=False).mean()
-            result["ema_200"] = round(float(daily['EMA_200'].iloc[-1]), 2)
-            daily['EMA_8'] = daily['Close'].ewm(span=8, adjust=False).mean()
-            daily['EMA_21'] = daily['Close'].ewm(span=21, adjust=False).mean()
-            result["ema_8"] = round(float(daily['EMA_8'].iloc[-1]), 2)
-            result["ema_21"] = round(float(daily['EMA_21'].iloc[-1]), 2)
+        # Use 30-minute chart - need ~15 days for 200 periods (200 * 30min = 100 hours = ~15 trading days)
+        data = spx.history(period="1mo", interval="30m")
+        if data is not None and not data.empty and len(data) > 200:
+            result["price"] = round(float(data['Close'].iloc[-1]), 2)
+            data['EMA_200'] = data['Close'].ewm(span=200, adjust=False).mean()
+            result["ema_200"] = round(float(data['EMA_200'].iloc[-1]), 2)
+            data['EMA_8'] = data['Close'].ewm(span=8, adjust=False).mean()
+            data['EMA_21'] = data['Close'].ewm(span=21, adjust=False).mean()
+            result["ema_8"] = round(float(data['EMA_8'].iloc[-1]), 2)
+            result["ema_21"] = round(float(data['EMA_21'].iloc[-1]), 2)
             result["above_200"] = result["price"] > result["ema_200"]
             result["ema_cross"] = "BULLISH" if result["ema_8"] > result["ema_21"] else "BEARISH"
             if result["above_200"] and result["ema_cross"] == "BULLISH":
