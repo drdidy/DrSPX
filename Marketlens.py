@@ -153,32 +153,47 @@ def fetch_es_candles(days=7):
     return None
 
 @st.cache_data(ttl=60, show_spinner=False)
-def fetch_spx_with_ema():
-    """Fetch SPX with EMAs based on 30-minute chart."""
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_es_with_ema():
+    """Fetch ES futures with EMAs based on 30-minute chart from Polygon."""
     result = {
         "price": None, "ema_200": None, "ema_8": None, "ema_21": None,
         "above_200": None, "ema_cross": None, "ema_bias": Bias.NEUTRAL
     }
     try:
-        spx = yf.Ticker("^GSPC")
-        # Use 30-minute chart - need ~15 days for 200 periods (200 * 30min = 100 hours = ~15 trading days)
-        data = spx.history(period="1mo", interval="30m")
-        if data is not None and not data.empty and len(data) > 200:
-            result["price"] = round(float(data['Close'].iloc[-1]), 2)
-            data['EMA_200'] = data['Close'].ewm(span=200, adjust=False).mean()
-            result["ema_200"] = round(float(data['EMA_200'].iloc[-1]), 2)
-            data['EMA_8'] = data['Close'].ewm(span=8, adjust=False).mean()
-            data['EMA_21'] = data['Close'].ewm(span=21, adjust=False).mean()
-            result["ema_8"] = round(float(data['EMA_8'].iloc[-1]), 2)
-            result["ema_21"] = round(float(data['EMA_21'].iloc[-1]), 2)
-            result["above_200"] = result["price"] > result["ema_200"]
-            result["ema_cross"] = "BULLISH" if result["ema_8"] > result["ema_21"] else "BEARISH"
-            if result["above_200"] and result["ema_cross"] == "BULLISH":
-                result["ema_bias"] = Bias.CALLS
-            elif not result["above_200"] and result["ema_cross"] == "BEARISH":
-                result["ema_bias"] = Bias.PUTS
-            else:
-                result["ema_bias"] = Bias.NEUTRAL
+        # Fetch 30-minute candles for ES futures - need ~15 trading days for 200 periods
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=25)).strftime("%Y-%m-%d")
+        
+        url = f"{POLYGON_BASE_URL}/v2/aggs/ticker/C:ESH25/range/30/minute/{start_date}/{end_date}"
+        params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": POLYGON_API_KEY}
+        response = requests.get(url, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("results") and len(data["results"]) > 200:
+                df = pd.DataFrame(data["results"])
+                df['datetime'] = pd.to_datetime(df['t'], unit='ms', utc=True).dt.tz_convert(CT)
+                df = df.sort_values('datetime')
+                
+                # Calculate EMAs on 30-minute closes
+                df['EMA_8'] = df['c'].ewm(span=8, adjust=False).mean()
+                df['EMA_21'] = df['c'].ewm(span=21, adjust=False).mean()
+                df['EMA_200'] = df['c'].ewm(span=200, adjust=False).mean()
+                
+                result["price"] = round(float(df['c'].iloc[-1]), 2)
+                result["ema_8"] = round(float(df['EMA_8'].iloc[-1]), 2)
+                result["ema_21"] = round(float(df['EMA_21'].iloc[-1]), 2)
+                result["ema_200"] = round(float(df['EMA_200'].iloc[-1]), 2)
+                result["above_200"] = result["price"] > result["ema_200"]
+                result["ema_cross"] = "BULLISH" if result["ema_8"] > result["ema_21"] else "BEARISH"
+                
+                if result["above_200"] and result["ema_cross"] == "BULLISH":
+                    result["ema_bias"] = Bias.CALLS
+                elif not result["above_200"] and result["ema_cross"] == "BEARISH":
+                    result["ema_bias"] = Bias.PUTS
+                else:
+                    result["ema_bias"] = Bias.NEUTRAL
     except:
         pass
     return result
@@ -1391,7 +1406,7 @@ def sidebar():
             fetch_es_current.clear()
             fetch_vix_polygon.clear()
             fetch_vix_yahoo.clear()
-            fetch_spx_with_ema.clear()
+            fetch_es_with_ema.clear()
             fetch_retail_positioning.clear()
             fetch_prior_day_rth.clear()
             st.rerun()
@@ -1506,7 +1521,7 @@ def main():
         
         vix_pos, vix_pos_desc = get_vix_position(vix, vix_range)
         retail_data = fetch_retail_positioning()
-        ema_data = fetch_spx_with_ema()
+        ema_data = fetch_es_with_ema()
         
         # --- Prior Day RTH Data ---
         if inputs["manual_prior"] is not None:
@@ -1585,7 +1600,7 @@ def main():
             fetch_es_current.clear()
             fetch_vix_polygon.clear()
             fetch_vix_yahoo.clear()
-            fetch_spx_with_ema.clear()
+            fetch_es_with_ema.clear()
             fetch_retail_positioning.clear()
             fetch_prior_day_rth.clear()
             st.rerun()
