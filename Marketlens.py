@@ -1042,17 +1042,17 @@ CSS_STYLES = """
 
 /* Levels Display */
 .levels-container { background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 18px; }
-.level-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px dashed var(--border-subtle); }
+.level-row { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px dashed var(--border-subtle); gap: 20px; }
 .level-row:last-child { border-bottom: none; }
-.level-label { display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }
+.level-label { display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 1px; min-width: 120px; }
 .level-label.ceiling { color: var(--puts-primary); }
 .level-label.current { color: var(--accent-gold); }
 .level-label.floor { color: var(--calls-primary); }
-.level-value { font-family: 'Outfit', sans-serif; font-size: 1.2rem; font-weight: 700; }
+.level-value { font-family: 'Outfit', sans-serif; font-size: 1.2rem; font-weight: 700; min-width: 140px; text-align: right; }
 .level-value.ceiling { color: var(--puts-primary); }
 .level-value.current { color: var(--accent-gold); }
 .level-value.floor { color: var(--calls-primary); }
-.level-note { font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-tertiary); }
+.level-note { font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-tertiary); margin-left: auto; text-align: right; }
 
 /* Prior Day Target */
 .prior-day-target {
