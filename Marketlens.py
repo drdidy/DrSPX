@@ -282,8 +282,9 @@ def fetch_retail_positioning():
 # PRIOR DAY RTH DATA
 # ═══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_prior_day_rth(trading_date):
-    """Fetch prior day's RTH (Regular Trading Hours) data for ES futures.
+    """Fetch prior day's RTH (Regular Trading Hours) data for ES futures using Yahoo Finance.
     RTH is 8:30 AM - 3:00 PM CT (9:30 AM - 4:00 PM ET)
     
     Returns:
@@ -293,47 +294,48 @@ def fetch_prior_day_rth(trading_date):
     result = {
         "highest_wick": None, "highest_wick_time": None,
         "lowest_close": None, "lowest_close_time": None,
-        "high": None, "low": None, "close": None,  # Keep for display
+        "high": None, "low": None, "close": None,
         "available": False
     }
     try:
         prior_day = get_prior_trading_day(trading_date)
-        date_str = prior_day.strftime("%Y-%m-%d")
         
-        # Fetch 5-minute candles for ES futures
-        url = f"{POLYGON_BASE_URL}/v2/aggs/ticker/C:ESH25/range/5/minute/{date_str}/{date_str}"
-        params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": POLYGON_API_KEY}
-        response = requests.get(url, params=params, timeout=15)
+        # Fetch 5-minute candles for ES futures from Yahoo
+        es = yf.Ticker("ES=F")
+        # Get 5 days of data to ensure we have the prior day
+        df = es.history(period="5d", interval="5m")
         
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("results") and len(data["results"]) > 0:
-                df = pd.DataFrame(data["results"])
-                df['datetime'] = pd.to_datetime(df['t'], unit='ms', utc=True).dt.tz_convert(CT)
+        if df is not None and not df.empty:
+            # Convert index to CT timezone
+            if df.index.tz is None:
+                df.index = df.index.tz_localize('America/New_York').tz_convert(CT)
+            else:
+                df.index = df.index.tz_convert(CT)
+            
+            # RTH hours: 8:30 AM - 3:00 PM CT
+            rth_start = CT.localize(datetime.combine(prior_day, time(8, 30)))
+            rth_end = CT.localize(datetime.combine(prior_day, time(15, 0)))
+            
+            # Filter to prior day RTH
+            rth_df = df[(df.index >= rth_start) & (df.index <= rth_end)]
+            
+            if not rth_df.empty and len(rth_df) > 5:
+                # Highest Wick = highest high of any candle
+                high_idx = rth_df['High'].idxmax()
+                result["highest_wick"] = round(float(rth_df.loc[high_idx, 'High']), 2)
+                result["highest_wick_time"] = high_idx
                 
-                # RTH hours: 8:30 AM - 3:00 PM CT
-                rth_start = CT.localize(datetime.combine(prior_day, time(8, 30)))
-                rth_end = CT.localize(datetime.combine(prior_day, time(15, 0)))
+                # Lowest Close = lowest close of any candle (NOT lowest wick)
+                lowest_close_idx = rth_df['Close'].idxmin()
+                result["lowest_close"] = round(float(rth_df.loc[lowest_close_idx, 'Close']), 2)
+                result["lowest_close_time"] = lowest_close_idx
                 
-                rth_df = df[(df['datetime'] >= rth_start) & (df['datetime'] <= rth_end)]
-                
-                if not rth_df.empty and len(rth_df) > 5:
-                    # Highest Wick = highest high of any candle
-                    high_idx = rth_df['h'].idxmax()
-                    result["highest_wick"] = round(float(rth_df.loc[high_idx, 'h']), 2)
-                    result["highest_wick_time"] = rth_df.loc[high_idx, 'datetime']
-                    
-                    # Lowest Close = lowest close of any candle (NOT lowest wick)
-                    lowest_close_idx = rth_df['c'].idxmin()
-                    result["lowest_close"] = round(float(rth_df.loc[lowest_close_idx, 'c']), 2)
-                    result["lowest_close_time"] = rth_df.loc[lowest_close_idx, 'datetime']
-                    
-                    # Also store overall H/L/C for display
-                    result["high"] = result["highest_wick"]
-                    result["low"] = round(float(rth_df['l'].min()), 2)
-                    result["close"] = round(float(rth_df.iloc[-1]['c']), 2)
-                    result["available"] = True
-    except:
+                # Also store overall H/L/C for display
+                result["high"] = result["highest_wick"]
+                result["low"] = round(float(rth_df['Low'].min()), 2)
+                result["close"] = round(float(rth_df.iloc[-1]['Close']), 2)
+                result["available"] = True
+    except Exception as e:
         pass
     return result
 
