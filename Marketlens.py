@@ -1826,9 +1826,9 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     # PRIOR DAY INTERMEDIATE LEVELS
     # ═══════════════════════════════════════════════════════════════════════════
+    st.markdown('<div class="section-header"><div class="section-icon">◎</div><h2 class="section-title">Prior Day Intermediate Levels</h2></div>', unsafe_allow_html=True)
+    
     if prior_targets["available"]:
-        st.markdown('<div class="section-header"><div class="section-icon">◎</div><h2 class="section-title">Prior Day Intermediate Levels</h2></div>', unsafe_allow_html=True)
-        
         # Convert ES targets to SPX
         hw_asc = round(prior_targets["highest_wick_ascending"] - offset, 2) if prior_targets["highest_wick_ascending"] else None
         hw_desc = round(prior_targets["highest_wick_descending"] - offset, 2) if prior_targets["highest_wick_descending"] else None
@@ -1877,6 +1877,16 @@ def main():
                     </div>
                 </div>
                 <div class="prior-levels-note">Use when price opened BELOW prior day low</div>
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
+    else:
+        st.markdown('''
+        <div class="alert-box" style="background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3);">
+            <span style="font-size:1.2rem;">⚠️</span>
+            <div>
+                <div style="font-weight:600;color:var(--accent-gold);margin-bottom:4px;">Prior Day Data Unavailable</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);">Use Manual Prior Day Override in sidebar to enable intermediate levels</div>
             </div>
         </div>
         ''', unsafe_allow_html=True)
