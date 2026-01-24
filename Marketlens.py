@@ -40,9 +40,8 @@ POLYGON_BASE_URL = "https://api.polygon.io"
 class ChannelType(Enum):
     ASCENDING = "ASCENDING"
     DESCENDING = "DESCENDING"
-    EXPANDING = "EXPANDING"
-    CONTRACTING = "CONTRACTING"
     MIXED = "MIXED"
+    CONTRACTING = "CONTRACTING"
     UNDETERMINED = "UNDETERMINED"
 
 class Position(Enum):
@@ -446,36 +445,8 @@ def determine_channel(sydney, tokyo, london=None):
     max_low_expansion = max(tokyo_low_expansion, london_low_expansion)
     
     if expanded_high and expanded_low:
-        # Both directions expanded = check for >6pt breakout
-        # If a session breaks >6 pts beyond previous → MIXED (show both setups)
-        
-        breakout_high = False
-        breakout_low = False
-        breakout_reason = []
-        
-        # Check if London broke out significantly
-        if london:
-            if london_high_expansion > 6:
-                breakout_high = True
-                breakout_reason.append(f"London +{london_high_expansion:.1f} above prior high")
-            if london_low_expansion > 6:
-                breakout_low = True
-                breakout_reason.append(f"London +{london_low_expansion:.1f} below prior low")
-        
-        # Check if Tokyo broke out significantly
-        if tokyo_high_expansion > 6:
-            breakout_high = True
-            breakout_reason.append(f"Tokyo +{tokyo_high_expansion:.1f} above Sydney")
-        if tokyo_low_expansion > 6:
-            breakout_low = True
-            breakout_reason.append(f"Tokyo +{tokyo_low_expansion:.1f} below Sydney")
-        
-        # If any >6pt breakout occurred → MIXED
-        if breakout_high or breakout_low:
-            return ChannelType.MIXED, f"Expanding with breakout: {'; '.join(breakout_reason)}", true_high, true_low, high_time, low_time
-        
-        # True expanding - no session broke >6 pts beyond previous
-        return ChannelType.EXPANDING, f"Range expanded both ways (no >6pt breakout)", true_high, true_low, high_time, low_time
+        # Both directions expanded → MIXED (show both ascending & descending setups)
+        return ChannelType.MIXED, f"Both directions expanded (H+{max_high_expansion:.1f}, L+{max_low_expansion:.1f})", true_high, true_low, high_time, low_time
     elif not expanded_high and not expanded_low:
         return ChannelType.CONTRACTING, "Range contracted", true_high, true_low, high_time, low_time
     elif expanded_high:
@@ -495,8 +466,8 @@ def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_ti
     elif channel_type == ChannelType.DESCENDING:
         ceiling = round(upper_pivot - SLOPE * blocks_high, 2)
         floor = round(lower_pivot - SLOPE * blocks_low, 2)
-    elif channel_type in [ChannelType.EXPANDING, ChannelType.MIXED]:
-        # MIXED uses expanding levels (ceiling up, floor down)
+    elif channel_type == ChannelType.MIXED:
+        # MIXED: ceiling goes up from high, floor goes down from low
         ceiling = round(upper_pivot + SLOPE * blocks_high, 2)
         floor = round(lower_pivot - SLOPE * blocks_low, 2)
     elif channel_type == ChannelType.CONTRACTING:
@@ -599,9 +570,6 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
             result["primary"] = make_scenario("Floor Pullback", "PUTS", floor_spx, floor_spx + 5, "Price pulls back to floor",
                 f"Confluence: {', '.join(result['puts_factors'])}" if result['puts_factors'] else "Breakdown continuation", get_confidence(puts_score))
             result["alternate"] = make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, "If floor acts as support", "Failed breakdown", "LOW")
-    elif channel_type == ChannelType.EXPANDING:
-        result["primary"] = make_scenario("Fade Ceiling", "PUTS", ceiling_spx, ceiling_spx + 5, "Price reaches ceiling", "EXPANDING: Fade extremes", "MEDIUM")
-        result["alternate"] = make_scenario("Fade Floor", "CALLS", floor_spx, floor_spx - 5, "Price reaches floor", "EXPANDING: Fade extremes", "MEDIUM")
     elif channel_type == ChannelType.MIXED:
         # MIXED: Show both ascending (CALLS at floor) and descending (PUTS at ceiling) as equal setups
         result["primary"] = make_scenario("Ascending Setup", "CALLS", floor_spx, floor_spx - 5, "If price respects floor",
@@ -1011,9 +979,8 @@ CSS_STYLES = """
 
 .channel-badge-ascending { background: linear-gradient(135deg, rgba(0,245,160,0.2) 0%, rgba(0,245,160,0.05) 100%); border: 1px solid var(--calls-primary); color: var(--calls-primary); }
 .channel-badge-descending { background: linear-gradient(135deg, rgba(255,71,87,0.2) 0%, rgba(255,71,87,0.05) 100%); border: 1px solid var(--puts-primary); color: var(--puts-primary); }
-.channel-badge-expanding { background: linear-gradient(135deg, rgba(123,97,255,0.2) 0%, rgba(123,97,255,0.05) 100%); border: 1px solid var(--accent-secondary); color: var(--accent-secondary); }
-.channel-badge-contracting { background: linear-gradient(135deg, rgba(255,215,0,0.2) 0%, rgba(255,215,0,0.05) 100%); border: 1px solid var(--accent-gold); color: var(--accent-gold); }
 .channel-badge-mixed { background: linear-gradient(135deg, rgba(255,165,0,0.2) 0%, rgba(255,165,0,0.05) 100%); border: 1px solid #FFA500; color: #FFA500; }
+.channel-badge-contracting { background: linear-gradient(135deg, rgba(255,215,0,0.2) 0%, rgba(255,215,0,0.05) 100%); border: 1px solid var(--accent-gold); color: var(--accent-gold); }
 
 /* Levels Display */
 .levels-container { background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 18px; }
@@ -1644,7 +1611,7 @@ def main():
     col1, col2, col3 = st.columns(3)
     with col1:
         chan_class = channel_type.value.lower()
-        chan_icon = {"ASCENDING": "↗", "DESCENDING": "↘", "EXPANDING": "⟷", "CONTRACTING": "⟶"}.get(channel_type.value, "○")
+        chan_icon = {"ASCENDING": "↗", "DESCENDING": "↘", "MIXED": "⟷", "CONTRACTING": "⟶"}.get(channel_type.value, "○")
         st.markdown(f'<div class="glass-card"><div class="channel-badge channel-badge-{chan_class}"><span style="font-size:1.2rem;">{chan_icon}</span><span>{channel_type.value}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{channel_reason}</p></div>', unsafe_allow_html=True)
     with col2:
         ema_class = "calls" if ema_data["above_200"] else "puts"
