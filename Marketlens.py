@@ -467,15 +467,29 @@ def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_ti
         ceiling = round(upper_pivot - SLOPE * blocks_high, 2)
         floor = round(lower_pivot - SLOPE * blocks_low, 2)
     elif channel_type == ChannelType.MIXED:
-        # MIXED: ceiling goes up from high, floor goes down from low
-        ceiling = round(upper_pivot + SLOPE * blocks_high, 2)
-        floor = round(lower_pivot - SLOPE * blocks_low, 2)
+        # MIXED: For display, use descending ceiling and ascending floor (outer bounds)
+        ceiling = round(upper_pivot - SLOPE * blocks_high, 2)  # Descending ceiling
+        floor = round(lower_pivot + SLOPE * blocks_low, 2)      # Ascending floor
     elif channel_type == ChannelType.CONTRACTING:
         ceiling = round(upper_pivot - SLOPE * blocks_high, 2)
         floor = round(lower_pivot + SLOPE * blocks_low, 2)
     else:
         ceiling, floor = upper_pivot, lower_pivot
     return ceiling, floor
+
+def calc_mixed_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time):
+    """Calculate all four levels for MIXED channel: ascending ceiling/floor and descending ceiling/floor."""
+    if upper_pivot is None or lower_pivot is None:
+        return None
+    blocks_high = blocks_between(upper_time, ref_time) if upper_time and ref_time else 0
+    blocks_low = blocks_between(lower_time, ref_time) if lower_time and ref_time else 0
+    
+    return {
+        "asc_ceiling": round(upper_pivot + SLOPE * blocks_high, 2),   # Ascending ceiling (high going up)
+        "asc_floor": round(lower_pivot + SLOPE * blocks_low, 2),       # Ascending floor (low going up)
+        "desc_ceiling": round(upper_pivot - SLOPE * blocks_high, 2),  # Descending ceiling (high going down)
+        "desc_floor": round(lower_pivot - SLOPE * blocks_low, 2),      # Descending floor (low going down)
+    }
 
 def get_position(price, ceiling, floor):
     if price > ceiling:
@@ -553,29 +567,73 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
         return "HIGH" if score >= 3 else "MEDIUM" if score >= 2 else "LOW"
     
     if channel_type == ChannelType.ASCENDING:
-        if position in [Position.INSIDE, Position.BELOW]:
-            result["primary"] = make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, "Price touches floor",
-                f"Confluence: {', '.join(result['calls_factors'])}" if result['calls_factors'] else "ASCENDING structure", get_confidence(calls_score))
-            result["alternate"] = make_scenario("Floor Break", "PUTS", floor_spx, floor_spx + 5, "If floor breaks down", "Failed support becomes resistance", "LOW")
-        else:
-            result["primary"] = make_scenario("Ceiling Pullback", "CALLS", ceiling_spx, ceiling_spx - 5, "Price pulls back to ceiling",
-                f"Confluence: {', '.join(result['calls_factors'])}" if result['calls_factors'] else "Breakout continuation", get_confidence(calls_score))
-            result["alternate"] = make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, "If ceiling acts as resistance", "Failed breakout", "LOW")
-    elif channel_type == ChannelType.DESCENDING:
+        # ASCENDING: Floor is KEY level
+        # Above/At floor → expect bounce (CALLS), alternate is breakdown (PUTS)
+        # Below floor → breakdown confirmed (PUTS), alternate is reclaim (CALLS)
         if position in [Position.INSIDE, Position.ABOVE]:
-            result["primary"] = make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, "Price touches ceiling",
-                f"Confluence: {', '.join(result['puts_factors'])}" if result['puts_factors'] else "DESCENDING structure", get_confidence(puts_score))
-            result["alternate"] = make_scenario("Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5, "If ceiling breaks up", "Failed resistance becomes support", "LOW")
+            # At or above floor - look for bounce
+            result["primary"] = make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, "Price at/near ascending floor",
+                f"Confluence: {', '.join(result['calls_factors'])}" if result['calls_factors'] else "ASCENDING floor support", get_confidence(calls_score))
+            result["alternate"] = make_scenario("Floor Break", "PUTS", floor_spx, floor_spx + 5, "If floor breaks down",
+                "Failed support - Loss of ascending structure", get_confidence(puts_score))
         else:
-            result["primary"] = make_scenario("Floor Pullback", "PUTS", floor_spx, floor_spx + 5, "Price pulls back to floor",
-                f"Confluence: {', '.join(result['puts_factors'])}" if result['puts_factors'] else "Breakdown continuation", get_confidence(puts_score))
-            result["alternate"] = make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, "If floor acts as support", "Failed breakdown", "LOW")
+            # Below floor - breakdown confirmed
+            result["primary"] = make_scenario("Breakdown Continuation", "PUTS", floor_spx, floor_spx + 5, "Price below ascending floor",
+                f"Confluence: {', '.join(result['puts_factors'])}" if result['puts_factors'] else "Floor broken - bearish", get_confidence(puts_score))
+            result["alternate"] = make_scenario("Floor Reclaim", "CALLS", floor_spx, floor_spx - 5, "If price reclaims floor",
+                "Failed breakdown - bullish reversal", get_confidence(calls_score))
+    
+    elif channel_type == ChannelType.DESCENDING:
+        # DESCENDING: Ceiling is KEY level
+        # Below/At ceiling → expect rejection (PUTS), alternate is breakout (CALLS)
+        # Above ceiling → breakout confirmed (CALLS), alternate is failed breakout (PUTS)
+        if position in [Position.INSIDE, Position.BELOW]:
+            # At or below ceiling - look for rejection
+            result["primary"] = make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, "Price at/near descending ceiling",
+                f"Confluence: {', '.join(result['puts_factors'])}" if result['puts_factors'] else "DESCENDING ceiling resistance", get_confidence(puts_score))
+            result["alternate"] = make_scenario("Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5, "If ceiling breaks up",
+                "Failed resistance - Loss of descending structure", get_confidence(calls_score))
+        else:
+            # Above ceiling - breakout confirmed
+            result["primary"] = make_scenario("Breakout Continuation", "CALLS", ceiling_spx, ceiling_spx - 5, "Price above descending ceiling",
+                f"Confluence: {', '.join(result['calls_factors'])}" if result['calls_factors'] else "Ceiling broken - bullish", get_confidence(calls_score))
+            result["alternate"] = make_scenario("Failed Breakout", "PUTS", ceiling_spx, ceiling_spx + 5, "If price fails back below ceiling",
+                "Failed breakout - bearish reversal", get_confidence(puts_score))
+    
     elif channel_type == ChannelType.MIXED:
-        # MIXED: Show both ascending (CALLS at floor) and descending (PUTS at ceiling) as equal setups
-        result["primary"] = make_scenario("Ascending Setup", "CALLS", floor_spx, floor_spx - 5, "If price respects floor",
-            "MIXED: Play for continuation higher", get_confidence(calls_score))
-        result["alternate"] = make_scenario("Descending Setup", "PUTS", ceiling_spx, ceiling_spx + 5, "If price respects ceiling",
-            "MIXED: Play for continuation lower", get_confidence(puts_score))
+        # MIXED: Both channels active - 4 scenarios
+        # Need to show setups for both ascending floor AND descending ceiling
+        result["scenarios"] = []
+        
+        # Ascending Floor scenarios (floor is support)
+        result["scenarios"].append(make_scenario("Ascending Floor Bounce", "CALLS", floor_spx, floor_spx - 5, 
+            "Price respects ascending floor",
+            "MIXED: Ascending floor acting as support", get_confidence(calls_score)))
+        result["scenarios"].append(make_scenario("Ascending Floor Break", "PUTS", floor_spx, floor_spx + 5,
+            "Price breaks below ascending floor",
+            "MIXED: Ascending floor fails", get_confidence(puts_score)))
+        
+        # Descending Ceiling scenarios (ceiling is resistance)
+        result["scenarios"].append(make_scenario("Descending Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5,
+            "Price respects descending ceiling",
+            "MIXED: Descending ceiling acting as resistance", get_confidence(puts_score)))
+        result["scenarios"].append(make_scenario("Descending Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5,
+            "Price breaks above descending ceiling",
+            "MIXED: Descending ceiling fails", get_confidence(calls_score)))
+        
+        # Set primary/alternate based on position for backward compatibility
+        if position == Position.BELOW:
+            # Near floor - ascending scenarios primary
+            result["primary"] = result["scenarios"][0]  # Floor Bounce
+            result["alternate"] = result["scenarios"][1]  # Floor Break
+        elif position == Position.ABOVE:
+            # Near ceiling - descending scenarios primary  
+            result["primary"] = result["scenarios"][2]  # Ceiling Rejection
+            result["alternate"] = result["scenarios"][3]  # Ceiling Break
+        else:
+            # Inside - show floor bounce and ceiling rejection
+            result["primary"] = result["scenarios"][0]  # Floor Bounce
+            result["alternate"] = result["scenarios"][2]  # Ceiling Rejection
     
     return result
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1712,13 +1770,74 @@ def main():
         ''', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # PRIMARY TRADE
+    # TRADE SETUPS
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">Primary Trade Setup</h2></div>', unsafe_allow_html=True)
-    
     if decision["no_trade"]:
+        st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">Trade Setup</h2></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="no-trade-card"><div class="no-trade-icon">⊘</div><div class="no-trade-title">NO TRADE</div><div class="no-trade-reason">{decision["no_trade_reason"]}</div></div>', unsafe_allow_html=True)
+    elif decision.get("scenarios") and len(decision["scenarios"]) == 4:
+        # MIXED: Show all 4 scenarios
+        st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">MIXED Channel - All Scenarios</h2></div>', unsafe_allow_html=True)
+        
+        # Ascending Floor scenarios
+        st.markdown('<div style="margin:20px 0 10px 0;font-family:\'Syne\',sans-serif;font-size:1rem;font-weight:600;color:var(--calls-primary);">▲ ASCENDING FLOOR (Support Level)</div>', unsafe_allow_html=True)
+        
+        for i, s in enumerate(decision["scenarios"][:2]):
+            tc = "calls" if s["direction"] == "CALLS" else "puts"
+            di = "↗" if s["direction"] == "CALLS" else "↘"
+            label = "If Floor Holds" if i == 0 else "If Floor Breaks"
+            st.markdown(f'''
+            <div class="trade-card trade-card-{tc}">
+                <div class="trade-header"><div class="trade-name">{di} {s["name"]}</div><div class="trade-confidence trade-confidence-{s["confidence"].lower()}">{s["confidence"]} CONFIDENCE</div></div>
+                <div class="trade-contract trade-contract-{tc}">{s["contract"]}</div>
+                <div class="trade-grid">
+                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${s["entry_premium"]:.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{s["entry"]:,.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{s["stop"]:,.2f}</div></div>
+                </div>
+                <div class="trade-targets">
+                    <div class="targets-header">◎ Profit Targets</div>
+                    <div class="targets-grid">
+                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${s["target_50"]:.2f}</div><div class="target-profit">+${s["profit_50"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${s["target_75"]:.2f}</div><div class="target-profit">+${s["profit_75"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${s["target_100"]:.2f}</div><div class="target-profit">+${s["profit_100"]:,.0f}</div></div>
+                    </div>
+                </div>
+                <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{s["trigger"]}</div></div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        # Descending Ceiling scenarios
+        st.markdown('<div style="margin:30px 0 10px 0;font-family:\'Syne\',sans-serif;font-size:1rem;font-weight:600;color:var(--puts-primary);">▼ DESCENDING CEILING (Resistance Level)</div>', unsafe_allow_html=True)
+        
+        for i, s in enumerate(decision["scenarios"][2:]):
+            tc = "calls" if s["direction"] == "CALLS" else "puts"
+            di = "↗" if s["direction"] == "CALLS" else "↘"
+            label = "If Ceiling Holds" if i == 0 else "If Ceiling Breaks"
+            st.markdown(f'''
+            <div class="trade-card trade-card-{tc}">
+                <div class="trade-header"><div class="trade-name">{di} {s["name"]}</div><div class="trade-confidence trade-confidence-{s["confidence"].lower()}">{s["confidence"]} CONFIDENCE</div></div>
+                <div class="trade-contract trade-contract-{tc}">{s["contract"]}</div>
+                <div class="trade-grid">
+                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${s["entry_premium"]:.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{s["entry"]:,.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{s["stop"]:,.2f}</div></div>
+                </div>
+                <div class="trade-targets">
+                    <div class="targets-header">◎ Profit Targets</div>
+                    <div class="targets-grid">
+                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${s["target_50"]:.2f}</div><div class="target-profit">+${s["profit_50"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${s["target_75"]:.2f}</div><div class="target-profit">+${s["profit_75"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${s["target_100"]:.2f}</div><div class="target-profit">+${s["profit_100"]:,.0f}</div></div>
+                    </div>
+                </div>
+                <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{s["trigger"]}</div></div>
+            </div>
+            ''', unsafe_allow_html=True)
     else:
+        # ASCENDING or DESCENDING: Show Primary and Alternate
+        st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">Primary Trade Setup</h2></div>', unsafe_allow_html=True)
+        
         p = decision["primary"]
         if p:
             tc = "calls" if p["direction"] == "CALLS" else "puts"
@@ -1745,37 +1864,35 @@ def main():
             ''', unsafe_allow_html=True)
             with st.expander("📋 Trade Rationale"):
                 st.write(p["rationale"])
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # ALTERNATE TRADE
-    # ═══════════════════════════════════════════════════════════════════════════
-    if not decision["no_trade"] and decision["alternate"]:
-        st.markdown('<div class="section-header"><div class="section-icon">◌</div><h2 class="section-title">Alternate Trade Setup</h2></div>', unsafe_allow_html=True)
-        a = decision["alternate"]
-        tc = "calls" if a["direction"] == "CALLS" else "puts"
-        di = "↗" if a["direction"] == "CALLS" else "↘"
-        st.markdown(f'''
-        <div class="trade-card trade-card-{tc}">
-            <div class="trade-header"><div class="trade-name">{di} {a["name"]}</div><div class="trade-confidence trade-confidence-{a["confidence"].lower()}">{a["confidence"]} CONFIDENCE</div></div>
-            <div class="trade-contract trade-contract-{tc}">{a["contract"]}</div>
-            <div class="trade-grid">
-                <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${a["entry_premium"]:.2f}</div></div>
-                <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{a["entry"]:,.2f}</div></div>
-                <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{a["stop"]:,.2f}</div></div>
-            </div>
-            <div class="trade-targets">
-                <div class="targets-header">◎ Profit Targets</div>
-                <div class="targets-grid">
-                    <div class="target-item"><div class="target-label">50%</div><div class="target-price">${a["target_50"]:.2f}</div><div class="target-profit">+${a["profit_50"]:,.0f}</div></div>
-                    <div class="target-item"><div class="target-label">75%</div><div class="target-price">${a["target_75"]:.2f}</div><div class="target-profit">+${a["profit_75"]:,.0f}</div></div>
-                    <div class="target-item"><div class="target-label">100%</div><div class="target-price">${a["target_100"]:.2f}</div><div class="target-profit">+${a["profit_100"]:,.0f}</div></div>
+        
+        # Alternate Trade
+        if decision["alternate"]:
+            st.markdown('<div class="section-header"><div class="section-icon">◌</div><h2 class="section-title">Alternate Trade Setup</h2></div>', unsafe_allow_html=True)
+            a = decision["alternate"]
+            tc = "calls" if a["direction"] == "CALLS" else "puts"
+            di = "↗" if a["direction"] == "CALLS" else "↘"
+            st.markdown(f'''
+            <div class="trade-card trade-card-{tc}">
+                <div class="trade-header"><div class="trade-name">{di} {a["name"]}</div><div class="trade-confidence trade-confidence-{a["confidence"].lower()}">{a["confidence"]} CONFIDENCE</div></div>
+                <div class="trade-contract trade-contract-{tc}">{a["contract"]}</div>
+                <div class="trade-grid">
+                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${a["entry_premium"]:.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{a["entry"]:,.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{a["stop"]:,.2f}</div></div>
                 </div>
+                <div class="trade-targets">
+                    <div class="targets-header">◎ Profit Targets</div>
+                    <div class="targets-grid">
+                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${a["target_50"]:.2f}</div><div class="target-profit">+${a["profit_50"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${a["target_75"]:.2f}</div><div class="target-profit">+${a["profit_75"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${a["target_100"]:.2f}</div><div class="target-profit">+${a["profit_100"]:,.0f}</div></div>
+                    </div>
+                </div>
+                <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{a["trigger"]}</div></div>
             </div>
-            <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{a["trigger"]}</div></div>
-        </div>
-        ''', unsafe_allow_html=True)
-        with st.expander("📋 Trade Rationale"):
-            st.write(a["rationale"])
+            ''', unsafe_allow_html=True)
+            with st.expander("📋 Trade Rationale"):
+                st.write(a["rationale"])
     
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSIONS
