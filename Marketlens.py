@@ -552,28 +552,75 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
             "profit_50": round((target_50 - entry_premium) * 100, 0), "profit_75": round((target_75 - entry_premium) * 100, 0), "profit_100": round((target_100 - entry_premium) * 100, 0)
         }
     
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONFIDENCE LOGIC: Channel structure is PRIMARY, other factors add/reduce
+    # ─────────────────────────────────────────────────────────────────────────
+    # Base confidence from channel:
+    #   - Primary scenario aligned with channel = starts at MEDIUM
+    #   - Alternate scenario (counter-trend) = starts at LOW
+    #
+    # Supporting factors (add confidence if aligned, reduce if opposing):
+    #   - EMA bias (above/below 200, 8/21 cross)
+    #   - VIX position (below range = bullish, above range = bearish)
+    #   - Retail positioning (crowded = fade that direction)
+    
+    # Track supporting factors for display
     if channel_type == ChannelType.ASCENDING:
-        result["calls_factors"].append("ASCENDING channel")
+        result["calls_factors"].append("ASCENDING channel (bullish structure)")
     elif channel_type == ChannelType.DESCENDING:
-        result["puts_factors"].append("DESCENDING channel")
+        result["puts_factors"].append("DESCENDING channel (bearish structure)")
     elif channel_type == ChannelType.MIXED:
-        result["calls_factors"].append("MIXED - Ascending setup")
-        result["puts_factors"].append("MIXED - Descending setup")
+        result["calls_factors"].append("MIXED channel - floor setup")
+        result["puts_factors"].append("MIXED channel - ceiling setup")
+    
+    # Count supporting factors for each direction
+    calls_support = 0
+    puts_support = 0
     
     if ema_bias == Bias.CALLS:
-        result["calls_factors"].append("Above 200 EMA + 8>21")
+        result["calls_factors"].append("EMA bullish (above 200, 8>21)")
+        calls_support += 1
     elif ema_bias == Bias.PUTS:
-        result["puts_factors"].append("Below 200 EMA + 8<21")
+        result["puts_factors"].append("EMA bearish (below 200, 8<21)")
+        puts_support += 1
     
     if retail_bias == Bias.PUTS:
-        result["puts_factors"].append("Calls crowded")
+        result["puts_factors"].append("Retail calls crowded (fade)")
+        puts_support += 1
     elif retail_bias == Bias.CALLS:
-        result["calls_factors"].append("Puts crowded")
+        result["calls_factors"].append("Retail puts crowded (fade)")
+        calls_support += 1
     
     if vix_position == VIXPosition.BELOW_RANGE:
-        result["calls_factors"].append("VIX below range")
+        result["calls_factors"].append("VIX below range (low fear)")
+        calls_support += 1
     elif vix_position == VIXPosition.ABOVE_RANGE:
-        result["puts_factors"].append("VIX above range")
+        result["puts_factors"].append("VIX above range (high fear)")
+        puts_support += 1
+    
+    def calc_confidence(is_primary, direction, support_for, support_against):
+        """
+        Calculate confidence based on:
+        1. Is this the primary (with-trend) or alternate (counter-trend) scenario?
+        2. How many supporting factors align vs oppose?
+        
+        Primary scenarios: Start at MEDIUM, can go HIGH with support or LOW with opposition
+        Alternate scenarios: Start at LOW, can go MEDIUM with strong support
+        """
+        if is_primary:
+            # Primary starts at MEDIUM
+            if support_for >= 2 and support_against == 0:
+                return "HIGH"  # Strong alignment
+            elif support_for >= 1 and support_against <= 1:
+                return "MEDIUM"  # Normal
+            else:
+                return "LOW"  # Factors opposing
+        else:
+            # Alternate (counter-trend) starts at LOW
+            if support_for >= 2 and support_against == 0:
+                return "MEDIUM"  # Enough support to consider
+            else:
+                return "LOW"  # Default for counter-trend
     
     if channel_type == ChannelType.CONTRACTING:
         result["no_trade"] = True
@@ -584,76 +631,93 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
         result["no_trade_reason"] = "Cannot determine channel structure"
         return result
     
-    calls_score, puts_score = len(result["calls_factors"]), len(result["puts_factors"])
-    def get_confidence(score):
-        return "HIGH" if score >= 3 else "MEDIUM" if score >= 2 else "LOW"
-    
     if channel_type == ChannelType.ASCENDING:
-        # ASCENDING: Floor is KEY level
-        # Above/At floor → expect bounce (CALLS), alternate is breakdown (PUTS)
-        # Below floor → breakdown confirmed (PUTS), alternate is reclaim (CALLS)
+        # ASCENDING: Floor is KEY level - bullish bias
+        # Primary = CALLS (with trend), Alternate = PUTS (counter-trend)
         if position in [Position.INSIDE, Position.ABOVE]:
-            # At or above floor - look for bounce
-            result["primary"] = make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, "Price at/near ascending floor",
-                f"Confluence: {', '.join(result['calls_factors'])}" if result['calls_factors'] else "ASCENDING floor support", get_confidence(calls_score))
-            result["alternate"] = make_scenario("Floor Break", "PUTS", floor_spx, floor_spx + 5, "If floor breaks down",
-                "Failed support - Loss of ascending structure", get_confidence(puts_score))
+            # At or above floor - look for bounce (primary play)
+            primary_conf = calc_confidence(True, "CALLS", calls_support, puts_support)
+            alt_conf = calc_confidence(False, "PUTS", puts_support, calls_support)
+            
+            result["primary"] = make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, 
+                "Price at/near ascending floor",
+                f"ASCENDING structure + {calls_support} supporting factors", primary_conf)
+            result["alternate"] = make_scenario("Floor Break", "PUTS", floor_spx, floor_spx + 5, 
+                "If floor breaks down",
+                "Counter-trend: Only if structure fails", alt_conf)
         else:
-            # Below floor - breakdown confirmed
-            result["primary"] = make_scenario("Breakdown Continuation", "PUTS", floor_spx, floor_spx + 5, "Price below ascending floor",
-                f"Confluence: {', '.join(result['puts_factors'])}" if result['puts_factors'] else "Floor broken - bearish", get_confidence(puts_score))
-            result["alternate"] = make_scenario("Floor Reclaim", "CALLS", floor_spx, floor_spx - 5, "If price reclaims floor",
-                "Failed breakdown - bullish reversal", get_confidence(calls_score))
+            # Below floor - structure broken, now bearish
+            primary_conf = calc_confidence(True, "PUTS", puts_support, calls_support)
+            alt_conf = calc_confidence(False, "CALLS", calls_support, puts_support)
+            
+            result["primary"] = make_scenario("Breakdown Continuation", "PUTS", floor_spx, floor_spx + 5, 
+                "Price below ascending floor - structure broken",
+                f"Floor broken + {puts_support} supporting factors", primary_conf)
+            result["alternate"] = make_scenario("Floor Reclaim", "CALLS", floor_spx, floor_spx - 5, 
+                "If price reclaims floor",
+                "Counter-trend: Only if breakdown fails", alt_conf)
     
     elif channel_type == ChannelType.DESCENDING:
-        # DESCENDING: Ceiling is KEY level
-        # Below/At ceiling → expect rejection (PUTS), alternate is breakout (CALLS)
-        # Above ceiling → breakout confirmed (CALLS), alternate is failed breakout (PUTS)
+        # DESCENDING: Ceiling is KEY level - bearish bias
+        # Primary = PUTS (with trend), Alternate = CALLS (counter-trend)
         if position in [Position.INSIDE, Position.BELOW]:
-            # At or below ceiling - look for rejection
-            result["primary"] = make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, "Price at/near descending ceiling",
-                f"Confluence: {', '.join(result['puts_factors'])}" if result['puts_factors'] else "DESCENDING ceiling resistance", get_confidence(puts_score))
-            result["alternate"] = make_scenario("Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5, "If ceiling breaks up",
-                "Failed resistance - Loss of descending structure", get_confidence(calls_score))
+            # At or below ceiling - look for rejection (primary play)
+            primary_conf = calc_confidence(True, "PUTS", puts_support, calls_support)
+            alt_conf = calc_confidence(False, "CALLS", calls_support, puts_support)
+            
+            result["primary"] = make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, 
+                "Price at/near descending ceiling",
+                f"DESCENDING structure + {puts_support} supporting factors", primary_conf)
+            result["alternate"] = make_scenario("Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5, 
+                "If ceiling breaks up",
+                "Counter-trend: Only if structure fails", alt_conf)
         else:
-            # Above ceiling - breakout confirmed
-            result["primary"] = make_scenario("Breakout Continuation", "CALLS", ceiling_spx, ceiling_spx - 5, "Price above descending ceiling",
-                f"Confluence: {', '.join(result['calls_factors'])}" if result['calls_factors'] else "Ceiling broken - bullish", get_confidence(calls_score))
-            result["alternate"] = make_scenario("Failed Breakout", "PUTS", ceiling_spx, ceiling_spx + 5, "If price fails back below ceiling",
-                "Failed breakout - bearish reversal", get_confidence(puts_score))
+            # Above ceiling - structure broken, now bullish
+            primary_conf = calc_confidence(True, "CALLS", calls_support, puts_support)
+            alt_conf = calc_confidence(False, "PUTS", puts_support, calls_support)
+            
+            result["primary"] = make_scenario("Breakout Continuation", "CALLS", ceiling_spx, ceiling_spx - 5, 
+                "Price above descending ceiling - structure broken",
+                f"Ceiling broken + {calls_support} supporting factors", primary_conf)
+            result["alternate"] = make_scenario("Failed Breakout", "PUTS", ceiling_spx, ceiling_spx + 5, 
+                "If price fails back below ceiling",
+                "Counter-trend: Only if breakout fails", alt_conf)
     
     elif channel_type == ChannelType.MIXED:
-        # MIXED: Both channels active - 4 scenarios
-        # Need to show setups for both ascending floor AND descending ceiling
+        # MIXED: Both setups are valid - neither is "counter-trend"
+        # Confidence based on supporting factors for each direction
         result["scenarios"] = []
         
-        # Ascending Floor scenarios (floor is support)
+        # Ascending Floor scenarios
+        floor_calls_conf = "HIGH" if calls_support >= 2 else "MEDIUM" if calls_support >= 1 else "LOW"
+        floor_puts_conf = "LOW"  # Breaking floor is always counter to floor setup
+        
         result["scenarios"].append(make_scenario("Ascending Floor Bounce", "CALLS", floor_spx, floor_spx - 5, 
             "Price respects ascending floor",
-            "MIXED: Ascending floor acting as support", get_confidence(calls_score)))
+            f"Floor support + {calls_support} factors", floor_calls_conf))
         result["scenarios"].append(make_scenario("Ascending Floor Break", "PUTS", floor_spx, floor_spx + 5,
             "Price breaks below ascending floor",
-            "MIXED: Ascending floor fails", get_confidence(puts_score)))
+            "Floor failure - loss of support", floor_puts_conf))
         
-        # Descending Ceiling scenarios (ceiling is resistance)
+        # Descending Ceiling scenarios
+        ceil_puts_conf = "HIGH" if puts_support >= 2 else "MEDIUM" if puts_support >= 1 else "LOW"
+        ceil_calls_conf = "LOW"  # Breaking ceiling is always counter to ceiling setup
+        
         result["scenarios"].append(make_scenario("Descending Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5,
             "Price respects descending ceiling",
-            "MIXED: Descending ceiling acting as resistance", get_confidence(puts_score)))
+            f"Ceiling resistance + {puts_support} factors", ceil_puts_conf))
         result["scenarios"].append(make_scenario("Descending Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5,
             "Price breaks above descending ceiling",
-            "MIXED: Descending ceiling fails", get_confidence(calls_score)))
+            "Ceiling failure - loss of resistance", ceil_calls_conf))
         
-        # Set primary/alternate based on position for backward compatibility
+        # Set primary/alternate based on position
         if position == Position.BELOW:
-            # Near floor - ascending scenarios primary
             result["primary"] = result["scenarios"][0]  # Floor Bounce
             result["alternate"] = result["scenarios"][1]  # Floor Break
         elif position == Position.ABOVE:
-            # Near ceiling - descending scenarios primary  
             result["primary"] = result["scenarios"][2]  # Ceiling Rejection
             result["alternate"] = result["scenarios"][3]  # Ceiling Break
         else:
-            # Inside - show floor bounce and ceiling rejection
             result["primary"] = result["scenarios"][0]  # Floor Bounce
             result["alternate"] = result["scenarios"][2]  # Ceiling Rejection
     
