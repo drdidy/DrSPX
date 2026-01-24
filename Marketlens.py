@@ -337,29 +337,49 @@ def fetch_prior_day_rth(trading_date):
         pass
     return result
 
-def calc_prior_day_targets(prior_rth, ref_time, position, overnight_ceiling, overnight_floor):
-    """Calculate targets from prior day when price is outside overnight cone.
-    - Above overnight: Target ascending (+0.48/30min) from prior day HIGHEST WICK
-    - Below overnight: Target descending (-0.48/30min) from prior day LOWEST CLOSE
+def calc_prior_day_targets(prior_rth, ref_time):
+    """Calculate BOTH ascending and descending targets from prior day anchors.
+    
+    From HIGHEST WICK:
+    - Ascending line (+0.48/30min) = Resistance (SELL point)
+    - Descending line (-0.48/30min) = Support (BUY point)
+    
+    From LOWEST CLOSE:
+    - Ascending line (+0.48/30min) = Support (BUY point)
+    - Descending line (-0.48/30min) = Resistance (SELL point)
+    
+    Returns dict with all four targets.
     """
+    result = {
+        "available": False,
+        "highest_wick": None,
+        "highest_wick_ascending": None,  # SELL point (resistance)
+        "highest_wick_descending": None,  # BUY point (support)
+        "lowest_close": None,
+        "lowest_close_ascending": None,   # BUY point (support)
+        "lowest_close_descending": None,  # SELL point (resistance)
+    }
+    
     if not prior_rth["available"]:
-        return None, None, None
+        return result
     
-    if position == Position.ABOVE and prior_rth["highest_wick"] is not None:
-        # Ascending target from prior day highest wick
-        blocks = blocks_between(prior_rth["highest_wick_time"], ref_time) if prior_rth["highest_wick_time"] else 0
-        target = round(prior_rth["highest_wick"] + SLOPE * blocks, 2)
-        return target, "ASCENDING", f"Prior RTH Highest Wick ({prior_rth['highest_wick']:.2f}) + {blocks} blocks × {SLOPE}"
+    result["available"] = True
+    result["highest_wick"] = prior_rth["highest_wick"]
+    result["lowest_close"] = prior_rth["lowest_close"]
     
-    elif position == Position.BELOW and prior_rth["lowest_close"] is not None:
-        # Descending target from prior day lowest close
-        blocks = blocks_between(prior_rth["lowest_close_time"], ref_time) if prior_rth["lowest_close_time"] else 0
-        target = round(prior_rth["lowest_close"] - SLOPE * blocks, 2)
-        return target, "DESCENDING", f"Prior RTH Lowest Close ({prior_rth['lowest_close']:.2f}) - {blocks} blocks × {SLOPE}"
+    # Calculate blocks from highest wick time
+    if prior_rth["highest_wick"] is not None and prior_rth["highest_wick_time"]:
+        blocks = blocks_between(prior_rth["highest_wick_time"], ref_time)
+        result["highest_wick_ascending"] = round(prior_rth["highest_wick"] + SLOPE * blocks, 2)
+        result["highest_wick_descending"] = round(prior_rth["highest_wick"] - SLOPE * blocks, 2)
     
-    return None, None, None
+    # Calculate blocks from lowest close time
+    if prior_rth["lowest_close"] is not None and prior_rth["lowest_close_time"]:
+        blocks = blocks_between(prior_rth["lowest_close_time"], ref_time)
+        result["lowest_close_ascending"] = round(prior_rth["lowest_close"] + SLOPE * blocks, 2)
+        result["lowest_close_descending"] = round(prior_rth["lowest_close"] - SLOPE * blocks, 2)
     
-    return None, None, None
+    return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION EXTRACTION
@@ -1123,7 +1143,86 @@ CSS_STYLES = """
     border-top: 1px dashed var(--border-subtle);
 }
 
-/* Prior Day Info (when inside cone) */
+/* Prior Day Intermediate Levels */
+.prior-levels-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 10px;
+}
+.prior-levels-section {
+    background: var(--bg-glass);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 16px;
+}
+.prior-levels-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--border-subtle);
+}
+.prior-levels-icon { font-size: 1rem; }
+.prior-levels-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.prior-levels-anchor {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--accent-primary);
+    font-weight: 500;
+}
+.prior-levels-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.prior-level-item {
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+}
+.prior-level-buy { border-left: 3px solid var(--calls-primary); }
+.prior-level-sell { border-left: 3px solid var(--puts-primary); }
+.prior-level-direction {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin-bottom: 4px;
+}
+.prior-level-value {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+.prior-level-item.prior-level-buy .prior-level-action { color: var(--calls-primary); }
+.prior-level-item.prior-level-sell .prior-level-action { color: var(--puts-primary); }
+.prior-level-action {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.prior-levels-note {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+}
+
+/* Prior Day Info (when inside channel) */
 .prior-day-info {
     display: flex;
     align-items: center;
@@ -1273,6 +1372,8 @@ hr { border: none !important; height: 1px !important; background: var(--border-s
     .hero-banner { flex-direction: column; padding: 20px 12px; gap: 12px; }
     .hero-content { text-align: center; }
     .brand-name { font-size: 1.8rem; }
+    .prior-levels-container { grid-template-columns: 1fr; }
+    .prior-levels-grid { grid-template-columns: 1fr; }
 }
 </style>
 """
@@ -1586,11 +1687,8 @@ def main():
     floor_spx = round(floor_es - offset, 2)
     position = get_position(current_es, ceiling_es, floor_es)
     
-    # Calculate prior day target if outside overnight cone
-    prior_target_es, prior_target_direction, prior_target_reason = calc_prior_day_targets(
-        prior_rth, ref_time_dt, position, ceiling_es, floor_es
-    )
-    prior_target_spx = round(prior_target_es - offset, 2) if prior_target_es else None
+    # Calculate prior day targets (both ascending and descending from each anchor)
+    prior_targets = calc_prior_day_targets(prior_rth, ref_time_dt)
     
     decision = analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, retail_data["bias"], ema_data["ema_bias"], vix_pos, vix)
     
@@ -1726,46 +1824,60 @@ def main():
     ''', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # PRIOR DAY TARGET (when outside overnight cone)
+    # PRIOR DAY INTERMEDIATE LEVELS
     # ═══════════════════════════════════════════════════════════════════════════
-    if position != Position.INSIDE and prior_target_spx:
-        target_color = "calls" if position == Position.ABOVE else "puts"
-        target_icon = "🎯"
-        if position == Position.ABOVE:
-            direction_text = "ASCENDING from Highest Wick"
-            anchor_label = "Highest Wick"
-            anchor_value = prior_rth['highest_wick']
-        else:
-            direction_text = "DESCENDING from Lowest Close"
-            anchor_label = "Lowest Close"
-            anchor_value = prior_rth['lowest_close']
-        dist_target = round(abs(prior_target_spx - current_spx), 1)
+    if prior_targets["available"]:
+        st.markdown('<div class="section-header"><div class="section-icon">◎</div><h2 class="section-title">Prior Day Intermediate Levels</h2></div>', unsafe_allow_html=True)
+        
+        # Convert ES targets to SPX
+        hw_asc = round(prior_targets["highest_wick_ascending"] - offset, 2) if prior_targets["highest_wick_ascending"] else None
+        hw_desc = round(prior_targets["highest_wick_descending"] - offset, 2) if prior_targets["highest_wick_descending"] else None
+        lc_asc = round(prior_targets["lowest_close_ascending"] - offset, 2) if prior_targets["lowest_close_ascending"] else None
+        lc_desc = round(prior_targets["lowest_close_descending"] - offset, 2) if prior_targets["lowest_close_descending"] else None
         
         st.markdown(f'''
-        <div class="prior-day-target prior-day-target-{target_color}">
-            <div class="prior-target-header">
-                <span class="prior-target-icon">{target_icon}</span>
-                <span class="prior-target-title">Prior Day Cone Target</span>
-                <span class="prior-target-badge {target_color}">{direction_text}</span>
+        <div class="prior-levels-container">
+            <div class="prior-levels-section">
+                <div class="prior-levels-header">
+                    <span class="prior-levels-icon">📍</span>
+                    <span class="prior-levels-title">From Highest Wick</span>
+                    <span class="prior-levels-anchor">{prior_targets["highest_wick"]:,.2f}</span>
+                </div>
+                <div class="prior-levels-grid">
+                    <div class="prior-level-item prior-level-sell">
+                        <div class="prior-level-direction">↗ Ascending</div>
+                        <div class="prior-level-value">{hw_asc:,.2f}</div>
+                        <div class="prior-level-action">SELL (Resistance)</div>
+                    </div>
+                    <div class="prior-level-item prior-level-buy">
+                        <div class="prior-level-direction">↘ Descending</div>
+                        <div class="prior-level-value">{hw_desc:,.2f}</div>
+                        <div class="prior-level-action">BUY (Support)</div>
+                    </div>
+                </div>
+                <div class="prior-levels-note">Use when price opened ABOVE prior day high</div>
             </div>
-            <div class="prior-target-value">{prior_target_spx:,.2f}</div>
-            <div class="prior-target-details">
-                <span>{dist_target} pts from current</span>
-                <span class="prior-target-sep">•</span>
-                <span>Prior RTH {anchor_label}: {anchor_value:,.2f}</span>
+            
+            <div class="prior-levels-section">
+                <div class="prior-levels-header">
+                    <span class="prior-levels-icon">📍</span>
+                    <span class="prior-levels-title">From Lowest Close</span>
+                    <span class="prior-levels-anchor">{prior_targets["lowest_close"]:,.2f}</span>
+                </div>
+                <div class="prior-levels-grid">
+                    <div class="prior-level-item prior-level-buy">
+                        <div class="prior-level-direction">↗ Ascending</div>
+                        <div class="prior-level-value">{lc_asc:,.2f}</div>
+                        <div class="prior-level-action">BUY (Support)</div>
+                    </div>
+                    <div class="prior-level-item prior-level-sell">
+                        <div class="prior-level-direction">↘ Descending</div>
+                        <div class="prior-level-value">{lc_desc:,.2f}</div>
+                        <div class="prior-level-action">SELL (Resistance)</div>
+                    </div>
+                </div>
+                <div class="prior-levels-note">Use when price opened BELOW prior day low</div>
             </div>
-            <div class="prior-target-note">Price outside ON cone → drawn to prior day {'+0.48' if position == Position.ABOVE else '-0.48'}/30min line</div>
-        </div>
-        ''', unsafe_allow_html=True)
-    elif prior_rth["available"]:
-        st.markdown(f'''
-        <div class="prior-day-info">
-            <span class="prior-day-label">Prior RTH:</span>
-            <span>Highest Wick: {prior_rth['highest_wick']:,.2f}</span>
-            <span class="prior-day-sep">|</span>
-            <span>Lowest Close: {prior_rth['lowest_close']:,.2f}</span>
-            <span class="prior-day-sep">|</span>
-            <span>Close: {prior_rth['close']:,.2f}</span>
         </div>
         ''', unsafe_allow_html=True)
     
