@@ -1830,58 +1830,69 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     st.markdown('<div class="section-header"><div class="section-icon">◎</div><h2 class="section-title">Prior Day Intermediate Levels</h2></div>', unsafe_allow_html=True)
     
-    if prior_targets["available"]:
+    if prior_targets["available"] and prior_targets["highest_wick"] is not None and prior_targets["lowest_close"] is not None:
         # Convert ES targets to SPX
         hw_asc = round(prior_targets["highest_wick_ascending"] - offset, 2) if prior_targets["highest_wick_ascending"] else None
         hw_desc = round(prior_targets["highest_wick_descending"] - offset, 2) if prior_targets["highest_wick_descending"] else None
         lc_asc = round(prior_targets["lowest_close_ascending"] - offset, 2) if prior_targets["lowest_close_ascending"] else None
         lc_desc = round(prior_targets["lowest_close_descending"] - offset, 2) if prior_targets["lowest_close_descending"] else None
         
-        st.markdown(f'''
-        <div class="prior-levels-container">
-            <div class="prior-levels-section">
-                <div class="prior-levels-header">
-                    <span class="prior-levels-icon">📍</span>
-                    <span class="prior-levels-title">From Highest Wick</span>
-                    <span class="prior-levels-anchor">{prior_targets["highest_wick"]:,.2f}</span>
-                </div>
-                <div class="prior-levels-grid">
-                    <div class="prior-level-item prior-level-sell">
-                        <div class="prior-level-direction">↗ Ascending</div>
-                        <div class="prior-level-value">{hw_asc:,.2f}</div>
-                        <div class="prior-level-action">SELL (Resistance)</div>
+        # Only display if all values are available
+        if all([hw_asc, hw_desc, lc_asc, lc_desc]):
+            st.markdown(f'''
+            <div class="prior-levels-container">
+                <div class="prior-levels-section">
+                    <div class="prior-levels-header">
+                        <span class="prior-levels-icon">📍</span>
+                        <span class="prior-levels-title">From Highest Wick</span>
+                        <span class="prior-levels-anchor">{prior_targets["highest_wick"]:,.2f}</span>
                     </div>
-                    <div class="prior-level-item prior-level-buy">
-                        <div class="prior-level-direction">↘ Descending</div>
-                        <div class="prior-level-value">{hw_desc:,.2f}</div>
-                        <div class="prior-level-action">BUY (Support)</div>
+                    <div class="prior-levels-grid">
+                        <div class="prior-level-item prior-level-sell">
+                            <div class="prior-level-direction">↗ Ascending</div>
+                            <div class="prior-level-value">{hw_asc:,.2f}</div>
+                            <div class="prior-level-action">SELL (Resistance)</div>
+                        </div>
+                        <div class="prior-level-item prior-level-buy">
+                            <div class="prior-level-direction">↘ Descending</div>
+                            <div class="prior-level-value">{hw_desc:,.2f}</div>
+                            <div class="prior-level-action">BUY (Support)</div>
+                        </div>
                     </div>
+                    <div class="prior-levels-note">Use when price opened ABOVE prior day high</div>
                 </div>
-                <div class="prior-levels-note">Use when price opened ABOVE prior day high</div>
+                <div class="prior-levels-section">
+                    <div class="prior-levels-header">
+                        <span class="prior-levels-icon">📍</span>
+                        <span class="prior-levels-title">From Lowest Close</span>
+                        <span class="prior-levels-anchor">{prior_targets["lowest_close"]:,.2f}</span>
+                    </div>
+                    <div class="prior-levels-grid">
+                        <div class="prior-level-item prior-level-buy">
+                            <div class="prior-level-direction">↗ Ascending</div>
+                            <div class="prior-level-value">{lc_asc:,.2f}</div>
+                            <div class="prior-level-action">BUY (Support)</div>
+                        </div>
+                        <div class="prior-level-item prior-level-sell">
+                            <div class="prior-level-direction">↘ Descending</div>
+                            <div class="prior-level-value">{lc_desc:,.2f}</div>
+                            <div class="prior-level-action">SELL (Resistance)</div>
+                        </div>
+                    </div>
+                    <div class="prior-levels-note">Use when price opened BELOW prior day low</div>
+                </div>
             </div>
-            
-            <div class="prior-levels-section">
-                <div class="prior-levels-header">
-                    <span class="prior-levels-icon">📍</span>
-                    <span class="prior-levels-title">From Lowest Close</span>
-                    <span class="prior-levels-anchor">{prior_targets["lowest_close"]:,.2f}</span>
+            ''', unsafe_allow_html=True)
+        else:
+            st.markdown('''
+            <div class="alert-box" style="background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3);">
+                <span style="font-size:1.2rem;">⚠️</span>
+                <div>
+                    <div style="font-weight:600;color:var(--accent-gold);margin-bottom:4px;">Prior Day Data Incomplete</div>
+                    <div style="font-size:0.85rem;color:var(--text-secondary);">Some values missing - use Manual Override in sidebar</div>
                 </div>
-                <div class="prior-levels-grid">
-                    <div class="prior-level-item prior-level-buy">
-                        <div class="prior-level-direction">↗ Ascending</div>
-                        <div class="prior-level-value">{lc_asc:,.2f}</div>
-                        <div class="prior-level-action">BUY (Support)</div>
-                    </div>
-                    <div class="prior-level-item prior-level-sell">
-                        <div class="prior-level-direction">↘ Descending</div>
-                        <div class="prior-level-value">{lc_desc:,.2f}</div>
-                        <div class="prior-level-action">SELL (Resistance)</div>
-                    </div>
-                </div>
-                <div class="prior-levels-note">Use when price opened BELOW prior day low</div>
             </div>
-        </div>
-        ''', unsafe_allow_html=True)
+            ''', unsafe_allow_html=True)
     else:
         st.markdown('''
         <div class="alert-box" style="background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3);">
