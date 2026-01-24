@@ -1750,27 +1750,32 @@ def main():
     # ALTERNATE TRADE
     # ═══════════════════════════════════════════════════════════════════════════
     if not decision["no_trade"] and decision["alternate"]:
-        st.markdown('<div class="section-header"><div class="section-icon">◌</div><h2 class="section-title">Alternate Setup</h2></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><div class="section-icon">◌</div><h2 class="section-title">Alternate Trade Setup</h2></div>', unsafe_allow_html=True)
         a = decision["alternate"]
         tc = "calls" if a["direction"] == "CALLS" else "puts"
         di = "↗" if a["direction"] == "CALLS" else "↘"
         st.markdown(f'''
-        <div class="glass-card glass-card-{tc}" style="opacity:0.85;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-                <div style="font-family:'Syne',sans-serif;font-size:1.05rem;font-weight:600;">{di} {a["name"]}</div>
-                <div class="trade-confidence trade-confidence-low">{a["confidence"]}</div>
+        <div class="trade-card trade-card-{tc}">
+            <div class="trade-header"><div class="trade-name">{di} {a["name"]}</div><div class="trade-confidence trade-confidence-{a["confidence"].lower()}">{a["confidence"]} CONFIDENCE</div></div>
+            <div class="trade-contract trade-contract-{tc}">{a["contract"]}</div>
+            <div class="trade-grid">
+                <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${a["entry_premium"]:.2f}</div></div>
+                <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{a["entry"]:,.2f}</div></div>
+                <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{a["stop"]:,.2f}</div></div>
             </div>
-            <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
-                <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;color:var(--{tc}-primary);">{a["contract"]} @ ${a["entry_premium"]:.2f}</div>
-                <div style="display:flex;gap:14px;">
-                    <span style="font-size:0.875rem;color:var(--text-secondary);">50%: <span style="color:var(--calls-primary);">${a["target_50"]:.2f}</span></span>
-                    <span style="font-size:0.875rem;color:var(--text-secondary);">75%: <span style="color:var(--calls-primary);">${a["target_75"]:.2f}</span></span>
-                    <span style="font-size:0.875rem;color:var(--text-secondary);">100%: <span style="color:var(--calls-primary);">${a["target_100"]:.2f}</span></span>
+            <div class="trade-targets">
+                <div class="targets-header">◎ Profit Targets</div>
+                <div class="targets-grid">
+                    <div class="target-item"><div class="target-label">50%</div><div class="target-price">${a["target_50"]:.2f}</div><div class="target-profit">+${a["profit_50"]:,.0f}</div></div>
+                    <div class="target-item"><div class="target-label">75%</div><div class="target-price">${a["target_75"]:.2f}</div><div class="target-profit">+${a["profit_75"]:,.0f}</div></div>
+                    <div class="target-item"><div class="target-label">100%</div><div class="target-price">${a["target_100"]:.2f}</div><div class="target-profit">+${a["profit_100"]:,.0f}</div></div>
                 </div>
             </div>
-            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle);font-size:0.875rem;color:var(--text-tertiary);"><strong style="color:var(--accent-primary);">Trigger:</strong> {a["trigger"]}</div>
+            <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{a["trigger"]}</div></div>
         </div>
         ''', unsafe_allow_html=True)
+        with st.expander("📋 Trade Rationale"):
+            st.write(a["rationale"])
     
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSIONS
