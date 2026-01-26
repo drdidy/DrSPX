@@ -1743,6 +1743,10 @@ def main():
             vix_polygon = fetch_vix_polygon()
             vix = vix_polygon if vix_polygon else fetch_vix_yahoo()
         
+        # Safety fallback if VIX fetch failed
+        if vix is None:
+            vix = 16.0  # Default to neutral VIX
+        
         # --- VIX Overnight Range ---
         if inputs["manual_vix_range"] is not None:
             vix_range = {
@@ -1934,6 +1938,8 @@ def main():
     
     if prior_targets["available"] and prior_targets["highest_wick"] is not None and prior_targets["lowest_close"] is not None:
         # Convert ES targets to SPX
+        hw_anchor_spx = round(prior_targets["highest_wick"] - offset, 2)
+        lc_anchor_spx = round(prior_targets["lowest_close"] - offset, 2)
         hw_asc = round(prior_targets["highest_wick_ascending"] - offset, 2) if prior_targets["highest_wick_ascending"] else None
         hw_desc = round(prior_targets["highest_wick_descending"] - offset, 2) if prior_targets["highest_wick_descending"] else None
         lc_asc = round(prior_targets["lowest_close_ascending"] - offset, 2) if prior_targets["lowest_close_ascending"] else None
@@ -1947,7 +1953,7 @@ def main():
                     <div class="prior-levels-header">
                         <span class="prior-levels-icon">📍</span>
                         <span class="prior-levels-title">From Highest Wick</span>
-                        <span class="prior-levels-anchor">{prior_targets["highest_wick"]:,.2f}</span>
+                        <span class="prior-levels-anchor">{hw_anchor_spx:,.2f}</span>
                     </div>
                     <div class="prior-levels-grid">
                         <div class="prior-level-item prior-level-sell">
@@ -1967,7 +1973,7 @@ def main():
                     <div class="prior-levels-header">
                         <span class="prior-levels-icon">📍</span>
                         <span class="prior-levels-title">From Lowest Close</span>
-                        <span class="prior-levels-anchor">{prior_targets["lowest_close"]:,.2f}</span>
+                        <span class="prior-levels-anchor">{lc_anchor_spx:,.2f}</span>
                     </div>
                     <div class="prior-levels-grid">
                         <div class="prior-level-item prior-level-buy">
