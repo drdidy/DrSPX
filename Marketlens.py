@@ -424,8 +424,46 @@ def extract_sessions(es_candles, trading_date):
 # CHANNEL LOGIC
 # ═══════════════════════════════════════════════════════════════════════════════
 def determine_channel(sydney, tokyo, london=None):
+    """
+    Determine channel type based on session expansions.
+    
+    Normal case: Sydney is baseline, compare Tokyo then London
+    Fallback: If Sydney missing but Tokyo + London available, use Tokyo as baseline
+    """
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FALLBACK: No Sydney but have Tokyo + London → Use Tokyo as baseline
+    # ─────────────────────────────────────────────────────────────────────────
+    if not sydney and tokyo and london:
+        all_highs = [(tokyo["high"], tokyo.get("high_time"), "Tokyo"), (london["high"], london.get("high_time"), "London")]
+        all_lows = [(tokyo["low"], tokyo.get("low_time"), "Tokyo"), (london["low"], london.get("low_time"), "London")]
+        
+        highest = max(all_highs, key=lambda x: x[0])
+        lowest = min(all_lows, key=lambda x: x[0])
+        true_high, high_time, high_session = highest
+        true_low, low_time, low_session = lowest
+        
+        # Compare London against Tokyo (Tokyo is baseline)
+        london_high_expansion = london["high"] - tokyo["high"]
+        london_low_expansion = tokyo["low"] - london["low"]
+        
+        expanded_high = london_high_expansion > 0
+        expanded_low = london_low_expansion > 0
+        
+        if expanded_high and expanded_low:
+            return ChannelType.MIXED, f"London expanded both ways vs Tokyo (H+{london_high_expansion:.1f}, L+{london_low_expansion:.1f})", true_high, true_low, high_time, low_time
+        elif not expanded_high and not expanded_low:
+            return ChannelType.CONTRACTING, "London contracted vs Tokyo", true_high, true_low, high_time, low_time
+        elif expanded_high:
+            return ChannelType.ASCENDING, f"London made higher high vs Tokyo (+{london_high_expansion:.1f} pts)", true_high, true_low, high_time, low_time
+        else:
+            return ChannelType.DESCENDING, f"London made lower low vs Tokyo (+{london_low_expansion:.1f} pts)", true_high, true_low, high_time, low_time
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # NORMAL CASE: Sydney + Tokyo required as minimum
+    # ─────────────────────────────────────────────────────────────────────────
     if not sydney or not tokyo:
-        return ChannelType.UNDETERMINED, "Missing session data", None, None, None, None
+        return ChannelType.UNDETERMINED, "Missing session data (need Sydney+Tokyo or Tokyo+London)", None, None, None, None
     
     all_highs = [(sydney["high"], sydney.get("high_time"), "Sydney"), (tokyo["high"], tokyo.get("high_time"), "Tokyo")]
     all_lows = [(sydney["low"], sydney.get("low_time"), "Sydney"), (tokyo["low"], tokyo.get("low_time"), "Tokyo")]
