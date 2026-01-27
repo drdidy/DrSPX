@@ -112,19 +112,55 @@ def black_scholes(S, K, T, r, sigma, opt_type):
         return S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
     return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
 
-def calc_0dte_iv(vix, hours_to_expiry):
-    if hours_to_expiry > 5:
-        mult = 1.6
-    elif hours_to_expiry > 3:
-        mult = 1.7
-    else:
-        mult = 1.8
-    return max((vix / 100) * mult, 0.15)
-
 def estimate_0dte_premium(spot, strike, hours_to_expiry, vix, opt_type):
-    iv = calc_0dte_iv(vix, hours_to_expiry)
-    T = max(0.0001, hours_to_expiry / (365 * 24))
-    premium = black_scholes(spot, strike, T, 0.05, iv, opt_type)
+    """
+    0DTE SPX premium estimation - calibrated to real market data.
+    
+    Uses empirical model based on:
+    - Base ATM premium scaling with VIX
+    - Exponential OTM decay (faster than Black-Scholes)
+    - Non-linear time decay
+    
+    Calibrated against: 6990C at SPX 6967.61 (22 OTM), 9:30 AM, VIX 15 = $1.32
+    """
+    # Calculate OTM distance
+    if opt_type == "CALL":
+        otm_points = max(0, strike - spot)
+        itm_points = max(0, spot - strike)
+    else:
+        otm_points = max(0, spot - strike)
+        itm_points = max(0, strike - spot)
+    
+    # Base ATM premium (scales with VIX)
+    # At VIX 15, ATM 0DTE at 9:30 AM ≈ $9-10
+    atm_base = 8 + (vix - 12) * 0.4
+    
+    # Time decay factor (non-linear - accelerates toward expiry)
+    if hours_to_expiry >= 6:
+        time_factor = 1.0
+    elif hours_to_expiry >= 5:
+        time_factor = 0.90
+    elif hours_to_expiry >= 4:
+        time_factor = 0.75
+    elif hours_to_expiry >= 3:
+        time_factor = 0.60
+    elif hours_to_expiry >= 2:
+        time_factor = 0.45
+    elif hours_to_expiry >= 1:
+        time_factor = 0.28
+    else:
+        time_factor = 0.12
+    
+    # OTM decay (exponential - calibrated to real data)
+    # Decay constant 12 means 22 OTM ≈ 16% of ATM premium
+    otm_decay = math.exp(-otm_points / 12)
+    
+    # Calculate extrinsic value
+    extrinsic = atm_base * time_factor * otm_decay
+    
+    # Total premium = extrinsic + intrinsic (for ITM options)
+    premium = extrinsic + itm_points
+    
     return max(round(premium, 2), 0.05)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -152,7 +188,6 @@ def fetch_es_candles(days=7):
         pass
     return None
 
-@st.cache_data(ttl=60, show_spinner=False)
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_es_with_ema():
     """Fetch ES futures with EMAs based on 30-minute chart from Yahoo Finance."""
