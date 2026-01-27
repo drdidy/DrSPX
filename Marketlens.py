@@ -253,6 +253,45 @@ def get_vix_position(current_vix, vix_range):
         return VIXPosition.IN_RANGE, f"Within {bottom}-{top}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# VIX TERM STRUCTURE
+# ═══════════════════════════════════════════════════════════════════════════════
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_vix_term_structure():
+    """
+    Fetch VIX term structure (VIX vs VIX futures).
+    Contango (normal): VIX futures > VIX spot → stable/bullish
+    Backwardation (fear): VIX spot > VIX futures → volatile/bearish
+    """
+    result = {"vix_spot": None, "vix_future": None, "structure": "UNKNOWN", "spread": None}
+    try:
+        # VIX spot
+        vix = yf.Ticker("^VIX")
+        vix_data = vix.history(period="2d")
+        
+        # VIX 3-month (proxy for futures)
+        vix3m = yf.Ticker("^VIX3M")
+        vix3m_data = vix3m.history(period="2d")
+        
+        if not vix_data.empty and not vix3m_data.empty:
+            spot = round(float(vix_data['Close'].iloc[-1]), 2)
+            future = round(float(vix3m_data['Close'].iloc[-1]), 2)
+            spread = round(future - spot, 2)  # Positive = contango, Negative = backwardation
+            
+            result["vix_spot"] = spot
+            result["vix_future"] = future
+            result["spread"] = spread
+            
+            if spread > 1.5:
+                result["structure"] = "CONTANGO"  # Normal, stable
+            elif spread < -1.5:
+                result["structure"] = "BACKWARDATION"  # Fear, volatile
+            else:
+                result["structure"] = "FLAT"  # Neutral
+    except:
+        pass
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # RETAIL POSITIONING
 # ═══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=300, show_spinner=False)
@@ -279,9 +318,155 @@ def fetch_retail_positioning():
     return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SESSION LEVEL TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+def analyze_session_tests(sydney, tokyo, london, channel_type):
+    """
+    Analyze how many sessions tested and respected the key levels.
+    More session tests = stronger level confirmation.
+    
+    Returns dict with floor_tests, ceiling_tests, and which sessions tested each.
+    """
+    result = {
+        "floor_tests": 0,
+        "ceiling_tests": 0,
+        "floor_sessions": [],
+        "ceiling_sessions": [],
+        "floor_respected": True,
+        "ceiling_respected": True
+    }
+    
+    if not sydney or not tokyo:
+        return result
+    
+    # Determine the key level bounds based on Sydney (baseline)
+    sydney_high = sydney["high"]
+    sydney_low = sydney["low"]
+    tolerance = 2.0  # Points tolerance for "testing" a level
+    
+    # Check Tokyo
+    if tokyo:
+        # Did Tokyo test Sydney's low (floor area)?
+        if tokyo["low"] <= sydney_low + tolerance:
+            result["floor_tests"] += 1
+            result["floor_sessions"].append("Tokyo")
+            # Did it respect (close above)?
+            # We approximate by checking if high recovered
+            if tokyo["high"] > sydney_low + 5:
+                pass  # Respected
+            else:
+                result["floor_respected"] = False
+        
+        # Did Tokyo test Sydney's high (ceiling area)?
+        if tokyo["high"] >= sydney_high - tolerance:
+            result["ceiling_tests"] += 1
+            result["ceiling_sessions"].append("Tokyo")
+    
+    # Check London
+    if london:
+        current_low = min(sydney_low, tokyo["low"]) if tokyo else sydney_low
+        current_high = max(sydney_high, tokyo["high"]) if tokyo else sydney_high
+        
+        # Did London test the floor?
+        if london["low"] <= current_low + tolerance:
+            result["floor_tests"] += 1
+            result["floor_sessions"].append("London")
+        
+        # Did London test the ceiling?
+        if london["high"] >= current_high - tolerance:
+            result["ceiling_tests"] += 1
+            result["ceiling_sessions"].append("London")
+    
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GAP ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════════
+def analyze_gap(current_price, prior_close, ceiling, floor):
+    """
+    Analyze the gap relative to the overnight channel.
+    
+    Returns:
+    - gap_direction: UP, DOWN, or FLAT
+    - gap_size: Size in points
+    - gap_position: Where the gap puts us relative to channel
+    - gap_into_level: True if gap brings us TO a key level (good setup)
+    """
+    result = {
+        "direction": "FLAT",
+        "size": 0,
+        "into_floor": False,
+        "into_ceiling": False,
+        "away_from_floor": False,
+        "away_from_ceiling": False
+    }
+    
+    if prior_close is None or current_price is None:
+        return result
+    
+    gap = current_price - prior_close
+    result["size"] = round(abs(gap), 1)
+    
+    if gap > 3:
+        result["direction"] = "UP"
+    elif gap < -3:
+        result["direction"] = "DOWN"
+    else:
+        result["direction"] = "FLAT"
+    
+    channel_range = ceiling - floor
+    dist_to_floor = current_price - floor
+    dist_to_ceiling = ceiling - current_price
+    
+    # Check if gap brings us TO a key level
+    if result["direction"] == "DOWN" and dist_to_floor <= channel_range * 0.3:
+        result["into_floor"] = True
+    elif result["direction"] == "UP" and dist_to_ceiling <= channel_range * 0.3:
+        result["into_ceiling"] = True
+    
+    # Check if gap takes us AWAY from a level
+    if result["direction"] == "UP" and dist_to_floor > channel_range * 0.5:
+        result["away_from_floor"] = True
+    elif result["direction"] == "DOWN" and dist_to_ceiling > channel_range * 0.5:
+        result["away_from_ceiling"] = True
+    
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRIOR CLOSE ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════════
+def analyze_prior_close(prior_close, ceiling, floor):
+    """
+    Analyze where prior RTH closed relative to today's overnight channel.
+    
+    If prior close is near today's floor → floor is validated
+    If prior close is near today's ceiling → ceiling is validated
+    """
+    result = {
+        "validates_floor": False,
+        "validates_ceiling": False,
+        "position": "MIDDLE"
+    }
+    
+    if prior_close is None or ceiling is None or floor is None:
+        return result
+    
+    channel_range = ceiling - floor
+    dist_to_floor = prior_close - floor
+    dist_to_ceiling = ceiling - prior_close
+    
+    if dist_to_floor <= channel_range * 0.3:
+        result["validates_floor"] = True
+        result["position"] = "NEAR_FLOOR"
+    elif dist_to_ceiling <= channel_range * 0.3:
+        result["validates_ceiling"] = True
+        result["position"] = "NEAR_CEILING"
+    
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # PRIOR DAY RTH DATA
 # ═══════════════════════════════════════════════════════════════════════════════
-@st.cache_data(ttl=600, show_spinner=False)
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_prior_day_rth(trading_date):
     """Fetch prior day's RTH (Regular Trading Hours) data for ES futures using Yahoo Finance.
@@ -561,7 +746,19 @@ def get_position(price, ceiling, floor):
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECISION ENGINE
 # ═══════════════════════════════════════════════════════════════════════════════
-def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, retail_bias, ema_bias, vix_position, vix):
+def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, retail_bias, ema_bias, 
+                         vix_position, vix, session_tests, gap_analysis, prior_close_analysis, vix_structure):
+    """
+    Analyze market state and generate trade scenarios with confluence-based confidence.
+    
+    Confluence Factors:
+    1. EMA alignment (8/21/200)
+    2. Retail positioning (fade the crowd)
+    3. Session level tests (more tests = stronger level)
+    4. Gap position (gap INTO level = better setup)
+    5. Prior close validation (prior close near level = validates it)
+    6. VIX term structure (backwardation = more volatile)
+    """
     if current_spx is None or ceiling_spx is None or floor_spx is None:
         return {"no_trade": True, "no_trade_reason": "Missing price data", "calls_factors": [], "puts_factors": [], "primary": None, "alternate": None}
     
@@ -591,78 +788,142 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
         }
     
     # ─────────────────────────────────────────────────────────────────────────
-    # CONFIDENCE LOGIC: Channel structure is PRIMARY, other factors add/reduce
+    # CONFLUENCE FACTORS - 6 factors for your 0DTE strategy
     # ─────────────────────────────────────────────────────────────────────────
-    # Base confidence from channel:
-    #   - Primary scenario aligned with channel = starts at MEDIUM
-    #   - Alternate scenario (counter-trend) = starts at LOW
-    #
-    # Supporting factors (add confidence if aligned, reduce if opposing):
-    #   - EMA bias (above/below 200, 8/21 cross)
-    #   - VIX position (below range = bullish, above range = bearish)
-    #   - Retail positioning (crowded = fade that direction)
     
-    # Track supporting factors for display
-    if channel_type == ChannelType.ASCENDING:
-        result["calls_factors"].append("ASCENDING channel (bullish structure)")
-    elif channel_type == ChannelType.DESCENDING:
-        result["puts_factors"].append("DESCENDING channel (bearish structure)")
-    elif channel_type == ChannelType.MIXED:
-        result["calls_factors"].append("MIXED channel - floor setup")
-        result["puts_factors"].append("MIXED channel - ceiling setup")
+    # Factor 1: Price proximity to key level
+    channel_range = ceiling_spx - floor_spx
+    dist_to_floor = current_spx - floor_spx
+    dist_to_ceiling = ceiling_spx - current_spx
+    near_floor = dist_to_floor <= channel_range * 0.3
+    near_ceiling = dist_to_ceiling <= channel_range * 0.3
     
-    # Count supporting factors for each direction
-    calls_support = 0
-    puts_support = 0
+    # Factor 2: EMA alignment (8/21/200)
+    ema_bullish = ema_bias == Bias.CALLS
+    ema_bearish = ema_bias == Bias.PUTS
     
-    if ema_bias == Bias.CALLS:
-        result["calls_factors"].append("EMA bullish (above 200, 8>21)")
-        calls_support += 1
-    elif ema_bias == Bias.PUTS:
-        result["puts_factors"].append("EMA bearish (below 200, 8<21)")
-        puts_support += 1
+    # Factor 3: Retail positioning (fade the crowd)
+    fade_to_calls = retail_bias == Bias.CALLS  # Retail heavy puts
+    fade_to_puts = retail_bias == Bias.PUTS    # Retail heavy calls
     
-    if retail_bias == Bias.PUTS:
-        result["puts_factors"].append("Retail calls crowded (fade)")
-        puts_support += 1
-    elif retail_bias == Bias.CALLS:
-        result["calls_factors"].append("Retail puts crowded (fade)")
-        calls_support += 1
+    # Factor 4: Session tests (more sessions tested = stronger level)
+    floor_tested = session_tests["floor_tests"] >= 1
+    floor_multi_test = session_tests["floor_tests"] >= 2
+    ceiling_tested = session_tests["ceiling_tests"] >= 1
+    ceiling_multi_test = session_tests["ceiling_tests"] >= 2
     
-    if vix_position == VIXPosition.BELOW_RANGE:
-        result["calls_factors"].append("VIX below range (low fear)")
-        calls_support += 1
-    elif vix_position == VIXPosition.ABOVE_RANGE:
-        result["puts_factors"].append("VIX above range (high fear)")
-        puts_support += 1
+    # Factor 5: Gap analysis
+    gap_into_floor = gap_analysis["into_floor"]
+    gap_into_ceiling = gap_analysis["into_ceiling"]
+    gap_away_floor = gap_analysis["away_from_floor"]
+    gap_away_ceiling = gap_analysis["away_from_ceiling"]
     
-    def calc_confidence(is_primary, direction, support_for, support_against):
+    # Factor 6: Prior close validation
+    prior_validates_floor = prior_close_analysis["validates_floor"]
+    prior_validates_ceiling = prior_close_analysis["validates_ceiling"]
+    
+    # Factor 7: VIX term structure (affects volatility, not direction)
+    vix_contango = vix_structure["structure"] == "CONTANGO"  # Normal, stable - tighter moves
+    vix_backwardation = vix_structure["structure"] == "BACKWARDATION"  # Fear - bigger moves both ways
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # BUILD FACTOR LISTS FOR DISPLAY
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    # Calls factors (for CALLS scenarios)
+    if ema_bullish:
+        result["calls_factors"].append("EMA bullish (8>21>200)")
+    if fade_to_calls:
+        result["calls_factors"].append("Retail puts heavy (fade)")
+    if floor_tested:
+        sessions_str = ", ".join(session_tests["floor_sessions"])
+        result["calls_factors"].append(f"Floor tested ({sessions_str})")
+    if floor_multi_test:
+        result["calls_factors"].append("Floor multi-tested ✓✓")
+    if gap_into_floor:
+        result["calls_factors"].append("Gap down INTO floor")
+    if prior_validates_floor:
+        result["calls_factors"].append("Prior close validates floor")
+    
+    # Puts factors (for PUTS scenarios)
+    if ema_bearish:
+        result["puts_factors"].append("EMA bearish (8<21<200)")
+    if fade_to_puts:
+        result["puts_factors"].append("Retail calls heavy (fade)")
+    if ceiling_tested:
+        sessions_str = ", ".join(session_tests["ceiling_sessions"])
+        result["puts_factors"].append(f"Ceiling tested ({sessions_str})")
+    if ceiling_multi_test:
+        result["puts_factors"].append("Ceiling multi-tested ✓✓")
+    if gap_into_ceiling:
+        result["puts_factors"].append("Gap up INTO ceiling")
+    if prior_validates_ceiling:
+        result["puts_factors"].append("Prior close validates ceiling")
+    
+    # VIX structure note (non-directional - applies to both)
+    if vix_backwardation:
+        result["calls_factors"].append("⚡ VIX backwardation (volatile)")
+        result["puts_factors"].append("⚡ VIX backwardation (volatile)")
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONFIDENCE CALCULATION
+    # ─────────────────────────────────────────────────────────────────────────
+    def calc_scenario_confidence(direction, key_level, at_key_level, is_structure_break=False):
         """
         Calculate confidence based on:
-        1. Is this the primary (with-trend) or alternate (counter-trend) scenario?
-        2. How many supporting factors align vs oppose?
+        1. At key level (not chasing)
+        2. Number of supporting confluence factors FOR THAT SPECIFIC LEVEL
+        3. Whether this is a structure break (lower probability)
         
-        Primary scenarios: Start at MEDIUM, can go HIGH with support or LOW with opposition
-        Alternate scenarios: Start at LOW, can go MEDIUM with strong support
+        key_level: "FLOOR" or "CEILING" - which level this scenario trades
+        direction: "CALLS" or "PUTS" - trade direction
+        
+        Note: VIX backwardation is not counted as it's non-directional
         """
-        if is_primary:
-            # Primary starts at MEDIUM
-            if support_for >= 2 and support_against == 0:
-                return "HIGH"  # Strong alignment
-            elif support_for >= 1 and support_against <= 1:
-                return "MEDIUM"  # Normal
+        support = 0
+        
+        if key_level == "FLOOR":
+            # Floor-based scenarios use floor factors
+            if ema_bullish: support += 1  # Bullish trend supports floor bounce
+            if fade_to_calls: support += 1  # Retail puts = fade to calls at floor
+            if floor_tested: support += 1
+            if floor_multi_test: support += 1
+            if gap_into_floor: support += 1
+            if prior_validates_floor: support += 1
+        else:  # CEILING
+            # Ceiling-based scenarios use ceiling factors
+            if ema_bearish: support += 1  # Bearish trend supports ceiling rejection
+            if fade_to_puts: support += 1  # Retail calls = fade to puts at ceiling
+            if ceiling_tested: support += 1
+            if ceiling_multi_test: support += 1
+            if gap_into_ceiling: support += 1
+            if prior_validates_ceiling: support += 1
+        
+        # Structure breaks max at MEDIUM
+        if is_structure_break:
+            return "MEDIUM" if support >= 3 else "LOW"
+        
+        # Normal scenarios
+        if at_key_level:
+            if support >= 4:
+                return "HIGH"
+            elif support >= 2:
+                return "MEDIUM"
             else:
-                return "LOW"  # Factors opposing
+                return "LOW"
         else:
-            # Alternate (counter-trend) starts at LOW
-            if support_for >= 2 and support_against == 0:
-                return "MEDIUM"  # Enough support to consider
+            # Not at key level - penalize
+            if support >= 4:
+                return "MEDIUM"
             else:
-                return "LOW"  # Default for counter-trend
+                return "LOW"
     
+    # ─────────────────────────────────────────────────────────────────────────
+    # GENERATE SCENARIOS
+    # ─────────────────────────────────────────────────────────────────────────
     if channel_type == ChannelType.CONTRACTING:
         result["no_trade"] = True
-        result["no_trade_reason"] = "CONTRACTING channel - No directional bias"
+        result["no_trade_reason"] = "CONTRACTING channel - No clear key level"
         return result
     if channel_type == ChannelType.UNDETERMINED:
         result["no_trade"] = True
@@ -670,96 +931,91 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
         return result
     
     if channel_type == ChannelType.ASCENDING:
-        # ASCENDING: Floor is KEY level - bullish bias
-        # Primary = CALLS (with trend), Alternate = PUTS (counter-trend)
+        # ASCENDING: Floor is KEY level
         if position in [Position.INSIDE, Position.ABOVE]:
-            # At or above floor - look for bounce (primary play)
-            primary_conf = calc_confidence(True, "CALLS", calls_support, puts_support)
-            alt_conf = calc_confidence(False, "PUTS", puts_support, calls_support)
+            # Both scenarios trade at FLOOR level
+            primary_conf = calc_scenario_confidence("CALLS", "FLOOR", near_floor, is_structure_break=False)
+            alt_conf = calc_scenario_confidence("PUTS", "FLOOR", near_floor, is_structure_break=True)
             
             result["primary"] = make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, 
-                "Price at/near ascending floor",
-                f"ASCENDING structure + {calls_support} supporting factors", primary_conf)
+                "Price at ascending floor",
+                f"Key level: Ascending floor • {len(result['calls_factors'])} confluence factors", primary_conf)
             result["alternate"] = make_scenario("Floor Break", "PUTS", floor_spx, floor_spx + 5, 
-                "If floor breaks down",
-                "Counter-trend: Only if structure fails", alt_conf)
+                "If floor fails",
+                "Structure break scenario", alt_conf)
         else:
-            # Below floor - structure broken, now bearish
-            primary_conf = calc_confidence(True, "PUTS", puts_support, calls_support)
-            alt_conf = calc_confidence(False, "CALLS", calls_support, puts_support)
+            # Price below floor - structure broken, now using floor as resistance
+            primary_conf = calc_scenario_confidence("PUTS", "FLOOR", True, is_structure_break=False)
+            alt_conf = calc_scenario_confidence("CALLS", "FLOOR", True, is_structure_break=True)
             
             result["primary"] = make_scenario("Breakdown Continuation", "PUTS", floor_spx, floor_spx + 5, 
-                "Price below ascending floor - structure broken",
-                f"Floor broken + {puts_support} supporting factors", primary_conf)
+                "Floor broken - bearish",
+                f"Structure broken • {len(result['puts_factors'])} confluence factors", primary_conf)
             result["alternate"] = make_scenario("Floor Reclaim", "CALLS", floor_spx, floor_spx - 5, 
                 "If price reclaims floor",
-                "Counter-trend: Only if breakdown fails", alt_conf)
+                "Recovery scenario", alt_conf)
     
     elif channel_type == ChannelType.DESCENDING:
-        # DESCENDING: Ceiling is KEY level - bearish bias
-        # Primary = PUTS (with trend), Alternate = CALLS (counter-trend)
+        # DESCENDING: Ceiling is KEY level
         if position in [Position.INSIDE, Position.BELOW]:
-            # At or below ceiling - look for rejection (primary play)
-            primary_conf = calc_confidence(True, "PUTS", puts_support, calls_support)
-            alt_conf = calc_confidence(False, "CALLS", calls_support, puts_support)
+            # Both scenarios trade at CEILING level
+            primary_conf = calc_scenario_confidence("PUTS", "CEILING", near_ceiling, is_structure_break=False)
+            alt_conf = calc_scenario_confidence("CALLS", "CEILING", near_ceiling, is_structure_break=True)
             
             result["primary"] = make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, 
-                "Price at/near descending ceiling",
-                f"DESCENDING structure + {puts_support} supporting factors", primary_conf)
+                "Price at descending ceiling",
+                f"Key level: Descending ceiling • {len(result['puts_factors'])} confluence factors", primary_conf)
             result["alternate"] = make_scenario("Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5, 
-                "If ceiling breaks up",
-                "Counter-trend: Only if structure fails", alt_conf)
+                "If ceiling fails",
+                "Structure break scenario", alt_conf)
         else:
-            # Above ceiling - structure broken, now bullish
-            primary_conf = calc_confidence(True, "CALLS", calls_support, puts_support)
-            alt_conf = calc_confidence(False, "PUTS", puts_support, calls_support)
+            # Price above ceiling - structure broken, now using ceiling as support
+            primary_conf = calc_scenario_confidence("CALLS", "CEILING", True, is_structure_break=False)
+            alt_conf = calc_scenario_confidence("PUTS", "CEILING", True, is_structure_break=True)
             
             result["primary"] = make_scenario("Breakout Continuation", "CALLS", ceiling_spx, ceiling_spx - 5, 
-                "Price above descending ceiling - structure broken",
-                f"Ceiling broken + {calls_support} supporting factors", primary_conf)
+                "Ceiling broken - bullish",
+                f"Structure broken • {len(result['calls_factors'])} confluence factors", primary_conf)
             result["alternate"] = make_scenario("Failed Breakout", "PUTS", ceiling_spx, ceiling_spx + 5, 
-                "If price fails back below ceiling",
-                "Counter-trend: Only if breakout fails", alt_conf)
+                "If breakout fails",
+                "Rejection scenario", alt_conf)
     
     elif channel_type == ChannelType.MIXED:
-        # MIXED: Both setups are valid - neither is "counter-trend"
-        # Confidence based on supporting factors for each direction
+        # MIXED: Both floor AND ceiling are key levels
         result["scenarios"] = []
         
-        # Ascending Floor scenarios
-        floor_calls_conf = "HIGH" if calls_support >= 2 else "MEDIUM" if calls_support >= 1 else "LOW"
-        floor_puts_conf = "LOW"  # Breaking floor is always counter to floor setup
+        # Floor scenarios - use FLOOR factors
+        floor_calls_conf = calc_scenario_confidence("CALLS", "FLOOR", near_floor, is_structure_break=False)
+        floor_puts_conf = calc_scenario_confidence("PUTS", "FLOOR", near_floor, is_structure_break=True)
         
-        result["scenarios"].append(make_scenario("Ascending Floor Bounce", "CALLS", floor_spx, floor_spx - 5, 
+        result["scenarios"].append(make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, 
             "Price respects ascending floor",
-            f"Floor support + {calls_support} factors", floor_calls_conf))
-        result["scenarios"].append(make_scenario("Ascending Floor Break", "PUTS", floor_spx, floor_spx + 5,
-            "Price breaks below ascending floor",
-            "Floor failure - loss of support", floor_puts_conf))
+            f"Key level: Floor • {len(result['calls_factors'])} factors", floor_calls_conf))
+        result["scenarios"].append(make_scenario("Floor Break", "PUTS", floor_spx, floor_spx + 5,
+            "Floor fails",
+            "Structure break", floor_puts_conf))
         
-        # Descending Ceiling scenarios
-        ceil_puts_conf = "HIGH" if puts_support >= 2 else "MEDIUM" if puts_support >= 1 else "LOW"
-        ceil_calls_conf = "LOW"  # Breaking ceiling is always counter to ceiling setup
+        # Ceiling scenarios - use CEILING factors
+        ceil_puts_conf = calc_scenario_confidence("PUTS", "CEILING", near_ceiling, is_structure_break=False)
+        ceil_calls_conf = calc_scenario_confidence("CALLS", "CEILING", near_ceiling, is_structure_break=True)
         
-        result["scenarios"].append(make_scenario("Descending Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5,
+        result["scenarios"].append(make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5,
             "Price respects descending ceiling",
-            f"Ceiling resistance + {puts_support} factors", ceil_puts_conf))
-        result["scenarios"].append(make_scenario("Descending Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5,
-            "Price breaks above descending ceiling",
-            "Ceiling failure - loss of resistance", ceil_calls_conf))
+            f"Key level: Ceiling • {len(result['puts_factors'])} factors", ceil_puts_conf))
+        result["scenarios"].append(make_scenario("Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5,
+            "Ceiling fails",
+            "Structure break", ceil_calls_conf))
         
-        # Set primary/alternate based on position
-        if position == Position.BELOW:
-            result["primary"] = result["scenarios"][0]  # Floor Bounce
-            result["alternate"] = result["scenarios"][1]  # Floor Break
-        elif position == Position.ABOVE:
-            result["primary"] = result["scenarios"][2]  # Ceiling Rejection
-            result["alternate"] = result["scenarios"][3]  # Ceiling Break
+        # Set primary/alternate based on which key level is closer
+        if dist_to_floor <= dist_to_ceiling:
+            result["primary"] = result["scenarios"][0]
+            result["alternate"] = result["scenarios"][2]
         else:
-            result["primary"] = result["scenarios"][0]  # Floor Bounce
-            result["alternate"] = result["scenarios"][2]  # Ceiling Rejection
+            result["primary"] = result["scenarios"][2]
+            result["alternate"] = result["scenarios"][0]
     
     return result
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # LEGENDARY CSS STYLING
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1798,7 +2054,28 @@ def main():
     # Calculate prior day targets (both ascending and descending from each anchor)
     prior_targets = calc_prior_day_targets(prior_rth, ref_time_dt)
     
-    decision = analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, retail_data["bias"], ema_data["ema_bias"], vix_pos, vix)
+    # ─────────────────────────────────────────────────────────────────────────
+    # CONFLUENCE DATA GATHERING
+    # ─────────────────────────────────────────────────────────────────────────
+    # Session tests - how many sessions tested each level
+    session_tests = analyze_session_tests(sydney, tokyo, london, channel_type)
+    
+    # Gap analysis - where did we gap relative to channel
+    prior_close_es = prior_rth.get("close") if prior_rth and prior_rth.get("available") else None
+    prior_close_spx = round(prior_close_es - offset, 2) if prior_close_es else None
+    gap_analysis = analyze_gap(current_spx, prior_close_spx, ceiling_spx, floor_spx)
+    
+    # Prior close analysis - does prior close validate a level
+    prior_close_validation = analyze_prior_close(prior_close_spx, ceiling_spx, floor_spx)
+    
+    # VIX term structure
+    vix_term = fetch_vix_term_structure()
+    
+    decision = analyze_market_state(
+        current_spx, ceiling_spx, floor_spx, channel_type, 
+        retail_data["bias"], ema_data["ema_bias"], vix_pos, vix,
+        session_tests, gap_analysis, prior_close_validation, vix_term
+    )
     
     # ═══════════════════════════════════════════════════════════════════════════
     # HERO BANNER
