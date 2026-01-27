@@ -662,42 +662,124 @@ def determine_channel(sydney, tokyo, london=None):
     true_high, high_time, high_session = highest
     true_low, low_time, low_session = lowest
     
-    # Check session-to-session expansions
-    tokyo_high_expansion = tokyo["high"] - sydney["high"]  # How much Tokyo exceeded Sydney's high
-    tokyo_low_expansion = sydney["low"] - tokyo["low"]      # How much Tokyo went below Sydney's low
+    # ─────────────────────────────────────────────────────────────────────────
+    # SESSION-BY-SESSION PATTERN ANALYSIS
+    # Key insight: Look at the PATTERN between sessions, not just new extremes
+    # ─────────────────────────────────────────────────────────────────────────
     
-    tokyo_expanded_high = tokyo_high_expansion > 0
-    tokyo_expanded_low = tokyo_low_expansion > 0
+    # Sydney → Tokyo pattern
+    tokyo_higher_high = tokyo["high"] > sydney["high"]
+    tokyo_lower_low = tokyo["low"] < sydney["low"]
+    tokyo_lower_high = tokyo["high"] < sydney["high"]
+    tokyo_higher_low = tokyo["low"] > sydney["low"]
     
-    london_high_expansion = 0
-    london_low_expansion = 0
-    london_expanded_high = False
-    london_expanded_low = False
-    
-    if london:
-        prior_high = max(sydney["high"], tokyo["high"])
-        prior_low = min(sydney["low"], tokyo["low"])
-        london_high_expansion = london["high"] - prior_high  # How much London exceeded prior high
-        london_low_expansion = prior_low - london["low"]      # How much London went below prior low
-        london_expanded_high = london_high_expansion > 0
-        london_expanded_low = london_low_expansion > 0
-    
-    expanded_high = tokyo_expanded_high or london_expanded_high
-    expanded_low = tokyo_expanded_low or london_expanded_low
-    
-    # Check for dominant expansion (>6 points in one direction)
-    max_high_expansion = max(tokyo_high_expansion, london_high_expansion)
-    max_low_expansion = max(tokyo_low_expansion, london_low_expansion)
-    
-    if expanded_high and expanded_low:
-        # Both directions expanded → MIXED (show both ascending & descending setups)
-        return ChannelType.MIXED, f"Both directions expanded (H+{max_high_expansion:.1f}, L+{max_low_expansion:.1f})", true_high, true_low, high_time, low_time
-    elif not expanded_high and not expanded_low:
-        return ChannelType.CONTRACTING, "Range contracted", true_high, true_low, high_time, low_time
-    elif expanded_high:
-        return ChannelType.ASCENDING, f"{high_session} made higher high (+{max_high_expansion:.1f} pts)", true_high, true_low, high_time, low_time
+    # Determine Tokyo's pattern vs Sydney
+    if tokyo_higher_high and tokyo_higher_low:
+        tokyo_pattern = "ASCENDING"  # Higher high AND higher low
+    elif tokyo_lower_high and tokyo_lower_low:
+        tokyo_pattern = "DESCENDING"  # Lower high AND lower low
+    elif tokyo_higher_high and tokyo_lower_low:
+        tokyo_pattern = "EXPANDING"  # Range expanded both ways
+    elif tokyo_lower_high and tokyo_higher_low:
+        tokyo_pattern = "CONTRACTING"  # Range contracted
+    elif tokyo_higher_high:
+        tokyo_pattern = "ASCENDING"  # Higher high, same/similar low
+    elif tokyo_lower_low:
+        tokyo_pattern = "DESCENDING"  # Lower low, same/similar high
     else:
-        return ChannelType.DESCENDING, f"{low_session} made lower low (+{max_low_expansion:.1f} pts)", true_high, true_low, high_time, low_time
+        tokyo_pattern = "NEUTRAL"
+    
+    # If no London, use Tokyo's pattern
+    if not london:
+        if tokyo_pattern == "ASCENDING":
+            return ChannelType.ASCENDING, f"Tokyo: higher high (+{tokyo['high']-sydney['high']:.1f})", true_high, true_low, high_time, low_time
+        elif tokyo_pattern == "DESCENDING":
+            return ChannelType.DESCENDING, f"Tokyo: lower low (+{sydney['low']-tokyo['low']:.1f})", true_high, true_low, high_time, low_time
+        elif tokyo_pattern == "EXPANDING":
+            return ChannelType.MIXED, f"Tokyo expanded both ways", true_high, true_low, high_time, low_time
+        else:
+            return ChannelType.CONTRACTING, "Tokyo contracted", true_high, true_low, high_time, low_time
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # WITH LONDON: Tokyo → London pattern is PRIMARY (closest to RTH)
+    # This is the key fix - look at London's pattern vs Tokyo, not vs all-time
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    # Tokyo → London pattern (THIS IS WHAT MATTERS FOR RTH!)
+    london_higher_high = london["high"] > tokyo["high"]
+    london_lower_low = london["low"] < tokyo["low"]
+    london_lower_high = london["high"] < tokyo["high"]
+    london_higher_low = london["low"] > tokyo["low"]
+    
+    # Determine London's pattern vs Tokyo
+    # Priority: Clear directional signals > mixed signals
+    # Lower high = DESCENDING (sellers pushing down highs)
+    # Higher low = ASCENDING (buyers pushing up lows)
+    # When conflicting: the HIGH is more important (it shows where sellers stepped in)
+    
+    if london_higher_high and london_higher_low:
+        london_pattern = "ASCENDING"  # Higher high AND higher low = clear uptrend
+    elif london_lower_high and london_lower_low:
+        london_pattern = "DESCENDING"  # Lower high AND lower low = clear downtrend
+    elif london_higher_high and london_lower_low:
+        london_pattern = "MIXED"  # Expanded both ways = no clear direction
+    elif london_lower_high and london_higher_low:
+        # CRITICAL: Lower high + higher low = DESCENDING bias
+        # The lower high shows sellers are defending - this is your scenario!
+        # RTH will use the descending channel (lower highs) as the ceiling
+        london_pattern = "DESCENDING"  # Lower high dominates
+    elif london_higher_high:
+        london_pattern = "ASCENDING"  # Higher high vs Tokyo
+    elif london_lower_low:
+        london_pattern = "DESCENDING"  # Lower low vs Tokyo
+    elif london_lower_high:
+        london_pattern = "DESCENDING"  # Lower high = bearish
+    elif london_higher_low:
+        london_pattern = "ASCENDING"  # Higher low = bullish
+    else:
+        london_pattern = "NEUTRAL"
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FINAL CHANNEL DETERMINATION
+    # London's pattern vs Tokyo takes priority (closest to RTH)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    # Build reason string with session details
+    tokyo_detail = f"Syd→Tok: {tokyo_pattern}"
+    london_detail = f"Tok→Lon: {london_pattern}"
+    
+    if london_pattern == "ASCENDING":
+        reason = f"{london_detail} (higher high/low vs Tokyo)"
+        return ChannelType.ASCENDING, reason, true_high, true_low, high_time, low_time
+    
+    elif london_pattern == "DESCENDING":
+        reason = f"{london_detail} (lower high/low vs Tokyo)"
+        return ChannelType.DESCENDING, reason, true_high, true_low, high_time, low_time
+    
+    elif london_pattern == "EXPANDING":
+        reason = f"{london_detail} (expanded both ways vs Tokyo)"
+        return ChannelType.MIXED, reason, true_high, true_low, high_time, low_time
+    
+    elif london_pattern == "CONTRACTING":
+        # London contracted vs Tokyo - fall back to Tokyo's pattern
+        if tokyo_pattern == "ASCENDING":
+            reason = f"{tokyo_detail}, {london_detail}"
+            return ChannelType.ASCENDING, reason, true_high, true_low, high_time, low_time
+        elif tokyo_pattern == "DESCENDING":
+            reason = f"{tokyo_detail}, {london_detail}"
+            return ChannelType.DESCENDING, reason, true_high, true_low, high_time, low_time
+        elif tokyo_pattern == "EXPANDING":
+            reason = f"{tokyo_detail}, {london_detail}"
+            return ChannelType.MIXED, reason, true_high, true_low, high_time, low_time
+        else:
+            return ChannelType.CONTRACTING, "Both sessions contracted", true_high, true_low, high_time, low_time
+    
+    else:
+        # Neutral - use Tokyo pattern
+        if tokyo_pattern in ["ASCENDING", "DESCENDING", "EXPANDING"]:
+            channel = ChannelType.ASCENDING if tokyo_pattern == "ASCENDING" else (ChannelType.DESCENDING if tokyo_pattern == "DESCENDING" else ChannelType.MIXED)
+            return channel, f"{tokyo_detail}, London neutral", true_high, true_low, high_time, low_time
+        return ChannelType.CONTRACTING, "No clear direction", true_high, true_low, high_time, low_time
 
 def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time, channel_type):
     if upper_pivot is None or lower_pivot is None:
