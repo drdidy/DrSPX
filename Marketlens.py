@@ -795,10 +795,24 @@ def _determine_channel_from_comparison(asian_high, asian_low, london_high, londo
         return ChannelType.MIXED, reason, true_high, true_low, high_time, low_time
     
     if lower_high and higher_low:
-        # Contracted - but this is actually a DESCENDING bias (lower high dominates)
-        # The lower high shows sellers defended - treat as DESCENDING
-        reason = f"{london_name} contracted: Lower H ({high_diff:.1f}), Higher L (+{low_diff:.1f}) → Descending bias"
-        return ChannelType.DESCENDING, reason, true_high, true_low, high_time, low_time
+        # Contracted range - determine bias by MAGNITUDE of moves
+        # Whichever move is larger determines the bias
+        high_move = abs(high_diff)  # How much lower the high is
+        low_move = abs(low_diff)    # How much higher the low is
+        
+        if low_move > high_move * 2:
+            # Higher low is significantly larger - ASCENDING bias
+            # Buyers are strongly defending, slight lower high doesn't matter
+            reason = f"{london_name}: Higher L (+{low_diff:.1f}) dominates Lower H ({high_diff:.1f}) → Ascending"
+            return ChannelType.ASCENDING, reason, true_high, true_low, high_time, low_time
+        elif high_move > low_move * 2:
+            # Lower high is significantly larger - DESCENDING bias
+            reason = f"{london_name}: Lower H ({high_diff:.1f}) dominates Higher L (+{low_diff:.1f}) → Descending"
+            return ChannelType.DESCENDING, reason, true_high, true_low, high_time, low_time
+        else:
+            # Moves are similar magnitude - MIXED (no clear direction)
+            reason = f"{london_name} contracted: Lower H ({high_diff:.1f}), Higher L (+{low_diff:.1f}) → Mixed"
+            return ChannelType.MIXED, reason, true_high, true_low, high_time, low_time
     
     # ─────────────────────────────────────────────────────────────────────────
     # SINGLE SIGNAL PATTERNS (only one of high/low moved)
