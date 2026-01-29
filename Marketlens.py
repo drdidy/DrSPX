@@ -28,7 +28,7 @@ CT = pytz.timezone("America/Chicago")
 ET = pytz.timezone("America/New_York")
 UTC = pytz.UTC
 
-SLOPE = 0.5
+SLOPE = 0.52
 SAVE_FILE = "spx_prophet_inputs.json"
 
 POLYGON_API_KEY = "jrbBZ2y12cJAOp2Buqtlay0TdprcTDIm"
@@ -576,12 +576,12 @@ def calc_prior_day_targets(prior_rth, ref_time):
     """Calculate BOTH ascending and descending targets from prior day anchors.
     
     From HIGHEST WICK:
-    - Ascending line (+0.5/30min) = Resistance (SELL point)
-    - Descending line (-0.5/30min) = Support (BUY point)
+    - Ascending line (+0.52/30min) = Resistance (SELL point)
+    - Descending line (-0.52/30min) = Support (BUY point)
     
     From LOWEST CLOSE:
-    - Ascending line (+0.5/30min) = Support (BUY point)
-    - Descending line (-0.5/30min) = Resistance (SELL point)
+    - Ascending line (+0.52/30min) = Support (BUY point)
+    - Descending line (-0.52/30min) = Resistance (SELL point)
     
     Returns dict with all four targets.
     """
