@@ -910,7 +910,7 @@ def calc_convergence_zone(overnight_high, overnight_low, overnight_high_time, ov
     if overnight_high is None or overnight_low is None:
         return None
     
-    # Calculate blocks from each pivot to the zone reference time (same as channel ref time)
+    # Calculate blocks from each pivot to the zone reference time
     blocks_from_high = blocks_between(overnight_high_time, zone_ref_time) if overnight_high_time and zone_ref_time else 0
     blocks_from_low = blocks_between(overnight_low_time, zone_ref_time) if overnight_low_time and zone_ref_time else 0
     
@@ -924,7 +924,6 @@ def calc_convergence_zone(overnight_high, overnight_low, overnight_high_time, ov
     # Zone boundaries - whichever is higher becomes top, lower becomes bottom
     zone_top = max(low_ascending, high_descending)
     zone_bottom = min(low_ascending, high_descending)
-    zone_mid = round((zone_top + zone_bottom) / 2, 2)
     zone_size = round(zone_top - zone_bottom, 2)
     
     # Determine which line forms which boundary (for display purposes)
@@ -939,7 +938,6 @@ def calc_convergence_zone(overnight_high, overnight_low, overnight_high_time, ov
         "available": True,
         "zone_top": zone_top,
         "zone_bottom": zone_bottom,
-        "zone_mid": zone_mid,
         "zone_size": zone_size,
         "low_ascending": low_ascending,
         "high_descending": high_descending,
@@ -2313,29 +2311,32 @@ def main():
     # to see where price settles relative to the zone for your trading plan
     zone_ref_time = CT.localize(datetime.combine(inputs["trading_date"], time(9, 0)))
     
-    # Get overnight high/low times
+    # Get overnight high/low and their times from sessions
+    overnight_high_val = None
+    overnight_low_val = None
     overnight_high_time = None
     overnight_low_time = None
+    
     if sydney and tokyo and london:
-        # Find which session made the overnight high and low
-        sessions_data = [
-            ("sydney", sydney),
-            ("tokyo", tokyo),
-            ("london", london)
-        ]
-        max_high = max(s[1]["high"] for s in sessions_data)
-        min_low = min(s[1]["low"] for s in sessions_data)
-        for name, sess in sessions_data:
-            if sess["high"] == max_high and overnight_high_time is None:
+        # Find overnight high and which session made it
+        sessions_list = [sydney, tokyo, london]
+        overnight_high_val = max(s["high"] for s in sessions_list)
+        overnight_low_val = min(s["low"] for s in sessions_list)
+        
+        for sess in sessions_list:
+            if sess["high"] == overnight_high_val and overnight_high_time is None:
                 overnight_high_time = sess.get("high_time")
-            if sess["low"] == min_low and overnight_low_time is None:
+            if sess["low"] == overnight_low_val and overnight_low_time is None:
                 overnight_low_time = sess.get("low_time")
+    elif overnight:
+        overnight_high_val = overnight.get("high")
+        overnight_low_val = overnight.get("low")
     
     # Calculate the Convergence Zone (in ES terms)
     convergence_zone_es = None
-    if overnight and overnight.get("high") and overnight.get("low"):
+    if overnight_high_val and overnight_low_val:
         convergence_zone_es = calc_convergence_zone(
-            overnight["high"], overnight["low"],
+            overnight_high_val, overnight_low_val,
             overnight_high_time, overnight_low_time,
             zone_ref_time
         )
@@ -2347,7 +2348,6 @@ def main():
             "available": True,
             "zone_top": round(convergence_zone_es["zone_top"] - offset, 2),
             "zone_bottom": round(convergence_zone_es["zone_bottom"] - offset, 2),
-            "zone_mid": round(convergence_zone_es["zone_mid"] - offset, 2),
             "zone_size": convergence_zone_es["zone_size"],
             "low_ascending": round(convergence_zone_es["low_ascending"] - offset, 2),
             "high_descending": round(convergence_zone_es["high_descending"] - offset, 2),
@@ -2544,19 +2544,12 @@ def main():
                 <div class="level-value" style="color: var(--text-primary);">{convergence_zone["zone_top"]:,.2f}</div>
                 <div class="level-note">{convergence_zone["top_source"]} • {dist_zone_top:+.1f} pts</div>
             </div>
-            <div class="level-row" style="background: linear-gradient(90deg, rgba(123,97,255,0.1) 0%, transparent 100%);">
-                <div class="level-label" style="color: rgba(123,97,255,0.8);">
-                    <span>▬</span><span>ZONE MID</span>
-                </div>
-                <div class="level-value" style="color: rgba(123,97,255,0.9);">{convergence_zone["zone_mid"]:,.2f}</div>
-                <div class="level-note">Zone size: {convergence_zone["zone_size"]:.1f} pts</div>
-            </div>
             <div class="level-row">
                 <div class="level-label" style="color: var(--accent-primary);">
                     <span>◆</span><span>ZONE BTM</span>
                 </div>
                 <div class="level-value" style="color: var(--text-primary);">{convergence_zone["zone_bottom"]:,.2f}</div>
-                <div class="level-note">{convergence_zone["bottom_source"]} • {dist_zone_bottom:+.1f} pts</div>
+                <div class="level-note">{convergence_zone["bottom_source"]} • {dist_zone_bottom:+.1f} pts • Size: {convergence_zone["zone_size"]:.1f} pts</div>
             </div>
         </div>
         <div style="font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; text-align: center; font-style: italic;">
