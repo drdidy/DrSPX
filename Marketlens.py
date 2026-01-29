@@ -2309,7 +2309,13 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # Calculate zone at 9:00 AM CT - this gives you 30 minutes after RTH open
     # to see where price settles relative to the zone for your trading plan
+    #
+    # ZONE LOCK LOGIC:
+    # - Before 6:00 AM: Zone updates if overnight high/low changes
+    # - After 6:00 AM: Zone is LOCKED (London session complete, structure is set)
     zone_ref_time = CT.localize(datetime.combine(inputs["trading_date"], time(9, 0)))
+    zone_lock_time = CT.localize(datetime.combine(inputs["trading_date"], time(6, 0)))
+    zone_is_locked = now >= zone_lock_time
     
     # Get overnight high/low and their times from sessions
     overnight_high_val = None
@@ -2353,6 +2359,7 @@ def main():
             "high_descending": round(convergence_zone_es["high_descending"] - offset, 2),
             "top_source": convergence_zone_es["top_source"],
             "bottom_source": convergence_zone_es["bottom_source"],
+            "is_locked": zone_is_locked,
         }
     
     # Determine zone position and bias
@@ -2521,6 +2528,7 @@ def main():
         zone_color = "calls" if zone_position == "ABOVE" else ("puts" if zone_position == "BELOW" else "")
         zone_status = "📈 ABOVE" if zone_position == "ABOVE" else ("📉 BELOW" if zone_position == "BELOW" else "⚖️ INSIDE")
         zone_bias_text = "Look for CALLS on pullback" if zone_bias == "CALLS" else ("Look for PUTS on rally" if zone_bias == "PUTS" else "Wait for breakout")
+        zone_lock_indicator = "🔒 LOCKED" if convergence_zone.get("is_locked") else "🔄 UPDATING"
         
         dist_zone_top = round(convergence_zone["zone_top"] - current_spx, 1)
         dist_zone_bottom = round(current_spx - convergence_zone["zone_bottom"], 1)
@@ -2533,8 +2541,8 @@ def main():
                 <div style="font-family: 'Syne', sans-serif; font-weight: 600; color: var(--text-primary);">
                     Position: <span style="color: {'var(--calls-primary)' if zone_position == 'ABOVE' else ('var(--puts-primary)' if zone_position == 'BELOW' else 'var(--accent-gold)')};">{zone_status}</span>
                 </div>
-                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-secondary);">
-                    {zone_bias_text}
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: {'var(--calls-primary)' if convergence_zone.get('is_locked') else 'var(--accent-gold)'};">
+                    {zone_lock_indicator}
                 </div>
             </div>
             <div class="level-row">
@@ -2553,7 +2561,7 @@ def main():
             </div>
         </div>
         <div style="font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; text-align: center; font-style: italic;">
-            Zone formed by overnight LOW ascending (+0.52/30min) and HIGH descending (-0.52/30min) projected to 9:00 AM
+            {'Zone locked after 6:00 AM (London close)' if convergence_zone.get('is_locked') else 'Zone updates until 6:00 AM • '} Projected to 9:00 AM
         </div>
         ''', unsafe_allow_html=True)
     
