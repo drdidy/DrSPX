@@ -893,6 +893,88 @@ def calc_mixed_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time
         "desc_floor": round(lower_pivot - SLOPE * blocks_low, 2),      # Descending floor (low going down)
     }
 
+def calc_convergence_zone(overnight_high, overnight_low, overnight_high_time, overnight_low_time, zone_ref_time):
+    """
+    Calculate the Convergence Zone - where ascending and descending projections meet.
+    
+    The zone is created by:
+    1. Project overnight LOW forward with ascending slope (+0.52/30min) to reference time
+    2. Project overnight HIGH forward with descending slope (-0.52/30min) to reference time
+    3. The two levels form a zone (regardless of which is higher)
+    
+    Trading Logic:
+    - RTH opens ABOVE zone → Look for CALLS when price drops INTO zone
+    - RTH opens BELOW zone → Look for PUTS when price rises INTO zone
+    - RTH opens INSIDE zone → Wait for breakout direction
+    """
+    if overnight_high is None or overnight_low is None:
+        return None
+    
+    # Calculate blocks from each pivot to the zone reference time (same as channel ref time)
+    blocks_from_high = blocks_between(overnight_high_time, zone_ref_time) if overnight_high_time and zone_ref_time else 0
+    blocks_from_low = blocks_between(overnight_low_time, zone_ref_time) if overnight_low_time and zone_ref_time else 0
+    
+    # Project the levels to reference time
+    # Ascending line from overnight LOW
+    low_ascending = round(overnight_low + SLOPE * blocks_from_low, 2)
+    
+    # Descending line from overnight HIGH
+    high_descending = round(overnight_high - SLOPE * blocks_from_high, 2)
+    
+    # Zone boundaries - whichever is higher becomes top, lower becomes bottom
+    zone_top = max(low_ascending, high_descending)
+    zone_bottom = min(low_ascending, high_descending)
+    zone_mid = round((zone_top + zone_bottom) / 2, 2)
+    zone_size = round(zone_top - zone_bottom, 2)
+    
+    # Determine which line forms which boundary (for display purposes)
+    if low_ascending >= high_descending:
+        top_source = "LOW→ASC"
+        bottom_source = "HIGH→DESC"
+    else:
+        top_source = "HIGH→DESC"
+        bottom_source = "LOW→ASC"
+    
+    return {
+        "available": True,
+        "zone_top": zone_top,
+        "zone_bottom": zone_bottom,
+        "zone_mid": zone_mid,
+        "zone_size": zone_size,
+        "low_ascending": low_ascending,
+        "high_descending": high_descending,
+        "top_source": top_source,
+        "bottom_source": bottom_source,
+        "blocks_from_high": blocks_from_high,
+        "blocks_from_low": blocks_from_low
+    }
+
+def get_zone_position(price, zone):
+    """Determine if price is above, below, or inside the Convergence Zone."""
+    if zone is None or not zone.get("available"):
+        return "UNKNOWN"
+    if price > zone["zone_top"]:
+        return "ABOVE"
+    elif price < zone["zone_bottom"]:
+        return "BELOW"
+    else:
+        return "INSIDE"
+
+def get_zone_bias(zone_position, channel_type):
+    """
+    Determine trading bias based on zone position.
+    
+    - ABOVE zone → CALLS bias (buy dips into zone, target upper ascending)
+    - BELOW zone → PUTS bias (sell rips into zone, target lower descending)
+    - INSIDE zone → Neutral, wait for breakout
+    """
+    if zone_position == "ABOVE":
+        return "CALLS", "Price above Convergence Zone - look for CALLS on pullback to zone"
+    elif zone_position == "BELOW":
+        return "PUTS", "Price below Convergence Zone - look for PUTS on rally to zone"
+    else:
+        return "NEUTRAL", "Price inside Convergence Zone - wait for direction"
+
 def get_position(price, ceiling, floor):
     if price > ceiling:
         return Position.ABOVE
@@ -904,7 +986,8 @@ def get_position(price, ceiling, floor):
 # DECISION ENGINE
 # ═══════════════════════════════════════════════════════════════════════════════
 def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, retail_bias, ema_bias, 
-                         vix_position, vix, session_tests, gap_analysis, prior_close_analysis, vix_structure):
+                         vix_position, vix, session_tests, gap_analysis, prior_close_analysis, vix_structure,
+                         convergence_zone=None, zone_position=None, zone_bias=None):
     """
     Analyze market state and generate trade scenarios with confluence-based confidence.
     
@@ -915,11 +998,12 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
     4. Gap position (gap INTO level = better setup)
     5. Prior close validation (prior close near level = validates it)
     6. VIX term structure (backwardation = more volatile)
+    7. Convergence Zone alignment (NEW!)
     """
     if current_spx is None or ceiling_spx is None or floor_spx is None:
-        return {"no_trade": True, "no_trade_reason": "Missing price data", "calls_factors": [], "puts_factors": [], "primary": None, "alternate": None}
+        return {"no_trade": True, "no_trade_reason": "Missing price data", "calls_factors": [], "puts_factors": [], "primary": None, "alternate": None, "convergence_zone": convergence_zone, "zone_position": zone_position, "zone_bias": zone_bias}
     
-    result = {"no_trade": False, "no_trade_reason": None, "calls_factors": [], "puts_factors": [], "primary": None, "alternate": None}
+    result = {"no_trade": False, "no_trade_reason": None, "calls_factors": [], "puts_factors": [], "primary": None, "alternate": None, "convergence_zone": convergence_zone, "zone_position": zone_position, "zone_bias": zone_bias}
     
     if current_spx > ceiling_spx:
         position = Position.ABOVE
@@ -983,6 +1067,10 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
     vix_contango = vix_structure["structure"] == "CONTANGO"  # Normal, stable - tighter moves
     vix_backwardation = vix_structure["structure"] == "BACKWARDATION"  # Fear - bigger moves both ways
     
+    # Factor 8: Convergence Zone alignment (NEW!)
+    zone_supports_calls = zone_bias == "CALLS" if zone_bias else False
+    zone_supports_puts = zone_bias == "PUTS" if zone_bias else False
+    
     # ─────────────────────────────────────────────────────────────────────────
     # BUILD FACTOR LISTS FOR DISPLAY
     # ─────────────────────────────────────────────────────────────────────────
@@ -1001,6 +1089,8 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
         result["calls_factors"].append("Gap down INTO floor")
     if prior_validates_floor:
         result["calls_factors"].append("Prior close validates floor")
+    if zone_supports_calls:
+        result["calls_factors"].append("📍 Above Convergence Zone")
     
     # Puts factors (for PUTS scenarios)
     if ema_bearish:
@@ -1016,6 +1106,8 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
         result["puts_factors"].append("Gap up INTO ceiling")
     if prior_validates_ceiling:
         result["puts_factors"].append("Prior close validates ceiling")
+    if zone_supports_puts:
+        result["puts_factors"].append("📍 Below Convergence Zone")
     
     # VIX structure note (non-directional - applies to both)
     if vix_backwardation:
@@ -1031,6 +1123,7 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
         1. At key level (not chasing)
         2. Number of supporting confluence factors FOR THAT SPECIFIC LEVEL
         3. Whether this is a structure break (lower probability)
+        4. Convergence Zone alignment (NEW!)
         
         key_level: "FLOOR" or "CEILING" - which level this scenario trades
         direction: "CALLS" or "PUTS" - trade direction
@@ -1047,6 +1140,7 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
             if floor_multi_test: support += 1
             if gap_into_floor: support += 1
             if prior_validates_floor: support += 1
+            if zone_supports_calls: support += 1  # Zone alignment for calls
         else:  # CEILING
             # Ceiling-based scenarios use ceiling factors
             if ema_bearish: support += 1  # Bearish trend supports ceiling rejection
@@ -1055,6 +1149,7 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
             if ceiling_multi_test: support += 1
             if gap_into_ceiling: support += 1
             if prior_validates_ceiling: support += 1
+            if zone_supports_puts: support += 1  # Zone alignment for puts
         
         # Structure breaks max at MEDIUM
         if is_structure_break:
@@ -2212,6 +2307,59 @@ def main():
     prior_targets = calc_prior_day_targets(prior_rth, ref_time_dt)
     
     # ─────────────────────────────────────────────────────────────────────────
+    # CONVERGENCE ZONE CALCULATION
+    # ─────────────────────────────────────────────────────────────────────────
+    # Calculate zone at 9:00 AM CT - this gives you 30 minutes after RTH open
+    # to see where price settles relative to the zone for your trading plan
+    zone_ref_time = CT.localize(datetime.combine(inputs["trading_date"], time(9, 0)))
+    
+    # Get overnight high/low times
+    overnight_high_time = None
+    overnight_low_time = None
+    if sydney and tokyo and london:
+        # Find which session made the overnight high and low
+        sessions_data = [
+            ("sydney", sydney),
+            ("tokyo", tokyo),
+            ("london", london)
+        ]
+        max_high = max(s[1]["high"] for s in sessions_data)
+        min_low = min(s[1]["low"] for s in sessions_data)
+        for name, sess in sessions_data:
+            if sess["high"] == max_high and overnight_high_time is None:
+                overnight_high_time = sess.get("high_time")
+            if sess["low"] == min_low and overnight_low_time is None:
+                overnight_low_time = sess.get("low_time")
+    
+    # Calculate the Convergence Zone (in ES terms)
+    convergence_zone_es = None
+    if overnight and overnight.get("high") and overnight.get("low"):
+        convergence_zone_es = calc_convergence_zone(
+            overnight["high"], overnight["low"],
+            overnight_high_time, overnight_low_time,
+            zone_ref_time
+        )
+    
+    # Convert to SPX
+    convergence_zone = None
+    if convergence_zone_es and convergence_zone_es.get("available"):
+        convergence_zone = {
+            "available": True,
+            "zone_top": round(convergence_zone_es["zone_top"] - offset, 2),
+            "zone_bottom": round(convergence_zone_es["zone_bottom"] - offset, 2),
+            "zone_mid": round(convergence_zone_es["zone_mid"] - offset, 2),
+            "zone_size": convergence_zone_es["zone_size"],
+            "low_ascending": round(convergence_zone_es["low_ascending"] - offset, 2),
+            "high_descending": round(convergence_zone_es["high_descending"] - offset, 2),
+            "top_source": convergence_zone_es["top_source"],
+            "bottom_source": convergence_zone_es["bottom_source"],
+        }
+    
+    # Determine zone position and bias
+    zone_position = get_zone_position(current_spx, convergence_zone) if convergence_zone else "UNKNOWN"
+    zone_bias, zone_bias_reason = get_zone_bias(zone_position, channel_type) if convergence_zone else ("NEUTRAL", "Zone not available")
+    
+    # ─────────────────────────────────────────────────────────────────────────
     # CONFLUENCE DATA GATHERING
     # ─────────────────────────────────────────────────────────────────────────
     # Session tests - how many sessions tested each level
@@ -2231,7 +2379,8 @@ def main():
     decision = analyze_market_state(
         current_spx, ceiling_spx, floor_spx, channel_type, 
         retail_data["bias"], ema_data["ema_bias"], vix_pos, vix,
-        session_tests, gap_analysis, prior_close_validation, vix_term
+        session_tests, gap_analysis, prior_close_validation, vix_term,
+        convergence_zone, zone_position, zone_bias
     )
     
     # ═══════════════════════════════════════════════════════════════════════════
@@ -2364,6 +2513,56 @@ def main():
         <div class="level-row"><div class="level-label floor"><span>▼</span><span>FLOOR</span></div><div class="level-value floor">{floor_spx:,.2f}</div><div class="level-note">CALLS entry • {dist_floor} pts away</div></div>
     </div>
     ''', unsafe_allow_html=True)
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CONVERGENCE ZONE
+    # ═══════════════════════════════════════════════════════════════════════════
+    if convergence_zone and convergence_zone.get("available"):
+        zone_color = "calls" if zone_position == "ABOVE" else ("puts" if zone_position == "BELOW" else "")
+        zone_status = "📈 ABOVE" if zone_position == "ABOVE" else ("📉 BELOW" if zone_position == "BELOW" else "⚖️ INSIDE")
+        zone_bias_text = "Look for CALLS on pullback" if zone_bias == "CALLS" else ("Look for PUTS on rally" if zone_bias == "PUTS" else "Wait for breakout")
+        
+        dist_zone_top = round(convergence_zone["zone_top"] - current_spx, 1)
+        dist_zone_bottom = round(current_spx - convergence_zone["zone_bottom"], 1)
+        
+        st.markdown('<div class="section-header"><div class="section-icon">◈</div><h2 class="section-title">Convergence Zone @ 9:00 AM</h2></div>', unsafe_allow_html=True)
+        
+        st.markdown(f'''
+        <div class="levels-container" style="border-color: rgba(123, 97, 255, 0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <div style="font-family: 'Syne', sans-serif; font-weight: 600; color: var(--text-primary);">
+                    Position: <span style="color: {'var(--calls-primary)' if zone_position == 'ABOVE' else ('var(--puts-primary)' if zone_position == 'BELOW' else 'var(--accent-gold)')};">{zone_status}</span>
+                </div>
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: var(--text-secondary);">
+                    {zone_bias_text}
+                </div>
+            </div>
+            <div class="level-row">
+                <div class="level-label" style="color: var(--accent-primary);">
+                    <span>◆</span><span>ZONE TOP</span>
+                </div>
+                <div class="level-value" style="color: var(--text-primary);">{convergence_zone["zone_top"]:,.2f}</div>
+                <div class="level-note">{convergence_zone["top_source"]} • {dist_zone_top:+.1f} pts</div>
+            </div>
+            <div class="level-row" style="background: linear-gradient(90deg, rgba(123,97,255,0.1) 0%, transparent 100%);">
+                <div class="level-label" style="color: rgba(123,97,255,0.8);">
+                    <span>▬</span><span>ZONE MID</span>
+                </div>
+                <div class="level-value" style="color: rgba(123,97,255,0.9);">{convergence_zone["zone_mid"]:,.2f}</div>
+                <div class="level-note">Zone size: {convergence_zone["zone_size"]:.1f} pts</div>
+            </div>
+            <div class="level-row">
+                <div class="level-label" style="color: var(--accent-primary);">
+                    <span>◆</span><span>ZONE BTM</span>
+                </div>
+                <div class="level-value" style="color: var(--text-primary);">{convergence_zone["zone_bottom"]:,.2f}</div>
+                <div class="level-note">{convergence_zone["bottom_source"]} • {dist_zone_bottom:+.1f} pts</div>
+            </div>
+        </div>
+        <div style="font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; text-align: center; font-style: italic;">
+            Zone formed by overnight LOW ascending (+0.52/30min) and HIGH descending (-0.52/30min) projected to 9:00 AM
+        </div>
+        ''', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # PRIOR DAY INTERMEDIATE LEVELS
