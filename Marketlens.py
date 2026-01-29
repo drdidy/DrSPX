@@ -1510,6 +1510,10 @@ CSS_STYLES = """
     border-radius: 14px;
     padding: 18px;
     transition: all 0.3s ease;
+    height: 100%;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
 }
 
 .glass-card:hover {
@@ -1909,7 +1913,7 @@ CSS_STYLES = """
 .session-low { color: var(--calls-primary); }
 
 /* Indicator Cards */
-.indicator-card { background: var(--bg-glass); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 16px; }
+.indicator-card { background: var(--bg-glass); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 16px; height: 100%; min-height: 140px; display: flex; flex-direction: column; }
 .indicator-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
 .indicator-icon { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); border-radius: 5px; font-size: 0.9rem; }
 .indicator-title { font-family: 'Syne', sans-serif; font-size: 0.9rem; font-weight: 600; color: var(--text-primary); }
@@ -1977,6 +1981,26 @@ section[data-testid="stSidebar"] p { color: rgba(255,255,255,0.6) !important; }
 
 .stButton > button { font-family: 'JetBrains Mono', monospace !important; font-weight: 600 !important; border-radius: 6px !important; }
 hr { border: none !important; height: 1px !important; background: var(--border-subtle) !important; margin: 18px 0 !important; }
+
+/* Force equal height cards in Streamlit columns */
+[data-testid="column"] {
+    display: flex !important;
+    flex-direction: column !important;
+}
+[data-testid="column"] > div {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+[data-testid="column"] > div > div {
+    flex: 1 !important;
+    display: flex !important;
+}
+[data-testid="column"] .glass-card,
+[data-testid="column"] .indicator-card {
+    flex: 1 !important;
+    width: 100% !important;
+}
 
 @media (max-width: 768px) {
     .hero-banner { flex-direction: column; padding: 20px 12px; gap: 12px; }
