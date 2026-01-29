@@ -2360,6 +2360,10 @@ def main():
             "top_source": convergence_zone_es["top_source"],
             "bottom_source": convergence_zone_es["bottom_source"],
             "is_locked": zone_is_locked,
+            "blocks_from_high": convergence_zone_es.get("blocks_from_high", 0),
+            "blocks_from_low": convergence_zone_es.get("blocks_from_low", 0),
+            "overnight_high_es": overnight_high_val,
+            "overnight_low_es": overnight_low_val,
         }
     
     # Determine zone position and bias
@@ -2560,7 +2564,10 @@ def main():
                 <div class="level-note">{convergence_zone["bottom_source"]} • {dist_zone_bottom:+.1f} pts • Size: {convergence_zone["zone_size"]:.1f} pts</div>
             </div>
         </div>
-        <div style="font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; text-align: center; font-style: italic;">
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--text-muted); margin-top: 8px; text-align: center;">
+            Low blocks: {convergence_zone.get('blocks_from_low', 0)} • High blocks: {convergence_zone.get('blocks_from_high', 0)} • ON High: {convergence_zone.get('overnight_high_es', 'N/A')} • ON Low: {convergence_zone.get('overnight_low_es', 'N/A')}
+        </div>
+        <div style="font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; text-align: center; font-style: italic;">
             {'Zone locked after 6:00 AM (London close)' if convergence_zone.get('is_locked') else 'Zone updates until 6:00 AM • '} Projected to 9:00 AM
         </div>
         ''', unsafe_allow_html=True)
