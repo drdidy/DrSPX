@@ -2317,14 +2317,28 @@ def main():
     zone_lock_time = CT.localize(datetime.combine(inputs["trading_date"], time(6, 0)))
     zone_is_locked = now >= zone_lock_time
     
-    # Get overnight high/low and their times from sessions
+    # Get overnight high/low and their ACTUAL times
+    # Priority: Use overnight session data from Yahoo (has exact times from candles)
     overnight_high_val = None
     overnight_low_val = None
     overnight_high_time = None
     overnight_low_time = None
     
-    if sydney and tokyo and london:
-        # Find overnight high and which session made it
+    # First, try to get from the overnight session extracted from Yahoo
+    # This has the actual high_time and low_time from the candle data
+    if not inputs.get("manual_overnight") and not inputs.get("manual_sessions"):
+        # Using Yahoo data - extract overnight session which has times
+        es_candles = fetch_es_candles()
+        sessions = extract_sessions(es_candles, inputs["trading_date"]) or {}
+        overnight_session = sessions.get("overnight")
+        if overnight_session:
+            overnight_high_val = overnight_session.get("high")
+            overnight_low_val = overnight_session.get("low")
+            overnight_high_time = overnight_session.get("high_time")
+            overnight_low_time = overnight_session.get("low_time")
+    
+    # Fallback: If manual data or no Yahoo times, try individual sessions
+    if overnight_high_val is None and sydney and tokyo and london:
         sessions_list = [sydney, tokyo, london]
         overnight_high_val = max(s["high"] for s in sessions_list)
         overnight_low_val = min(s["low"] for s in sessions_list)
@@ -2334,7 +2348,9 @@ def main():
                 overnight_high_time = sess.get("high_time")
             if sess["low"] == overnight_low_val and overnight_low_time is None:
                 overnight_low_time = sess.get("low_time")
-    elif overnight:
+    
+    # Final fallback: use overnight dict values (no times)
+    if overnight_high_val is None and overnight:
         overnight_high_val = overnight.get("high")
         overnight_low_val = overnight.get("low")
     
