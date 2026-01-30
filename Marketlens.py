@@ -1265,7 +1265,7 @@ CSS_STYLES = """
 }
 
 /* Hide Streamlit defaults */
-#MainMenu, footer, .stDeployButton, header[data-testid="stHeader"] {
+#MainMenu, footer, .stDeployButton {
     display: none !important;
     visibility: hidden !important;
 }
