@@ -1047,7 +1047,6 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
             if floor_multi_test: support += 1
             if gap_into_floor: support += 1
             if prior_validates_floor: support += 1
-            if zone_supports_calls: support += 1  # Zone alignment for calls
         else:  # CEILING
             # Ceiling-based scenarios use ceiling factors
             if ema_bearish: support += 1  # Bearish trend supports ceiling rejection
@@ -1056,7 +1055,6 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
             if ceiling_multi_test: support += 1
             if gap_into_ceiling: support += 1
             if prior_validates_ceiling: support += 1
-            if zone_supports_puts: support += 1  # Zone alignment for puts
         
         # Structure breaks max at MEDIUM
         if is_structure_break:
