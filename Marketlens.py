@@ -67,9 +67,91 @@ def now_ct():
     return datetime.now(CT)
 
 def blocks_between(start, end):
+    """Calculate 30-minute blocks between two times.
+    Used for intraday projections within the same trading session."""
     if start is None or end is None or end <= start:
         return 0
     return max(0, int((end - start).total_seconds() / 1800))
+
+def trading_blocks_between(start_time, end_time):
+    """Calculate trading blocks between two times for prior day projections.
+    
+    For cross-day calculations, we count:
+    - Blocks from anchor time to that day's RTH close (3:00 PM CT)
+    - Overnight blocks to the next trading day's reference time
+    - Weekend is treated as one extended overnight session
+    
+    Key insight: The TRADING reference time matters, not the calendar date.
+    If user picks Sunday or Monday, we project to MONDAY's reference time.
+    """
+    if start_time is None or end_time is None:
+        return 0
+    
+    # Ensure both are timezone-aware
+    if start_time.tzinfo is None or end_time.tzinfo is None:
+        return blocks_between(start_time, end_time)
+    
+    start_date = start_time.date()
+    end_date = end_time.date()
+    
+    # If same day, use simple calculation
+    if start_date == end_date:
+        return blocks_between(start_time, end_time)
+    
+    # Blocks from start_time to 3:00 PM CT (end of RTH) on start day
+    start_day_close = start_time.replace(hour=15, minute=0, second=0, microsecond=0)
+    if start_time < start_day_close:
+        blocks_to_close = int((start_day_close - start_time).total_seconds() / 1800)
+    else:
+        blocks_to_close = 0
+    
+    # Blocks from 8:30 AM to end_time on final day
+    end_day_open = end_time.replace(hour=8, minute=30, second=0, microsecond=0)
+    if end_time >= end_day_open:
+        blocks_from_open = int((end_time - end_day_open).total_seconds() / 1800)
+    else:
+        blocks_from_open = 0
+    
+    # Check if this crosses a weekend
+    # Weekend crossing = start is Friday (4) or earlier, and end is Saturday (5), Sunday (6), or Monday (0)
+    # OR start is Friday and there's a weekend between start and end
+    start_weekday = start_date.weekday()
+    end_weekday = end_date.weekday()
+    
+    # Count weekend days between start and end
+    crosses_weekend = False
+    current = start_date + timedelta(days=1)
+    while current <= end_date:
+        if current.weekday() in [5, 6]:  # Saturday or Sunday
+            crosses_weekend = True
+            break
+        current += timedelta(days=1)
+    
+    # Also check if end_date itself is a weekend (user picked Sunday)
+    if end_weekday in [5, 6]:
+        crosses_weekend = True
+    
+    if crosses_weekend:
+        # Weekend overnight: Friday 3PM → Monday 8:30AM = ~32 blocks for the overnight portion
+        OVERNIGHT_WEEKEND_BLOCKS = 32
+        total_blocks = blocks_to_close + OVERNIGHT_WEEKEND_BLOCKS + blocks_from_open
+    else:
+        # Regular overnight (weekday to weekday, no weekend)
+        # Count trading days between
+        trading_days_between = 0
+        current = start_date + timedelta(days=1)
+        while current < end_date:
+            if current.weekday() < 5:
+                trading_days_between += 1
+            current += timedelta(days=1)
+        
+        BLOCKS_PER_FULL_DAY = 26
+        OVERNIGHT_REGULAR_BLOCKS = 17
+        
+        blocks_middle_days = trading_days_between * BLOCKS_PER_FULL_DAY
+        total_blocks = blocks_to_close + blocks_middle_days + OVERNIGHT_REGULAR_BLOCKS + blocks_from_open
+    
+    return max(0, total_blocks)
 
 def save_inputs(data):
     try:
@@ -92,6 +174,15 @@ def get_prior_trading_day(ref_date):
     while prior.weekday() >= 5:
         prior -= timedelta(days=1)
     return prior
+
+def get_actual_trading_day(selected_date):
+    """If user selects a weekend, return the next Monday (actual trading day).
+    Otherwise return the selected date."""
+    if selected_date.weekday() == 5:  # Saturday
+        return selected_date + timedelta(days=2)  # Monday
+    elif selected_date.weekday() == 6:  # Sunday
+        return selected_date + timedelta(days=1)  # Monday
+    return selected_date
 # ═══════════════════════════════════════════════════════════════════════════════
 # BLACK-SCHOLES PRICING
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -602,15 +693,15 @@ def calc_prior_day_targets(prior_rth, ref_time):
     result["highest_wick"] = prior_rth["highest_wick"]
     result["lowest_close"] = prior_rth["lowest_close"]
     
-    # Calculate blocks from highest wick time
+    # Calculate blocks from highest wick time (using trading blocks for cross-day)
     if prior_rth["highest_wick"] is not None and prior_rth["highest_wick_time"]:
-        blocks = blocks_between(prior_rth["highest_wick_time"], ref_time)
+        blocks = trading_blocks_between(prior_rth["highest_wick_time"], ref_time)
         result["highest_wick_ascending"] = round(prior_rth["highest_wick"] + SLOPE * blocks, 2)
         result["highest_wick_descending"] = round(prior_rth["highest_wick"] - SLOPE * blocks, 2)
     
-    # Calculate blocks from lowest close time
+    # Calculate blocks from lowest close time (using trading blocks for cross-day)
     if prior_rth["lowest_close"] is not None and prior_rth["lowest_close_time"]:
-        blocks = blocks_between(prior_rth["lowest_close_time"], ref_time)
+        blocks = trading_blocks_between(prior_rth["lowest_close_time"], ref_time)
         result["lowest_close_ascending"] = round(prior_rth["lowest_close"] + SLOPE * blocks, 2)
         result["lowest_close_descending"] = round(prior_rth["lowest_close"] - SLOPE * blocks, 2)
     
@@ -893,6 +984,40 @@ def calc_mixed_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time
         "desc_floor": round(lower_pivot - SLOPE * blocks_low, 2),      # Descending floor (low going down)
     }
 
+def calc_dual_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time):
+    """
+    Calculate ALL FOUR channel levels - always show both ascending and descending.
+    This is the core of Option C - dual channel system.
+    
+    Returns:
+        dict with:
+        - asc_floor: Ascending floor (LOW projected up) - CALLS entry
+        - asc_ceiling: Ascending ceiling (HIGH projected up) - CALLS target
+        - desc_ceiling: Descending ceiling (HIGH projected down) - PUTS entry  
+        - desc_floor: Descending floor (LOW projected down) - PUTS target
+    """
+    if upper_pivot is None or lower_pivot is None:
+        return None
+    
+    blocks_high = blocks_between(upper_time, ref_time) if upper_time and ref_time else 0
+    blocks_low = blocks_between(lower_time, ref_time) if lower_time and ref_time else 0
+    
+    return {
+        # ASCENDING CHANNEL (from overnight low, projecting UP)
+        "asc_floor": round(lower_pivot + SLOPE * blocks_low, 2),      # LOW going UP - CALLS entry
+        "asc_ceiling": round(upper_pivot + SLOPE * blocks_high, 2),   # HIGH going UP - CALLS target
+        
+        # DESCENDING CHANNEL (from overnight high, projecting DOWN)
+        "desc_ceiling": round(upper_pivot - SLOPE * blocks_high, 2),  # HIGH going DOWN - PUTS entry
+        "desc_floor": round(lower_pivot - SLOPE * blocks_low, 2),     # LOW going DOWN - PUTS target
+        
+        # Metadata
+        "blocks_high": blocks_high,
+        "blocks_low": blocks_low,
+        "overnight_high": upper_pivot,
+        "overnight_low": lower_pivot,
+    }
+
 def get_position(price, ceiling, floor):
     if price > ceiling:
         return Position.ABOVE
@@ -1173,6 +1298,232 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
     
     return result
 
+
+def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reason,
+                            retail_bias, ema_bias, vix_position, vix, 
+                            session_tests, gap_analysis, prior_close_analysis, vix_structure):
+    """
+    OPTION C: Dual Channel Decision Engine
+    
+    Always provides:
+    1. All 4 levels (asc_floor, asc_ceiling, desc_ceiling, desc_floor)
+    2. Dominant channel detection with reasoning
+    3. PRIMARY trade at dominant level (higher probability)
+    4. SECONDARY trade at other level (backup/hedge)
+    5. Structure break alerts
+    6. Confluence-based confidence scoring
+    """
+    
+    if current_spx is None or dual_levels is None:
+        return {
+            "no_trade": True, 
+            "no_trade_reason": "Missing price data",
+            "dual_levels": None,
+            "primary": None,
+            "secondary": None,
+            "structure_alerts": [],
+            "calls_factors": [],
+            "puts_factors": [],
+            "position_summary": "No data available"
+        }
+    
+    # Extract levels
+    asc_floor = dual_levels["asc_floor"]
+    asc_ceiling = dual_levels["asc_ceiling"]
+    desc_ceiling = dual_levels["desc_ceiling"]
+    desc_floor = dual_levels["desc_floor"]
+    
+    # Position analysis
+    dist_to_asc_floor = abs(current_spx - asc_floor)
+    dist_to_desc_ceiling = abs(current_spx - desc_ceiling)
+    
+    NEAR_THRESHOLD = 15
+    near_asc_floor = dist_to_asc_floor <= NEAR_THRESHOLD
+    near_desc_ceiling = dist_to_desc_ceiling <= NEAR_THRESHOLD
+    
+    below_asc_floor = current_spx < asc_floor
+    above_desc_ceiling = current_spx > desc_ceiling
+    
+    # Confluence factors
+    ema_bullish = ema_bias == Bias.CALLS
+    ema_bearish = ema_bias == Bias.PUTS
+    fade_to_calls = retail_bias == Bias.CALLS
+    fade_to_puts = retail_bias == Bias.PUTS
+    floor_tested = session_tests["floor_tests"] >= 1
+    floor_multi_test = session_tests["floor_tests"] >= 2
+    ceiling_tested = session_tests["ceiling_tests"] >= 1
+    ceiling_multi_test = session_tests["ceiling_tests"] >= 2
+    gap_into_floor = gap_analysis["into_floor"]
+    gap_into_ceiling = gap_analysis["into_ceiling"]
+    prior_validates_floor = prior_close_analysis["validates_floor"]
+    prior_validates_ceiling = prior_close_analysis["validates_ceiling"]
+    vix_backwardation = vix_structure["structure"] == "BACKWARDATION"
+    
+    # Build factor lists
+    calls_factors = []
+    puts_factors = []
+    
+    if ema_bullish: calls_factors.append("✓ EMA bullish (8>21>200)")
+    if fade_to_calls: calls_factors.append("✓ Retail puts heavy (fade)")
+    if floor_tested: 
+        sessions_str = ", ".join(session_tests["floor_sessions"])
+        calls_factors.append(f"✓ Floor tested ({sessions_str})")
+    if floor_multi_test: calls_factors.append("✓✓ Floor multi-tested")
+    if gap_into_floor: calls_factors.append("✓ Gap down INTO floor")
+    if prior_validates_floor: calls_factors.append("✓ Prior close validates floor")
+    
+    if ema_bearish: puts_factors.append("✓ EMA bearish (8<21<200)")
+    if fade_to_puts: puts_factors.append("✓ Retail calls heavy (fade)")
+    if ceiling_tested:
+        sessions_str = ", ".join(session_tests["ceiling_sessions"])
+        puts_factors.append(f"✓ Ceiling tested ({sessions_str})")
+    if ceiling_multi_test: puts_factors.append("✓✓ Ceiling multi-tested")
+    if gap_into_ceiling: puts_factors.append("✓ Gap up INTO ceiling")
+    if prior_validates_ceiling: puts_factors.append("✓ Prior close validates ceiling")
+    
+    if vix_backwardation:
+        calls_factors.append("⚡ VIX backwardation (volatile)")
+        puts_factors.append("⚡ VIX backwardation (volatile)")
+    
+    # Confidence calculation
+    def calc_conf(direction, at_level, is_break=False):
+        support = 0
+        if direction == "CALLS":
+            if ema_bullish: support += 1
+            if fade_to_calls: support += 1
+            if floor_tested: support += 1
+            if floor_multi_test: support += 1
+            if gap_into_floor: support += 1
+            if prior_validates_floor: support += 1
+        else:
+            if ema_bearish: support += 1
+            if fade_to_puts: support += 1
+            if ceiling_tested: support += 1
+            if ceiling_multi_test: support += 1
+            if gap_into_ceiling: support += 1
+            if prior_validates_ceiling: support += 1
+        
+        if is_break: return "MEDIUM" if support >= 3 else "LOW"
+        if at_level:
+            if support >= 4: return "HIGH"
+            elif support >= 2: return "MEDIUM"
+            else: return "LOW"
+        else:
+            return "MEDIUM" if support >= 4 else "LOW"
+    
+    # Trade builder
+    def make_trade(name, direction, entry, stop, trigger, rationale, confidence, is_primary=True):
+        if direction == "CALLS":
+            strike = int(math.ceil((entry + 20) / 5) * 5)
+            opt_type = "CALL"
+        else:
+            strike = int(math.floor((entry - 20) / 5) * 5)
+            opt_type = "PUT"
+        
+        entry_premium = estimate_0dte_premium(entry, strike, 6.0, vix, opt_type)
+        t1 = round(entry_premium * 1.50, 2)
+        t2 = round(entry_premium * 1.75, 2)
+        t3 = round(entry_premium * 2.00, 2)
+        
+        return {
+            "name": name, "direction": direction, "entry_level": entry, "stop_level": stop,
+            "trigger": trigger, "rationale": rationale, "confidence": confidence, "is_primary": is_primary,
+            "strike": strike, "contract": f"SPX {strike}{'C' if direction == 'CALLS' else 'P'} 0DTE",
+            "entry_premium": entry_premium,
+            "targets": {
+                "t1": {"price": t1, "profit_pct": 50, "profit_dollars": round((t1 - entry_premium) * 100, 0)},
+                "t2": {"price": t2, "profit_pct": 75, "profit_dollars": round((t2 - entry_premium) * 100, 0)},
+                "t3": {"price": t3, "profit_pct": 100, "profit_dollars": round((t3 - entry_premium) * 100, 0)},
+            }
+        }
+    
+    # Structure alerts
+    structure_alerts = []
+    if channel_type == ChannelType.ASCENDING and below_asc_floor:
+        structure_alerts.append(f"⚠️ STRUCTURE BROKEN: Price below ascending floor ({asc_floor:.2f})")
+    if channel_type == ChannelType.DESCENDING and above_desc_ceiling:
+        structure_alerts.append(f"⚠️ STRUCTURE BROKEN: Price above descending ceiling ({desc_ceiling:.2f})")
+    
+    # Initialize result
+    result = {
+        "no_trade": False, "no_trade_reason": None,
+        "channel_type": channel_type, "channel_reason": channel_reason,
+        "dual_levels": dual_levels,
+        "calls_factors": calls_factors, "puts_factors": puts_factors,
+        "structure_alerts": structure_alerts,
+        "primary": None, "secondary": None, "position_summary": ""
+    }
+    
+    # No trade conditions
+    if channel_type == ChannelType.CONTRACTING:
+        result["no_trade"] = True
+        result["no_trade_reason"] = "CONTRACTING channel - Wait for expansion"
+        return result
+    if channel_type == ChannelType.UNDETERMINED:
+        result["no_trade"] = True
+        result["no_trade_reason"] = "Cannot determine channel - Insufficient data"
+        return result
+    
+    # ASCENDING DOMINANT
+    if channel_type == ChannelType.ASCENDING:
+        if below_asc_floor:
+            # Structure broken
+            result["primary"] = make_trade("Breakdown Continuation", "PUTS", asc_floor, asc_floor + 10,
+                f"Sell rallies to broken floor {asc_floor:.2f}",
+                f"Structure broken • {len(puts_factors)} factors", calc_conf("PUTS", True), True)
+            result["secondary"] = make_trade("Floor Reclaim", "CALLS", asc_floor, asc_floor - 10,
+                f"ONLY if price reclaims {asc_floor:.2f}",
+                "Recovery scenario", calc_conf("CALLS", True, True), False)
+            result["position_summary"] = f"⚠️ BELOW ascending floor ({asc_floor:.2f}) - BEARISH bias"
+        else:
+            result["primary"] = make_trade("Ascending Floor Bounce", "CALLS", asc_floor, asc_floor - 10,
+                f"Wait for price at {asc_floor:.2f}",
+                f"KEY: Ascending floor • {len(calls_factors)} factors", calc_conf("CALLS", near_asc_floor), True)
+            result["secondary"] = make_trade("Desc Ceiling Rejection", "PUTS", desc_ceiling, desc_ceiling + 10,
+                f"If price reaches {desc_ceiling:.2f}",
+                f"Secondary level • {len(puts_factors)} factors", calc_conf("PUTS", near_desc_ceiling), False)
+            result["position_summary"] = f"{'✅ AT' if near_asc_floor else '📍 Wait for'} ascending floor ({asc_floor:.2f})"
+    
+    # DESCENDING DOMINANT
+    elif channel_type == ChannelType.DESCENDING:
+        if above_desc_ceiling:
+            # Structure broken
+            result["primary"] = make_trade("Breakout Continuation", "CALLS", desc_ceiling, desc_ceiling - 10,
+                f"Buy dips to broken ceiling {desc_ceiling:.2f}",
+                f"Structure broken • {len(calls_factors)} factors", calc_conf("CALLS", True), True)
+            result["secondary"] = make_trade("Failed Breakout", "PUTS", desc_ceiling, desc_ceiling + 10,
+                f"ONLY if price fails below {desc_ceiling:.2f}",
+                "Rejection scenario", calc_conf("PUTS", True, True), False)
+            result["position_summary"] = f"🚀 ABOVE descending ceiling ({desc_ceiling:.2f}) - BULLISH bias"
+        else:
+            result["primary"] = make_trade("Desc Ceiling Rejection", "PUTS", desc_ceiling, desc_ceiling + 10,
+                f"Wait for price at {desc_ceiling:.2f}",
+                f"KEY: Descending ceiling • {len(puts_factors)} factors", calc_conf("PUTS", near_desc_ceiling), True)
+            result["secondary"] = make_trade("Ascending Floor Bounce", "CALLS", asc_floor, asc_floor - 10,
+                f"If price reaches {asc_floor:.2f}",
+                f"Secondary level • {len(calls_factors)} factors", calc_conf("CALLS", near_asc_floor), False)
+            result["position_summary"] = f"{'✅ AT' if near_desc_ceiling else '📍 Wait for'} descending ceiling ({desc_ceiling:.2f})"
+    
+    # MIXED
+    elif channel_type == ChannelType.MIXED:
+        if dist_to_asc_floor <= dist_to_desc_ceiling:
+            result["primary"] = make_trade("Floor Bounce", "CALLS", asc_floor, asc_floor - 10,
+                f"Price near floor {asc_floor:.2f}",
+                f"Mixed - floor closer • {len(calls_factors)} factors", calc_conf("CALLS", near_asc_floor), True)
+            result["secondary"] = make_trade("Ceiling Rejection", "PUTS", desc_ceiling, desc_ceiling + 10,
+                f"If price reaches {desc_ceiling:.2f}",
+                f"Mixed - ceiling level • {len(puts_factors)} factors", calc_conf("PUTS", near_desc_ceiling), False)
+        else:
+            result["primary"] = make_trade("Ceiling Rejection", "PUTS", desc_ceiling, desc_ceiling + 10,
+                f"Price near ceiling {desc_ceiling:.2f}",
+                f"Mixed - ceiling closer • {len(puts_factors)} factors", calc_conf("PUTS", near_desc_ceiling), True)
+            result["secondary"] = make_trade("Floor Bounce", "CALLS", asc_floor, asc_floor - 10,
+                f"If price reaches {asc_floor:.2f}",
+                f"Mixed - floor level • {len(calls_factors)} factors", calc_conf("CALLS", near_asc_floor), False)
+        result["position_summary"] = f"⚖️ MIXED: Floor {asc_floor:.2f} / Ceiling {desc_ceiling:.2f}"
+    
+    return result
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # LEGENDARY CSS STYLING
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1181,87 +1532,130 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
 # ═══════════════════════════════════════════════════════════════════════════════
 CSS_STYLES = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Orbitron:wght@400;500;600;700;800;900&display=swap');
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   PROFESSIONAL TRADING TERMINAL - DESIGN SYSTEM
-   Inspired by Bloomberg, TradingView Pro, and Institutional Dashboards
+   PREMIUM TRADING TERMINAL - ELITE DESIGN SYSTEM
+   Bloomberg Terminal + TradingView Pro + Hedge Fund Dashboard
    ═══════════════════════════════════════════════════════════════════════════ */
 :root {
-    /* Terminal Backgrounds - Deep, sophisticated darks */
-    --bg-terminal: #0b0d12;
-    --bg-panel: #111318;
-    --bg-card: #171b22;
-    --bg-elevated: #1e232c;
-    --bg-hover: #252b37;
-    --bg-input: #0d0f14;
+    /* Deep Space Backgrounds */
+    --bg-terminal: #05070a;
+    --bg-panel: #0a0d12;
+    --bg-card: #0f1318;
+    --bg-elevated: #151a21;
+    --bg-hover: #1c222b;
+    --bg-input: #080a0e;
     
-    /* Premium Accent Colors */
-    --accent-cyan: #00e5c7;
-    --accent-cyan-soft: rgba(0, 229, 199, 0.12);
-    --accent-cyan-glow: rgba(0, 229, 199, 0.25);
-    --accent-blue: #4da6ff;
-    --accent-purple: #a78bfa;
-    --accent-gold: #f5b800;
-    --accent-gold-soft: rgba(245, 184, 0, 0.12);
+    /* Electric Accent Colors */
+    --accent-cyan: #00f5d4;
+    --accent-cyan-soft: rgba(0, 245, 212, 0.15);
+    --accent-cyan-glow: rgba(0, 245, 212, 0.4);
+    --accent-blue: #00bbf9;
+    --accent-purple: #9b5de5;
+    --accent-pink: #f15bb5;
+    --accent-gold: #fee440;
+    --accent-gold-soft: rgba(254, 228, 64, 0.15);
     
-    /* Trading Semantic Colors */
-    --bull: #00d67d;
-    --bull-soft: rgba(0, 214, 125, 0.1);
-    --bull-medium: rgba(0, 214, 125, 0.2);
-    --bull-glow: rgba(0, 214, 125, 0.35);
-    --bear: #ff5263;
-    --bear-soft: rgba(255, 82, 99, 0.1);
-    --bear-medium: rgba(255, 82, 99, 0.2);
-    --bear-glow: rgba(255, 82, 99, 0.35);
+    /* Vivid Trading Colors */
+    --bull: #00ff88;
+    --bull-soft: rgba(0, 255, 136, 0.08);
+    --bull-medium: rgba(0, 255, 136, 0.18);
+    --bull-glow: rgba(0, 255, 136, 0.5);
+    --bear: #ff3366;
+    --bear-soft: rgba(255, 51, 102, 0.08);
+    --bear-medium: rgba(255, 51, 102, 0.18);
+    --bear-glow: rgba(255, 51, 102, 0.5);
     --neutral: #64748b;
     
     /* Typography */
     --text-bright: #ffffff;
-    --text-primary: #e2e8f0;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --text-dim: #475569;
+    --text-primary: #e8ecf4;
+    --text-secondary: #9ba8bc;
+    --text-muted: #5c6b7f;
+    --text-dim: #3d4a5c;
     
-    /* Borders & Dividers */
-    --border-subtle: rgba(255, 255, 255, 0.06);
-    --border-default: rgba(255, 255, 255, 0.1);
-    --border-strong: rgba(255, 255, 255, 0.15);
-    --border-accent: rgba(0, 229, 199, 0.3);
+    /* Neon Borders */
+    --border-subtle: rgba(255, 255, 255, 0.04);
+    --border-default: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.12);
+    --border-accent: rgba(0, 245, 212, 0.4);
+    --border-glow: rgba(0, 245, 212, 0.6);
     
-    /* Effects */
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
-    --shadow-glow-cyan: 0 0 20px rgba(0, 229, 199, 0.15);
-    --shadow-glow-bull: 0 0 20px rgba(0, 214, 125, 0.15);
-    --shadow-glow-bear: 0 0 20px rgba(255, 82, 99, 0.15);
+    /* Dramatic Shadows & Glows */
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.7);
+    --shadow-glow-cyan: 0 0 30px rgba(0, 245, 212, 0.25), 0 0 60px rgba(0, 245, 212, 0.1);
+    --shadow-glow-bull: 0 0 30px rgba(0, 255, 136, 0.3), 0 0 60px rgba(0, 255, 136, 0.15);
+    --shadow-glow-bear: 0 0 30px rgba(255, 51, 102, 0.3), 0 0 60px rgba(255, 51, 102, 0.15);
+    --shadow-glow-gold: 0 0 30px rgba(254, 228, 64, 0.3);
     
-    /* Gradients */
-    --gradient-premium: linear-gradient(135deg, #00e5c7 0%, #4da6ff 50%, #a78bfa 100%);
-    --gradient-bull: linear-gradient(135deg, #00d67d 0%, #00e5c7 100%);
-    --gradient-bear: linear-gradient(135deg, #ff5263 0%, #ff7b54 100%);
+    /* Premium Gradients */
+    --gradient-premium: linear-gradient(135deg, #00f5d4 0%, #00bbf9 25%, #9b5de5 50%, #f15bb5 75%, #fee440 100%);
+    --gradient-cyber: linear-gradient(135deg, #00f5d4 0%, #00bbf9 100%);
+    --gradient-bull: linear-gradient(135deg, #00ff88 0%, #00f5d4 100%);
+    --gradient-bear: linear-gradient(135deg, #ff3366 0%, #ff6b6b 100%);
     --gradient-card: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%);
+    --gradient-glass: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
     
-    /* Spacing & Sizing */
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
-    --radius-xl: 18px;
+    /* Spacing */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    
+    /* ═══════════════════════════════════════════════════════════════════════════
+       STANDARDIZED TYPOGRAPHY SCALE
+       ═══════════════════════════════════════════════════════════════════════════ */
+    /* Font Families - 3 Purpose-Driven Fonts */
+    --font-display: 'Orbitron', 'Plus Jakarta Sans', sans-serif;  /* Headlines, big numbers */
+    --font-body: 'Plus Jakarta Sans', 'Inter', sans-serif;        /* Body text, cards */
+    --font-mono: 'JetBrains Mono', monospace;                     /* Labels, technical data */
+    
+    /* Font Sizes - Consistent Scale */
+    --text-3xl: 2.5rem;    /* Hero brand name */
+    --text-2xl: 1.75rem;   /* Big metric values */
+    --text-xl: 1.4rem;     /* Section values, price levels */
+    --text-lg: 1.15rem;    /* Card titles, section headers */
+    --text-md: 1rem;       /* Body text */
+    --text-sm: 0.875rem;   /* Secondary info, descriptions */
+    --text-xs: 0.75rem;    /* Labels, badges, small caps */
+    --text-xxs: 0.65rem;   /* Micro labels */
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BASE APPLICATION STYLES
+   BASE APPLICATION - IMMERSIVE DARK TERMINAL
    ═══════════════════════════════════════════════════════════════════════════ */
 .stApp {
     background: var(--bg-terminal);
     background-image: 
-        radial-gradient(ellipse 100% 80% at 50% -30%, rgba(0, 229, 199, 0.06) 0%, transparent 50%),
-        radial-gradient(ellipse 80% 60% at 100% 50%, rgba(77, 166, 255, 0.04) 0%, transparent 40%),
-        radial-gradient(ellipse 60% 50% at 0% 80%, rgba(167, 139, 250, 0.03) 0%, transparent 40%);
+        radial-gradient(ellipse 120% 80% at 50% -40%, rgba(0, 245, 212, 0.08) 0%, transparent 50%),
+        radial-gradient(ellipse 100% 60% at 100% 20%, rgba(0, 187, 249, 0.06) 0%, transparent 40%),
+        radial-gradient(ellipse 80% 50% at 0% 80%, rgba(155, 93, 229, 0.05) 0%, transparent 40%),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(241, 91, 181, 0.04) 0%, transparent 40%);
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     color: var(--text-primary);
     min-height: 100vh;
+}
+
+/* Animated Background Grid */
+.stApp::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: 
+        linear-gradient(rgba(0, 245, 212, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 245, 212, 0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+    pointer-events: none;
+    z-index: 0;
+    animation: gridPulse 8s ease-in-out infinite;
+}
+
+@keyframes gridPulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.6; }
 }
 
 /* Hide Streamlit defaults */
@@ -1271,14 +1665,16 @@ CSS_STYLES = """
 }
 
 /* Premium Scrollbar */
-::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--bg-panel); }
 ::-webkit-scrollbar-thumb { 
-    background: var(--border-strong); 
-    border-radius: 4px;
+    background: linear-gradient(180deg, var(--accent-cyan) 0%, var(--accent-purple) 100%);
+    border-radius: 5px;
     border: 2px solid var(--bg-panel);
 }
-::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+::-webkit-scrollbar-thumb:hover { 
+    background: linear-gradient(180deg, var(--accent-cyan) 0%, var(--accent-pink) 100%);
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    STREAMLIT COLUMN EQUAL HEIGHT - CRITICAL FIX
@@ -1320,18 +1716,19 @@ CSS_STYLES = """
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   HERO BANNER - PREMIUM HEADER
+   HERO BANNER - CINEMATIC HEADER
    ═══════════════════════════════════════════════════════════════════════════ */
 .hero-banner {
     position: relative;
-    padding: 28px 32px;
-    margin: -1rem -1rem 24px -1rem;
+    padding: 40px 40px;
+    margin: -1rem -1rem 30px -1rem;
     background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-terminal) 100%);
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 2px solid transparent;
+    border-image: var(--gradient-premium) 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 24px;
+    gap: 30px;
     overflow: hidden;
 }
 
@@ -1340,9 +1737,16 @@ CSS_STYLES = """
     position: absolute;
     inset: 0;
     background: 
-        radial-gradient(ellipse 60% 100% at 20% 50%, rgba(0, 229, 199, 0.08) 0%, transparent 50%),
-        radial-gradient(ellipse 60% 100% at 80% 50%, rgba(167, 139, 250, 0.06) 0%, transparent 50%);
-    animation: heroShimmer 12s ease-in-out infinite;
+        radial-gradient(ellipse 80% 120% at 20% 50%, rgba(0, 245, 212, 0.12) 0%, transparent 50%),
+        radial-gradient(ellipse 80% 120% at 80% 50%, rgba(155, 93, 229, 0.1) 0%, transparent 50%),
+        radial-gradient(ellipse 100% 100% at 50% 0%, rgba(0, 187, 249, 0.08) 0%, transparent 60%);
+    animation: heroAurora 10s ease-in-out infinite;
+}
+
+@keyframes heroAurora {
+    0%, 100% { opacity: 0.6; transform: scale(1) translateX(0); }
+    33% { opacity: 1; transform: scale(1.05) translateX(2%); }
+    66% { opacity: 0.8; transform: scale(1.02) translateX(-2%); }
 }
 
 .hero-banner::after {
@@ -1351,21 +1755,16 @@ CSS_STYLES = """
     bottom: 0;
     left: 0;
     right: 0;
-    height: 1px;
+    height: 2px;
     background: var(--gradient-premium);
-    opacity: 0.5;
+    box-shadow: 0 0 20px rgba(0, 245, 212, 0.5), 0 0 40px rgba(155, 93, 229, 0.3);
 }
 
-@keyframes heroShimmer {
-    0%, 100% { opacity: 0.5; transform: translateX(0); }
-    50% { opacity: 1; transform: translateX(2%); }
-}
-
-/* Animated Logo */
+/* Animated Holographic Logo */
 .prophet-logo {
     position: relative;
-    width: 72px;
-    height: 72px;
+    width: 90px;
+    height: 90px;
     flex-shrink: 0;
     z-index: 2;
 }
@@ -1374,12 +1773,12 @@ CSS_STYLES = """
     position: absolute;
     width: 100%;
     height: 100%;
-    animation: pyramidFloat 5s ease-in-out infinite;
+    animation: pyramidFloat 4s ease-in-out infinite;
 }
 
 @keyframes pyramidFloat {
-    0%, 100% { transform: translateY(0) scale(1); }
-    50% { transform: translateY(-4px) scale(1.02); }
+    0%, 100% { transform: translateY(0) scale(1) rotateY(0deg); }
+    50% { transform: translateY(-6px) scale(1.05) rotateY(5deg); }
 }
 
 .pyramid-body {
@@ -1389,90 +1788,140 @@ CSS_STYLES = """
     transform: translateX(-50%);
     width: 0;
     height: 0;
-    border-left: 34px solid transparent;
-    border-right: 34px solid transparent;
-    border-bottom: 60px solid rgba(0, 229, 199, 0.12);
-    filter: drop-shadow(0 0 20px rgba(0, 229, 199, 0.2));
-    animation: pyramidGlow 3s ease-in-out infinite;
+    border-left: 42px solid transparent;
+    border-right: 42px solid transparent;
+    border-bottom: 75px solid rgba(0, 245, 212, 0.15);
+    filter: drop-shadow(0 0 25px rgba(0, 245, 212, 0.4));
+    animation: pyramidGlow 2s ease-in-out infinite;
 }
 
 @keyframes pyramidGlow {
-    0%, 100% { filter: drop-shadow(0 0 15px rgba(0, 229, 199, 0.15)); }
-    50% { filter: drop-shadow(0 0 30px rgba(0, 229, 199, 0.35)); }
+    0%, 100% { filter: drop-shadow(0 0 20px rgba(0, 245, 212, 0.3)); border-bottom-color: rgba(0, 245, 212, 0.15); }
+    50% { filter: drop-shadow(0 0 40px rgba(0, 245, 212, 0.6)); border-bottom-color: rgba(0, 245, 212, 0.25); }
 }
 
 .pyramid-inner {
     position: absolute;
-    top: 16px;
+    top: 20px;
     left: 50%;
     transform: translateX(-50%);
     width: 0;
     height: 0;
-    border-left: 22px solid transparent;
-    border-right: 22px solid transparent;
-    border-bottom: 38px solid rgba(167, 139, 250, 0.15);
+    border-left: 26px solid transparent;
+    border-right: 26px solid transparent;
+    border-bottom: 46px solid rgba(155, 93, 229, 0.2);
+    animation: innerPulse 2s ease-in-out infinite 0.5s;
+}
+
+@keyframes innerPulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
 }
 
 .eye-container {
     position: absolute;
-    top: 24px;
+    top: 28px;
     left: 50%;
     transform: translateX(-50%);
-    width: 26px;
-    height: 16px;
-}
-
-.eye-outer {
-    position: absolute;
-    width: 26px;
-    height: 14px;
-    border: 2px solid var(--accent-cyan);
-    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-    animation: eyeBlink 5s ease-in-out infinite;
-    box-shadow: 0 0 12px var(--accent-cyan-glow), inset 0 0 8px rgba(0, 229, 199, 0.2);
-}
-
-@keyframes eyeBlink {
-    0%, 42%, 58%, 100% { transform: scaleY(1); }
-    50% { transform: scaleY(0.08); }
-}
-
-.eye-iris {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 8px;
-    height: 8px;
-    background: radial-gradient(circle, var(--accent-cyan) 20%, transparent 70%);
-    border-radius: 50%;
-    animation: eyeTrack 6s ease-in-out infinite;
-}
-
-@keyframes eyeTrack {
-    0%, 100% { transform: translate(-50%, -50%); }
-    20% { transform: translate(-80%, -50%); }
-    80% { transform: translate(-20%, -50%); }
-}
-
-.eye-pupil {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 4px;
-    height: 4px;
-    background: var(--accent-cyan);
-    border-radius: 50%;
-    box-shadow: 0 0 8px var(--accent-cyan);
+    width: 32px;
+    height: 20px;
 }
 
 .eye-rays {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 36px;
-    height: 36px;
+    width: 60px;
+    height: 60px;
+    top: -20px;
+    left: -14px;
+    background: radial-gradient(circle, rgba(254, 228, 64, 0.3) 0%, transparent 60%);
+    animation: raysPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes raysPulse {
+    0%, 100% { opacity: 0.4; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.2); }
+}
+
+.eye-outer {
+    position: absolute;
+    width: 32px;
+    height: 18px;
+    border: 2px solid var(--accent-gold);
+    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+    animation: eyeBlink 4s ease-in-out infinite;
+    box-shadow: 0 0 15px var(--accent-gold), 0 0 30px rgba(254, 228, 64, 0.3), inset 0 0 10px rgba(254, 228, 64, 0.3);
+}
+
+@keyframes eyeBlink {
+    0%, 45%, 55%, 100% { transform: scaleY(1); }
+    50% { transform: scaleY(0.1); }
+}
+
+.eye-iris {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: radial-gradient(circle, var(--accent-gold) 0%, #ff9500 60%, #ff6b00 100%);
+    border-radius: 50%;
+    top: 2px;
+    left: 9px;
+    box-shadow: 0 0 15px var(--accent-gold), 0 0 25px rgba(254, 228, 64, 0.5);
+    animation: irisGlow 2s ease-in-out infinite;
+}
+
+@keyframes irisGlow {
+    0%, 100% { box-shadow: 0 0 10px var(--accent-gold); }
+    50% { box-shadow: 0 0 25px var(--accent-gold), 0 0 40px rgba(254, 228, 64, 0.6); }
+}
+
+.eye-pupil {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: #000;
+    border-radius: 50%;
+    top: 4px;
+    left: 4px;
+    box-shadow: inset 0 0 3px rgba(254, 228, 64, 0.5);
+}
+
+.hero-content {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+}
+
+.brand-name {
+    font-family: var(--font-display);
+    font-size: var(--text-3xl);
+    font-weight: 900;
+    letter-spacing: 8px;
+    background: var(--gradient-premium);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0;
+    text-transform: uppercase;
+    animation: gradientFlow 4s ease infinite;
+    text-shadow: 0 0 40px rgba(0, 245, 212, 0.3);
+}
+
+@keyframes gradientFlow {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+.brand-tagline {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    letter-spacing: 4px;
+    margin-top: 8px;
+    text-transform: uppercase;
+    font-weight: 500;
+    opacity: 0.8;
+}
     transform: translate(-50%, -50%);
     background: radial-gradient(circle, rgba(0,229,199,0.25) 0%, transparent 60%);
     animation: rayPulse 2.5s ease-in-out infinite;
@@ -1489,8 +1938,8 @@ CSS_STYLES = """
 }
 
 .brand-name {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 2rem;
+    font-family: var(--font-body);
+    font-size: var(--text-2xl);
     font-weight: 800;
     letter-spacing: 4px;
     background: var(--gradient-premium);
@@ -1502,8 +1951,8 @@ CSS_STYLES = """
 }
 
 .brand-tagline {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     color: var(--text-muted);
     letter-spacing: 3px;
     margin-top: 4px;
@@ -1624,12 +2073,12 @@ CSS_STYLES = """
     background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
     border: 1px solid var(--border-default);
     border-radius: var(--radius-md);
-    font-size: 1rem;
+    font-size: var(--text-md);
 }
 
 .indicator-title {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 0.9rem;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
     font-weight: 700;
     color: var(--text-bright);
     letter-spacing: 0.3px;
@@ -1640,12 +2089,13 @@ CSS_STYLES = """
     justify-content: space-between;
     align-items: center;
     padding: 10px 0;
-    font-size: 0.9rem;
+    font-size: var(--text-sm);
     position: relative;
     z-index: 1;
 }
 
 .indicator-label {
+    font-family: var(--font-body);
     color: var(--text-muted);
     font-weight: 500;
 }
@@ -1653,8 +2103,8 @@ CSS_STYLES = """
 .indicator-value {
     color: var(--text-bright);
     font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.95rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
 }
 
 .indicator-status {
@@ -1664,8 +2114,8 @@ CSS_STYLES = """
     gap: 8px;
     padding: 12px 16px;
     border-radius: var(--radius-md);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     font-weight: 700;
     margin-top: auto;
     position: relative;
@@ -1693,9 +2143,9 @@ CSS_STYLES = """
 .section-header {
     display: flex;
     align-items: center;
-    gap: 14px;
-    margin: 36px 0 20px 0;
-    padding-bottom: 14px;
+    gap: 16px;
+    margin: 44px 0 24px 0;
+    padding-bottom: 16px;
     border-bottom: 1px solid var(--border-subtle);
     position: relative;
 }
@@ -1705,98 +2155,129 @@ CSS_STYLES = """
     position: absolute;
     bottom: -1px;
     left: 0;
-    width: 80px;
-    height: 2px;
+    width: 120px;
+    height: 3px;
     background: var(--gradient-premium);
+    box-shadow: 0 0 15px rgba(0, 245, 212, 0.4);
+    border-radius: 2px;
 }
 
 .section-icon {
-    width: 40px;
-    height: 40px;
+    width: 46px;
+    height: 46px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
-    border: 1px solid var(--border-default);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-md);
-    font-size: 1.1rem;
-    box-shadow: var(--shadow-sm);
+    font-size: var(--text-lg);
+    box-shadow: var(--shadow-sm), 0 0 15px rgba(0, 245, 212, 0.15);
+    color: var(--accent-cyan);
 }
 
 .section-title {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1.1rem;
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
     font-weight: 700;
     color: var(--text-bright);
     margin: 0;
-    letter-spacing: 0.5px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    METRIC CARDS - Top Row KPIs
    ═══════════════════════════════════════════════════════════════════════════ */
 .metric-card {
-    background: var(--bg-card);
+    background: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-panel) 100%);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
-    padding: 20px 24px;
+    padding: 22px 26px;
     text-align: center;
     height: 100%;
-    min-height: 110px;
+    min-height: 120px;
     display: flex;
     flex-direction: column;
     justify-content: center;
     position: relative;
     overflow: hidden;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .metric-card::before {
     content: '';
     position: absolute;
     inset: 0;
-    background: var(--gradient-card);
+    background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, transparent 50%);
     pointer-events: none;
+}
+
+.metric-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--gradient-cyber);
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }
 
 .metric-card:hover {
     border-color: var(--border-accent);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-glow-cyan);
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: var(--shadow-glow-cyan), var(--shadow-md);
+}
+
+.metric-card:hover::after {
+    opacity: 1;
 }
 
 .metric-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xxs);
     color: var(--text-muted);
     text-transform: uppercase;
-    letter-spacing: 2px;
-    margin-bottom: 10px;
+    letter-spacing: 2.5px;
+    margin-bottom: 12px;
     font-weight: 600;
     position: relative;
     z-index: 1;
 }
 
 .metric-value {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1.75rem;
+    font-family: var(--font-display);
+    font-size: var(--text-2xl);
     font-weight: 800;
     color: var(--text-bright);
     line-height: 1;
     position: relative;
     z-index: 1;
+    letter-spacing: 1px;
 }
 
-.metric-value.accent { color: var(--accent-cyan); text-shadow: 0 0 20px var(--accent-cyan-glow); }
-.metric-value.calls { color: var(--bull); text-shadow: 0 0 20px var(--bull-glow); }
-.metric-value.puts { color: var(--bear); text-shadow: 0 0 20px var(--bear-glow); }
-.metric-value.gold { color: var(--accent-gold); text-shadow: 0 0 20px var(--accent-gold-soft); }
+.metric-value.accent { 
+    color: var(--accent-cyan); 
+    text-shadow: 0 0 20px var(--accent-cyan-glow), 0 0 40px rgba(0, 245, 212, 0.2);
+    animation: valueGlow 3s ease-in-out infinite;
+}
+
+@keyframes valueGlow {
+    0%, 100% { text-shadow: 0 0 15px var(--accent-cyan-glow); }
+    50% { text-shadow: 0 0 30px var(--accent-cyan-glow), 0 0 50px rgba(0, 245, 212, 0.3); }
+}
+
+.metric-value.calls { color: var(--bull); text-shadow: 0 0 25px var(--bull-glow); }
+.metric-value.puts { color: var(--bear); text-shadow: 0 0 25px var(--bear-glow); }
+.metric-value.gold { color: var(--accent-gold); text-shadow: 0 0 25px rgba(254, 228, 64, 0.4); }
 
 .metric-delta {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     color: var(--text-secondary);
-    margin-top: 10px;
+    margin-top: 12px;
     position: relative;
     z-index: 1;
     font-weight: 500;
@@ -1812,8 +2293,8 @@ CSS_STYLES = """
     gap: 10px;
     padding: 14px 24px;
     border-radius: 50px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     font-weight: 700;
     letter-spacing: 1.5px;
     text-transform: uppercase;
@@ -1847,8 +2328,8 @@ CSS_STYLES = """
     gap: 12px;
     padding: 14px 24px;
     border-radius: var(--radius-md);
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 0.85rem;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
     font-weight: 800;
     letter-spacing: 2px;
     text-transform: uppercase;
@@ -1923,18 +2404,19 @@ CSS_STYLES = """
 .level-row {
     display: flex;
     align-items: center;
-    padding: 16px 0;
+    padding: 18px 0;
     border-bottom: 1px solid var(--border-subtle);
-    gap: 24px;
+    gap: 28px;
     position: relative;
     z-index: 1;
-    transition: background 0.2s ease;
+    transition: all 0.25s ease;
 }
 
 .level-row:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(0, 245, 212, 0.03);
     margin: 0 -24px;
-    padding: 16px 24px;
+    padding: 18px 24px;
+    border-radius: 8px;
 }
 
 .level-row:last-child { border-bottom: none; }
@@ -1942,35 +2424,41 @@ CSS_STYLES = """
 .level-label {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
+    gap: 12px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 2px;
-    min-width: 140px;
+    letter-spacing: 2.5px;
+    min-width: 150px;
 }
 
-.level-label.ceiling { color: var(--bear); }
-.level-label.current { color: var(--accent-gold); }
-.level-label.floor { color: var(--bull); }
+.level-label.ceiling { color: var(--bear); text-shadow: 0 0 10px rgba(255, 51, 102, 0.3); }
+.level-label.current { color: var(--accent-gold); text-shadow: 0 0 10px rgba(254, 228, 64, 0.3); }
+.level-label.floor { color: var(--bull); text-shadow: 0 0 10px rgba(0, 255, 136, 0.3); }
 
 .level-value {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1.4rem;
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
     font-weight: 800;
-    min-width: 150px;
+    min-width: 160px;
     text-align: right;
+    letter-spacing: 1px;
 }
 
-.level-value.ceiling { color: var(--bear); }
-.level-value.current { color: var(--accent-gold); text-shadow: 0 0 15px var(--accent-gold-soft); }
-.level-value.floor { color: var(--bull); }
+.level-value.ceiling { color: var(--bear); text-shadow: 0 0 20px var(--bear-glow); }
+.level-value.current { color: var(--accent-gold); text-shadow: 0 0 25px rgba(254, 228, 64, 0.5); animation: currentPulse 2s ease-in-out infinite; }
+.level-value.floor { color: var(--bull); text-shadow: 0 0 20px var(--bull-glow); }
+
+@keyframes currentPulse {
+    0%, 100% { text-shadow: 0 0 20px rgba(254, 228, 64, 0.4); }
+    50% { text-shadow: 0 0 35px rgba(254, 228, 64, 0.7), 0 0 50px rgba(254, 228, 64, 0.3); }
+}
 
 .level-note {
-    font-family: 'Inter', sans-serif;
-    font-size: 0.85rem;
-    color: var(--text-muted);
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
     margin-left: auto;
     text-align: right;
 }
@@ -2012,19 +2500,19 @@ CSS_STYLES = """
     z-index: 1;
 }
 
-.prior-levels-icon { font-size: 1.1rem; }
+.prior-levels-icon { font-size: var(--text-lg); }
 
 .prior-levels-title {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 0.9rem;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
     font-weight: 700;
     color: var(--text-bright);
 }
 
 .prior-levels-anchor {
     margin-left: auto;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
     color: var(--accent-cyan);
     font-weight: 700;
 }
@@ -2055,8 +2543,8 @@ CSS_STYLES = """
 .prior-level-sell { border-left: 3px solid var(--bear); }
 
 .prior-level-direction {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xxs);
     color: var(--text-muted);
     margin-bottom: 8px;
     text-transform: uppercase;
@@ -2065,8 +2553,8 @@ CSS_STYLES = """
 }
 
 .prior-level-value {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1.15rem;
+    font-family: var(--font-body);
+    font-size: var(--text-lg);
     font-weight: 800;
     color: var(--text-bright);
     margin-bottom: 8px;
@@ -2076,16 +2564,16 @@ CSS_STYLES = """
 .prior-level-item.prior-level-sell .prior-level-action { color: var(--bear); }
 
 .prior-level-action {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 1px;
 }
 
 .prior-levels-note {
-    font-family: 'Inter', sans-serif;
-    font-size: 0.8rem;
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
     color: var(--text-dim);
     font-style: italic;
     text-align: center;
@@ -2101,8 +2589,8 @@ CSS_STYLES = """
     margin-top: 14px;
     background: var(--bg-elevated);
     border-radius: var(--radius-md);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     color: var(--text-secondary);
 }
 
@@ -2110,7 +2598,7 @@ CSS_STYLES = """
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     font-weight: 600;
 }
 
@@ -2157,15 +2645,15 @@ CSS_STYLES = """
 }
 
 .confluence-title {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1rem;
+    font-family: var(--font-body);
+    font-size: var(--text-md);
     font-weight: 700;
     color: var(--text-bright);
 }
 
 .confluence-score {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 2rem;
+    font-family: var(--font-display);
+    font-size: var(--text-2xl);
     font-weight: 900;
     padding: 8px 16px;
     border-radius: var(--radius-md);
@@ -2192,8 +2680,8 @@ CSS_STYLES = """
     align-items: center;
     gap: 12px;
     padding: 12px 0;
-    font-family: 'Inter', sans-serif;
-    font-size: 0.875rem;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-subtle);
     position: relative;
@@ -2217,7 +2705,7 @@ CSS_STYLES = """
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     flex-shrink: 0;
     font-weight: 700;
 }
@@ -2234,15 +2722,16 @@ CSS_STYLES = """
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   TRADE CARDS - Primary Action Cards
+   TRADE CARDS - Premium Action Cards with Glow Effects
    ═══════════════════════════════════════════════════════════════════════════ */
 .trade-card {
-    background: var(--bg-card);
+    background: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-panel) 100%);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-xl);
-    padding: 28px;
+    padding: 32px;
     position: relative;
     overflow: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .trade-card::before {
@@ -2251,53 +2740,94 @@ CSS_STYLES = """
     top: 0;
     left: 0;
     right: 0;
-    height: 4px;
+    height: 5px;
+}
+
+.trade-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 30%);
+    pointer-events: none;
+}
+
+.trade-card-calls {
+    border-color: rgba(0, 255, 136, 0.2);
 }
 
 .trade-card-calls::before {
     background: var(--gradient-bull);
-    box-shadow: 0 0 20px var(--bull-glow);
+    box-shadow: 0 0 30px var(--bull-glow), 0 0 60px rgba(0, 255, 136, 0.2);
+}
+
+.trade-card-calls:hover {
+    border-color: rgba(0, 255, 136, 0.4);
+    box-shadow: var(--shadow-glow-bull), var(--shadow-lg);
+    transform: translateY(-4px);
+}
+
+.trade-card-puts {
+    border-color: rgba(255, 51, 102, 0.2);
 }
 
 .trade-card-puts::before {
     background: var(--gradient-bear);
-    box-shadow: 0 0 20px var(--bear-glow);
+    box-shadow: 0 0 30px var(--bear-glow), 0 0 60px rgba(255, 51, 102, 0.2);
+}
+
+.trade-card-puts:hover {
+    border-color: rgba(255, 51, 102, 0.4);
+    box-shadow: var(--shadow-glow-bear), var(--shadow-lg);
+    transform: translateY(-4px);
 }
 
 .trade-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 20px;
+    margin-bottom: 24px;
+    position: relative;
+    z-index: 2;
 }
 
 .trade-name {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1.2rem;
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
     font-weight: 800;
     color: var(--text-bright);
+    letter-spacing: 1px;
 }
 
 .trade-confidence {
-    padding: 8px 16px;
+    padding: 10px 20px;
     border-radius: 50px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     font-weight: 700;
-    letter-spacing: 1.5px;
+    letter-spacing: 2px;
     text-transform: uppercase;
+    position: relative;
+    z-index: 2;
 }
 
 .trade-confidence-high {
-    background: var(--bull-medium);
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.25) 0%, rgba(0, 245, 212, 0.15) 100%);
     color: var(--bull);
-    border: 1px solid rgba(0, 214, 125, 0.4);
+    border: 1px solid rgba(0, 255, 136, 0.5);
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.2), inset 0 0 15px rgba(0, 255, 136, 0.1);
+    animation: highConfPulse 2s ease-in-out infinite;
+}
+
+@keyframes highConfPulse {
+    0%, 100% { box-shadow: 0 0 15px rgba(0, 255, 136, 0.2); }
+    50% { box-shadow: 0 0 30px rgba(0, 255, 136, 0.4), 0 0 45px rgba(0, 255, 136, 0.2); }
 }
 
 .trade-confidence-medium {
-    background: var(--accent-gold-soft);
+    background: linear-gradient(135deg, rgba(254, 228, 64, 0.2) 0%, rgba(255, 150, 0, 0.1) 100%);
     color: var(--accent-gold);
-    border: 1px solid rgba(245, 184, 0, 0.4);
+    border: 1px solid rgba(254, 228, 64, 0.5);
+    box-shadow: 0 0 15px rgba(254, 228, 64, 0.15);
 }
 
 .trade-confidence-low {
@@ -2307,8 +2837,8 @@ CSS_STYLES = """
 }
 
 .trade-contract {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 1.3rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xl);
     font-weight: 700;
     padding: 18px 24px;
     border-radius: var(--radius-md);
@@ -2349,8 +2879,8 @@ CSS_STYLES = """
 }
 
 .trade-metric-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xxs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 1.5px;
@@ -2359,8 +2889,8 @@ CSS_STYLES = """
 }
 
 .trade-metric-value {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1.1rem;
+    font-family: var(--font-body);
+    font-size: var(--text-lg);
     font-weight: 800;
     color: var(--text-bright);
 }
@@ -2372,8 +2902,8 @@ CSS_STYLES = """
 }
 
 .targets-header {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xxs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 2px;
@@ -2402,7 +2932,7 @@ CSS_STYLES = """
 }
 
 .target-label {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     margin-bottom: 6px;
     font-weight: 600;
@@ -2411,15 +2941,15 @@ CSS_STYLES = """
 }
 
 .target-price {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1.1rem;
+    font-family: var(--font-body);
+    font-size: var(--text-lg);
     font-weight: 800;
     color: var(--text-bright);
 }
 
 .target-profit {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     color: var(--bull);
     margin-top: 6px;
     font-weight: 600;
@@ -2434,8 +2964,8 @@ CSS_STYLES = """
 }
 
 .trigger-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-xxs);
     color: var(--accent-cyan);
     text-transform: uppercase;
     letter-spacing: 1.5px;
@@ -2444,8 +2974,8 @@ CSS_STYLES = """
 }
 
 .trigger-text {
-    font-family: 'Inter', sans-serif;
-    font-size: 0.9rem;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
     color: var(--text-secondary);
     line-height: 1.5;
 }
@@ -2481,15 +3011,15 @@ CSS_STYLES = """
 }
 
 .session-icon {
-    font-size: 1.6rem;
+    font-size: var(--text-xl);
     margin-bottom: 10px;
     position: relative;
     z-index: 1;
 }
 
 .session-name {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 0.9rem;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
     font-weight: 700;
     color: var(--text-bright);
     margin-bottom: 14px;
@@ -2509,8 +3039,8 @@ CSS_STYLES = """
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
     font-weight: 600;
 }
 
@@ -2565,7 +3095,7 @@ CSS_STYLES = """
 .alert-box-info::before { background: var(--accent-blue); }
 
 .alert-icon {
-    font-size: 1.3rem;
+    font-size: var(--text-xl);
     flex-shrink: 0;
     margin-top: 2px;
 }
@@ -2573,16 +3103,16 @@ CSS_STYLES = """
 .alert-content { flex: 1; }
 
 .alert-title {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 0.95rem;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
     font-weight: 700;
     color: var(--text-bright);
     margin-bottom: 6px;
 }
 
 .alert-text {
-    font-family: 'Inter', sans-serif;
-    font-size: 0.875rem;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
     color: var(--text-secondary);
     line-height: 1.5;
 }
@@ -2611,22 +3141,22 @@ CSS_STYLES = """
 }
 
 .no-trade-icon {
-    font-size: 3rem;
+    font-size: var(--text-3xl);
     margin-bottom: 20px;
     opacity: 0.9;
 }
 
 .no-trade-title {
-    font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 1.4rem;
+    font-family: var(--font-body);
+    font-size: var(--text-xl);
     font-weight: 800;
     color: var(--bear);
     margin-bottom: 12px;
 }
 
 .no-trade-reason {
-    font-family: 'Inter', sans-serif;
-    font-size: 1rem;
+    font-family: var(--font-body);
+    font-size: var(--text-md);
     color: var(--text-secondary);
     max-width: 400px;
     margin: 0 auto;
@@ -2759,7 +3289,7 @@ hr {
     }
     
     .hero-content { text-align: center; }
-    .brand-name { font-size: 1.6rem; letter-spacing: 2px; }
+    .brand-name { font-size: var(--text-xl); letter-spacing: 2px; }
     
     .prior-levels-container { grid-template-columns: 1fr; }
     .prior-levels-grid { grid-template-columns: 1fr; }
@@ -2767,7 +3297,7 @@ hr {
     .targets-grid { grid-template-columns: 1fr; }
     
     .metric-card { min-height: 90px; padding: 16px; }
-    .metric-value { font-size: 1.4rem; }
+    .metric-value { font-size: var(--text-xl); }
 }
 </style>
 """
@@ -2839,12 +3369,19 @@ def sidebar():
         use_manual_prior = st.checkbox("Manual Prior Day Override", value=False)
         if use_manual_prior:
             col1, col2 = st.columns(2)
-            prior_highest_wick = col1.number_input("Highest Wick", value=6100.0, step=0.5, help="Highest high of any RTH candle")
-            prior_lowest_close = col2.number_input("Lowest Close", value=6050.0, step=0.5, help="Lowest close of any RTH candle")
-            prior_close = st.number_input("RTH Close", value=6075.0, step=0.5, help="Final RTH close")
+            prior_highest_wick = col1.number_input("Highest Wick (ES)", value=6100.0, step=0.5, help="Highest high of any RTH candle")
+            prior_lowest_close = col2.number_input("Lowest Close (ES)", value=6050.0, step=0.5, help="Lowest close of any RTH candle")
+            
+            col3, col4 = st.columns(2)
+            prior_hw_hour = col3.selectbox("HW Time (Hour)", options=list(range(8, 16)), index=4, help="Hour when highest wick occurred")
+            prior_lc_hour = col4.selectbox("LC Time (Hour)", options=list(range(8, 16)), index=4, help="Hour when lowest close occurred")
+            
+            prior_close = st.number_input("RTH Close (ES)", value=6075.0, step=0.5, help="Final RTH close")
         else:
             prior_highest_wick = None
             prior_lowest_close = None
+            prior_hw_hour = 12
+            prior_lc_hour = 12
             prior_close = None
         
         st.divider()
@@ -2950,7 +3487,7 @@ def sidebar():
         # Manual overrides
         "manual_vix": manual_vix,
         "manual_vix_range": {"low": manual_vix_low, "high": manual_vix_high} if use_manual_vix_range else None,
-        "manual_prior": {"highest_wick": prior_highest_wick, "lowest_close": prior_lowest_close, "close": prior_close} if use_manual_prior else None,
+        "manual_prior": {"highest_wick": prior_highest_wick, "lowest_close": prior_lowest_close, "close": prior_close, "hw_hour": prior_hw_hour, "lc_hour": prior_lc_hour} if use_manual_prior else None,
         "manual_overnight": {"high": on_high, "low": on_low} if use_manual_overnight else None,
         "manual_sessions": {
             "sydney": {"high": sydney_high, "low": sydney_low},
@@ -2978,10 +3515,14 @@ def main():
         else:
             current_es = fetch_es_current() or 6050
         
+        # --- IMPORTANT: Adjust trading date for weekends ---
+        # If user selects Saturday/Sunday, use Monday as actual trading date
+        actual_trading_date = get_actual_trading_day(inputs["trading_date"])
+        
         # --- Session Data ---
         if inputs["manual_sessions"] is not None:
             m = inputs["manual_sessions"]
-            overnight_day = get_prior_trading_day(inputs["trading_date"])
+            overnight_day = get_prior_trading_day(actual_trading_date)
             sydney = {
                 "high": m["sydney"]["high"], "low": m["sydney"]["low"],
                 "high_time": CT.localize(datetime.combine(overnight_day, time(18, 0))),
@@ -2990,16 +3531,16 @@ def main():
             tokyo = {
                 "high": m["tokyo"]["high"], "low": m["tokyo"]["low"],
                 "high_time": CT.localize(datetime.combine(overnight_day, time(23, 0))),
-                "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(0, 30)))
+                "low_time": CT.localize(datetime.combine(actual_trading_date, time(0, 30)))
             }
             london = {
                 "high": m["london"]["high"], "low": m["london"]["low"],
-                "high_time": CT.localize(datetime.combine(inputs["trading_date"], time(3, 0))),
-                "low_time": CT.localize(datetime.combine(inputs["trading_date"], time(4, 0)))
+                "high_time": CT.localize(datetime.combine(actual_trading_date, time(3, 0))),
+                "low_time": CT.localize(datetime.combine(actual_trading_date, time(4, 0)))
             }
         else:
             es_candles = fetch_es_candles()
-            sessions = extract_sessions(es_candles, inputs["trading_date"]) or {}
+            sessions = extract_sessions(es_candles, actual_trading_date) or {}
             sydney = sessions.get("sydney")
             tokyo = sessions.get("tokyo")
             london = sessions.get("london")
@@ -3023,7 +3564,7 @@ def main():
             }
         else:
             es_candles = fetch_es_candles()
-            sessions = extract_sessions(es_candles, inputs["trading_date"]) or {}
+            sessions = extract_sessions(es_candles, actual_trading_date) or {}
             overnight = sessions.get("overnight")
         
         # --- VIX Current ---
@@ -3047,7 +3588,7 @@ def main():
             }
         else:
             vix_range = fetch_vix_overnight_range(
-                inputs["trading_date"], 
+                actual_trading_date, 
                 inputs["vix_zone_start"].hour, inputs["vix_zone_start"].minute, 
                 inputs["vix_zone_end"].hour, inputs["vix_zone_end"].minute
             )
@@ -3057,25 +3598,31 @@ def main():
         ema_data = fetch_es_with_ema()
         
         # --- Prior Day RTH Data ---
+        # actual_trading_date was already set at the beginning (adjusts weekends to Monday)
+        
         if inputs["manual_prior"] is not None:
-            prior_day = get_prior_trading_day(inputs["trading_date"])
+            prior_day = get_prior_trading_day(actual_trading_date)
+            hw_hour = inputs["manual_prior"].get("hw_hour", 12)
+            lc_hour = inputs["manual_prior"].get("lc_hour", 12)
             prior_rth = {
                 "highest_wick": inputs["manual_prior"]["highest_wick"],
-                "highest_wick_time": CT.localize(datetime.combine(prior_day, time(12, 0))),
+                "highest_wick_time": CT.localize(datetime.combine(prior_day, time(hw_hour, 0))),
                 "lowest_close": inputs["manual_prior"]["lowest_close"],
-                "lowest_close_time": CT.localize(datetime.combine(prior_day, time(12, 0))),
+                "lowest_close_time": CT.localize(datetime.combine(prior_day, time(lc_hour, 0))),
                 "high": inputs["manual_prior"]["highest_wick"],
                 "low": inputs["manual_prior"]["lowest_close"],
                 "close": inputs["manual_prior"]["close"],
                 "available": True
             }
         else:
-            prior_rth = fetch_prior_day_rth(inputs["trading_date"])
+            prior_rth = fetch_prior_day_rth(actual_trading_date)
     
     offset = inputs["offset"]
     current_spx = round(current_es - offset, 2)
     channel_type, channel_reason, upper_pivot, lower_pivot, upper_time, lower_time = determine_channel(sydney, tokyo, london)
-    ref_time_dt = CT.localize(datetime.combine(inputs["trading_date"], time(*inputs["ref_time"])))
+    
+    # Reference time uses actual trading day
+    ref_time_dt = CT.localize(datetime.combine(actual_trading_date, time(*inputs["ref_time"])))
     ceiling_es, floor_es = calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time_dt, channel_type)
     
     if ceiling_es is None:
@@ -3084,6 +3631,25 @@ def main():
     ceiling_spx = round(ceiling_es - offset, 2)
     floor_spx = round(floor_es - offset, 2)
     position = get_position(current_es, ceiling_es, floor_es)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # DUAL CHANNEL LEVELS (Option C - Always show BOTH ascending and descending)
+    # ─────────────────────────────────────────────────────────────────────────
+    dual_levels_es = calc_dual_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time_dt)
+    
+    # Convert to SPX
+    dual_levels_spx = None
+    if dual_levels_es:
+        dual_levels_spx = {
+            "asc_floor": round(dual_levels_es["asc_floor"] - offset, 2),
+            "asc_ceiling": round(dual_levels_es["asc_ceiling"] - offset, 2),
+            "desc_ceiling": round(dual_levels_es["desc_ceiling"] - offset, 2),
+            "desc_floor": round(dual_levels_es["desc_floor"] - offset, 2),
+            "overnight_high": dual_levels_es["overnight_high"],
+            "overnight_low": dual_levels_es["overnight_low"],
+            "blocks_high": dual_levels_es["blocks_high"],
+            "blocks_low": dual_levels_es["blocks_low"],
+        }
     
     # Calculate prior day targets (both ascending and descending from each anchor)
     prior_targets = calc_prior_day_targets(prior_rth, ref_time_dt)
@@ -3112,8 +3678,9 @@ def main():
     # VIX term structure
     vix_term = fetch_vix_term_structure()
     
-    decision = analyze_market_state(
-        current_spx, ceiling_spx, floor_spx, channel_type, 
+    # OPTION C: Use the new dual-channel decision engine
+    decision = analyze_market_state_v2(
+        current_spx, dual_levels_spx, channel_type, channel_reason,
         retail_data["bias"], ema_data["ema_bias"], vix_pos, vix,
         session_tests, gap_analysis, prior_close_validation, vix_term
     )
@@ -3146,10 +3713,15 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     col1, col2, col3 = st.columns([2, 1, 2])
     with col1:
+        # Show actual trading date (with note if user selected weekend)
+        date_display = actual_trading_date.strftime("%A, %B %d, %Y")
+        weekend_note = ""
+        if inputs["trading_date"] != actual_trading_date:
+            weekend_note = f" (adjusted from {inputs['trading_date'].strftime('%A')})"
         st.markdown(f"""
         <div style="display:flex;align-items:center;gap:8px;padding:10px 0;">
             <span style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:rgba(255,255,255,0.5);">
-                📅 {inputs["trading_date"].strftime("%A, %B %d, %Y")}
+                📅 {date_display}{weekend_note}
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -3236,18 +3808,66 @@ def main():
         st.markdown(f'<div class="confluence-card confluence-card-puts"><div class="confluence-header"><span class="confluence-title">🔴 PUTS</span><span class="confluence-score {puts_class}">{puts_score}</span></div>{factors_html}</div>', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # TRADING LEVELS
+    # DUAL CHANNEL LEVELS (Option C - All 4 Levels)
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown(f'<div class="section-header"><div class="section-icon">◫</div><h2 class="section-title">Trading Levels @ {inputs["ref_time"][0]}:{inputs["ref_time"][1]:02d} AM</h2></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header"><div class="section-icon">◫</div><h2 class="section-title">Dual Channel Levels @ {inputs["ref_time"][0]}:{inputs["ref_time"][1]:02d} AM</h2></div>', unsafe_allow_html=True)
     
-    dist_ceil, dist_floor = round(ceiling_spx - current_spx, 1), round(current_spx - floor_spx, 1)
-    st.markdown(f'''
-    <div class="levels-container">
-        <div class="level-row"><div class="level-label ceiling"><span>▲</span><span>CEILING</span></div><div class="level-value ceiling">{ceiling_spx:,.2f}</div><div class="level-note">PUTS entry • {dist_ceil} pts away</div></div>
-        <div class="level-row" style="background:rgba(255,215,0,0.05);margin:0 -18px;padding:12px 18px;"><div class="level-label current"><span>●</span><span>CURRENT</span></div><div class="level-value current">{current_spx:,.2f}</div><div class="level-note">Position: {position.value}</div></div>
-        <div class="level-row"><div class="level-label floor"><span>▼</span><span>FLOOR</span></div><div class="level-value floor">{floor_spx:,.2f}</div><div class="level-note">CALLS entry • {dist_floor} pts away</div></div>
-    </div>
-    ''', unsafe_allow_html=True)
+    if dual_levels_spx:
+        asc_floor = dual_levels_spx["asc_floor"]
+        asc_ceiling = dual_levels_spx["asc_ceiling"]
+        desc_ceiling = dual_levels_spx["desc_ceiling"]
+        desc_floor = dual_levels_spx["desc_floor"]
+        
+        dist_asc_floor = round(current_spx - asc_floor, 1)
+        dist_asc_ceiling = round(asc_ceiling - current_spx, 1)
+        dist_desc_ceiling = round(desc_ceiling - current_spx, 1)
+        dist_desc_floor = round(current_spx - desc_floor, 1)
+        
+        # Determine which level is KEY based on channel type
+        is_ascending = channel_type == ChannelType.ASCENDING
+        is_descending = channel_type == ChannelType.DESCENDING
+        
+        # Position summary from decision
+        pos_summary = decision.get("position_summary", f"Position: {position.value}")
+        
+        # Position summary
+        st.markdown(f'<div class="levels-container"><div style="padding:14px 16px;background:linear-gradient(90deg,var(--bg-elevated) 0%,transparent 100%);border-radius:10px;margin-bottom:16px;border-left:4px solid var(--accent-cyan);"><span style="font-family:JetBrains Mono,monospace;font-size:0.9rem;color:var(--text-primary);">{pos_summary}</span></div></div>', unsafe_allow_html=True)
+        
+        # Ascending Channel Header
+        asc_label = "↗ ASCENDING CHANNEL (DOMINANT)" if is_ascending else "↗ ASCENDING CHANNEL"
+        st.markdown(f'<div style="font-size:0.8rem;color:var(--bull);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px 0;font-weight:600;">{asc_label}</div>', unsafe_allow_html=True)
+        
+        # Ascending Floor Row
+        if is_ascending:
+            st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bull);"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="levels-container" style="opacity:0.7;"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        
+        # Ascending Ceiling Row
+        st.markdown(f'<div class="levels-container" style="opacity:0.5;margin-top:-8px;"><div class="level-row"><div class="level-label" style="color:var(--bull);"><span>▲</span><span>ASC CEIL</span></div><div class="level-value" style="color:var(--bull);">{asc_ceiling:,.2f}</div><div class="level-note">CALLS target • {dist_asc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        
+        # Current Price
+        st.markdown(f'<div class="levels-container" style="background:linear-gradient(90deg,rgba(245,184,0,0.15) 0%,transparent 100%);margin:12px 0;"><div class="level-row"><div class="level-label current"><span>●</span><span>CURRENT</span></div><div class="level-value current">{current_spx:,.2f}</div><div class="level-note">ES: {current_es:,.2f}</div></div></div>', unsafe_allow_html=True)
+        
+        # Descending Channel Header
+        desc_label = "↘ DESCENDING CHANNEL (DOMINANT)" if is_descending else "↘ DESCENDING CHANNEL"
+        st.markdown(f'<div style="font-size:0.8rem;color:var(--bear);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px 0;font-weight:600;">{desc_label}</div>', unsafe_allow_html=True)
+        
+        # Descending Ceiling Row
+        if is_descending:
+            st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bear);"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="levels-container" style="opacity:0.7;"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        
+        # Descending Floor Row
+        st.markdown(f'<div class="levels-container" style="opacity:0.5;margin-top:-8px;"><div class="level-row"><div class="level-label" style="color:var(--bear);"><span>▼</span><span>DESC FLOOR</span></div><div class="level-value" style="color:var(--bear);">{desc_floor:,.2f}</div><div class="level-note">PUTS target • {dist_desc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        
+        # Structure Alerts
+        if decision.get("structure_alerts"):
+            for alert in decision["structure_alerts"]:
+                st.markdown(f'<div class="alert-box alert-box-warning"><span class="alert-icon">⚠️</span><div class="alert-content"><div class="alert-title">Structure Break Alert</div><div class="alert-text">{alert}</div></div></div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="alert-box alert-box-danger"><span class="alert-icon">❌</span><div class="alert-content"><div class="alert-title">Dual Levels Unavailable</div><div class="alert-text">Missing overnight session data</div></div></div>', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # PRIOR DAY INTERMEDIATE LEVELS
@@ -3331,93 +3951,38 @@ def main():
         ''', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # TRADE SETUPS
+    # TRADE SETUPS (Option C - Primary + Secondary)
     # ═══════════════════════════════════════════════════════════════════════════
     if decision["no_trade"]:
         st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">Trade Setup</h2></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="no-trade-card"><div class="no-trade-icon">⊘</div><div class="no-trade-title">NO TRADE</div><div class="no-trade-reason">{decision["no_trade_reason"]}</div></div>', unsafe_allow_html=True)
-    elif decision.get("scenarios") and len(decision["scenarios"]) == 4:
-        # MIXED: Show all 4 scenarios
-        st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">MIXED Channel - All Scenarios</h2></div>', unsafe_allow_html=True)
-        
-        # Ascending Floor scenarios
-        st.markdown('<div style="margin:20px 0 10px 0;font-family:\'Syne\',sans-serif;font-size:1rem;font-weight:600;color:var(--calls-primary);">▲ ASCENDING FLOOR (Support Level)</div>', unsafe_allow_html=True)
-        
-        for i, s in enumerate(decision["scenarios"][:2]):
-            tc = "calls" if s["direction"] == "CALLS" else "puts"
-            di = "↗" if s["direction"] == "CALLS" else "↘"
-            label = "If Floor Holds" if i == 0 else "If Floor Breaks"
-            st.markdown(f'''
-            <div class="trade-card trade-card-{tc}">
-                <div class="trade-header"><div class="trade-name">{di} {s["name"]}</div><div class="trade-confidence trade-confidence-{s["confidence"].lower()}">{s["confidence"]} CONFIDENCE</div></div>
-                <div class="trade-contract trade-contract-{tc}">{s["contract"]}</div>
-                <div class="trade-grid">
-                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${s["entry_premium"]:.2f}</div></div>
-                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{s["entry"]:,.2f}</div></div>
-                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{s["stop"]:,.2f}</div></div>
-                </div>
-                <div class="trade-targets">
-                    <div class="targets-header">◎ Profit Targets</div>
-                    <div class="targets-grid">
-                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${s["target_50"]:.2f}</div><div class="target-profit">+${s["profit_50"]:,.0f}</div></div>
-                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${s["target_75"]:.2f}</div><div class="target-profit">+${s["profit_75"]:,.0f}</div></div>
-                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${s["target_100"]:.2f}</div><div class="target-profit">+${s["profit_100"]:,.0f}</div></div>
-                    </div>
-                </div>
-                <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{s["trigger"]}</div></div>
-            </div>
-            ''', unsafe_allow_html=True)
-        
-        # Descending Ceiling scenarios
-        st.markdown('<div style="margin:30px 0 10px 0;font-family:\'Syne\',sans-serif;font-size:1rem;font-weight:600;color:var(--puts-primary);">▼ DESCENDING CEILING (Resistance Level)</div>', unsafe_allow_html=True)
-        
-        for i, s in enumerate(decision["scenarios"][2:]):
-            tc = "calls" if s["direction"] == "CALLS" else "puts"
-            di = "↗" if s["direction"] == "CALLS" else "↘"
-            label = "If Ceiling Holds" if i == 0 else "If Ceiling Breaks"
-            st.markdown(f'''
-            <div class="trade-card trade-card-{tc}">
-                <div class="trade-header"><div class="trade-name">{di} {s["name"]}</div><div class="trade-confidence trade-confidence-{s["confidence"].lower()}">{s["confidence"]} CONFIDENCE</div></div>
-                <div class="trade-contract trade-contract-{tc}">{s["contract"]}</div>
-                <div class="trade-grid">
-                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${s["entry_premium"]:.2f}</div></div>
-                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{s["entry"]:,.2f}</div></div>
-                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{s["stop"]:,.2f}</div></div>
-                </div>
-                <div class="trade-targets">
-                    <div class="targets-header">◎ Profit Targets</div>
-                    <div class="targets-grid">
-                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${s["target_50"]:.2f}</div><div class="target-profit">+${s["profit_50"]:,.0f}</div></div>
-                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${s["target_75"]:.2f}</div><div class="target-profit">+${s["profit_75"]:,.0f}</div></div>
-                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${s["target_100"]:.2f}</div><div class="target-profit">+${s["profit_100"]:,.0f}</div></div>
-                    </div>
-                </div>
-                <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{s["trigger"]}</div></div>
-            </div>
-            ''', unsafe_allow_html=True)
     else:
-        # ASCENDING or DESCENDING: Show Primary and Alternate
-        st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">Primary Trade Setup</h2></div>', unsafe_allow_html=True)
+        # PRIMARY TRADE
+        st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">PRIMARY Trade Setup</h2></div>', unsafe_allow_html=True)
         
         p = decision["primary"]
         if p:
             tc = "calls" if p["direction"] == "CALLS" else "puts"
             di = "↗" if p["direction"] == "CALLS" else "↘"
+            t = p["targets"]
             st.markdown(f'''
             <div class="trade-card trade-card-{tc}">
-                <div class="trade-header"><div class="trade-name">{di} {p["name"]}</div><div class="trade-confidence trade-confidence-{p["confidence"].lower()}">{p["confidence"]} CONFIDENCE</div></div>
+                <div class="trade-header">
+                    <div class="trade-name">{di} {p["name"]}</div>
+                    <div class="trade-confidence trade-confidence-{p["confidence"].lower()}">{p["confidence"]} CONFIDENCE</div>
+                </div>
                 <div class="trade-contract trade-contract-{tc}">{p["contract"]}</div>
                 <div class="trade-grid">
                     <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${p["entry_premium"]:.2f}</div></div>
-                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{p["entry"]:,.2f}</div></div>
-                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{p["stop"]:,.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{p["entry_level"]:,.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{p["stop_level"]:,.2f}</div></div>
                 </div>
                 <div class="trade-targets">
                     <div class="targets-header">◎ Profit Targets</div>
                     <div class="targets-grid">
-                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${p["target_50"]:.2f}</div><div class="target-profit">+${p["profit_50"]:,.0f}</div></div>
-                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${p["target_75"]:.2f}</div><div class="target-profit">+${p["profit_75"]:,.0f}</div></div>
-                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${p["target_100"]:.2f}</div><div class="target-profit">+${p["profit_100"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>
                     </div>
                 </div>
                 <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{p["trigger"]}</div></div>
@@ -3426,34 +3991,38 @@ def main():
             with st.expander("📋 Trade Rationale"):
                 st.write(p["rationale"])
         
-        # Alternate Trade
-        if decision["alternate"]:
-            st.markdown('<div class="section-header"><div class="section-icon">◌</div><h2 class="section-title">Alternate Trade Setup</h2></div>', unsafe_allow_html=True)
-            a = decision["alternate"]
-            tc = "calls" if a["direction"] == "CALLS" else "puts"
-            di = "↗" if a["direction"] == "CALLS" else "↘"
+        # SECONDARY TRADE
+        if decision["secondary"]:
+            st.markdown('<div class="section-header"><div class="section-icon">◌</div><h2 class="section-title">SECONDARY Trade Setup</h2></div>', unsafe_allow_html=True)
+            s = decision["secondary"]
+            tc = "calls" if s["direction"] == "CALLS" else "puts"
+            di = "↗" if s["direction"] == "CALLS" else "↘"
+            t = s["targets"]
             st.markdown(f'''
-            <div class="trade-card trade-card-{tc}">
-                <div class="trade-header"><div class="trade-name">{di} {a["name"]}</div><div class="trade-confidence trade-confidence-{a["confidence"].lower()}">{a["confidence"]} CONFIDENCE</div></div>
-                <div class="trade-contract trade-contract-{tc}">{a["contract"]}</div>
+            <div class="trade-card trade-card-{tc}" style="opacity: 0.85;">
+                <div class="trade-header">
+                    <div class="trade-name">{di} {s["name"]}</div>
+                    <div class="trade-confidence trade-confidence-{s["confidence"].lower()}">{s["confidence"]} CONFIDENCE</div>
+                </div>
+                <div class="trade-contract trade-contract-{tc}">{s["contract"]}</div>
                 <div class="trade-grid">
-                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${a["entry_premium"]:.2f}</div></div>
-                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{a["entry"]:,.2f}</div></div>
-                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{a["stop"]:,.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${s["entry_premium"]:.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{s["entry_level"]:,.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{s["stop_level"]:,.2f}</div></div>
                 </div>
                 <div class="trade-targets">
                     <div class="targets-header">◎ Profit Targets</div>
                     <div class="targets-grid">
-                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${a["target_50"]:.2f}</div><div class="target-profit">+${a["profit_50"]:,.0f}</div></div>
-                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${a["target_75"]:.2f}</div><div class="target-profit">+${a["profit_75"]:,.0f}</div></div>
-                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${a["target_100"]:.2f}</div><div class="target-profit">+${a["profit_100"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>
                     </div>
                 </div>
-                <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{a["trigger"]}</div></div>
+                <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{s["trigger"]}</div></div>
             </div>
             ''', unsafe_allow_html=True)
             with st.expander("📋 Trade Rationale"):
-                st.write(a["rationale"])
+                st.write(s["rationale"])
     
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSIONS
