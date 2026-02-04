@@ -612,22 +612,29 @@ def fetch_prior_day_rth(trading_date):
     RTH is 8:30 AM - 3:00 PM CT (9:30 AM - 4:00 PM ET)
     
     Returns:
-    - highest_wick: The highest high (wick) of any RTH candle
-    - lowest_close: The lowest close of any RTH candle
+    - primary_high_wick: The highest high (wick) of any RTH candle
+    - secondary_high_wick: Lower high wick made AFTER primary (1hr+ gap), or None
+    - primary_low_open: The lowest open of any BULLISH RTH candle (buyers defended)
+    - secondary_low_open: Higher low open made AFTER primary (1hr+ gap, bullish), or None
     """
     result = {
+        "primary_high_wick": None, "primary_high_wick_time": None,
+        "secondary_high_wick": None, "secondary_high_wick_time": None,
+        "primary_low_open": None, "primary_low_open_time": None,
+        "secondary_low_open": None, "secondary_low_open_time": None,
+        "high": None, "low": None, "close": None,
+        "available": False,
+        # Legacy keys for backward compatibility
         "highest_wick": None, "highest_wick_time": None,
         "lowest_close": None, "lowest_close_time": None,
-        "high": None, "low": None, "close": None,
-        "available": False
     }
     try:
         prior_day = get_prior_trading_day(trading_date)
         
-        # Fetch 5-minute candles for ES futures from Yahoo
+        # Fetch 30-minute candles for ES futures from Yahoo (matches our trading blocks)
         es = yf.Ticker("ES=F")
         # Get 5 days of data to ensure we have the prior day
-        df = es.history(period="5d", interval="5m")
+        df = es.history(period="5d", interval="30m")
         
         if df is not None and not df.empty:
             # Convert index to CT timezone
@@ -641,69 +648,175 @@ def fetch_prior_day_rth(trading_date):
             rth_end = CT.localize(datetime.combine(prior_day, time(15, 0)))
             
             # Filter to prior day RTH
-            rth_df = df[(df.index >= rth_start) & (df.index <= rth_end)]
+            rth_df = df[(df.index >= rth_start) & (df.index <= rth_end)].copy()
             
-            if not rth_df.empty and len(rth_df) > 5:
-                # Highest Wick = highest high of any candle
-                high_idx = rth_df['High'].idxmax()
-                result["highest_wick"] = round(float(rth_df.loc[high_idx, 'High']), 2)
-                result["highest_wick_time"] = high_idx
+            if not rth_df.empty and len(rth_df) > 3:
+                # ─────────────────────────────────────────────────────────────
+                # PRIMARY HIGH WICK: Highest high of any candle
+                # ─────────────────────────────────────────────────────────────
+                primary_high_idx = rth_df['High'].idxmax()
+                result["primary_high_wick"] = round(float(rth_df.loc[primary_high_idx, 'High']), 2)
+                result["primary_high_wick_time"] = primary_high_idx
                 
-                # Lowest Close = lowest close of any candle (NOT lowest wick)
-                lowest_close_idx = rth_df['Close'].idxmin()
-                result["lowest_close"] = round(float(rth_df.loc[lowest_close_idx, 'Close']), 2)
-                result["lowest_close_time"] = lowest_close_idx
+                # ─────────────────────────────────────────────────────────────
+                # SECONDARY HIGH WICK: Lower high made 1hr+ after primary
+                # ─────────────────────────────────────────────────────────────
+                min_gap = timedelta(hours=1)
+                secondary_high_search = rth_df[rth_df.index >= primary_high_idx + min_gap]
+                if not secondary_high_search.empty:
+                    # Find highest wick after primary (must be lower than primary)
+                    secondary_high_candidates = secondary_high_search[
+                        secondary_high_search['High'] < result["primary_high_wick"]
+                    ]
+                    if not secondary_high_candidates.empty:
+                        sec_high_idx = secondary_high_candidates['High'].idxmax()
+                        result["secondary_high_wick"] = round(float(secondary_high_candidates.loc[sec_high_idx, 'High']), 2)
+                        result["secondary_high_wick_time"] = sec_high_idx
+                
+                # ─────────────────────────────────────────────────────────────
+                # PRIMARY LOW OPEN: Lowest open of any BULLISH candle
+                # Bullish = Close > Open (buyers stepped in and defended)
+                # ─────────────────────────────────────────────────────────────
+                bullish_candles = rth_df[rth_df['Close'] > rth_df['Open']]
+                if not bullish_candles.empty:
+                    primary_low_idx = bullish_candles['Open'].idxmin()
+                    result["primary_low_open"] = round(float(bullish_candles.loc[primary_low_idx, 'Open']), 2)
+                    result["primary_low_open_time"] = primary_low_idx
+                    
+                    # ─────────────────────────────────────────────────────────
+                    # SECONDARY LOW OPEN: Higher low open made 1hr+ after primary (bullish)
+                    # ─────────────────────────────────────────────────────────
+                    secondary_low_search = bullish_candles[bullish_candles.index >= primary_low_idx + min_gap]
+                    if not secondary_low_search.empty:
+                        # Find lowest open after primary (must be higher than primary)
+                        secondary_low_candidates = secondary_low_search[
+                            secondary_low_search['Open'] > result["primary_low_open"]
+                        ]
+                        if not secondary_low_candidates.empty:
+                            sec_low_idx = secondary_low_candidates['Open'].idxmin()
+                            result["secondary_low_open"] = round(float(secondary_low_candidates.loc[sec_low_idx, 'Open']), 2)
+                            result["secondary_low_open_time"] = sec_low_idx
                 
                 # Also store overall H/L/C for display
-                result["high"] = result["highest_wick"]
+                result["high"] = result["primary_high_wick"]
                 result["low"] = round(float(rth_df['Low'].min()), 2)
                 result["close"] = round(float(rth_df.iloc[-1]['Close']), 2)
                 result["available"] = True
+                
+                # Legacy keys for backward compatibility
+                result["highest_wick"] = result["primary_high_wick"]
+                result["highest_wick_time"] = result["primary_high_wick_time"]
+                result["lowest_close"] = result["primary_low_open"]  # Now uses low open
+                result["lowest_close_time"] = result["primary_low_open_time"]
+                
     except Exception as e:
         pass
     return result
 
 def calc_prior_day_targets(prior_rth, ref_time):
-    """Calculate BOTH ascending and descending targets from prior day anchors.
+    """Calculate BOTH ascending and descending targets from ALL prior day anchors.
     
-    From HIGHEST WICK:
+    From PRIMARY HIGH WICK:
     - Ascending line (+0.52/30min) = Resistance (SELL point)
     - Descending line (-0.52/30min) = Support (BUY point)
     
-    From LOWEST CLOSE:
+    From SECONDARY HIGH WICK (if exists):
+    - Ascending line (+0.52/30min) = Resistance (SELL point)
+    - Descending line (-0.52/30min) = Support (BUY point)
+    
+    From PRIMARY LOW OPEN:
     - Ascending line (+0.52/30min) = Support (BUY point)
     - Descending line (-0.52/30min) = Resistance (SELL point)
     
-    Returns dict with all four targets.
+    From SECONDARY LOW OPEN (if exists):
+    - Ascending line (+0.52/30min) = Support (BUY point)
+    - Descending line (-0.52/30min) = Resistance (SELL point)
+    
+    Returns dict with all eight targets (4 pivots x 2 directions).
     """
     result = {
         "available": False,
+        # Primary High Wick
+        "primary_high_wick": None,
+        "primary_high_wick_time": None,
+        "primary_high_wick_ascending": None,
+        "primary_high_wick_descending": None,
+        # Secondary High Wick
+        "secondary_high_wick": None,
+        "secondary_high_wick_time": None,
+        "secondary_high_wick_ascending": None,
+        "secondary_high_wick_descending": None,
+        # Primary Low Open
+        "primary_low_open": None,
+        "primary_low_open_time": None,
+        "primary_low_open_ascending": None,
+        "primary_low_open_descending": None,
+        # Secondary Low Open
+        "secondary_low_open": None,
+        "secondary_low_open_time": None,
+        "secondary_low_open_ascending": None,
+        "secondary_low_open_descending": None,
+        # Legacy keys for backward compatibility
         "highest_wick": None,
-        "highest_wick_ascending": None,  # SELL point (resistance)
-        "highest_wick_descending": None,  # BUY point (support)
+        "highest_wick_ascending": None,
+        "highest_wick_descending": None,
         "lowest_close": None,
-        "lowest_close_ascending": None,   # BUY point (support)
-        "lowest_close_descending": None,  # SELL point (resistance)
+        "lowest_close_ascending": None,
+        "lowest_close_descending": None,
     }
     
-    if not prior_rth["available"]:
+    if not prior_rth.get("available"):
         return result
     
     result["available"] = True
-    result["highest_wick"] = prior_rth["highest_wick"]
-    result["lowest_close"] = prior_rth["lowest_close"]
     
-    # Calculate blocks from highest wick time (using trading blocks for cross-day)
-    if prior_rth["highest_wick"] is not None and prior_rth["highest_wick_time"]:
-        blocks = trading_blocks_between(prior_rth["highest_wick_time"], ref_time)
-        result["highest_wick_ascending"] = round(prior_rth["highest_wick"] + SLOPE * blocks, 2)
-        result["highest_wick_descending"] = round(prior_rth["highest_wick"] - SLOPE * blocks, 2)
+    # ─────────────────────────────────────────────────────────────────────────
+    # PRIMARY HIGH WICK
+    # ─────────────────────────────────────────────────────────────────────────
+    if prior_rth.get("primary_high_wick") is not None and prior_rth.get("primary_high_wick_time"):
+        result["primary_high_wick"] = prior_rth["primary_high_wick"]
+        result["primary_high_wick_time"] = prior_rth["primary_high_wick_time"]
+        blocks = trading_blocks_between(prior_rth["primary_high_wick_time"], ref_time)
+        result["primary_high_wick_ascending"] = round(prior_rth["primary_high_wick"] + SLOPE * blocks, 2)
+        result["primary_high_wick_descending"] = round(prior_rth["primary_high_wick"] - SLOPE * blocks, 2)
+        # Legacy
+        result["highest_wick"] = result["primary_high_wick"]
+        result["highest_wick_ascending"] = result["primary_high_wick_ascending"]
+        result["highest_wick_descending"] = result["primary_high_wick_descending"]
     
-    # Calculate blocks from lowest close time (using trading blocks for cross-day)
-    if prior_rth["lowest_close"] is not None and prior_rth["lowest_close_time"]:
-        blocks = trading_blocks_between(prior_rth["lowest_close_time"], ref_time)
-        result["lowest_close_ascending"] = round(prior_rth["lowest_close"] + SLOPE * blocks, 2)
-        result["lowest_close_descending"] = round(prior_rth["lowest_close"] - SLOPE * blocks, 2)
+    # ─────────────────────────────────────────────────────────────────────────
+    # SECONDARY HIGH WICK
+    # ─────────────────────────────────────────────────────────────────────────
+    if prior_rth.get("secondary_high_wick") is not None and prior_rth.get("secondary_high_wick_time"):
+        result["secondary_high_wick"] = prior_rth["secondary_high_wick"]
+        result["secondary_high_wick_time"] = prior_rth["secondary_high_wick_time"]
+        blocks = trading_blocks_between(prior_rth["secondary_high_wick_time"], ref_time)
+        result["secondary_high_wick_ascending"] = round(prior_rth["secondary_high_wick"] + SLOPE * blocks, 2)
+        result["secondary_high_wick_descending"] = round(prior_rth["secondary_high_wick"] - SLOPE * blocks, 2)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # PRIMARY LOW OPEN
+    # ─────────────────────────────────────────────────────────────────────────
+    if prior_rth.get("primary_low_open") is not None and prior_rth.get("primary_low_open_time"):
+        result["primary_low_open"] = prior_rth["primary_low_open"]
+        result["primary_low_open_time"] = prior_rth["primary_low_open_time"]
+        blocks = trading_blocks_between(prior_rth["primary_low_open_time"], ref_time)
+        result["primary_low_open_ascending"] = round(prior_rth["primary_low_open"] + SLOPE * blocks, 2)
+        result["primary_low_open_descending"] = round(prior_rth["primary_low_open"] - SLOPE * blocks, 2)
+        # Legacy
+        result["lowest_close"] = result["primary_low_open"]
+        result["lowest_close_ascending"] = result["primary_low_open_ascending"]
+        result["lowest_close_descending"] = result["primary_low_open_descending"]
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # SECONDARY LOW OPEN
+    # ─────────────────────────────────────────────────────────────────────────
+    if prior_rth.get("secondary_low_open") is not None and prior_rth.get("secondary_low_open_time"):
+        result["secondary_low_open"] = prior_rth["secondary_low_open"]
+        result["secondary_low_open_time"] = prior_rth["secondary_low_open_time"]
+        blocks = trading_blocks_between(prior_rth["secondary_low_open_time"], ref_time)
+        result["secondary_low_open_ascending"] = round(prior_rth["secondary_low_open"] + SLOPE * blocks, 2)
+        result["secondary_low_open_descending"] = round(prior_rth["secondary_low_open"] - SLOPE * blocks, 2)
     
     return result
 
@@ -1299,9 +1412,214 @@ def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, reta
     return result
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# EXPLOSIVE MOVE DETECTOR
+# ═══════════════════════════════════════════════════════════════════════════════
+def detect_explosive_potential(current_spx, dual_levels, prior_targets, channel_type,
+                                vix_spread, ema_data, overnight_range, prior_day_range,
+                                gap_analysis):
+    """
+    Detect conditions that precede explosive moves (20x+ premium potential).
+    
+    Key factors:
+    1. Target Distance - How far is the profit target if structure breaks?
+    2. Sentiment Extreme - Is the crowd positioned wrong?
+    3. Range Compression - Is volatility coiled?
+    4. EMA Extension - Is price overextended?
+    5. Gap Vulnerability - Did we gap into a weak position?
+    
+    Returns dict with explosive_score (0-100) and alerts.
+    """
+    
+    result = {
+        "explosive_score": 0,
+        "alerts": [],
+        "factors": [],
+        "direction_bias": None,  # CALLS or PUTS
+        "target_distance": None,
+        "potential_move": None,
+        "conviction": "LOW"
+    }
+    
+    if not dual_levels or not current_spx:
+        return result
+    
+    score = 0
+    factors = []
+    alerts = []
+    
+    asc_floor = dual_levels.get("asc_floor", 0)
+    desc_ceiling = dual_levels.get("desc_ceiling", 0)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FACTOR 1: TARGET DISTANCE (Most Important!)
+    # If structure breaks, how far is the target?
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    bearish_target = None
+    bullish_target = None
+    
+    if prior_targets and prior_targets.get("available"):
+        # Bearish target: descending line from prior low
+        bearish_target = prior_targets.get("primary_low_open_descending")
+        # Bullish target: ascending line from prior high  
+        bullish_target = prior_targets.get("primary_high_wick_ascending")
+    
+    # Calculate distances
+    dist_to_bearish_target = abs(current_spx - bearish_target) if bearish_target else 0
+    dist_to_bullish_target = abs(current_spx - bullish_target) if bullish_target else 0
+    dist_to_asc_floor = abs(current_spx - asc_floor)
+    dist_to_desc_ceiling = abs(current_spx - desc_ceiling)
+    
+    # BEARISH EXPLOSIVE: Close to ascending floor + far bearish target
+    if dist_to_asc_floor < 20 and dist_to_bearish_target > 50:
+        runway = dist_to_bearish_target
+        score += min(35, int(runway / 2))  # Up to 35 points
+        factors.append(f"🎯 BEARISH RUNWAY: {runway:.0f} pts to target ({bearish_target:.2f})")
+        result["target_distance"] = runway
+        result["potential_move"] = "BEARISH"
+        if runway > 80:
+            alerts.append(f"🔥 MASSIVE BEARISH TARGET: {runway:.0f} pts below if floor breaks!")
+    
+    # BULLISH EXPLOSIVE: Close to descending ceiling + far bullish target
+    if dist_to_desc_ceiling < 20 and dist_to_bullish_target > 50:
+        runway = dist_to_bullish_target
+        score += min(35, int(runway / 2))  # Up to 35 points
+        factors.append(f"🎯 BULLISH RUNWAY: {runway:.0f} pts to target ({bullish_target:.2f})")
+        result["target_distance"] = runway
+        result["potential_move"] = "BULLISH"
+        if runway > 80:
+            alerts.append(f"🚀 MASSIVE BULLISH TARGET: {runway:.0f} pts above if ceiling breaks!")
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FACTOR 2: SENTIMENT EXTREME (Fade the Crowd)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    if vix_spread is not None:
+        if vix_spread <= -2.5:
+            # Extreme complacency - bearish setup
+            score += 20
+            factors.append(f"😴 EXTREME COMPLACENCY: VIX spread {vix_spread:.2f} (crowd bullish)")
+            if result["potential_move"] == "BEARISH":
+                alerts.append("⚠️ SENTIMENT ALIGNED: Crowd bullish + bearish structure = FADE SETUP")
+                score += 10  # Bonus for alignment
+        elif vix_spread >= 2.5:
+            # Extreme fear - bullish setup
+            score += 20
+            factors.append(f"😱 EXTREME FEAR: VIX spread {vix_spread:.2f} (crowd bearish)")
+            if result["potential_move"] == "BULLISH":
+                alerts.append("⚠️ SENTIMENT ALIGNED: Crowd bearish + bullish structure = FADE SETUP")
+                score += 10  # Bonus for alignment
+        elif vix_spread <= -1.5:
+            score += 10
+            factors.append(f"📊 Elevated complacency: VIX spread {vix_spread:.2f}")
+        elif vix_spread >= 1.5:
+            score += 10
+            factors.append(f"📊 Elevated fear: VIX spread {vix_spread:.2f}")
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FACTOR 3: RANGE COMPRESSION (Volatility Coiling)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    if overnight_range and overnight_range < 25:
+        score += 15
+        factors.append(f"🔄 COMPRESSED OVERNIGHT: Only {overnight_range:.1f} pts (expansion likely)")
+        alerts.append("📊 Tight overnight range = BREAKOUT CONDITIONS")
+    elif overnight_range and overnight_range < 35:
+        score += 8
+        factors.append(f"📉 Narrow overnight: {overnight_range:.1f} pts")
+    
+    if prior_day_range and prior_day_range < 40:
+        score += 10
+        factors.append(f"📊 Compressed prior day: {prior_day_range:.1f} pts")
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FACTOR 4: EMA EXTENSION (Rubber Band Effect)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    if ema_data:
+        ema_200 = ema_data.get("ema_200")
+        if ema_200 and current_spx:
+            pct_from_ema = ((current_spx - ema_200) / ema_200) * 100
+            
+            if pct_from_ema > 1.5:
+                score += 15
+                factors.append(f"📈 EXTENDED ABOVE 200 EMA: +{pct_from_ema:.1f}% (pullback vulnerable)")
+                if result["potential_move"] == "BEARISH":
+                    alerts.append("🎯 MEAN REVERSION SETUP: Extended + bearish structure")
+            elif pct_from_ema < -1.5:
+                score += 15
+                factors.append(f"📉 EXTENDED BELOW 200 EMA: {pct_from_ema:.1f}% (bounce vulnerable)")
+                if result["potential_move"] == "BULLISH":
+                    alerts.append("🎯 MEAN REVERSION SETUP: Oversold + bullish structure")
+            elif pct_from_ema > 0.8:
+                score += 5
+                factors.append(f"📊 Above 200 EMA: +{pct_from_ema:.1f}%")
+            elif pct_from_ema < -0.8:
+                score += 5
+                factors.append(f"📊 Below 200 EMA: {pct_from_ema:.1f}%")
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FACTOR 5: GAP VULNERABILITY
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    if gap_analysis:
+        if gap_analysis.get("into_floor"):
+            score += 10
+            factors.append("⬇️ GAPPED INTO FLOOR: Weak open, breakdown risk")
+            if result["potential_move"] == "BEARISH":
+                score += 5
+        if gap_analysis.get("into_ceiling"):
+            score += 10
+            factors.append("⬆️ GAPPED INTO CEILING: Weak open, rejection risk")
+            if result["potential_move"] == "BULLISH":
+                score += 5
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # FACTOR 6: STRUCTURE ALREADY BROKEN
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    below_floor = current_spx < asc_floor
+    above_ceiling = current_spx > desc_ceiling
+    
+    if channel_type == ChannelType.ASCENDING and below_floor:
+        score += 15
+        factors.append("💥 STRUCTURE BROKEN: Below ascending floor - continuation likely")
+        result["potential_move"] = "BEARISH"
+        alerts.append("🚨 BREAKDOWN IN PROGRESS: Look for continuation to targets")
+    
+    if channel_type == ChannelType.DESCENDING and above_ceiling:
+        score += 15
+        factors.append("💥 STRUCTURE BROKEN: Above descending ceiling - continuation likely")
+        result["potential_move"] = "BULLISH"
+        alerts.append("🚨 BREAKOUT IN PROGRESS: Look for continuation to targets")
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # CALCULATE FINAL SCORE AND CONVICTION
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    result["explosive_score"] = min(100, score)
+    result["factors"] = factors
+    result["alerts"] = alerts
+    
+    if score >= 70:
+        result["conviction"] = "EXTREME"
+        result["direction_bias"] = "PUTS" if result["potential_move"] == "BEARISH" else "CALLS"
+    elif score >= 50:
+        result["conviction"] = "HIGH"
+        result["direction_bias"] = "PUTS" if result["potential_move"] == "BEARISH" else "CALLS"
+    elif score >= 30:
+        result["conviction"] = "MODERATE"
+    else:
+        result["conviction"] = "LOW"
+    
+    return result
+
+
 def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reason,
                             retail_bias, ema_bias, vix_position, vix, 
-                            session_tests, gap_analysis, prior_close_analysis, vix_structure):
+                            session_tests, gap_analysis, prior_close_analysis, vix_structure,
+                            prior_targets=None, current_time=None):
     """
     OPTION C: Dual Channel Decision Engine
     
@@ -1309,9 +1627,15 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
     1. All 4 levels (asc_floor, asc_ceiling, desc_ceiling, desc_floor)
     2. Dominant channel detection with reasoning
     3. PRIMARY trade at dominant level (higher probability)
-    4. SECONDARY trade at other level (backup/hedge)
-    5. Structure break alerts
+    4. ALTERNATE trade if structure breaks at open
+    5. Structure break alerts (only after channel locks at 5:30 AM CT)
     6. Confluence-based confidence scoring
+    
+    Channel Building Timeline:
+    - 5:00 PM - 5:30 AM CT: Channel BUILDING (Sydney + Tokyo + London)
+    - 5:30 AM CT: Channel LOCKED
+    - 5:30 AM - 8:30 AM CT: Pre-RTH testing
+    - 8:30 AM CT: RTH Open - final assessment
     """
     
     if current_spx is None or dual_levels is None:
@@ -1321,11 +1645,31 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
             "dual_levels": None,
             "primary": None,
             "secondary": None,
+            "alternate": None,
             "structure_alerts": [],
             "calls_factors": [],
             "puts_factors": [],
-            "position_summary": "No data available"
+            "position_summary": "No data available",
+            "channel_status": "UNKNOWN"
         }
+    
+    # Determine channel status based on time
+    channel_locked = True  # Default to locked
+    channel_status = "LOCKED"
+    
+    if current_time:
+        ct_hour = current_time.hour
+        ct_minute = current_time.minute
+        ct_decimal = ct_hour + ct_minute / 60.0
+        
+        # Channel builds from 5 PM (17:00) to 5:30 AM (5:30)
+        # Before 5:30 AM = still building
+        if ct_decimal < 5.5:  # Before 5:30 AM
+            channel_locked = False
+            channel_status = "BUILDING"
+        elif ct_decimal >= 17.0:  # After 5 PM = new session building
+            channel_locked = False
+            channel_status = "BUILDING"
     
     # Extract levels
     asc_floor = dual_levels["asc_floor"]
@@ -1437,21 +1781,30 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
             }
         }
     
-    # Structure alerts
+    # Structure alerts - ONLY show "broken" if channel is locked (after 5:30 AM CT)
     structure_alerts = []
-    if channel_type == ChannelType.ASCENDING and below_asc_floor:
-        structure_alerts.append(f"⚠️ STRUCTURE BROKEN: Price below ascending floor ({asc_floor:.2f})")
-    if channel_type == ChannelType.DESCENDING and above_desc_ceiling:
-        structure_alerts.append(f"⚠️ STRUCTURE BROKEN: Price above descending ceiling ({desc_ceiling:.2f})")
+    if channel_locked:
+        if channel_type == ChannelType.ASCENDING and below_asc_floor:
+            structure_alerts.append(f"⚠️ STRUCTURE BROKEN: Price below ascending floor ({asc_floor:.2f})")
+        if channel_type == ChannelType.DESCENDING and above_desc_ceiling:
+            structure_alerts.append(f"⚠️ STRUCTURE BROKEN: Price above descending ceiling ({desc_ceiling:.2f})")
+    else:
+        # Channel still building - show informational message
+        if channel_type == ChannelType.ASCENDING and below_asc_floor:
+            structure_alerts.append(f"📊 CHANNEL BUILDING: Price currently below developing floor ({asc_floor:.2f})")
+        if channel_type == ChannelType.DESCENDING and above_desc_ceiling:
+            structure_alerts.append(f"📊 CHANNEL BUILDING: Price currently above developing ceiling ({desc_ceiling:.2f})")
     
     # Initialize result
     result = {
         "no_trade": False, "no_trade_reason": None,
         "channel_type": channel_type, "channel_reason": channel_reason,
+        "channel_status": channel_status,
+        "channel_locked": channel_locked,
         "dual_levels": dual_levels,
         "calls_factors": calls_factors, "puts_factors": puts_factors,
         "structure_alerts": structure_alerts,
-        "primary": None, "secondary": None, "position_summary": ""
+        "primary": None, "secondary": None, "alternate": None, "position_summary": ""
     }
     
     # No trade conditions
@@ -1466,43 +1819,83 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
     
     # ASCENDING DOMINANT
     if channel_type == ChannelType.ASCENDING:
-        if below_asc_floor:
-            # Structure broken
-            result["primary"] = make_trade("Breakdown Continuation", "PUTS", asc_floor, asc_floor + 10,
+        # Get price target for break scenario
+        desc_target = None
+        price_target_text = ""
+        if prior_targets and prior_targets.get("available"):
+            desc_target = prior_targets.get("primary_low_open_descending")
+            if desc_target:
+                price_target_text = f" • Target: {desc_target:.2f} (desc from prior low)"
+        
+        if channel_locked and below_asc_floor:
+            # AFTER 5:30 AM and structure is broken - flip the trades
+            result["primary"] = make_trade("Ascending Floor Rejection", "PUTS", asc_floor, asc_floor + 10,
                 f"Sell rallies to broken floor {asc_floor:.2f}",
-                f"Structure broken • {len(puts_factors)} factors", calc_conf("PUTS", True), True)
-            result["secondary"] = make_trade("Floor Reclaim", "CALLS", asc_floor, asc_floor - 10,
+                f"Structure broken{price_target_text} • {len(puts_factors)} factors", calc_conf("PUTS", True), True)
+            result["alternate"] = make_trade("Floor Reclaim", "CALLS", asc_floor, asc_floor - 10,
                 f"ONLY if price reclaims {asc_floor:.2f}",
-                "Recovery scenario", calc_conf("CALLS", True, True), False)
+                "Recovery scenario - watch for failed breakdown", calc_conf("CALLS", True, True), False)
             result["position_summary"] = f"⚠️ BELOW ascending floor ({asc_floor:.2f}) - BEARISH bias"
+            if desc_target:
+                result["price_target"] = desc_target
+                result["price_target_desc"] = "Descending line from prior RTH low"
         else:
+            # Structure intact OR channel still building - show both scenarios
             result["primary"] = make_trade("Ascending Floor Bounce", "CALLS", asc_floor, asc_floor - 10,
-                f"Wait for price at {asc_floor:.2f}",
+                f"Buy at floor {asc_floor:.2f}" if channel_locked else f"Buy at developing floor {asc_floor:.2f}",
                 f"KEY: Ascending floor • {len(calls_factors)} factors", calc_conf("CALLS", near_asc_floor), True)
+            result["alternate"] = make_trade("Floor Break → Rejection", "PUTS", asc_floor, asc_floor + 10,
+                f"IF floor {asc_floor:.2f} breaks at open",
+                f"Breakdown scenario{price_target_text} • {len(puts_factors)} factors", calc_conf("PUTS", False), False)
+            # Also keep secondary for ceiling
             result["secondary"] = make_trade("Desc Ceiling Rejection", "PUTS", desc_ceiling, desc_ceiling + 10,
                 f"If price reaches {desc_ceiling:.2f}",
                 f"Secondary level • {len(puts_factors)} factors", calc_conf("PUTS", near_desc_ceiling), False)
-            result["position_summary"] = f"{'✅ AT' if near_asc_floor else '📍 Wait for'} ascending floor ({asc_floor:.2f})"
+            
+            if channel_locked:
+                result["position_summary"] = f"{'✅ AT' if near_asc_floor else '📍 Wait for'} ascending floor ({asc_floor:.2f})"
+            else:
+                result["position_summary"] = f"🔄 CHANNEL BUILDING - Floor developing at {asc_floor:.2f}"
     
     # DESCENDING DOMINANT
     elif channel_type == ChannelType.DESCENDING:
-        if above_desc_ceiling:
-            # Structure broken
-            result["primary"] = make_trade("Breakout Continuation", "CALLS", desc_ceiling, desc_ceiling - 10,
+        # Get price target for break scenario
+        asc_target = None
+        price_target_text = ""
+        if prior_targets and prior_targets.get("available"):
+            asc_target = prior_targets.get("primary_high_wick_ascending")
+            if asc_target:
+                price_target_text = f" • Target: {asc_target:.2f} (asc from prior high)"
+        
+        if channel_locked and above_desc_ceiling:
+            # AFTER 5:30 AM and structure is broken - flip the trades
+            result["primary"] = make_trade("Descending Ceiling Bounce", "CALLS", desc_ceiling, desc_ceiling - 10,
                 f"Buy dips to broken ceiling {desc_ceiling:.2f}",
-                f"Structure broken • {len(calls_factors)} factors", calc_conf("CALLS", True), True)
-            result["secondary"] = make_trade("Failed Breakout", "PUTS", desc_ceiling, desc_ceiling + 10,
+                f"Structure broken{price_target_text} • {len(calls_factors)} factors", calc_conf("CALLS", True), True)
+            result["alternate"] = make_trade("Failed Breakout", "PUTS", desc_ceiling, desc_ceiling + 10,
                 f"ONLY if price fails below {desc_ceiling:.2f}",
-                "Rejection scenario", calc_conf("PUTS", True, True), False)
+                "Rejection scenario - watch for failed breakout", calc_conf("PUTS", True, True), False)
             result["position_summary"] = f"🚀 ABOVE descending ceiling ({desc_ceiling:.2f}) - BULLISH bias"
+            if asc_target:
+                result["price_target"] = asc_target
+                result["price_target_desc"] = "Ascending line from prior RTH high"
         else:
+            # Structure intact OR channel still building - show both scenarios
             result["primary"] = make_trade("Desc Ceiling Rejection", "PUTS", desc_ceiling, desc_ceiling + 10,
-                f"Wait for price at {desc_ceiling:.2f}",
+                f"Sell at ceiling {desc_ceiling:.2f}" if channel_locked else f"Sell at developing ceiling {desc_ceiling:.2f}",
                 f"KEY: Descending ceiling • {len(puts_factors)} factors", calc_conf("PUTS", near_desc_ceiling), True)
+            result["alternate"] = make_trade("Ceiling Break → Bounce", "CALLS", desc_ceiling, desc_ceiling - 10,
+                f"IF ceiling {desc_ceiling:.2f} breaks at open",
+                f"Breakout scenario{price_target_text} • {len(calls_factors)} factors", calc_conf("CALLS", False), False)
+            # Also keep secondary for floor
             result["secondary"] = make_trade("Ascending Floor Bounce", "CALLS", asc_floor, asc_floor - 10,
                 f"If price reaches {asc_floor:.2f}",
                 f"Secondary level • {len(calls_factors)} factors", calc_conf("CALLS", near_asc_floor), False)
-            result["position_summary"] = f"{'✅ AT' if near_desc_ceiling else '📍 Wait for'} descending ceiling ({desc_ceiling:.2f})"
+            
+            if channel_locked:
+                result["position_summary"] = f"{'✅ AT' if near_desc_ceiling else '📍 Wait for'} descending ceiling ({desc_ceiling:.2f})"
+            else:
+                result["position_summary"] = f"🔄 CHANNEL BUILDING - Ceiling developing at {desc_ceiling:.2f}"
     
     # MIXED
     elif channel_type == ChannelType.MIXED:
@@ -1532,7 +1925,7 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
 # ═══════════════════════════════════════════════════════════════════════════════
 CSS_STYLES = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Orbitron:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PREMIUM TRADING TERMINAL - ELITE DESIGN SYSTEM
@@ -1608,10 +2001,10 @@ CSS_STYLES = """
     /* ═══════════════════════════════════════════════════════════════════════════
        STANDARDIZED TYPOGRAPHY SCALE
        ═══════════════════════════════════════════════════════════════════════════ */
-    /* Font Families - 3 Purpose-Driven Fonts */
-    --font-display: 'Orbitron', 'Plus Jakarta Sans', sans-serif;  /* Headlines, big numbers */
-    --font-body: 'Plus Jakarta Sans', 'Inter', sans-serif;        /* Body text, cards */
-    --font-mono: 'JetBrains Mono', monospace;                     /* Labels, technical data */
+    /* Font Families - Cohesive Futuristic Terminal Aesthetic */
+    --font-display: 'Orbitron', sans-serif;           /* Prices, big numbers, headlines */
+    --font-body: 'Rajdhani', sans-serif;              /* Body text, descriptions, UI elements */
+    --font-mono: 'Share Tech Mono', 'IBM Plex Mono', monospace;  /* Labels, codes, technical data */
     
     /* Font Sizes - Consistent Scale */
     --text-3xl: 2.5rem;    /* Hero brand name */
@@ -1634,7 +2027,7 @@ CSS_STYLES = """
         radial-gradient(ellipse 100% 60% at 100% 20%, rgba(0, 187, 249, 0.06) 0%, transparent 40%),
         radial-gradient(ellipse 80% 50% at 0% 80%, rgba(155, 93, 229, 0.05) 0%, transparent 40%),
         radial-gradient(ellipse 60% 40% at 80% 100%, rgba(241, 91, 181, 0.04) 0%, transparent 40%);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Rajdhani', sans-serif;
     color: var(--text-primary);
     min-height: 100vh;
 }
@@ -1716,37 +2109,49 @@ CSS_STYLES = """
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   HERO BANNER - CINEMATIC HEADER
+   HERO BANNER - EPIC CINEMATIC HEADER WITH LEGENDARY LOGO
    ═══════════════════════════════════════════════════════════════════════════ */
 .hero-banner {
     position: relative;
-    padding: 40px 40px;
+    padding: 50px 40px 40px 40px;
     margin: -1rem -1rem 30px -1rem;
-    background: linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-terminal) 100%);
-    border-bottom: 2px solid transparent;
+    background: linear-gradient(180deg, rgba(5, 10, 20, 1) 0%, var(--bg-terminal) 100%);
+    border-bottom: 3px solid transparent;
     border-image: var(--gradient-premium) 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 30px;
+    gap: 24px;
     overflow: hidden;
+    min-height: 380px;
 }
 
+/* Starfield Background */
 .hero-banner::before {
     content: '';
     position: absolute;
     inset: 0;
     background: 
-        radial-gradient(ellipse 80% 120% at 20% 50%, rgba(0, 245, 212, 0.12) 0%, transparent 50%),
-        radial-gradient(ellipse 80% 120% at 80% 50%, rgba(155, 93, 229, 0.1) 0%, transparent 50%),
-        radial-gradient(ellipse 100% 100% at 50% 0%, rgba(0, 187, 249, 0.08) 0%, transparent 60%);
-    animation: heroAurora 10s ease-in-out infinite;
+        radial-gradient(2px 2px at 20% 30%, rgba(255,255,255,0.8) 0%, transparent 100%),
+        radial-gradient(2px 2px at 40% 70%, rgba(255,255,255,0.6) 0%, transparent 100%),
+        radial-gradient(1px 1px at 60% 20%, rgba(255,255,255,0.7) 0%, transparent 100%),
+        radial-gradient(2px 2px at 80% 50%, rgba(255,255,255,0.5) 0%, transparent 100%),
+        radial-gradient(1px 1px at 10% 80%, rgba(255,255,255,0.6) 0%, transparent 100%),
+        radial-gradient(1px 1px at 90% 10%, rgba(255,255,255,0.7) 0%, transparent 100%),
+        radial-gradient(2px 2px at 30% 90%, rgba(255,255,255,0.5) 0%, transparent 100%),
+        radial-gradient(1px 1px at 70% 40%, rgba(255,255,255,0.6) 0%, transparent 100%),
+        radial-gradient(1px 1px at 50% 60%, rgba(0, 245, 212, 0.8) 0%, transparent 100%),
+        radial-gradient(1px 1px at 85% 75%, rgba(155, 93, 229, 0.8) 0%, transparent 100%),
+        radial-gradient(ellipse 100% 100% at 50% 0%, rgba(0, 245, 212, 0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 80% 80% at 20% 100%, rgba(155, 93, 229, 0.1) 0%, transparent 50%),
+        radial-gradient(ellipse 80% 80% at 80% 100%, rgba(0, 187, 249, 0.08) 0%, transparent 50%);
+    animation: starsShimmer 8s ease-in-out infinite;
 }
 
-@keyframes heroAurora {
-    0%, 100% { opacity: 0.6; transform: scale(1) translateX(0); }
-    33% { opacity: 1; transform: scale(1.05) translateX(2%); }
-    66% { opacity: 0.8; transform: scale(1.02) translateX(-2%); }
+@keyframes starsShimmer {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
 }
 
 .hero-banner::after {
@@ -1755,209 +2160,667 @@ CSS_STYLES = """
     bottom: 0;
     left: 0;
     right: 0;
-    height: 2px;
-    background: var(--gradient-premium);
-    box-shadow: 0 0 20px rgba(0, 245, 212, 0.5), 0 0 40px rgba(155, 93, 229, 0.3);
+    height: 4px;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        var(--accent-cyan) 20%, 
+        var(--accent-purple) 40%,
+        var(--accent-gold) 60%,
+        var(--accent-purple) 80%,
+        var(--accent-cyan) 100%);
+    box-shadow: 0 0 30px rgba(0, 245, 212, 0.6), 0 0 60px rgba(155, 93, 229, 0.4);
+    animation: bottomBarFlow 4s linear infinite;
 }
 
-/* Animated Holographic Logo */
+@keyframes bottomBarFlow {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE LEGENDARY 3-PILLAR HOLOGRAPHIC PYRAMID
+   ═══════════════════════════════════════════════════════════════════════════ */
 .prophet-logo {
     position: relative;
-    width: 90px;
-    height: 90px;
+    width: 240px;
+    height: 220px;
     flex-shrink: 0;
     z-index: 2;
+    perspective: 1000px;
 }
 
-.logo-pyramid {
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 1: OUTER PARTICLE FIELD - Cosmic dust swirling
+   ═══════════════════════════════════════════════════════════════════════════ */
+.particle-field {
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    top: -40px;
+    left: -30px;
+    border-radius: 50%;
+    background: 
+        radial-gradient(circle at 30% 30%, rgba(0, 245, 212, 0.4) 0%, transparent 3%),
+        radial-gradient(circle at 70% 20%, rgba(155, 93, 229, 0.5) 0%, transparent 2%),
+        radial-gradient(circle at 20% 70%, rgba(254, 228, 64, 0.4) 0%, transparent 2%),
+        radial-gradient(circle at 80% 80%, rgba(0, 187, 249, 0.5) 0%, transparent 3%),
+        radial-gradient(circle at 50% 50%, rgba(0, 245, 212, 0.3) 0%, transparent 2%),
+        radial-gradient(circle at 40% 80%, rgba(155, 93, 229, 0.4) 0%, transparent 2%),
+        radial-gradient(circle at 60% 30%, rgba(254, 228, 64, 0.3) 0%, transparent 2%),
+        radial-gradient(circle at 10% 50%, rgba(0, 245, 212, 0.5) 0%, transparent 2%),
+        radial-gradient(circle at 90% 50%, rgba(155, 93, 229, 0.4) 0%, transparent 2%);
+    animation: particleSwirl 20s linear infinite;
+    opacity: 0.8;
+}
+
+@keyframes particleSwirl {
+    0% { transform: rotate(0deg) scale(1); }
+    50% { transform: rotate(180deg) scale(1.1); }
+    100% { transform: rotate(360deg) scale(1); }
+}
+
+.particle-field-inner {
+    position: absolute;
+    width: 200px;
+    height: 200px;
+    top: 10px;
+    left: 20px;
+    border-radius: 50%;
+    background: 
+        radial-gradient(circle at 25% 25%, rgba(0, 245, 212, 0.6) 0%, transparent 4%),
+        radial-gradient(circle at 75% 25%, rgba(155, 93, 229, 0.6) 0%, transparent 4%),
+        radial-gradient(circle at 50% 75%, rgba(254, 228, 64, 0.6) 0%, transparent 4%),
+        radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.8) 0%, transparent 3%);
+    animation: particleSwirl 12s linear infinite reverse;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 2: TRIPLE ORBITAL RINGS - The 3 Systems in Motion
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* Ring 1: Prior RTH Cones (Cyan) */
+.orbital-ring-1 {
+    position: absolute;
+    width: 220px;
+    height: 220px;
+    top: 0;
+    left: 10px;
+    border: 2px solid transparent;
+    border-top-color: var(--accent-cyan);
+    border-radius: 50%;
+    animation: orbit1 8s linear infinite;
+    box-shadow: 0 0 20px var(--accent-cyan), inset 0 0 20px rgba(0, 245, 212, 0.1);
+}
+
+.orbital-ring-1::before {
+    content: '◆';
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 16px;
+    color: var(--accent-cyan);
+    text-shadow: 0 0 20px var(--accent-cyan), 0 0 40px var(--accent-cyan);
+    animation: orbitNodePulse 2s ease-in-out infinite;
+}
+
+@keyframes orbit1 {
+    0% { transform: rotateX(70deg) rotateZ(0deg); }
+    100% { transform: rotateX(70deg) rotateZ(360deg); }
+}
+
+/* Ring 2: Overnight Structure (Purple) */
+.orbital-ring-2 {
+    position: absolute;
+    width: 200px;
+    height: 200px;
+    top: 10px;
+    left: 20px;
+    border: 2px solid transparent;
+    border-top-color: var(--accent-purple);
+    border-radius: 50%;
+    animation: orbit2 10s linear infinite reverse;
+    box-shadow: 0 0 20px var(--accent-purple), inset 0 0 20px rgba(155, 93, 229, 0.1);
+}
+
+.orbital-ring-2::before {
+    content: '◆';
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 16px;
+    color: var(--accent-purple);
+    text-shadow: 0 0 20px var(--accent-purple), 0 0 40px var(--accent-purple);
+    animation: orbitNodePulse 2s ease-in-out infinite 0.5s;
+}
+
+@keyframes orbit2 {
+    0% { transform: rotateX(70deg) rotateY(60deg) rotateZ(0deg); }
+    100% { transform: rotateX(70deg) rotateY(60deg) rotateZ(-360deg); }
+}
+
+/* Ring 3: VIX (Gold) */
+.orbital-ring-3 {
+    position: absolute;
+    width: 180px;
+    height: 180px;
+    top: 20px;
+    left: 30px;
+    border: 2px solid transparent;
+    border-top-color: var(--accent-gold);
+    border-radius: 50%;
+    animation: orbit3 6s linear infinite;
+    box-shadow: 0 0 20px var(--accent-gold), inset 0 0 20px rgba(254, 228, 64, 0.1);
+}
+
+.orbital-ring-3::before {
+    content: '◆';
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 16px;
+    color: var(--accent-gold);
+    text-shadow: 0 0 20px var(--accent-gold), 0 0 40px var(--accent-gold);
+    animation: orbitNodePulse 2s ease-in-out infinite 1s;
+}
+
+@keyframes orbit3 {
+    0% { transform: rotateX(70deg) rotateY(-60deg) rotateZ(0deg); }
+    100% { transform: rotateX(70deg) rotateY(-60deg) rotateZ(360deg); }
+}
+
+@keyframes orbitNodePulse {
+    0%, 100% { opacity: 1; transform: translateX(-50%) scale(1); }
+    50% { opacity: 0.6; transform: translateX(-50%) scale(1.3); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 3: THE HOLOGRAPHIC PYRAMID - Main Structure
+   ═══════════════════════════════════════════════════════════════════════════ */
+.pyramid-container {
     position: absolute;
     width: 100%;
     height: 100%;
-    animation: pyramidFloat 4s ease-in-out infinite;
+    top: 0;
+    left: 0;
+    animation: pyramidFloat 6s ease-in-out infinite;
+    transform-style: preserve-3d;
 }
 
 @keyframes pyramidFloat {
-    0%, 100% { transform: translateY(0) scale(1) rotateY(0deg); }
-    50% { transform: translateY(-6px) scale(1.05) rotateY(5deg); }
+    0%, 100% { transform: translateY(0) rotateY(0deg); }
+    25% { transform: translateY(-8px) rotateY(3deg); }
+    50% { transform: translateY(-12px) rotateY(0deg); }
+    75% { transform: translateY(-8px) rotateY(-3deg); }
 }
 
-.pyramid-body {
+/* Pyramid Base Platform - Glowing */
+.pyramid-base {
     position: absolute;
-    top: 4px;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 160px;
+    height: 20px;
+    background: linear-gradient(180deg, rgba(0, 245, 212, 0.3) 0%, transparent 100%);
+    border-radius: 50%;
+    filter: blur(8px);
+    animation: basePulse 3s ease-in-out infinite;
+}
+
+@keyframes basePulse {
+    0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+    50% { opacity: 0.8; transform: translateX(-50%) scale(1.1); }
+}
+
+/* Main Pyramid Body - Outer Layer */
+.pyramid-main {
+    position: absolute;
+    top: 35px;
     left: 50%;
     transform: translateX(-50%);
     width: 0;
     height: 0;
-    border-left: 42px solid transparent;
-    border-right: 42px solid transparent;
-    border-bottom: 75px solid rgba(0, 245, 212, 0.15);
-    filter: drop-shadow(0 0 25px rgba(0, 245, 212, 0.4));
-    animation: pyramidGlow 2s ease-in-out infinite;
+    border-left: 80px solid transparent;
+    border-right: 80px solid transparent;
+    border-bottom: 140px solid rgba(0, 245, 212, 0.08);
+    filter: drop-shadow(0 0 40px rgba(0, 245, 212, 0.4));
+    animation: pyramidGlow 4s ease-in-out infinite;
 }
 
 @keyframes pyramidGlow {
-    0%, 100% { filter: drop-shadow(0 0 20px rgba(0, 245, 212, 0.3)); border-bottom-color: rgba(0, 245, 212, 0.15); }
-    50% { filter: drop-shadow(0 0 40px rgba(0, 245, 212, 0.6)); border-bottom-color: rgba(0, 245, 212, 0.25); }
+    0%, 100% { 
+        filter: drop-shadow(0 0 30px rgba(0, 245, 212, 0.3)); 
+        border-bottom-color: rgba(0, 245, 212, 0.08); 
+    }
+    50% { 
+        filter: drop-shadow(0 0 60px rgba(0, 245, 212, 0.6)); 
+        border-bottom-color: rgba(0, 245, 212, 0.15); 
+    }
 }
 
-.pyramid-inner {
+/* Pyramid Layer 2 - Purple */
+.pyramid-layer-2 {
     position: absolute;
-    top: 20px;
+    top: 55px;
     left: 50%;
     transform: translateX(-50%);
     width: 0;
     height: 0;
-    border-left: 26px solid transparent;
-    border-right: 26px solid transparent;
-    border-bottom: 46px solid rgba(155, 93, 229, 0.2);
-    animation: innerPulse 2s ease-in-out infinite 0.5s;
+    border-left: 60px solid transparent;
+    border-right: 60px solid transparent;
+    border-bottom: 105px solid rgba(155, 93, 229, 0.1);
+    animation: layer2Pulse 4s ease-in-out infinite 0.5s;
 }
 
-@keyframes innerPulse {
+@keyframes layer2Pulse {
+    0%, 100% { opacity: 0.6; border-bottom-color: rgba(155, 93, 229, 0.1); }
+    50% { opacity: 1; border-bottom-color: rgba(155, 93, 229, 0.2); }
+}
+
+/* Pyramid Layer 3 - Gold Core */
+.pyramid-layer-3 {
+    position: absolute;
+    top: 75px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 40px solid transparent;
+    border-right: 40px solid transparent;
+    border-bottom: 70px solid rgba(254, 228, 64, 0.12);
+    animation: layer3Pulse 4s ease-in-out infinite 1s;
+}
+
+@keyframes layer3Pulse {
+    0%, 100% { opacity: 0.5; border-bottom-color: rgba(254, 228, 64, 0.12); }
+    50% { opacity: 1; border-bottom-color: rgba(254, 228, 64, 0.25); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 4: THE 3 PILLAR VERTICES - Energy Nodes
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* Top Vertex - The Apex (Convergence Point) */
+.vertex-top {
+    position: absolute;
+    top: 25px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 24px;
+    background: radial-gradient(circle, #fff 0%, var(--accent-cyan) 40%, transparent 70%);
+    border-radius: 50%;
+    box-shadow: 
+        0 0 30px var(--accent-cyan),
+        0 0 60px var(--accent-cyan),
+        0 0 90px rgba(0, 245, 212, 0.5);
+    animation: apexPulse 2s ease-in-out infinite;
+}
+
+@keyframes apexPulse {
+    0%, 100% { 
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 0 30px var(--accent-cyan), 0 0 60px var(--accent-cyan);
+    }
+    50% { 
+        transform: translateX(-50%) scale(1.3);
+        box-shadow: 0 0 50px var(--accent-cyan), 0 0 100px var(--accent-cyan), 0 0 150px rgba(0, 245, 212, 0.3);
+    }
+}
+
+.vertex-top::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 8px;
+    height: 8px;
+    background: #fff;
+    border-radius: 50%;
+    animation: coreFlicker 0.5s ease-in-out infinite;
+}
+
+@keyframes coreFlicker {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Left Base Vertex - Prior RTH (Cyan) */
+.vertex-left {
+    position: absolute;
+    bottom: 32px;
+    left: 38px;
+    width: 18px;
+    height: 18px;
+    background: radial-gradient(circle, #fff 0%, var(--accent-cyan) 50%, transparent 70%);
+    border-radius: 50%;
+    box-shadow: 0 0 25px var(--accent-cyan), 0 0 50px rgba(0, 245, 212, 0.4);
+    animation: vertexPulse 3s ease-in-out infinite;
+}
+
+/* Right Base Vertex - Overnight (Purple) */
+.vertex-right {
+    position: absolute;
+    bottom: 32px;
+    right: 38px;
+    width: 18px;
+    height: 18px;
+    background: radial-gradient(circle, #fff 0%, var(--accent-purple) 50%, transparent 70%);
+    border-radius: 50%;
+    box-shadow: 0 0 25px var(--accent-purple), 0 0 50px rgba(155, 93, 229, 0.4);
+    animation: vertexPulse 3s ease-in-out infinite 1s;
+}
+
+/* Center Base Vertex - VIX (Gold) */
+.vertex-center {
+    position: absolute;
+    bottom: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 18px;
+    height: 18px;
+    background: radial-gradient(circle, #fff 0%, var(--accent-gold) 50%, transparent 70%);
+    border-radius: 50%;
+    box-shadow: 0 0 25px var(--accent-gold), 0 0 50px rgba(254, 228, 64, 0.4);
+    animation: vertexPulse 3s ease-in-out infinite 2s;
+}
+
+@keyframes vertexPulse {
+    0%, 100% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.4); opacity: 1; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 5: ENERGY BEAMS - Connecting the Vertices
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* Left Edge Beam (Top to Left) */
+.energy-beam-left {
+    position: absolute;
+    top: 35px;
+    left: 45px;
+    width: 3px;
+    height: 130px;
+    background: linear-gradient(180deg, var(--accent-cyan) 0%, transparent 100%);
+    transform: rotate(-30deg);
+    transform-origin: top center;
+    box-shadow: 0 0 15px var(--accent-cyan);
+    animation: beamFlow 2s ease-in-out infinite;
+}
+
+.energy-beam-left::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -2px;
+    width: 7px;
+    height: 30px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.9) 0%, var(--accent-cyan) 50%, transparent 100%);
+    border-radius: 3px;
+    animation: beamParticle 2s ease-in-out infinite;
+}
+
+@keyframes beamFlow {
     0%, 100% { opacity: 0.6; }
     50% { opacity: 1; }
 }
 
-.eye-container {
+@keyframes beamParticle {
+    0% { top: 0; opacity: 1; }
+    100% { top: 120px; opacity: 0; }
+}
+
+/* Right Edge Beam (Top to Right) */
+.energy-beam-right {
     position: absolute;
-    top: 28px;
+    top: 35px;
+    right: 45px;
+    width: 3px;
+    height: 130px;
+    background: linear-gradient(180deg, var(--accent-purple) 0%, transparent 100%);
+    transform: rotate(30deg);
+    transform-origin: top center;
+    box-shadow: 0 0 15px var(--accent-purple);
+    animation: beamFlow 2s ease-in-out infinite 0.3s;
+}
+
+.energy-beam-right::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -2px;
+    width: 7px;
+    height: 30px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.9) 0%, var(--accent-purple) 50%, transparent 100%);
+    border-radius: 3px;
+    animation: beamParticle 2s ease-in-out infinite 0.3s;
+}
+
+/* Base Beam (Left to Right through Center) */
+.energy-beam-base {
+    position: absolute;
+    bottom: 38px;
     left: 50%;
     transform: translateX(-50%);
-    width: 32px;
-    height: 20px;
+    width: 140px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-gold) 50%, var(--accent-purple) 100%);
+    box-shadow: 0 0 15px rgba(254, 228, 64, 0.5);
+    animation: baseBeamPulse 3s ease-in-out infinite;
 }
 
-.eye-rays {
+@keyframes baseBeamPulse {
+    0%, 100% { opacity: 0.5; width: 140px; }
+    50% { opacity: 1; width: 150px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 6: HOLOGRAPHIC SCAN LINES - Tech Effect
+   ═══════════════════════════════════════════════════════════════════════════ */
+.scan-line {
     position: absolute;
-    width: 60px;
-    height: 60px;
-    top: -20px;
-    left: -14px;
-    background: radial-gradient(circle, rgba(254, 228, 64, 0.3) 0%, transparent 60%);
-    animation: raysPulse 1.5s ease-in-out infinite;
+    top: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 160px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+    opacity: 0.6;
+    animation: scanMove 3s ease-in-out infinite;
 }
 
-@keyframes raysPulse {
-    0%, 100% { opacity: 0.4; transform: scale(0.9); }
-    50% { opacity: 1; transform: scale(1.2); }
+@keyframes scanMove {
+    0% { top: 30px; opacity: 0; }
+    10% { opacity: 0.8; }
+    90% { opacity: 0.8; }
+    100% { top: 170px; opacity: 0; }
 }
 
-.eye-outer {
+.scan-line-2 {
     position: absolute;
-    width: 32px;
-    height: 18px;
-    border: 2px solid var(--accent-gold);
-    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-    animation: eyeBlink 4s ease-in-out infinite;
-    box-shadow: 0 0 15px var(--accent-gold), 0 0 30px rgba(254, 228, 64, 0.3), inset 0 0 10px rgba(254, 228, 64, 0.3);
+    top: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 160px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-purple), transparent);
+    opacity: 0.6;
+    animation: scanMove 3s ease-in-out infinite 1.5s;
 }
 
-@keyframes eyeBlink {
-    0%, 45%, 55%, 100% { transform: scaleY(1); }
-    50% { transform: scaleY(0.1); }
-}
-
-.eye-iris {
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 7: DATA STREAMS - Flowing Numbers Effect
+   ═══════════════════════════════════════════════════════════════════════════ */
+.data-stream-left {
     position: absolute;
-    width: 14px;
-    height: 14px;
-    background: radial-gradient(circle, var(--accent-gold) 0%, #ff9500 60%, #ff6b00 100%);
-    border-radius: 50%;
-    top: 2px;
-    left: 9px;
-    box-shadow: 0 0 15px var(--accent-gold), 0 0 25px rgba(254, 228, 64, 0.5);
-    animation: irisGlow 2s ease-in-out infinite;
+    top: 50px;
+    left: 25px;
+    width: 20px;
+    height: 100px;
+    overflow: hidden;
+    opacity: 0.4;
 }
 
-@keyframes irisGlow {
-    0%, 100% { box-shadow: 0 0 10px var(--accent-gold); }
-    50% { box-shadow: 0 0 25px var(--accent-gold), 0 0 40px rgba(254, 228, 64, 0.6); }
-}
-
-.eye-pupil {
+.data-stream-left::before {
+    content: '0110 1001 0011 1100 0101 1010 0111 1000';
     position: absolute;
-    width: 6px;
-    height: 6px;
-    background: #000;
-    border-radius: 50%;
-    top: 4px;
-    left: 4px;
-    box-shadow: inset 0 0 3px rgba(254, 228, 64, 0.5);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8px;
+    color: var(--accent-cyan);
+    writing-mode: vertical-rl;
+    animation: dataFlow 4s linear infinite;
+    text-shadow: 0 0 10px var(--accent-cyan);
 }
 
+@keyframes dataFlow {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+}
+
+.data-stream-right {
+    position: absolute;
+    top: 50px;
+    right: 25px;
+    width: 20px;
+    height: 100px;
+    overflow: hidden;
+    opacity: 0.4;
+}
+
+.data-stream-right::before {
+    content: '1101 0010 1110 0001 1011 0100 1111 0000';
+    position: absolute;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8px;
+    color: var(--accent-purple);
+    writing-mode: vertical-rl;
+    animation: dataFlow 4s linear infinite 2s;
+    text-shadow: 0 0 10px var(--accent-purple);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 8: PILLAR LABELS - The 3 Systems
+   ═══════════════════════════════════════════════════════════════════════════ */
+.pillar-label-left {
+    position: absolute;
+    bottom: 0px;
+    left: 10px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 7px;
+    color: var(--accent-cyan);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.7;
+    text-shadow: 0 0 10px var(--accent-cyan);
+    animation: labelPulse 4s ease-in-out infinite;
+}
+
+.pillar-label-right {
+    position: absolute;
+    bottom: 0px;
+    right: 5px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 7px;
+    color: var(--accent-purple);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.7;
+    text-shadow: 0 0 10px var(--accent-purple);
+    animation: labelPulse 4s ease-in-out infinite 1s;
+}
+
+.pillar-label-center {
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 7px;
+    color: var(--accent-gold);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.7;
+    text-shadow: 0 0 10px var(--accent-gold);
+    animation: labelPulse 4s ease-in-out infinite 2s;
+}
+
+@keyframes labelPulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYER 9: AMBIENT GLOW - Overall Atmosphere
+   ═══════════════════════════════════════════════════════════════════════════ */
+.ambient-glow {
+    position: absolute;
+    width: 300px;
+    height: 250px;
+    top: -15px;
+    left: -30px;
+    background: radial-gradient(ellipse at center, 
+        rgba(0, 245, 212, 0.15) 0%, 
+        rgba(155, 93, 229, 0.1) 30%,
+        rgba(254, 228, 64, 0.05) 50%,
+        transparent 70%);
+    filter: blur(20px);
+    animation: ambientPulse 5s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes ambientPulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HERO CONTENT - EPIC TYPOGRAPHY
+   ═══════════════════════════════════════════════════════════════════════════ */
 .hero-content {
     position: relative;
     z-index: 2;
     text-align: center;
+    margin-top: 15px;
 }
 
 .brand-name {
-    font-family: var(--font-display);
-    font-size: var(--text-3xl);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 3.2rem;
     font-weight: 900;
-    letter-spacing: 8px;
-    background: var(--gradient-premium);
-    background-size: 200% 200%;
+    letter-spacing: 14px;
+    background: linear-gradient(135deg, 
+        var(--accent-cyan) 0%, 
+        #00d4ff 20%, 
+        #fff 40%,
+        var(--accent-purple) 60%, 
+        #f15bb5 80%, 
+        var(--accent-cyan) 100%);
+    background-size: 400% 400%;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin: 0;
     text-transform: uppercase;
-    animation: gradientFlow 4s ease infinite;
-    text-shadow: 0 0 40px rgba(0, 245, 212, 0.3);
+    animation: brandShimmer 8s ease-in-out infinite;
+    filter: drop-shadow(0 0 40px rgba(0, 245, 212, 0.4));
 }
 
-@keyframes gradientFlow {
+@keyframes brandShimmer {
     0%, 100% { background-position: 0% 50%; }
+    25% { background-position: 50% 0%; }
     50% { background-position: 100% 50%; }
+    75% { background-position: 50% 100%; }
 }
 
 .brand-tagline {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-    letter-spacing: 4px;
-    margin-top: 8px;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 1.1rem;
+    color: rgba(255, 255, 255, 0.6);
+    letter-spacing: 10px;
+    margin-top: 15px;
     text-transform: uppercase;
-    font-weight: 500;
-    opacity: 0.8;
-}
-    transform: translate(-50%, -50%);
-    background: radial-gradient(circle, rgba(0,229,199,0.25) 0%, transparent 60%);
-    animation: rayPulse 2.5s ease-in-out infinite;
-}
-
-@keyframes rayPulse {
-    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.4; }
-    50% { transform: translate(-50%, -50%) scale(1.4); opacity: 0.7; }
-}
-
-.hero-content {
-    position: relative;
-    z-index: 2;
-}
-
-.brand-name {
-    font-family: var(--font-body);
-    font-size: var(--text-2xl);
-    font-weight: 800;
-    letter-spacing: 4px;
-    background: var(--gradient-premium);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin: 0;
-    text-transform: uppercase;
-}
-
-.brand-tagline {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    letter-spacing: 3px;
-    margin-top: 4px;
-    text-transform: uppercase;
-    font-weight: 500;
+    font-weight: 600;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2024,14 +2887,14 @@ CSS_STYLES = """
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
-/* Indicator Cards - Equal height guaranteed */
+/* Indicator Cards - Equal height guaranteed with enhanced icons */
 .indicator-card {
-    background: var(--bg-card);
+    background: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-panel) 100%);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: 20px;
+    border-radius: var(--radius-xl);
+    padding: 24px;
     height: 100%;
-    min-height: 160px;
+    min-height: 180px;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
@@ -2045,43 +2908,68 @@ CSS_STYLES = """
     inset: 0;
     background: var(--gradient-card);
     pointer-events: none;
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-xl);
+}
+
+.indicator-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--gradient-premium);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }
 
 .indicator-card:hover {
     border-color: var(--border-accent);
-    box-shadow: var(--shadow-glow-cyan);
+    box-shadow: var(--shadow-glow-cyan), var(--shadow-md);
+    transform: translateY(-3px);
+}
+
+.indicator-card:hover::after {
+    opacity: 1;
 }
 
 .indicator-header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-    padding-bottom: 14px;
+    gap: 14px;
+    margin-bottom: 18px;
+    padding-bottom: 16px;
     border-bottom: 1px solid var(--border-subtle);
     position: relative;
     z-index: 1;
 }
 
 .indicator-icon {
-    width: 36px;
-    height: 36px;
+    width: 56px;
+    height: 56px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-md);
-    font-size: var(--text-md);
+    background: linear-gradient(135deg, rgba(0, 245, 212, 0.15) 0%, rgba(0, 187, 249, 0.08) 100%);
+    border: 2px solid var(--accent-cyan);
+    border-radius: var(--radius-lg);
+    font-size: 2rem;
+    box-shadow: 0 0 25px rgba(0, 245, 212, 0.3);
+    animation: indicatorIconPulse 3s ease-in-out infinite;
+}
+
+@keyframes indicatorIconPulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(0, 245, 212, 0.25); transform: scale(1); }
+    50% { box-shadow: 0 0 35px rgba(0, 245, 212, 0.5); transform: scale(1.05); }
 }
 
 .indicator-title {
-    font-family: var(--font-body);
-    font-size: var(--text-sm);
+    font-family: var(--font-display);
+    font-size: var(--text-md);
     font-weight: 700;
     color: var(--text-bright);
-    letter-spacing: 0.3px;
+    letter-spacing: 1px;
 }
 
 .indicator-row {
@@ -2103,8 +2991,9 @@ CSS_STYLES = """
 .indicator-value {
     color: var(--text-bright);
     font-weight: 700;
-    font-family: var(--font-mono);
+    font-family: var(--font-display);
     font-size: var(--text-sm);
+    letter-spacing: 0.5px;
 }
 
 .indicator-status {
@@ -2138,56 +3027,155 @@ CSS_STYLES = """
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SECTION HEADERS - Premium Dividers
+   SECTION HEADERS - Premium Dividers with Large Icons
    ═══════════════════════════════════════════════════════════════════════════ */
 .section-header {
     display: flex;
+    flex-direction: column;
     align-items: center;
     gap: 16px;
-    margin: 44px 0 24px 0;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border-subtle);
+    margin: 56px 0 32px 0;
+    padding: 32px 0;
     position: relative;
+    text-align: center;
 }
 
 .section-header::before {
     content: '';
     position: absolute;
-    bottom: -1px;
-    left: 0;
-    width: 120px;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
     height: 3px;
     background: var(--gradient-premium);
-    box-shadow: 0 0 15px rgba(0, 245, 212, 0.4);
+    box-shadow: 0 0 20px rgba(0, 245, 212, 0.5);
     border-radius: 2px;
 }
 
+.section-header::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+}
+
 .section-icon {
-    width: 46px;
-    height: 46px;
+    width: 80px;
+    height: 80px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
-    border: 1px solid var(--border-accent);
-    border-radius: var(--radius-md);
-    font-size: var(--text-lg);
-    box-shadow: var(--shadow-sm), 0 0 15px rgba(0, 245, 212, 0.15);
+    background: linear-gradient(145deg, rgba(0, 245, 212, 0.12) 0%, rgba(0, 187, 249, 0.08) 50%, rgba(155, 93, 229, 0.06) 100%);
+    border: 2px solid transparent;
+    border-image: var(--gradient-premium) 1;
+    border-radius: 20px;
+    font-size: 2.5rem;
+    box-shadow: 
+        0 0 40px rgba(0, 245, 212, 0.25),
+        0 0 80px rgba(0, 245, 212, 0.1),
+        inset 0 0 30px rgba(0, 245, 212, 0.08);
     color: var(--accent-cyan);
+    text-shadow: 0 0 20px var(--accent-cyan);
+    animation: iconFloat 4s ease-in-out infinite;
+    position: relative;
+}
+
+.section-icon::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 24px;
+    background: var(--gradient-premium);
+    opacity: 0.3;
+    filter: blur(8px);
+    z-index: -1;
+    animation: iconGlow 3s ease-in-out infinite;
+}
+
+@keyframes iconFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-6px); }
+}
+
+@keyframes iconGlow {
+    0%, 100% { opacity: 0.2; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.05); }
 }
 
 .section-title {
-    font-family: var(--font-display);
-    font-size: var(--text-lg);
-    font-weight: 700;
-    color: var(--text-bright);
-    margin: 0;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
+    font-family: 'Orbitron', sans-serif !important;
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    color: var(--text-bright) !important;
+    margin: 0 !important;
+    letter-spacing: 3px !important;
+    text-transform: uppercase !important;
+    text-shadow: 0 0 30px rgba(255, 255, 255, 0.15);
+    background: linear-gradient(135deg, var(--text-bright) 0%, var(--accent-cyan) 50%, var(--text-bright) 100%);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: titleShimmer 6s ease-in-out infinite;
+}
+
+@keyframes titleShimmer {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+}
+
+/* Section-specific icon colors */
+.section-icon-bullish {
+    background: linear-gradient(145deg, rgba(0, 214, 125, 0.15) 0%, rgba(0, 255, 136, 0.08) 100%);
+    border-color: var(--bull);
+    color: var(--bull);
+    text-shadow: 0 0 20px var(--bull-glow);
+    box-shadow: 
+        0 0 40px rgba(0, 214, 125, 0.25),
+        0 0 80px rgba(0, 214, 125, 0.1),
+        inset 0 0 30px rgba(0, 214, 125, 0.08);
+}
+
+.section-icon-bearish {
+    background: linear-gradient(145deg, rgba(255, 82, 99, 0.15) 0%, rgba(255, 51, 102, 0.08) 100%);
+    border-color: var(--bear);
+    color: var(--bear);
+    text-shadow: 0 0 20px var(--bear-glow);
+    box-shadow: 
+        0 0 40px rgba(255, 82, 99, 0.25),
+        0 0 80px rgba(255, 82, 99, 0.1),
+        inset 0 0 30px rgba(255, 82, 99, 0.08);
+}
+
+.section-icon-gold {
+    background: linear-gradient(145deg, rgba(254, 228, 64, 0.15) 0%, rgba(245, 184, 0, 0.08) 100%);
+    border-color: var(--accent-gold);
+    color: var(--accent-gold);
+    text-shadow: 0 0 20px rgba(254, 228, 64, 0.5);
+    box-shadow: 
+        0 0 40px rgba(254, 228, 64, 0.25),
+        0 0 80px rgba(254, 228, 64, 0.1),
+        inset 0 0 30px rgba(254, 228, 64, 0.08);
+}
+
+.section-icon-purple {
+    background: linear-gradient(145deg, rgba(155, 93, 229, 0.15) 0%, rgba(139, 92, 246, 0.08) 100%);
+    border-color: var(--accent-purple);
+    color: var(--accent-purple);
+    text-shadow: 0 0 20px rgba(155, 93, 229, 0.5);
+    box-shadow: 
+        0 0 40px rgba(155, 93, 229, 0.25),
+        0 0 80px rgba(155, 93, 229, 0.1),
+        inset 0 0 30px rgba(155, 93, 229, 0.08);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   METRIC CARDS - Top Row KPIs
+   METRIC CARDS - Top Row KPIs with Icons
    ═══════════════════════════════════════════════════════════════════════════ */
 .metric-card {
     background: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-panel) 100%);
@@ -2196,10 +3184,11 @@ CSS_STYLES = """
     padding: 22px 26px;
     text-align: center;
     height: 100%;
-    min-height: 120px;
+    min-height: 140px;
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
     position: relative;
     overflow: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2219,7 +3208,7 @@ CSS_STYLES = """
     top: 0;
     left: 0;
     right: 0;
-    height: 2px;
+    height: 3px;
     background: var(--gradient-cyber);
     opacity: 0;
     transition: opacity 0.3s ease;
@@ -2233,6 +3222,123 @@ CSS_STYLES = """
 
 .metric-card:hover::after {
     opacity: 1;
+}
+
+.metric-icon {
+    font-size: 3.2rem;
+    margin-bottom: 12px;
+    filter: drop-shadow(0 0 20px rgba(0, 245, 212, 0.5));
+    position: relative;
+    display: inline-block;
+}
+
+.metric-icon::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 70px;
+    height: 70px;
+    background: radial-gradient(circle, rgba(0, 245, 212, 0.2) 0%, transparent 70%);
+    border-radius: 50%;
+    z-index: -1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ICON GLOW VARIANTS - Color-coded halos for different contexts
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Green glow for bullish/up */
+.icon-glow-green {
+    filter: drop-shadow(0 0 20px rgba(0, 214, 125, 0.6)) !important;
+}
+.icon-glow-green::after {
+    background: radial-gradient(circle, rgba(0, 214, 125, 0.25) 0%, transparent 70%) !important;
+}
+
+/* Red glow for bearish/down */
+.icon-glow-red {
+    filter: drop-shadow(0 0 20px rgba(255, 82, 99, 0.6)) !important;
+}
+.icon-glow-red::after {
+    background: radial-gradient(circle, rgba(255, 82, 99, 0.25) 0%, transparent 70%) !important;
+}
+
+/* Orange glow for high volatility */
+.icon-glow-orange {
+    filter: drop-shadow(0 0 25px rgba(255, 120, 50, 0.7)) !important;
+}
+.icon-glow-orange::after {
+    background: radial-gradient(circle, rgba(255, 120, 50, 0.3) 0%, transparent 70%) !important;
+}
+
+/* Blue glow for calm/ice */
+.icon-glow-blue {
+    filter: drop-shadow(0 0 20px rgba(150, 220, 255, 0.6)) !important;
+}
+.icon-glow-blue::after {
+    background: radial-gradient(circle, rgba(150, 220, 255, 0.25) 0%, transparent 70%) !important;
+}
+
+/* Gold glow for neutral/balance */
+.icon-glow-gold {
+    filter: drop-shadow(0 0 20px rgba(254, 228, 64, 0.6)) !important;
+}
+.icon-glow-gold::after {
+    background: radial-gradient(circle, rgba(254, 228, 64, 0.25) 0%, transparent 70%) !important;
+}
+
+/* Purple glow for overnight/moon */
+.icon-glow-purple {
+    filter: drop-shadow(0 0 20px rgba(180, 160, 255, 0.6)) !important;
+}
+.icon-glow-purple::after {
+    background: radial-gradient(circle, rgba(180, 160, 255, 0.25) 0%, transparent 70%) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MEANINGFUL ANIMATIONS - Only for icons where movement makes sense
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 🦘 Kangaroo - Hops up and down */
+.icon-kangaroo {
+    animation: kangarooHop 1.2s ease-in-out infinite;
+}
+@keyframes kangarooHop {
+    0%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-15px); }
+    50% { transform: translateY(-18px); }
+    80% { transform: translateY(0); }
+}
+
+/* 🚀 Rocket - Slight shake/vibration before launch */
+.icon-rocket {
+    animation: rocketShake 0.5s ease-in-out infinite;
+}
+@keyframes rocketShake {
+    0%, 100% { transform: translate(0, 0) rotate(-2deg); }
+    25% { transform: translate(1px, -1px) rotate(0deg); }
+    50% { transform: translate(-1px, 0) rotate(2deg); }
+    75% { transform: translate(1px, 1px) rotate(0deg); }
+}
+
+/* 🔄 Rotate symbol - Continuous rotation */
+.icon-rotate {
+    animation: iconSpin 3s linear infinite;
+}
+@keyframes iconSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* 🕐 Clock - Gentle pulse like a heartbeat */
+.icon-clock {
+    animation: clockPulse 1.5s ease-in-out infinite;
+}
+@keyframes clockPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
 }
 
 .metric-label {
@@ -2328,7 +3434,7 @@ CSS_STYLES = """
     gap: 12px;
     padding: 14px 24px;
     border-radius: var(--radius-md);
-    font-family: var(--font-body);
+    font-family: var(--font-display);
     font-size: var(--text-sm);
     font-weight: 800;
     letter-spacing: 2px;
@@ -2503,18 +3609,20 @@ CSS_STYLES = """
 .prior-levels-icon { font-size: var(--text-lg); }
 
 .prior-levels-title {
-    font-family: var(--font-body);
+    font-family: var(--font-display);
     font-size: var(--text-sm);
     font-weight: 700;
     color: var(--text-bright);
+    letter-spacing: 0.5px;
 }
 
 .prior-levels-anchor {
     margin-left: auto;
-    font-family: var(--font-mono);
+    font-family: var(--font-display);
     font-size: var(--text-sm);
     color: var(--accent-cyan);
     font-weight: 700;
+    letter-spacing: 0.5px;
 }
 
 .prior-levels-grid {
@@ -2553,11 +3661,12 @@ CSS_STYLES = """
 }
 
 .prior-level-value {
-    font-family: var(--font-body);
+    font-family: var(--font-display);
     font-size: var(--text-lg);
     font-weight: 800;
     color: var(--text-bright);
     margin-bottom: 8px;
+    letter-spacing: 0.5px;
 }
 
 .prior-level-item.prior-level-buy .prior-level-action { color: var(--bull); }
@@ -2645,10 +3754,11 @@ CSS_STYLES = """
 }
 
 .confluence-title {
-    font-family: var(--font-body);
+    font-family: var(--font-display);
     font-size: var(--text-md);
     font-weight: 700;
     color: var(--text-bright);
+    letter-spacing: 0.5px;
 }
 
 .confluence-score {
@@ -2889,10 +3999,11 @@ CSS_STYLES = """
 }
 
 .trade-metric-value {
-    font-family: var(--font-body);
+    font-family: var(--font-display);
     font-size: var(--text-lg);
     font-weight: 800;
     color: var(--text-bright);
+    letter-spacing: 0.5px;
 }
 
 .trade-targets {
@@ -2941,10 +4052,11 @@ CSS_STYLES = """
 }
 
 .target-price {
-    font-family: var(--font-body);
+    font-family: var(--font-display);
     font-size: var(--text-lg);
     font-weight: 800;
     color: var(--text-bright);
+    letter-spacing: 0.5px;
 }
 
 .target-profit {
@@ -2981,16 +4093,16 @@ CSS_STYLES = """
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SESSION CARDS
+   SESSION CARDS - Global Market Sessions with Large Icons
    ═══════════════════════════════════════════════════════════════════════════ */
 .session-card {
-    background: var(--bg-card);
+    background: linear-gradient(145deg, var(--bg-card) 0%, var(--bg-panel) 100%);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: 20px;
+    border-radius: var(--radius-xl);
+    padding: 24px 20px;
     text-align: center;
     height: 100%;
-    min-height: 140px;
+    min-height: 180px;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
@@ -3004,27 +4116,60 @@ CSS_STYLES = """
     pointer-events: none;
 }
 
+.session-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--gradient-premium);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
 .session-card:hover {
     border-color: var(--border-accent);
-    transform: translateY(-3px);
-    box-shadow: var(--shadow-glow-cyan);
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-glow-cyan), var(--shadow-md);
+}
+
+.session-card:hover::after {
+    opacity: 1;
 }
 
 .session-icon {
-    font-size: var(--text-xl);
-    margin-bottom: 10px;
+    font-size: 3.5rem;
+    margin-bottom: 14px;
     position: relative;
     z-index: 1;
+    filter: drop-shadow(0 0 20px rgba(0, 245, 212, 0.5));
+    display: inline-block;
+}
+
+.session-icon::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 80px;
+    height: 80px;
+    background: radial-gradient(circle, rgba(0, 245, 212, 0.2) 0%, transparent 70%);
+    border-radius: 50%;
+    z-index: -1;
+    animation: iconHalo 3s ease-in-out infinite;
 }
 
 .session-name {
-    font-family: var(--font-body);
-    font-size: var(--text-sm);
+    font-family: var(--font-display);
+    font-size: var(--text-md);
     font-weight: 700;
     color: var(--text-bright);
     margin-bottom: 14px;
     position: relative;
     z-index: 1;
+    letter-spacing: 1px;
 }
 
 .session-data {
@@ -3039,9 +4184,10 @@ CSS_STYLES = """
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-family: var(--font-mono);
+    font-family: var(--font-display);
     font-size: var(--text-sm);
     font-weight: 600;
+    letter-spacing: 0.5px;
 }
 
 .session-high { color: var(--bear); }
@@ -3052,9 +4198,11 @@ CSS_STYLES = """
    ═══════════════════════════════════════════════════════════════════════════ */
 .alert-box {
     display: flex;
-    align-items: flex-start;
-    gap: 16px;
-    padding: 20px 24px;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 12px;
+    padding: 28px 24px;
     border-radius: var(--radius-lg);
     margin: 16px 0;
     position: relative;
@@ -3066,8 +4214,9 @@ CSS_STYLES = """
     position: absolute;
     top: 0;
     left: 0;
-    width: 4px;
-    height: 100%;
+    right: 0;
+    width: 100%;
+    height: 4px;
 }
 
 .alert-box-warning {
@@ -3100,14 +4249,37 @@ CSS_STYLES = """
     margin-top: 2px;
 }
 
-.alert-content { flex: 1; }
+.alert-icon-large {
+    font-size: 3.5rem;
+    flex-shrink: 0;
+    filter: drop-shadow(0 0 20px rgba(0, 245, 212, 0.5));
+    line-height: 1;
+}
+
+.alert-box-warning .alert-icon-large {
+    filter: drop-shadow(0 0 25px rgba(245, 184, 0, 0.6));
+}
+
+.alert-box-danger .alert-icon-large {
+    filter: drop-shadow(0 0 25px rgba(255, 82, 99, 0.6));
+}
+
+.alert-box-success .alert-icon-large {
+    filter: drop-shadow(0 0 25px rgba(0, 214, 125, 0.6));
+}
+
+.alert-content { 
+    flex: 1;
+    text-align: center;
+}
 
 .alert-title {
-    font-family: var(--font-body);
-    font-size: var(--text-sm);
+    font-family: var(--font-display);
+    font-size: var(--text-md);
     font-weight: 700;
     color: var(--text-bright);
     margin-bottom: 6px;
+    letter-spacing: 1px;
 }
 
 .alert-text {
@@ -3115,6 +4287,16 @@ CSS_STYLES = """
     font-size: var(--text-sm);
     color: var(--text-secondary);
     line-height: 1.5;
+}
+
+.alert-values {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    letter-spacing: 0.5px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3147,11 +4329,12 @@ CSS_STYLES = """
 }
 
 .no-trade-title {
-    font-family: var(--font-body);
+    font-family: var(--font-display);
     font-size: var(--text-xl);
     font-weight: 800;
     color: var(--bear);
     margin-bottom: 12px;
+    letter-spacing: 1px;
 }
 
 .no-trade-reason {
@@ -3190,12 +4373,12 @@ CSS_STYLES = """
    STREAMLIT OVERRIDES
    ═══════════════════════════════════════════════════════════════════════════ */
 [data-testid="stMetricValue"] {
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-family: 'Orbitron', sans-serif !important;
     font-weight: 800 !important;
 }
 
 [data-testid="stMetricLabel"] {
-    font-family: 'JetBrains Mono', monospace !important;
+    font-family: 'Share Tech Mono', monospace !important;
     text-transform: uppercase !important;
     letter-spacing: 1.5px !important;
 }
@@ -3212,26 +4395,26 @@ section[data-testid="stSidebar"] > div {
 
 section[data-testid="stSidebar"] h3 {
     color: var(--text-bright) !important;
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-family: 'Rajdhani', sans-serif !important;
     font-weight: 700 !important;
 }
 
 section[data-testid="stSidebar"] h4 {
     color: var(--accent-cyan) !important;
-    font-family: 'Plus Jakarta Sans', sans-serif !important;
+    font-family: 'Rajdhani', sans-serif !important;
     font-size: 0.9rem !important;
     font-weight: 600 !important;
 }
 
 section[data-testid="stSidebar"] h5 {
     color: var(--text-secondary) !important;
-    font-family: 'Inter', sans-serif !important;
+    font-family: 'Rajdhani', sans-serif !important;
     font-size: 0.85rem !important;
 }
 
 section[data-testid="stSidebar"] label {
     color: var(--text-secondary) !important;
-    font-family: 'Inter', sans-serif !important;
+    font-family: 'Rajdhani', sans-serif !important;
 }
 
 section[data-testid="stSidebar"] input {
@@ -3239,6 +4422,7 @@ section[data-testid="stSidebar"] input {
     color: var(--text-bright) !important;
     border: 1px solid var(--border-default) !important;
     border-radius: var(--radius-sm) !important;
+    font-family: 'Share Tech Mono', monospace !important;
 }
 
 section[data-testid="stSidebar"] input:focus {
@@ -3249,6 +4433,7 @@ section[data-testid="stSidebar"] input:focus {
 section[data-testid="stSidebar"] .stSelectbox > div > div {
     background: var(--bg-input) !important;
     color: var(--text-bright) !important;
+    font-family: 'Share Tech Mono', monospace !important;
 }
 
 section[data-testid="stSidebar"] p {
@@ -3257,7 +4442,7 @@ section[data-testid="stSidebar"] p {
 
 /* Buttons */
 .stButton > button {
-    font-family: 'JetBrains Mono', monospace !important;
+    font-family: 'Share Tech Mono', monospace !important;
     font-weight: 700 !important;
     border-radius: var(--radius-md) !important;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
@@ -3268,6 +4453,11 @@ section[data-testid="stSidebar"] p {
 .stButton > button:hover {
     transform: translateY(-2px) !important;
     box-shadow: var(--shadow-md) !important;
+}
+
+/* Force Orbitron on all h2 section headers */
+h2.section-title, .section-title {
+    font-family: 'Orbitron', sans-serif !important;
 }
 
 /* Dividers */
@@ -3314,7 +4504,10 @@ def sidebar():
         # BASIC SETTINGS
         # ─────────────────────────────────────────────────────────────────────
         st.markdown("#### 📅 Trading Session")
-        trading_date = st.date_input("Trading Date", value=date.today())
+        # Use CT timezone for today's date to avoid timezone issues
+        ct_now = datetime.now(CT)
+        ct_today = ct_now.date()
+        trading_date = st.date_input("Trading Date", value=ct_today)
         
         # Reference time with 30-minute granularity
         ref_time_options = []
@@ -3375,10 +4568,6 @@ def sidebar():
         st.markdown("#### 📈 Prior Day RTH (ES)")
         use_manual_prior = st.checkbox("Manual Prior Day Override", value=False)
         if use_manual_prior:
-            col1, col2 = st.columns(2)
-            prior_highest_wick = col1.number_input("Highest Wick (ES)", value=6100.0, step=0.5, help="Highest high of any RTH candle")
-            prior_lowest_close = col2.number_input("Lowest Close (ES)", value=6050.0, step=0.5, help="Lowest close of any RTH candle")
-            
             # Time inputs with 30-minute granularity (RTH: 8:30 AM - 3:00 PM CT)
             time_options = []
             for h in range(8, 16):
@@ -3389,28 +4578,60 @@ def sidebar():
                         continue  # RTH ends at 3:00
                     time_options.append(f"{h}:{m:02d}")
             
-            col3, col4 = st.columns(2)
-            hw_time_str = col3.selectbox("HW Time", options=time_options, index=time_options.index("12:00") if "12:00" in time_options else 7, help="Time when highest wick occurred (CT)")
-            lc_time_str = col4.selectbox("LC Time", options=time_options, index=time_options.index("12:00") if "12:00" in time_options else 7, help="Time when lowest close occurred (CT)")
+            st.markdown("##### Primary High Wick")
+            col1, col2 = st.columns(2)
+            prior_primary_hw = col1.number_input("Price (ES)", value=6100.0, step=0.5, key="p_hw", help="Highest high of any RTH candle")
+            p_hw_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("9:30") if "9:30" in time_options else 2, key="p_hw_t", help="Time when primary high wick occurred (CT)")
+            
+            st.markdown("##### Secondary High Wick")
+            has_secondary_hw = st.checkbox("Has Secondary High Wick", value=False, key="has_s_hw")
+            if has_secondary_hw:
+                col1, col2 = st.columns(2)
+                prior_secondary_hw = col1.number_input("Price (ES)", value=6090.0, step=0.5, key="s_hw", help="Lower high wick made after primary")
+                s_hw_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("14:30") if "14:30" in time_options else 10, key="s_hw_t", help="Time when secondary high wick occurred (CT)")
+            else:
+                prior_secondary_hw = None
+                s_hw_time_str = "12:00"
+            
+            st.markdown("##### Primary Low Open")
+            col1, col2 = st.columns(2)
+            prior_primary_lo = col1.number_input("Price (ES)", value=6050.0, step=0.5, key="p_lo", help="Lowest open of any BULLISH RTH candle")
+            p_lo_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("12:00") if "12:00" in time_options else 7, key="p_lo_t", help="Time when primary low open occurred (CT)")
+            
+            st.markdown("##### Secondary Low Open")
+            has_secondary_lo = st.checkbox("Has Secondary Low Open", value=False, key="has_s_lo")
+            if has_secondary_lo:
+                col1, col2 = st.columns(2)
+                prior_secondary_lo = col1.number_input("Price (ES)", value=6060.0, step=0.5, key="s_lo", help="Higher low open made after primary (bullish candle)")
+                s_lo_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("14:30") if "14:30" in time_options else 10, key="s_lo_t", help="Time when secondary low open occurred (CT)")
+            else:
+                prior_secondary_lo = None
+                s_lo_time_str = "12:00"
+            
+            st.markdown("##### RTH Close")
+            prior_close = st.number_input("RTH Close (ES)", value=6075.0, step=0.5, help="Final RTH close")
             
             # Parse time strings
-            hw_parts = hw_time_str.split(":")
-            prior_hw_hour = int(hw_parts[0])
-            prior_hw_min = int(hw_parts[1])
+            def parse_time_str(t_str):
+                parts = t_str.split(":")
+                return int(parts[0]), int(parts[1])
             
-            lc_parts = lc_time_str.split(":")
-            prior_lc_hour = int(lc_parts[0])
-            prior_lc_min = int(lc_parts[1])
-            
-            prior_close = st.number_input("RTH Close (ES)", value=6075.0, step=0.5, help="Final RTH close")
+            p_hw_hour, p_hw_min = parse_time_str(p_hw_time_str)
+            s_hw_hour, s_hw_min = parse_time_str(s_hw_time_str)
+            p_lo_hour, p_lo_min = parse_time_str(p_lo_time_str)
+            s_lo_hour, s_lo_min = parse_time_str(s_lo_time_str)
         else:
-            prior_highest_wick = None
-            prior_lowest_close = None
-            prior_hw_hour = 12
-            prior_hw_min = 0
-            prior_lc_hour = 12
-            prior_lc_min = 0
+            prior_primary_hw = None
+            prior_secondary_hw = None
+            prior_primary_lo = None
+            prior_secondary_lo = None
+            p_hw_hour, p_hw_min = 9, 30
+            s_hw_hour, s_hw_min = 14, 30
+            p_lo_hour, p_lo_min = 12, 0
+            s_lo_hour, s_lo_min = 14, 30
             prior_close = None
+            has_secondary_hw = False
+            has_secondary_lo = False
         
         st.divider()
         
@@ -3579,7 +4800,22 @@ def sidebar():
         # Manual overrides
         "manual_vix": manual_vix,
         "manual_vix_range": {"low": manual_vix_low, "high": manual_vix_high} if use_manual_vix_range else None,
-        "manual_prior": {"highest_wick": prior_highest_wick, "lowest_close": prior_lowest_close, "close": prior_close, "hw_hour": prior_hw_hour, "hw_min": prior_hw_min, "lc_hour": prior_lc_hour, "lc_min": prior_lc_min} if use_manual_prior else None,
+        "manual_prior": {
+            "primary_high_wick": prior_primary_hw, 
+            "secondary_high_wick": prior_secondary_hw if has_secondary_hw else None,
+            "primary_low_open": prior_primary_lo, 
+            "secondary_low_open": prior_secondary_lo if has_secondary_lo else None,
+            "close": prior_close, 
+            "p_hw_hour": p_hw_hour, "p_hw_min": p_hw_min,
+            "s_hw_hour": s_hw_hour, "s_hw_min": s_hw_min,
+            "p_lo_hour": p_lo_hour, "p_lo_min": p_lo_min,
+            "s_lo_hour": s_lo_hour, "s_lo_min": s_lo_min,
+            # Legacy keys for backward compatibility
+            "highest_wick": prior_primary_hw,
+            "lowest_close": prior_primary_lo,
+            "hw_hour": p_hw_hour, "hw_min": p_hw_min,
+            "lc_hour": p_lo_hour, "lc_min": p_lo_min,
+        } if use_manual_prior else None,
         "manual_overnight": {"high": on_high, "low": on_low, "high_hour": on_high_hour, "high_min": on_high_min, "low_hour": on_low_hour, "low_min": on_low_min} if use_manual_overnight else None,
         "manual_sessions": {
             "sydney": {"high": sydney_high, "low": sydney_low, "high_time": sydney_high_time, "low_time": sydney_low_time},
@@ -3713,19 +4949,41 @@ def main():
         
         if inputs["manual_prior"] is not None:
             prior_day = get_prior_trading_day(actual_trading_date)
-            hw_hour = inputs["manual_prior"].get("hw_hour", 12)
-            hw_min = inputs["manual_prior"].get("hw_min", 0)
-            lc_hour = inputs["manual_prior"].get("lc_hour", 12)
-            lc_min = inputs["manual_prior"].get("lc_min", 0)
+            m = inputs["manual_prior"]
+            
+            # Parse all pivot times
+            p_hw_hour = m.get("p_hw_hour", m.get("hw_hour", 9))
+            p_hw_min = m.get("p_hw_min", m.get("hw_min", 30))
+            s_hw_hour = m.get("s_hw_hour", 14)
+            s_hw_min = m.get("s_hw_min", 30)
+            p_lo_hour = m.get("p_lo_hour", m.get("lc_hour", 12))
+            p_lo_min = m.get("p_lo_min", m.get("lc_min", 0))
+            s_lo_hour = m.get("s_lo_hour", 14)
+            s_lo_min = m.get("s_lo_min", 30)
+            
             prior_rth = {
-                "highest_wick": inputs["manual_prior"]["highest_wick"],
-                "highest_wick_time": CT.localize(datetime.combine(prior_day, time(hw_hour, hw_min))),
-                "lowest_close": inputs["manual_prior"]["lowest_close"],
-                "lowest_close_time": CT.localize(datetime.combine(prior_day, time(lc_hour, lc_min))),
-                "high": inputs["manual_prior"]["highest_wick"],
-                "low": inputs["manual_prior"]["lowest_close"],
-                "close": inputs["manual_prior"]["close"],
-                "available": True
+                # Primary High Wick
+                "primary_high_wick": m.get("primary_high_wick", m.get("highest_wick")),
+                "primary_high_wick_time": CT.localize(datetime.combine(prior_day, time(p_hw_hour, p_hw_min))),
+                # Secondary High Wick
+                "secondary_high_wick": m.get("secondary_high_wick"),
+                "secondary_high_wick_time": CT.localize(datetime.combine(prior_day, time(s_hw_hour, s_hw_min))) if m.get("secondary_high_wick") else None,
+                # Primary Low Open
+                "primary_low_open": m.get("primary_low_open", m.get("lowest_close")),
+                "primary_low_open_time": CT.localize(datetime.combine(prior_day, time(p_lo_hour, p_lo_min))),
+                # Secondary Low Open
+                "secondary_low_open": m.get("secondary_low_open"),
+                "secondary_low_open_time": CT.localize(datetime.combine(prior_day, time(s_lo_hour, s_lo_min))) if m.get("secondary_low_open") else None,
+                # Overall stats
+                "high": m.get("primary_high_wick", m.get("highest_wick")),
+                "low": m.get("primary_low_open", m.get("lowest_close")),
+                "close": m.get("close"),
+                "available": True,
+                # Legacy keys for backward compatibility
+                "highest_wick": m.get("primary_high_wick", m.get("highest_wick")),
+                "highest_wick_time": CT.localize(datetime.combine(prior_day, time(p_hw_hour, p_hw_min))),
+                "lowest_close": m.get("primary_low_open", m.get("lowest_close")),
+                "lowest_close_time": CT.localize(datetime.combine(prior_day, time(p_lo_hour, p_lo_min))),
             }
         else:
             prior_rth = fetch_prior_day_rth(actual_trading_date)
@@ -3791,11 +5049,35 @@ def main():
     # VIX term structure
     vix_term = fetch_vix_term_structure()
     
+    # Get current CT time for channel lock determination
+    ct_now = datetime.now(CT)
+    
     # OPTION C: Use the new dual-channel decision engine
     decision = analyze_market_state_v2(
         current_spx, dual_levels_spx, channel_type, channel_reason,
         retail_data["bias"], ema_data["ema_bias"], vix_pos, vix,
-        session_tests, gap_analysis, prior_close_validation, vix_term
+        session_tests, gap_analysis, prior_close_validation, vix_term,
+        prior_targets, ct_now
+    )
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # EXPLOSIVE MOVE DETECTOR
+    # ═══════════════════════════════════════════════════════════════════════════
+    overnight_range = None
+    if overnight:
+        overnight_range = overnight.get("high", 0) - overnight.get("low", 0)
+    
+    prior_day_range = None
+    if prior_rth and prior_rth.get("available"):
+        p_high = prior_rth.get("primary_high_wick")
+        p_low = prior_rth.get("primary_low_open")
+        if p_high and p_low:
+            prior_day_range = p_high - p_low
+    
+    explosive = detect_explosive_potential(
+        current_spx, dual_levels_spx, prior_targets, channel_type,
+        retail_data.get("spread"), ema_data, overnight_range, prior_day_range,
+        gap_analysis
     )
     
     # ═══════════════════════════════════════════════════════════════════════════
@@ -3804,14 +5086,31 @@ def main():
     st.markdown("""
     <div class="hero-banner">
         <div class="prophet-logo">
-            <div class="logo-pyramid">
-                <div class="pyramid-body"></div>
-                <div class="pyramid-inner"></div>
-                <div class="eye-container">
-                    <div class="eye-rays"></div>
-                    <div class="eye-outer"></div>
-                    <div class="eye-iris"><div class="eye-pupil"></div></div>
-                </div>
+            <div class="particle-field"></div>
+            <div class="particle-field-inner"></div>
+            <div class="orbital-ring-1"></div>
+            <div class="orbital-ring-2"></div>
+            <div class="orbital-ring-3"></div>
+            <div class="ambient-glow"></div>
+            <div class="pyramid-container">
+                <div class="pyramid-base"></div>
+                <div class="pyramid-main"></div>
+                <div class="pyramid-layer-2"></div>
+                <div class="pyramid-layer-3"></div>
+                <div class="vertex-top"></div>
+                <div class="vertex-left"></div>
+                <div class="vertex-right"></div>
+                <div class="vertex-center"></div>
+                <div class="energy-beam-left"></div>
+                <div class="energy-beam-right"></div>
+                <div class="energy-beam-base"></div>
+                <div class="scan-line"></div>
+                <div class="scan-line-2"></div>
+                <div class="data-stream-left"></div>
+                <div class="data-stream-right"></div>
+                <div class="pillar-label-left">RTH</div>
+                <div class="pillar-label-right">O/N</div>
+                <div class="pillar-label-center">VIX</div>
             </div>
         </div>
         <div class="hero-content">
@@ -3833,7 +5132,7 @@ def main():
             weekend_note = f" (adjusted from {inputs['trading_date'].strftime('%A')})"
         st.markdown(f"""
         <div style="display:flex;align-items:center;gap:8px;padding:10px 0;">
-            <span style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:rgba(255,255,255,0.5);">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:0.8rem;color:rgba(255,255,255,0.5);">
                 📅 {date_display}{weekend_note}
             </span>
         </div>
@@ -3850,7 +5149,7 @@ def main():
     with col3:
         st.markdown(f"""
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 0;">
-            <span style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:rgba(255,255,255,0.5);">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:0.8rem;color:rgba(255,255,255,0.5);">
                 ⏰ {now.strftime("%I:%M %p CT")}
             </span>
         </div>
@@ -3861,19 +5160,23 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">SPX Index</div><div class="metric-value accent">{current_spx:,.2f}</div><div class="metric-delta">ES {current_es:,.2f}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-icon">📈</div><div class="metric-label">SPX Index</div><div class="metric-value accent">{current_spx:,.2f}</div><div class="metric-delta">ES {current_es:,.2f}</div></div>', unsafe_allow_html=True)
     with col2:
         vix_color = "puts" if vix > 20 else "calls" if vix < 15 else ""
-        st.markdown(f'<div class="metric-card"><div class="metric-label">VIX Index</div><div class="metric-value {vix_color}">{vix:.2f}</div><div class="metric-delta">Volatility</div></div>', unsafe_allow_html=True)
+        vix_icon = "🌋" if vix > 20 else "🧊" if vix < 15 else "🌊"
+        vix_glow = "icon-glow-orange" if vix > 20 else "icon-glow-blue" if vix < 15 else ""
+        st.markdown(f'<div class="metric-card"><div class="metric-icon {vix_glow}">{vix_icon}</div><div class="metric-label">VIX Index</div><div class="metric-value {vix_color}">{vix:.2f}</div><div class="metric-delta">Volatility</div></div>', unsafe_allow_html=True)
     with col3:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">Position</div><div class="metric-value">{position.value}</div><div class="metric-delta">In Channel</div></div>', unsafe_allow_html=True)
+        pos_icon = "🔼" if position.value == "ABOVE" else "🔽" if position.value == "BELOW" else "⚖️"
+        pos_glow = "icon-glow-green" if position.value == "ABOVE" else "icon-glow-red" if position.value == "BELOW" else "icon-glow-gold"
+        st.markdown(f'<div class="metric-card"><div class="metric-icon {pos_glow}">{pos_icon}</div><div class="metric-label">Position</div><div class="metric-value">{position.value}</div><div class="metric-delta">In Channel</div></div>', unsafe_allow_html=True)
     with col4:
-        st.markdown(f'<div class="metric-card"><div class="metric-label">Time</div><div class="metric-value">{now.strftime("%I:%M")}</div><div class="metric-delta live-indicator"><span class="live-dot"></span> {now.strftime("%p CT")}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card"><div class="metric-icon icon-clock">🕐</div><div class="metric-label">Time</div><div class="metric-value">{now.strftime("%I:%M")}</div><div class="metric-delta live-indicator"><span class="live-dot"></span> {now.strftime("%p CT")}</div></div>', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # TODAY'S BIAS
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">◎</div><h2 class="section-title">Today\'s Bias</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><div class="section-icon">🎯</div><h2 class="section-title">Today\'s Bias</h2></div>', unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -3890,13 +5193,58 @@ def main():
         cross_icon = "✓" if ema_data["ema_cross"] == "BULLISH" else "✗"
         st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{cross_class}"><span>{cross_icon}</span><span>8/21 {ema_data["ema_cross"]}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{"8 EMA > 21 EMA" if ema_data["ema_cross"] == "BULLISH" else "8 EMA < 21 EMA"}</p></div>', unsafe_allow_html=True)
     
+    # ═══════════════════════════════════════════════════════════════════════════
+    # EXPLOSIVE MOVE ALERT (Clean & Bold)
+    # ═══════════════════════════════════════════════════════════════════════════
+    if explosive["explosive_score"] >= 40:
+        score = explosive["explosive_score"]
+        direction = explosive.get("direction_bias", "")
+        target_dist = explosive.get("target_distance", 0)
+        
+        # Determine styling
+        if score >= 70:
+            alert_class = "danger"
+            score_icon = "🔥"
+            score_label = "EXTREME"
+        elif score >= 50:
+            alert_class = "warning" 
+            score_icon = "⚡"
+            score_label = "HIGH"
+        else:
+            alert_class = "info"
+            score_icon = "📊"
+            score_label = "MODERATE"
+        
+        direction_icon = "🐻" if direction == "PUTS" else "🐂" if direction == "CALLS" else "⚖️"
+        target_text = f"{target_dist:.0f} pt runway" if target_dist else ""
+        
+        st.markdown(f'''
+        <div class="alert-box alert-box-{alert_class}" style="border-width:2px;">
+            <div class="alert-icon-large" style="font-size:4rem;">{direction_icon}</div>
+            <div class="alert-content">
+                <div class="alert-title" style="font-size:1.3rem;">{score_icon} EXPLOSIVE POTENTIAL: {score_label}</div>
+                <div class="alert-values" style="font-size:1.1rem;margin-top:8px;border:none;padding:0;">
+                    Score: <strong>{score}/100</strong> &nbsp;|&nbsp; Bias: <strong>{direction or "NEUTRAL"}</strong>{f" &nbsp;|&nbsp; {target_text}" if target_text else ""}
+                </div>
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
     # Retail positioning alert
     if retail_data["positioning"] != "BALANCED":
         alert_class = "warning" if "HEAVY" in retail_data["positioning"] else "danger"
-        alert_icon = "⚡" if "EXTREME" in retail_data["positioning"] else "⚠"
-        st.markdown(f'<div class="alert-box alert-box-{alert_class}"><span class="alert-icon">{alert_icon}</span><div class="alert-content"><div class="alert-title">{retail_data["positioning"]}</div><div class="alert-text">{retail_data["warning"]}</div></div></div>', unsafe_allow_html=True)
+        # Bull icon for CALL buying (fade to puts), Bear icon for PUT buying (fade to calls)
+        alert_icon = "🐂" if "CALL" in retail_data["positioning"] else "🐻"
+        # Show the actual VIX values so user can verify data is real
+        vix_vals = f"VIX: {retail_data['vix']} | VIX3M: {retail_data['vix3m']} | Spread: {retail_data['spread']}" if retail_data['vix'] else "Data unavailable"
+        st.markdown(f'<div class="alert-box alert-box-{alert_class}"><div class="alert-icon-large">{alert_icon}</div><div class="alert-content"><div class="alert-title">{retail_data["positioning"]}</div><div class="alert-text">{retail_data["warning"]}</div><div class="alert-values">{vix_vals}</div></div></div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="alert-box alert-box-success"><span class="alert-icon">✓</span><div class="alert-content"><div class="alert-title">BALANCED POSITIONING</div><div class="alert-text">No crowd pressure detected - trade freely with structure</div></div></div>', unsafe_allow_html=True)
+        # Check if we actually have data or if it failed silently
+        if retail_data['vix'] is not None:
+            vix_vals = f"VIX: {retail_data['vix']} | VIX3M: {retail_data['vix3m']} | Spread: {retail_data['spread']}"
+            st.markdown(f'<div class="alert-box alert-box-success"><div class="alert-icon-large">⚖️</div><div class="alert-content"><div class="alert-title">BALANCED POSITIONING</div><div class="alert-text">No crowd pressure detected - trade freely with structure</div><div class="alert-values">{vix_vals}</div></div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="alert-box alert-box-info"><div class="alert-icon-large">❓</div><div class="alert-content"><div class="alert-title">POSITIONING UNKNOWN</div><div class="alert-text">Could not fetch VIX term structure data</div></div></div>', unsafe_allow_html=True)
     
     # VIX Position
     if vix_range["available"]:
@@ -3906,7 +5254,7 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     # CONFLUENCE
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">⚖</div><h2 class="section-title">Confluence Analysis</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><div class="section-icon">⚖️</div><h2 class="section-title">Confluence Analysis</h2></div>', unsafe_allow_html=True)
     
     calls_score, puts_score = len(decision["calls_factors"]), len(decision["puts_factors"])
     calls_class = "high" if calls_score >= 3 else "medium" if calls_score >= 2 else "low"
@@ -3923,7 +5271,7 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     # DUAL CHANNEL LEVELS (Option C - All 4 Levels)
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown(f'<div class="section-header"><div class="section-icon">◫</div><h2 class="section-title">Dual Channel Levels @ {inputs["ref_time"][0]}:{inputs["ref_time"][1]:02d} AM</h2></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header"><div class="section-icon">📊</div><h2 class="section-title">Dual Channel Levels @ {inputs["ref_time"][0]}:{inputs["ref_time"][1]:02d} AM</h2></div>', unsafe_allow_html=True)
     
     if dual_levels_spx:
         asc_floor = dual_levels_spx["asc_floor"]
@@ -3944,7 +5292,7 @@ def main():
         pos_summary = decision.get("position_summary", f"Position: {position.value}")
         
         # Position summary
-        st.markdown(f'<div class="levels-container"><div style="padding:14px 16px;background:linear-gradient(90deg,var(--bg-elevated) 0%,transparent 100%);border-radius:10px;margin-bottom:16px;border-left:4px solid var(--accent-cyan);"><span style="font-family:JetBrains Mono,monospace;font-size:0.9rem;color:var(--text-primary);">{pos_summary}</span></div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="levels-container"><div style="padding:14px 16px;background:linear-gradient(90deg,var(--bg-elevated) 0%,transparent 100%);border-radius:10px;margin-bottom:16px;border-left:4px solid var(--accent-cyan);"><span style="font-family:Share Tech Mono,monospace;font-size:0.9rem;color:var(--text-primary);">{pos_summary}</span></div></div>', unsafe_allow_html=True)
         
         # Ascending Channel Header
         asc_label = "↗ ASCENDING CHANNEL (DOMINANT)" if is_ascending else "↗ ASCENDING CHANNEL"
@@ -3983,75 +5331,163 @@ def main():
         st.markdown('<div class="alert-box alert-box-danger"><span class="alert-icon">❌</span><div class="alert-content"><div class="alert-title">Dual Levels Unavailable</div><div class="alert-text">Missing overnight session data</div></div></div>', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # PRIOR DAY INTERMEDIATE LEVELS
+    # PRIOR DAY INTERMEDIATE LEVELS (4 Pivots x 2 Directions = 8 Levels)
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">◎</div><h2 class="section-title">Prior Day Intermediate Levels</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><div class="section-icon">📍</div><h2 class="section-title">Prior Day Intermediate Levels</h2></div>', unsafe_allow_html=True)
     
-    if prior_targets["available"] and prior_targets["highest_wick"] is not None and prior_targets["lowest_close"] is not None:
-        # Convert ES targets to SPX
-        hw_anchor_spx = round(prior_targets["highest_wick"] - offset, 2)
-        lc_anchor_spx = round(prior_targets["lowest_close"] - offset, 2)
-        hw_asc = round(prior_targets["highest_wick_ascending"] - offset, 2) if prior_targets["highest_wick_ascending"] else None
-        hw_desc = round(prior_targets["highest_wick_descending"] - offset, 2) if prior_targets["highest_wick_descending"] else None
-        lc_asc = round(prior_targets["lowest_close_ascending"] - offset, 2) if prior_targets["lowest_close_ascending"] else None
-        lc_desc = round(prior_targets["lowest_close_descending"] - offset, 2) if prior_targets["lowest_close_descending"] else None
+    if prior_targets["available"]:
+        # Convert all ES targets to SPX
+        def to_spx(val):
+            return round(val - offset, 2) if val is not None else None
         
-        # Only display if all values are available
-        if all([hw_asc, hw_desc, lc_asc, lc_desc]):
-            st.markdown(f'''
-            <div class="prior-levels-container">
-                <div class="prior-levels-section">
-                    <div class="prior-levels-header">
-                        <span class="prior-levels-icon">📍</span>
-                        <span class="prior-levels-title">From Highest Wick</span>
-                        <span class="prior-levels-anchor">{hw_anchor_spx:,.2f}</span>
-                    </div>
-                    <div class="prior-levels-grid">
-                        <div class="prior-level-item prior-level-sell">
-                            <div class="prior-level-direction">↗ Ascending</div>
-                            <div class="prior-level-value">{hw_asc:,.2f}</div>
-                            <div class="prior-level-action">SELL (Resistance)</div>
+        # Primary High Wick
+        p_hw = to_spx(prior_targets.get("primary_high_wick"))
+        p_hw_asc = to_spx(prior_targets.get("primary_high_wick_ascending"))
+        p_hw_desc = to_spx(prior_targets.get("primary_high_wick_descending"))
+        
+        # Secondary High Wick
+        s_hw = to_spx(prior_targets.get("secondary_high_wick"))
+        s_hw_asc = to_spx(prior_targets.get("secondary_high_wick_ascending"))
+        s_hw_desc = to_spx(prior_targets.get("secondary_high_wick_descending"))
+        
+        # Primary Low Open
+        p_lo = to_spx(prior_targets.get("primary_low_open"))
+        p_lo_asc = to_spx(prior_targets.get("primary_low_open_ascending"))
+        p_lo_desc = to_spx(prior_targets.get("primary_low_open_descending"))
+        
+        # Secondary Low Open
+        s_lo = to_spx(prior_targets.get("secondary_low_open"))
+        s_lo_asc = to_spx(prior_targets.get("secondary_low_open_ascending"))
+        s_lo_desc = to_spx(prior_targets.get("secondary_low_open_descending"))
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # PRIMARY PIVOTS (Expandable)
+        # ─────────────────────────────────────────────────────────────────────
+        with st.expander("📍 **PRIMARY PIVOTS** (High Wick & Low Open)", expanded=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if p_hw is not None and p_hw_asc is not None and p_hw_desc is not None:
+                    st.markdown(f'''
+                    <div class="prior-levels-section" style="margin-bottom:0;">
+                        <div class="prior-levels-header">
+                            <span class="prior-levels-icon">🔺</span>
+                            <span class="prior-levels-title">Primary High Wick</span>
+                            <span class="prior-levels-anchor">{p_hw:,.2f}</span>
                         </div>
-                        <div class="prior-level-item prior-level-buy">
-                            <div class="prior-level-direction">↘ Descending</div>
-                            <div class="prior-level-value">{hw_desc:,.2f}</div>
-                            <div class="prior-level-action">BUY (Support)</div>
+                        <div class="prior-levels-grid">
+                            <div class="prior-level-item prior-level-sell">
+                                <div class="prior-level-direction">↗ Ascending</div>
+                                <div class="prior-level-value">{p_hw_asc:,.2f}</div>
+                                <div class="prior-level-action">SELL (Resistance)</div>
+                            </div>
+                            <div class="prior-level-item prior-level-buy">
+                                <div class="prior-level-direction">↘ Descending</div>
+                                <div class="prior-level-value">{p_hw_desc:,.2f}</div>
+                                <div class="prior-level-action">BUY (Support)</div>
+                            </div>
                         </div>
                     </div>
-                    <div class="prior-levels-note">Use when price opened ABOVE prior day high</div>
+                    ''', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Primary High Wick: N/A</div>', unsafe_allow_html=True)
+            
+            with col2:
+                if p_lo is not None and p_lo_asc is not None and p_lo_desc is not None:
+                    st.markdown(f'''
+                    <div class="prior-levels-section" style="margin-bottom:0;">
+                        <div class="prior-levels-header">
+                            <span class="prior-levels-icon">🔻</span>
+                            <span class="prior-levels-title">Primary Low Open</span>
+                            <span class="prior-levels-anchor">{p_lo:,.2f}</span>
+                        </div>
+                        <div class="prior-levels-grid">
+                            <div class="prior-level-item prior-level-buy">
+                                <div class="prior-level-direction">↗ Ascending</div>
+                                <div class="prior-level-value">{p_lo_asc:,.2f}</div>
+                                <div class="prior-level-action">BUY (Support)</div>
+                            </div>
+                            <div class="prior-level-item prior-level-sell">
+                                <div class="prior-level-direction">↘ Descending</div>
+                                <div class="prior-level-value">{p_lo_desc:,.2f}</div>
+                                <div class="prior-level-action">SELL (Resistance)</div>
+                            </div>
+                        </div>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Primary Low Open: N/A<br><small>(No bullish candle found)</small></div>', unsafe_allow_html=True)
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # SECONDARY PIVOTS (Expandable)
+        # ─────────────────────────────────────────────────────────────────────
+        has_secondary = s_hw is not None or s_lo is not None
+        secondary_label = "📍 **SECONDARY PIVOTS** (Lower High & Higher Low)" if has_secondary else "📍 **SECONDARY PIVOTS** (None Detected)"
+        
+        with st.expander(secondary_label, expanded=has_secondary):
+            if not has_secondary:
+                st.markdown('''
+                <div style="padding:20px;text-align:center;color:var(--text-muted);">
+                    <div style="font-size:1.2rem;margin-bottom:8px;">No Secondary Pivots Detected</div>
+                    <div style="font-size:0.85rem;">Secondary pivots require a rejection 1+ hour after the primary pivot</div>
                 </div>
-                <div class="prior-levels-section">
-                    <div class="prior-levels-header">
-                        <span class="prior-levels-icon">📍</span>
-                        <span class="prior-levels-title">From Lowest Close</span>
-                        <span class="prior-levels-anchor">{lc_anchor_spx:,.2f}</span>
-                    </div>
-                    <div class="prior-levels-grid">
-                        <div class="prior-level-item prior-level-buy">
-                            <div class="prior-level-direction">↗ Ascending</div>
-                            <div class="prior-level-value">{lc_asc:,.2f}</div>
-                            <div class="prior-level-action">BUY (Support)</div>
+                ''', unsafe_allow_html=True)
+            else:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if s_hw is not None and s_hw_asc is not None and s_hw_desc is not None:
+                        st.markdown(f'''
+                        <div class="prior-levels-section" style="margin-bottom:0;opacity:0.9;">
+                            <div class="prior-levels-header">
+                                <span class="prior-levels-icon">🔸</span>
+                                <span class="prior-levels-title">Secondary High Wick</span>
+                                <span class="prior-levels-anchor">{s_hw:,.2f}</span>
+                            </div>
+                            <div class="prior-levels-grid">
+                                <div class="prior-level-item prior-level-sell">
+                                    <div class="prior-level-direction">↗ Ascending</div>
+                                    <div class="prior-level-value">{s_hw_asc:,.2f}</div>
+                                    <div class="prior-level-action">SELL (Resistance)</div>
+                                </div>
+                                <div class="prior-level-item prior-level-buy">
+                                    <div class="prior-level-direction">↘ Descending</div>
+                                    <div class="prior-level-value">{s_hw_desc:,.2f}</div>
+                                    <div class="prior-level-action">BUY (Support)</div>
+                                </div>
+                            </div>
+                            <div class="prior-levels-note">Lower high after primary rejection</div>
                         </div>
-                        <div class="prior-level-item prior-level-sell">
-                            <div class="prior-level-direction">↘ Descending</div>
-                            <div class="prior-level-value">{lc_desc:,.2f}</div>
-                            <div class="prior-level-action">SELL (Resistance)</div>
+                        ''', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Secondary High Wick: N/A</div>', unsafe_allow_html=True)
+                
+                with col2:
+                    if s_lo is not None and s_lo_asc is not None and s_lo_desc is not None:
+                        st.markdown(f'''
+                        <div class="prior-levels-section" style="margin-bottom:0;opacity:0.9;">
+                            <div class="prior-levels-header">
+                                <span class="prior-levels-icon">🔹</span>
+                                <span class="prior-levels-title">Secondary Low Open</span>
+                                <span class="prior-levels-anchor">{s_lo:,.2f}</span>
+                            </div>
+                            <div class="prior-levels-grid">
+                                <div class="prior-level-item prior-level-buy">
+                                    <div class="prior-level-direction">↗ Ascending</div>
+                                    <div class="prior-level-value">{s_lo_asc:,.2f}</div>
+                                    <div class="prior-level-action">BUY (Support)</div>
+                                </div>
+                                <div class="prior-level-item prior-level-sell">
+                                    <div class="prior-level-direction">↘ Descending</div>
+                                    <div class="prior-level-value">{s_lo_desc:,.2f}</div>
+                                    <div class="prior-level-action">SELL (Resistance)</div>
+                                </div>
+                            </div>
+                            <div class="prior-levels-note">Higher low after primary defense (bullish)</div>
                         </div>
-                    </div>
-                    <div class="prior-levels-note">Use when price opened BELOW prior day low</div>
-                </div>
-            </div>
-            ''', unsafe_allow_html=True)
-        else:
-            st.markdown('''
-            <div class="alert-box" style="background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3);">
-                <span style="font-size:1.2rem;">⚠️</span>
-                <div>
-                    <div style="font-weight:600;color:var(--accent-gold);margin-bottom:4px;">Prior Day Data Incomplete</div>
-                    <div style="font-size:0.85rem;color:var(--text-secondary);">Some values missing - use Manual Override in sidebar</div>
-                </div>
-            </div>
-            ''', unsafe_allow_html=True)
+                        ''', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Secondary Low Open: N/A</div>', unsafe_allow_html=True)
     else:
         st.markdown('''
         <div class="alert-box" style="background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3);">
@@ -4067,11 +5503,24 @@ def main():
     # TRADE SETUPS (Option C - Primary + Secondary)
     # ═══════════════════════════════════════════════════════════════════════════
     if decision["no_trade"]:
-        st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">Trade Setup</h2></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><div class="section-icon">🎲</div><h2 class="section-title">Trade Setup</h2></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="no-trade-card"><div class="no-trade-icon">⊘</div><div class="no-trade-title">NO TRADE</div><div class="no-trade-reason">{decision["no_trade_reason"]}</div></div>', unsafe_allow_html=True)
     else:
+        # Show channel status
+        channel_status = decision.get("channel_status", "LOCKED")
+        if channel_status == "BUILDING":
+            st.markdown(f'''
+            <div class="alert-box alert-box-info" style="margin-bottom:20px;">
+                <div class="alert-icon-large">🔄</div>
+                <div class="alert-content">
+                    <div class="alert-title">CHANNEL BUILDING</div>
+                    <div class="alert-values" style="border:none;padding:0;margin-top:4px;">London session in progress • Channel locks at 5:30 AM CT</div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
         # PRIMARY TRADE
-        st.markdown('<div class="section-header"><div class="section-icon">◉</div><h2 class="section-title">PRIMARY Trade Setup</h2></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header"><div class="section-icon icon-rocket">🚀</div><h2 class="section-title">PRIMARY Trade Setup</h2></div>', unsafe_allow_html=True)
         
         p = decision["primary"]
         if p:
@@ -4104,9 +5553,42 @@ def main():
             with st.expander("📋 Trade Rationale"):
                 st.write(p["rationale"])
         
-        # SECONDARY TRADE
-        if decision["secondary"]:
-            st.markdown('<div class="section-header"><div class="section-icon">◌</div><h2 class="section-title">SECONDARY Trade Setup</h2></div>', unsafe_allow_html=True)
+        # ALTERNATE TRADE (If structure breaks)
+        if decision.get("alternate"):
+            st.markdown('<div class="section-header"><div class="section-icon">⚡</div><h2 class="section-title">ALTERNATE: If Structure Breaks</h2></div>', unsafe_allow_html=True)
+            a = decision["alternate"]
+            tc = "calls" if a["direction"] == "CALLS" else "puts"
+            di = "↗" if a["direction"] == "CALLS" else "↘"
+            t = a["targets"]
+            st.markdown(f'''
+            <div class="trade-card trade-card-{tc}" style="border-style: dashed;">
+                <div class="trade-header">
+                    <div class="trade-name">{di} {a["name"]}</div>
+                    <div class="trade-confidence trade-confidence-{a["confidence"].lower()}">{a["confidence"]} CONFIDENCE</div>
+                </div>
+                <div class="trade-contract trade-contract-{tc}">{a["contract"]}</div>
+                <div class="trade-grid">
+                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${a["entry_premium"]:.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{a["entry_level"]:,.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{a["stop_level"]:,.2f}</div></div>
+                </div>
+                <div class="trade-targets">
+                    <div class="targets-header">◎ Profit Targets</div>
+                    <div class="targets-grid">
+                        <div class="target-item"><div class="target-label">50%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">75%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>
+                        <div class="target-item"><div class="target-label">100%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>
+                    </div>
+                </div>
+                <div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{a["trigger"]}</div></div>
+            </div>
+            ''', unsafe_allow_html=True)
+            with st.expander("📋 Trade Rationale"):
+                st.write(a["rationale"])
+        
+        # SECONDARY TRADE (other side of channel)
+        if decision.get("secondary"):
+            st.markdown('<div class="section-header"><div class="section-icon icon-rotate">🔄</div><h2 class="section-title">SECONDARY Trade Setup</h2></div>', unsafe_allow_html=True)
             s = decision["secondary"]
             tc = "calls" if s["direction"] == "CALLS" else "puts"
             di = "↗" if s["direction"] == "CALLS" else "↘"
@@ -4140,23 +5622,23 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSIONS
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">◐</div><h2 class="section-title">Global Sessions</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><div class="section-icon">🌍</div><h2 class="section-title">Global Sessions</h2></div>', unsafe_allow_html=True)
     
-    session_data = [("🦘", "Sydney", sydney), ("🗼", "Tokyo", tokyo), ("🏛", "London", london), ("🌙", "Overnight", overnight)]
+    session_data = [("🦘", "Sydney", sydney, "icon-kangaroo"), ("🗼", "Tokyo", tokyo, ""), ("🏛", "London", london, ""), ("🌙", "Overnight", overnight, "icon-glow-purple")]
     cols = st.columns(4)
-    for i, (icon, name, data) in enumerate(session_data):
+    for i, (icon, name, data, anim_class) in enumerate(session_data):
         with cols[i]:
             if data:
                 h_mark = " ⬆" if upper_pivot and upper_pivot == data.get("high") else ""
                 l_mark = " ⬇" if lower_pivot and lower_pivot == data.get("low") else ""
-                st.markdown(f'<div class="session-card"><div class="session-icon">{icon}</div><div class="session-name">{name}</div><div class="session-data"><div class="session-value"><span style="color:var(--text-tertiary);">H</span><span class="session-high">{data["high"]:,.2f}{h_mark}</span></div><div class="session-value"><span style="color:var(--text-tertiary);">L</span><span class="session-low">{data["low"]:,.2f}{l_mark}</span></div></div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="session-card"><div class="session-icon {anim_class}">{icon}</div><div class="session-name">{name}</div><div class="session-data"><div class="session-value"><span style="color:var(--text-tertiary);">H</span><span class="session-high">{data["high"]:,.2f}{h_mark}</span></div><div class="session-value"><span style="color:var(--text-tertiary);">L</span><span class="session-low">{data["low"]:,.2f}{l_mark}</span></div></div></div>', unsafe_allow_html=True)
             else:
-                st.markdown(f'<div class="session-card" style="opacity:0.5;"><div class="session-icon">{icon}</div><div class="session-name">{name}</div><div class="session-data"><div style="color:var(--text-muted);font-size:0.85rem;">No data</div></div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="session-card" style="opacity:0.5;"><div class="session-icon {anim_class}">{icon}</div><div class="session-name">{name}</div><div class="session-data"><div style="color:var(--text-muted);font-size:0.85rem;">No data</div></div></div>', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
     # INDICATORS
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">◧</div><h2 class="section-title">Technical Indicators</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header"><div class="section-icon">📈</div><h2 class="section-title">Technical Indicators</h2></div>', unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -4174,7 +5656,7 @@ def main():
             st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📉</div><div class="indicator-title">VIX Overnight</div></div><div class="indicator-row"><span class="indicator-label">Current</span><span class="indicator-value">{vix}</span></div><div style="margin-top:8px;color:var(--text-muted);font-size:0.85rem;">Range data unavailable</div></div>', unsafe_allow_html=True)
     
     # Footer
-    st.markdown('<div style="margin-top:40px;padding:20px 0;border-top:1px solid var(--border-subtle);text-align:center;"><p style="font-family:\'JetBrains Mono\',monospace;font-size:0.75rem;color:var(--text-muted);letter-spacing:2px;">SPX PROPHET • STRUCTURAL 0DTE TRADING SYSTEM</p></div>', unsafe_allow_html=True)
+    st.markdown('<div style="margin-top:40px;padding:20px 0;border-top:1px solid var(--border-subtle);text-align:center;"><p style="font-family:\'Share Tech Mono\',monospace;font-size:0.75rem;color:var(--text-muted);letter-spacing:2px;">SPX PROPHET • STRUCTURAL 0DTE TRADING SYSTEM</p></div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
