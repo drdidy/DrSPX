@@ -268,6 +268,192 @@ def estimate_0dte_premium(spot, strike, hours_to_expiry, vix, opt_type):
     return max(round(premium, 2), 0.05)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# REAL SPX OPTIONS PREMIUM - Polygon API
+# ═══════════════════════════════════════════════════════════════════════════════
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_real_option_premium(strike, opt_type, trading_date):
+    """
+    Fetch REAL SPX 0DTE option premium from Polygon.
+    
+    Args:
+        strike: Strike price (e.g., 6050)
+        opt_type: "CALL" or "PUT"
+        trading_date: The trading date (for 0DTE expiry)
+    
+    Returns:
+        Dict with bid, ask, mid, last, delta (if available)
+    """
+    result = {
+        "available": False,
+        "bid": None,
+        "ask": None,
+        "mid": None,
+        "last": None,
+        "delta": None,
+        "underlying_price": None,
+        "ticker": None,
+        "error": None
+    }
+    
+    try:
+        # SPX options ticker format: O:SPXW{YYMMDD}{C/P}{STRIKE}
+        # Strike format: 8 digits, price * 1000, zero-padded
+        # Example: Strike 6050 -> 06050000 (6050.000)
+        date_str = trading_date.strftime("%y%m%d")
+        opt_letter = "C" if opt_type == "CALL" else "P"
+        
+        # Strike with 3 implied decimal places, 8 digits total
+        strike_int = int(strike * 1000)
+        strike_str = f"{strike_int:08d}"
+        
+        # The ticker includes SPXW but we query using SPX as underlying
+        ticker = f"O:SPXW{date_str}{opt_letter}{strike_str}"
+        result["ticker"] = ticker
+        
+        # Method 1: Use the universal snapshot endpoint with just the ticker
+        # This doesn't require specifying underlying
+        url = f"{POLYGON_BASE_URL}/v3/snapshot?ticker.any_of={ticker}"
+        params = {"apiKey": POLYGON_API_KEY}
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("results") and len(data["results"]) > 0:
+                r = data["results"][0]
+                
+                # Get quote data from session
+                if r.get("session"):
+                    session = r["session"]
+                    result["last"] = session.get("close") or session.get("previous_close")
+                
+                # Get quote data
+                if r.get("last_quote"):
+                    q = r["last_quote"]
+                    result["bid"] = q.get("bid")
+                    result["ask"] = q.get("ask")
+                    if result["bid"] and result["ask"]:
+                        result["mid"] = round((result["bid"] + result["ask"]) / 2, 2)
+                
+                # Get last trade
+                if r.get("last_trade"):
+                    result["last"] = r["last_trade"].get("price")
+                
+                # Get Greeks
+                if r.get("greeks"):
+                    result["delta"] = r["greeks"].get("delta")
+                
+                # Get underlying price
+                if r.get("underlying_asset"):
+                    result["underlying_price"] = r["underlying_asset"].get("price")
+                
+                result["available"] = result["mid"] is not None or result["last"] is not None
+                return result
+        
+        # Method 2: Try last trade endpoint directly
+        url = f"{POLYGON_BASE_URL}/v2/last/trade/{ticker}"
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("results"):
+                result["last"] = data["results"].get("price") or data["results"].get("p")
+                result["available"] = result["last"] is not None
+                return result
+        
+        # Method 3: Try quotes endpoint
+        url = f"{POLYGON_BASE_URL}/v3/quotes/{ticker}"
+        params["limit"] = 1
+        params["order"] = "desc"
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("results") and len(data["results"]) > 0:
+                q = data["results"][0]
+                result["bid"] = q.get("bid_price")
+                result["ask"] = q.get("ask_price")
+                if result["bid"] and result["ask"]:
+                    result["mid"] = round((result["bid"] + result["ask"]) / 2, 2)
+                    result["available"] = True
+                    return result
+        
+        result["error"] = f"No data found for {ticker}"
+            
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+def calculate_premium_at_entry(current_premium, current_spx, entry_spx, strike, opt_type, delta=None):
+    """
+    Calculate what an option premium will be when SPX reaches entry level.
+    
+    For CALLS at ascending floor:
+    - SPX drops to floor → CALL premium DECREASES (cheaper entry!)
+    
+    For PUTS at descending ceiling:
+    - SPX rises to ceiling → PUT premium DECREASES (cheaper entry!)
+    
+    Uses delta approximation: ΔPremium ≈ delta × ΔSPX
+    
+    Args:
+        current_premium: Current option price
+        current_spx: Current SPX price
+        entry_spx: Entry level (floor for calls, ceiling for puts)
+        strike: Option strike
+        opt_type: "CALL" or "PUT"
+        delta: Option delta (if available, otherwise estimate)
+    
+    Returns:
+        Estimated premium at entry level
+    """
+    if current_premium is None or current_spx is None or entry_spx is None:
+        return None
+    
+    spx_move = entry_spx - current_spx  # Negative if dropping to floor, positive if rising to ceiling
+    
+    # Estimate delta if not provided
+    if delta is None:
+        # Rough delta estimate based on moneyness
+        if opt_type == "CALL":
+            otm = strike - current_spx
+            if otm <= 0:  # ITM
+                delta = 0.60
+            elif otm <= 10:
+                delta = 0.45
+            elif otm <= 20:
+                delta = 0.30
+            elif otm <= 30:
+                delta = 0.20
+            else:
+                delta = 0.10
+        else:  # PUT
+            otm = current_spx - strike
+            if otm <= 0:  # ITM
+                delta = -0.60
+            elif otm <= 10:
+                delta = -0.45
+            elif otm <= 20:
+                delta = -0.30
+            elif otm <= 30:
+                delta = -0.20
+            else:
+                delta = -0.10
+    
+    # Premium change = delta × SPX move
+    # For calls: if SPX drops (negative move), premium drops (delta positive)
+    # For puts: if SPX rises (positive move), premium drops (delta negative)
+    premium_change = delta * spx_move
+    
+    # New premium (with floor of $0.05)
+    new_premium = max(0.05, current_premium + premium_change)
+    
+    return round(new_premium, 2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # DATA FETCHING - Yahoo Finance
 # ═══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=60, show_spinner=False)
@@ -1065,11 +1251,14 @@ def validate_and_adjust_pivots(channel_type, upper_pivot, lower_pivot, upper_tim
                                 sessions_data, ref_time):
     """
     Validate that no price broke through the projected channel lines during building phase.
-    If price broke through, adjust the pivot to the new extreme.
+    If price broke through, adjust the pivot to the new extreme BUT ALSO TRACK THE ORIGINAL.
     
     Rule: No price can exist outside the channel before 5:30 AM lock.
     - If price broke BELOW ascending floor line → new lower_pivot = that low
     - If price broke ABOVE descending ceiling line → new upper_pivot = that high
+    
+    IMPORTANT: We track BOTH because the market often respects the ORIGINAL level
+    even after an overnight "break" (like today's Sydney floor example).
     
     Args:
         channel_type: ASCENDING, DESCENDING, MIXED, etc.
@@ -1079,11 +1268,39 @@ def validate_and_adjust_pivots(channel_type, upper_pivot, lower_pivot, upper_tim
         ref_time: Reference time for projection
     
     Returns:
-        Adjusted (upper_pivot, lower_pivot, upper_time, lower_time)
+        Dict with both original and adjusted pivots:
+        {
+            "upper_pivot": adjusted_upper,
+            "lower_pivot": adjusted_lower,
+            "upper_time": adjusted_upper_time,
+            "lower_time": adjusted_lower_time,
+            "original_upper_pivot": original_upper,
+            "original_lower_pivot": original_lower,
+            "original_upper_time": original_upper_time,
+            "original_lower_time": original_lower_time,
+            "floor_was_adjusted": bool,
+            "ceiling_was_adjusted": bool,
+            "adjustment_session": which session caused the adjustment
+        }
     """
     
+    result = {
+        "upper_pivot": upper_pivot,
+        "lower_pivot": lower_pivot,
+        "upper_time": upper_time,
+        "lower_time": lower_time,
+        "original_upper_pivot": upper_pivot,
+        "original_lower_pivot": lower_pivot,
+        "original_upper_time": upper_time,
+        "original_lower_time": lower_time,
+        "floor_was_adjusted": False,
+        "ceiling_was_adjusted": False,
+        "floor_adjustment_session": None,
+        "ceiling_adjustment_session": None,
+    }
+    
     if not sessions_data or channel_type in [ChannelType.UNDETERMINED, ChannelType.CONTRACTING]:
-        return upper_pivot, lower_pivot, upper_time, lower_time
+        return result
     
     # Collect all session lows and highs with their times
     all_lows = []
@@ -1112,6 +1329,8 @@ def validate_and_adjust_pivots(channel_type, upper_pivot, lower_pivot, upper_tim
                 if low_price < projected_floor:
                     adjusted_lower = low_price
                     adjusted_lower_time = low_time_val
+                    result["floor_was_adjusted"] = True
+                    result["floor_adjustment_session"] = session_name
     
     # For DESCENDING channel: Check if any price broke above the descending ceiling line
     elif channel_type == ChannelType.DESCENDING:
@@ -1125,6 +1344,8 @@ def validate_and_adjust_pivots(channel_type, upper_pivot, lower_pivot, upper_tim
                 if high_price > projected_ceiling:
                     adjusted_upper = high_price
                     adjusted_upper_time = high_time_val
+                    result["ceiling_was_adjusted"] = True
+                    result["ceiling_adjustment_session"] = session_name
     
     # For MIXED channel: Check both directions
     elif channel_type == ChannelType.MIXED:
@@ -1136,6 +1357,8 @@ def validate_and_adjust_pivots(channel_type, upper_pivot, lower_pivot, upper_tim
                 if low_price < projected_floor:
                     adjusted_lower = low_price
                     adjusted_lower_time = low_time_val
+                    result["floor_was_adjusted"] = True
+                    result["floor_adjustment_session"] = session_name
         
         # Check descending ceiling breaks
         for high_price, high_time_val, session_name in all_highs:
@@ -1145,8 +1368,15 @@ def validate_and_adjust_pivots(channel_type, upper_pivot, lower_pivot, upper_tim
                 if high_price > projected_ceiling:
                     adjusted_upper = high_price
                     adjusted_upper_time = high_time_val
+                    result["ceiling_was_adjusted"] = True
+                    result["ceiling_adjustment_session"] = session_name
     
-    return adjusted_upper, adjusted_lower, adjusted_upper_time, adjusted_lower_time
+    result["upper_pivot"] = adjusted_upper
+    result["lower_pivot"] = adjusted_lower
+    result["upper_time"] = adjusted_upper_time
+    result["lower_time"] = adjusted_lower_time
+    
+    return result
 
 
 def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time, channel_type):
@@ -4962,15 +5192,37 @@ def main():
     channel_type, channel_reason, upper_pivot, lower_pivot, upper_time, lower_time = determine_channel(sydney, tokyo, london)
     
     # Validate and adjust pivots - ensure no price broke through projected lines during building
+    # This also tracks ORIGINAL pivots for cases like today where market respects original level
     sessions_data = {"sydney": sydney, "tokyo": tokyo, "london": london}
     ref_time_dt = CT.localize(datetime.combine(actual_trading_date, time(*inputs["ref_time"])))
-    upper_pivot, lower_pivot, upper_time, lower_time = validate_and_adjust_pivots(
+    pivot_validation = validate_and_adjust_pivots(
         channel_type, upper_pivot, lower_pivot, upper_time, lower_time, 
         sessions_data, ref_time_dt
     )
     
-    # Calculate channel levels with validated pivots
+    # Extract adjusted pivots (these are used for channel calculation)
+    upper_pivot = pivot_validation["upper_pivot"]
+    lower_pivot = pivot_validation["lower_pivot"]
+    upper_time = pivot_validation["upper_time"]
+    lower_time = pivot_validation["lower_time"]
+    
+    # Also store original pivots for display
+    original_upper_pivot = pivot_validation["original_upper_pivot"]
+    original_lower_pivot = pivot_validation["original_lower_pivot"]
+    original_upper_time = pivot_validation["original_upper_time"]
+    original_lower_time = pivot_validation["original_lower_time"]
+    floor_was_adjusted = pivot_validation["floor_was_adjusted"]
+    ceiling_was_adjusted = pivot_validation["ceiling_was_adjusted"]
+    floor_adjustment_session = pivot_validation["floor_adjustment_session"]
+    ceiling_adjustment_session = pivot_validation["ceiling_adjustment_session"]
+    
+    # Calculate channel levels with validated (adjusted) pivots
     ceiling_es, floor_es = calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time_dt, channel_type)
+    
+    # Also calculate ORIGINAL channel levels (before adjustment)
+    original_ceiling_es, original_floor_es = calc_channel_levels(
+        original_upper_pivot, original_lower_pivot, original_upper_time, original_lower_time, ref_time_dt, channel_type
+    )
     
     if ceiling_es is None:
         ceiling_es, floor_es = 6080, 6040
@@ -4979,10 +5231,19 @@ def main():
     floor_spx = round(floor_es - offset, 2)
     position = get_position(current_es, ceiling_es, floor_es)
     
+    # Original levels in SPX (for display when adjusted)
+    original_ceiling_spx = round(original_ceiling_es - offset, 2) if original_ceiling_es else ceiling_spx
+    original_floor_spx = round(original_floor_es - offset, 2) if original_floor_es else floor_spx
+    
     # ─────────────────────────────────────────────────────────────────────────
     # DUAL CHANNEL LEVELS (Option C - Always show BOTH ascending and descending)
     # ─────────────────────────────────────────────────────────────────────────
     dual_levels_es = calc_dual_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time_dt)
+    
+    # Also calculate ORIGINAL dual levels
+    original_dual_levels_es = calc_dual_channel_levels(
+        original_upper_pivot, original_lower_pivot, original_upper_time, original_lower_time, ref_time_dt
+    )
     
     # Convert to SPX
     dual_levels_spx = None
@@ -4996,7 +5257,18 @@ def main():
             "overnight_low": dual_levels_es["overnight_low"],
             "blocks_high": dual_levels_es["blocks_high"],
             "blocks_low": dual_levels_es["blocks_low"],
+            # Add original levels if adjusted
+            "floor_was_adjusted": floor_was_adjusted,
+            "ceiling_was_adjusted": ceiling_was_adjusted,
+            "floor_adjustment_session": floor_adjustment_session,
+            "ceiling_adjustment_session": ceiling_adjustment_session,
         }
+        
+        # Add original levels if they were adjusted
+        if floor_was_adjusted and original_dual_levels_es:
+            dual_levels_spx["original_asc_floor"] = round(original_dual_levels_es["asc_floor"] - offset, 2)
+        if ceiling_was_adjusted and original_dual_levels_es:
+            dual_levels_spx["original_desc_ceiling"] = round(original_dual_levels_es["desc_ceiling"] - offset, 2)
     
     # Calculate prior day targets (both ascending and descending from each anchor)
     prior_targets = calc_prior_day_targets(prior_rth, ref_time_dt)
@@ -5267,13 +5539,66 @@ def main():
         # Position summary
         st.markdown(f'<div class="levels-container"><div style="padding:14px 16px;background:linear-gradient(90deg,var(--bg-elevated) 0%,transparent 100%);border-radius:10px;margin-bottom:16px;border-left:4px solid var(--accent-cyan);"><span style="font-family:Share Tech Mono,monospace;font-size:0.9rem;color:var(--text-primary);">{pos_summary}</span></div></div>', unsafe_allow_html=True)
         
+        # Check if floor or ceiling was adjusted
+        floor_adjusted = dual_levels_spx.get("floor_was_adjusted", False)
+        ceiling_adjusted = dual_levels_spx.get("ceiling_was_adjusted", False)
+        original_asc_floor = dual_levels_spx.get("original_asc_floor")
+        original_desc_ceiling = dual_levels_spx.get("original_desc_ceiling")
+        floor_adj_session = (dual_levels_spx.get("floor_adjustment_session") or "").upper()
+        ceiling_adj_session = (dual_levels_spx.get("ceiling_adjustment_session") or "").upper()
+        
+        # Show adjustment alert if floor was adjusted
+        if floor_adjusted and original_asc_floor:
+            st.markdown(f'''
+            <div class="alert-box alert-box-info" style="margin-bottom:16px;">
+                <span class="alert-icon">🔄</span>
+                <div class="alert-content">
+                    <div class="alert-title">Floor Adjusted by {floor_adj_session}</div>
+                    <div class="alert-text">Original floor: {original_asc_floor:,.2f} → Adjusted floor: {asc_floor:,.2f}<br>
+                    <strong>Note:</strong> Market may still respect original level (like today!)</div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        if ceiling_adjusted and original_desc_ceiling:
+            st.markdown(f'''
+            <div class="alert-box alert-box-info" style="margin-bottom:16px;">
+                <span class="alert-icon">🔄</span>
+                <div class="alert-content">
+                    <div class="alert-title">Ceiling Adjusted by {ceiling_adj_session}</div>
+                    <div class="alert-text">Original ceiling: {original_desc_ceiling:,.2f} → Adjusted ceiling: {desc_ceiling:,.2f}<br>
+                    <strong>Note:</strong> Market may still respect original level!</div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
         # Ascending Channel Header
         asc_label = "↗ ASCENDING CHANNEL (DOMINANT)" if is_ascending else "↗ ASCENDING CHANNEL"
         st.markdown(f'<div style="font-size:0.8rem;color:var(--bull);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px 0;font-weight:600;">{asc_label}</div>', unsafe_allow_html=True)
         
-        # Ascending Floor Row
+        # Ascending Floor Row - show BOTH if adjusted
         if is_ascending:
-            st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bull);"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+            if floor_adjusted and original_asc_floor:
+                # Show both original and adjusted
+                dist_original = current_spx - original_asc_floor
+                st.markdown(f'''
+                <div class="levels-container" style="border-left:3px solid var(--bull);">
+                    <div class="level-row">
+                        <div class="level-label floor"><span>▼</span><span>ASC FLOOR (ADJ)</span></div>
+                        <div class="level-value floor">{asc_floor:,.2f}</div>
+                        <div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div>
+                    </div>
+                </div>
+                <div class="levels-container" style="border-left:3px dashed var(--accent-gold);margin-top:-8px;opacity:0.85;">
+                    <div class="level-row">
+                        <div class="level-label" style="color:var(--accent-gold);"><span>▼</span><span>ORIGINAL FLOOR</span></div>
+                        <div class="level-value" style="color:var(--accent-gold);">{original_asc_floor:,.2f}</div>
+                        <div class="level-note" style="color:var(--accent-gold);">May still act as support • {dist_original:+.1f} pts</div>
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bull);"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="levels-container" style="opacity:0.7;"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
         
@@ -5287,9 +5612,29 @@ def main():
         desc_label = "↘ DESCENDING CHANNEL (DOMINANT)" if is_descending else "↘ DESCENDING CHANNEL"
         st.markdown(f'<div style="font-size:0.8rem;color:var(--bear);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px 0;font-weight:600;">{desc_label}</div>', unsafe_allow_html=True)
         
-        # Descending Ceiling Row
+        # Descending Ceiling Row - show BOTH if adjusted
         if is_descending:
-            st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bear);"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+            if ceiling_adjusted and original_desc_ceiling:
+                # Show both original and adjusted
+                dist_original = current_spx - original_desc_ceiling
+                st.markdown(f'''
+                <div class="levels-container" style="border-left:3px solid var(--bear);">
+                    <div class="level-row">
+                        <div class="level-label ceiling"><span>▲</span><span>DESC CEIL (ADJ)</span></div>
+                        <div class="level-value ceiling">{desc_ceiling:,.2f}</div>
+                        <div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div>
+                    </div>
+                </div>
+                <div class="levels-container" style="border-left:3px dashed var(--accent-gold);margin-top:-8px;opacity:0.85;">
+                    <div class="level-row">
+                        <div class="level-label" style="color:var(--accent-gold);"><span>▲</span><span>ORIGINAL CEIL</span></div>
+                        <div class="level-value" style="color:var(--accent-gold);">{original_desc_ceiling:,.2f}</div>
+                        <div class="level-note" style="color:var(--accent-gold);">May still act as resistance • {dist_original:+.1f} pts</div>
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bear);"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="levels-container" style="opacity:0.7;"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
         
@@ -5475,6 +5820,11 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════════
     # TRADE SETUPS (Option C - Primary + Secondary)
     # ═══════════════════════════════════════════════════════════════════════════
+    
+    # Check if we're in RTH (8:30 AM - 3:00 PM CT) for real premium fetching
+    ct_now = datetime.now(CT)
+    is_rth = 8.5 <= (ct_now.hour + ct_now.minute/60) < 15  # 8:30 AM to 3:00 PM
+    
     if decision["no_trade"]:
         st.markdown('<div class="section-header"><div class="section-icon">🎲</div><h2 class="section-title">Trade Setup</h2></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="no-trade-card"><div class="no-trade-icon">⊘</div><div class="no-trade-title">NO TRADE</div><div class="no-trade-reason">{decision["no_trade_reason"]}</div></div>', unsafe_allow_html=True)
@@ -5492,23 +5842,158 @@ def main():
             </div>
             ''', unsafe_allow_html=True)
         
+        # Function to get real or estimated premium for a trade
+        def get_trade_premium(trade, current_spx, trading_date, is_rth):
+            """Get real premium during RTH, with logic for trade status."""
+            if not trade:
+                return trade
+            
+            strike = trade["strike"]
+            opt_type = "CALL" if trade["direction"] == "CALLS" else "PUT"
+            entry_level = trade["entry_level"]
+            
+            # Determine if trade has already triggered
+            # For CALLS: Trade triggers when price drops TO the floor (entry), then rises
+            #            If current price > entry, we're either approaching or past target
+            # For PUTS: Trade triggers when price rises TO the ceiling (entry), then drops
+            #            If current price < entry, the trade has triggered and is in profit
+            
+            if opt_type == "CALL":
+                trade_triggered = current_spx > entry_level  # Price above entry = either not reached or past
+                # Actually for calls at floor: price drops to floor, then rises
+                # If price is BELOW floor, trade hasn't triggered yet (approaching)
+                # If price is ABOVE floor, either: never reached floor, or reached and bounced
+                # We need to check if price is moving toward or away from entry
+                trade_triggered = False  # For calls, we calculate entry premium (price dropping to floor)
+                
+            else:  # PUT
+                # For puts at ceiling: price rises to ceiling, then drops
+                # If current price < entry level, the trade has TRIGGERED (price dropped below entry)
+                trade_triggered = current_spx < entry_level
+            
+            if is_rth and current_spx:
+                # Fetch real premium from Polygon
+                real_data = fetch_real_option_premium(strike, opt_type, trading_date)
+                
+                # Store debug info
+                trade = trade.copy()
+                trade["polygon_ticker"] = real_data.get("ticker")
+                trade["polygon_error"] = real_data.get("error")
+                trade["polygon_available"] = real_data.get("available")
+                trade["polygon_bid"] = real_data.get("bid")
+                trade["polygon_ask"] = real_data.get("ask")
+                trade["polygon_mid"] = real_data.get("mid")
+                trade["polygon_last"] = real_data.get("last")
+                trade["polygon_delta"] = real_data.get("delta")
+                
+                if real_data["available"]:
+                    current_premium = real_data["mid"] or real_data["last"]
+                    delta = real_data["delta"]
+                    underlying = real_data["underlying_price"] or current_spx
+                    
+                    # Store for debug
+                    trade["calc_current_premium"] = current_premium
+                    trade["calc_underlying"] = underlying
+                    trade["calc_entry_level"] = entry_level
+                    trade["calc_delta_used"] = delta
+                    trade["trade_triggered"] = trade_triggered
+                    
+                    if trade_triggered:
+                        # Trade has already triggered! Show current premium, not projected entry
+                        trade["real_premium"] = True
+                        trade["trade_status"] = "TRIGGERED"
+                        trade["current_premium"] = current_premium
+                        trade["current_spx"] = underlying
+                        # Don't update entry_premium - keep the estimated one for reference
+                        # But mark that we have live data
+                        trade["live_current_premium"] = current_premium
+                        
+                        # Calculate profit from estimated entry to current
+                        est_entry = trade["entry_premium"]
+                        if est_entry and current_premium:
+                            profit_pct = ((current_premium - est_entry) / est_entry) * 100
+                            profit_dollars = (current_premium - est_entry) * 100
+                            trade["current_profit_pct"] = round(profit_pct, 1)
+                            trade["current_profit_dollars"] = round(profit_dollars, 0)
+                    else:
+                        # Trade not yet triggered - calculate projected entry premium
+                        entry_premium = calculate_premium_at_entry(
+                            current_premium, underlying, entry_level, strike, opt_type, delta
+                        )
+                        
+                        trade["calc_result"] = entry_premium
+                        trade["trade_status"] = "PENDING"
+                        
+                        if entry_premium:
+                            # Update trade with real premium data
+                            trade["entry_premium"] = entry_premium
+                            trade["real_premium"] = True
+                            trade["current_premium"] = current_premium
+                            trade["current_spx"] = underlying
+                            
+                            # Recalculate targets based on projected entry
+                            t1 = round(entry_premium * 1.50, 2)
+                            t2 = round(entry_premium * 1.75, 2)
+                            t3 = round(entry_premium * 2.00, 2)
+                            trade["targets"] = {
+                                "t1": {"price": t1, "profit_pct": 50, "profit_dollars": round((t1 - entry_premium) * 100, 0)},
+                                "t2": {"price": t2, "profit_pct": 75, "profit_dollars": round((t2 - entry_premium) * 100, 0)},
+                                "t3": {"price": t3, "profit_pct": 100, "profit_dollars": round((t3 - entry_premium) * 100, 0)},
+                            }
+            
+            return trade
+        
+        # Update primary trade with real premium if in RTH
+        p = get_trade_premium(decision["primary"], current_spx, actual_trading_date, is_rth)
+        
         # PRIMARY TRADE
         st.markdown('<div class="section-header"><div class="section-icon icon-rocket">🚀</div><h2 class="section-title">PRIMARY Trade Setup</h2></div>', unsafe_allow_html=True)
         
-        p = decision["primary"]
         if p:
             tc = "calls" if p["direction"] == "CALLS" else "puts"
             di = "↗" if p["direction"] == "CALLS" else "↘"
             t = p["targets"]
+            
+            # Determine display based on trade status
+            trade_status = p.get("trade_status", "PENDING")
+            
+            if trade_status == "TRIGGERED" and p.get("live_current_premium"):
+                # Trade has triggered - show current premium and profit
+                premium_label = "Current Premium (LIVE)"
+                current_prem = p["live_current_premium"]
+                profit_pct = p.get("current_profit_pct", 0)
+                profit_dollars = p.get("current_profit_dollars", 0)
+                profit_color = "var(--bull)" if profit_pct >= 0 else "var(--bear)"
+                profit_sign = "+" if profit_pct >= 0 else ""
+                premium_note = f'<div style="font-size:0.7rem;color:{profit_color};margin-top:4px;font-weight:600;">P/L: {profit_sign}{profit_pct:.1f}% ({profit_sign}${profit_dollars:,.0f})</div>'
+                premium_value = current_prem
+                # Show TRIGGERED badge
+                status_badge = '<div style="background:var(--bull);color:#000;padding:4px 12px;border-radius:20px;font-size:0.7rem;font-weight:700;display:inline-block;margin-bottom:8px;">✓ TRADE TRIGGERED</div>'
+            elif p.get("real_premium"):
+                # Trade pending - show projected entry premium
+                premium_label = "Entry Premium (LIVE)"
+                premium_value = p["entry_premium"]
+                premium_note = f'<div style="font-size:0.7rem;color:var(--accent-cyan);margin-top:4px;">Current: ${p["current_premium"]:.2f} @ SPX {p["current_spx"]:,.0f}</div>'
+                status_badge = ""
+            else:
+                premium_label = "Entry Premium (EST)"
+                premium_value = p["entry_premium"]
+                premium_note = ""
+                status_badge = ""
+                # Show debug info if we tried to fetch but failed
+                if p.get("polygon_ticker"):
+                    premium_note = f'<div style="font-size:0.65rem;color:var(--text-muted);margin-top:4px;">Polygon: {p.get("polygon_error", "No data")}</div>'
+            
             st.markdown(f'''
             <div class="trade-card trade-card-{tc}">
                 <div class="trade-header">
                     <div class="trade-name">{di} {p["name"]}</div>
                     <div class="trade-confidence trade-confidence-{p["confidence"].lower()}">{p["confidence"]} CONFIDENCE</div>
                 </div>
+                {status_badge}
                 <div class="trade-contract trade-contract-{tc}">{p["contract"]}</div>
                 <div class="trade-grid">
-                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${p["entry_premium"]:.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">{premium_label}</div><div class="trade-metric-value">${premium_value:.2f}</div>{premium_note}</div>
                     <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{p["entry_level"]:,.2f}</div></div>
                     <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{p["stop_level"]:,.2f}</div></div>
                 </div>
@@ -5525,23 +6010,71 @@ def main():
             ''', unsafe_allow_html=True)
             with st.expander("📋 Trade Rationale"):
                 st.write(p["rationale"])
+            # Debug: Show Polygon API details during RTH
+            if is_rth and p.get("polygon_ticker"):
+                with st.expander("🔧 Polygon API Debug"):
+                    debug_text = f"""Ticker: {p.get('polygon_ticker')}
+Available: {p.get('polygon_available')}
+Error: {p.get('polygon_error')}
+
+--- Raw Data ---
+Bid: {p.get('polygon_bid')}
+Ask: {p.get('polygon_ask')}
+Mid: {p.get('polygon_mid')}
+Last: {p.get('polygon_last')}
+Delta: {p.get('polygon_delta')}
+
+--- Calculation ---
+Current Premium: {p.get('calc_current_premium')}
+Current SPX: {p.get('calc_underlying')}
+Entry Level: {p.get('calc_entry_level')}
+Delta Used: {p.get('calc_delta_used')}
+Calculated Entry Premium: {p.get('calc_result')}
+"""
+                    st.code(debug_text)
         
         # ALTERNATE TRADE (If structure breaks)
         if decision.get("alternate"):
+            a = get_trade_premium(decision["alternate"], current_spx, actual_trading_date, is_rth)
             st.markdown('<div class="section-header"><div class="section-icon">⚡</div><h2 class="section-title">ALTERNATE: If Structure Breaks</h2></div>', unsafe_allow_html=True)
-            a = decision["alternate"]
             tc = "calls" if a["direction"] == "CALLS" else "puts"
             di = "↗" if a["direction"] == "CALLS" else "↘"
             t = a["targets"]
+            
+            # Determine display based on trade status
+            trade_status = a.get("trade_status", "PENDING")
+            
+            if trade_status == "TRIGGERED" and a.get("live_current_premium"):
+                premium_label = "Current Premium (LIVE)"
+                current_prem = a["live_current_premium"]
+                profit_pct = a.get("current_profit_pct", 0)
+                profit_dollars = a.get("current_profit_dollars", 0)
+                profit_color = "var(--bull)" if profit_pct >= 0 else "var(--bear)"
+                profit_sign = "+" if profit_pct >= 0 else ""
+                premium_note = f'<div style="font-size:0.7rem;color:{profit_color};margin-top:4px;font-weight:600;">P/L: {profit_sign}{profit_pct:.1f}% ({profit_sign}${profit_dollars:,.0f})</div>'
+                premium_value = current_prem
+                status_badge = '<div style="background:var(--bull);color:#000;padding:4px 12px;border-radius:20px;font-size:0.7rem;font-weight:700;display:inline-block;margin-bottom:8px;">✓ TRADE TRIGGERED</div>'
+            elif a.get("real_premium"):
+                premium_label = "Entry Premium (LIVE)"
+                premium_value = a["entry_premium"]
+                premium_note = f'<div style="font-size:0.7rem;color:var(--accent-cyan);margin-top:4px;">Current: ${a["current_premium"]:.2f} @ SPX {a["current_spx"]:,.0f}</div>'
+                status_badge = ""
+            else:
+                premium_label = "Entry Premium (EST)"
+                premium_value = a["entry_premium"]
+                premium_note = ""
+                status_badge = ""
+            
             st.markdown(f'''
             <div class="trade-card trade-card-{tc}" style="border-style: dashed;">
                 <div class="trade-header">
                     <div class="trade-name">{di} {a["name"]}</div>
                     <div class="trade-confidence trade-confidence-{a["confidence"].lower()}">{a["confidence"]} CONFIDENCE</div>
                 </div>
+                {status_badge}
                 <div class="trade-contract trade-contract-{tc}">{a["contract"]}</div>
                 <div class="trade-grid">
-                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${a["entry_premium"]:.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">{premium_label}</div><div class="trade-metric-value">${premium_value:.2f}</div>{premium_note}</div>
                     <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{a["entry_level"]:,.2f}</div></div>
                     <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{a["stop_level"]:,.2f}</div></div>
                 </div>
@@ -5561,20 +6094,46 @@ def main():
         
         # SECONDARY TRADE (other side of channel)
         if decision.get("secondary"):
+            s = get_trade_premium(decision["secondary"], current_spx, actual_trading_date, is_rth)
             st.markdown('<div class="section-header"><div class="section-icon icon-rotate">🔄</div><h2 class="section-title">SECONDARY Trade Setup</h2></div>', unsafe_allow_html=True)
-            s = decision["secondary"]
             tc = "calls" if s["direction"] == "CALLS" else "puts"
             di = "↗" if s["direction"] == "CALLS" else "↘"
             t = s["targets"]
+            
+            # Determine display based on trade status
+            trade_status = s.get("trade_status", "PENDING")
+            
+            if trade_status == "TRIGGERED" and s.get("live_current_premium"):
+                premium_label = "Current Premium (LIVE)"
+                current_prem = s["live_current_premium"]
+                profit_pct = s.get("current_profit_pct", 0)
+                profit_dollars = s.get("current_profit_dollars", 0)
+                profit_color = "var(--bull)" if profit_pct >= 0 else "var(--bear)"
+                profit_sign = "+" if profit_pct >= 0 else ""
+                premium_note = f'<div style="font-size:0.7rem;color:{profit_color};margin-top:4px;font-weight:600;">P/L: {profit_sign}{profit_pct:.1f}% ({profit_sign}${profit_dollars:,.0f})</div>'
+                premium_value = current_prem
+                status_badge = '<div style="background:var(--bull);color:#000;padding:4px 12px;border-radius:20px;font-size:0.7rem;font-weight:700;display:inline-block;margin-bottom:8px;">✓ TRADE TRIGGERED</div>'
+            elif s.get("real_premium"):
+                premium_label = "Entry Premium (LIVE)"
+                premium_value = s["entry_premium"]
+                premium_note = f'<div style="font-size:0.7rem;color:var(--accent-cyan);margin-top:4px;">Current: ${s["current_premium"]:.2f} @ SPX {s["current_spx"]:,.0f}</div>'
+                status_badge = ""
+            else:
+                premium_label = "Entry Premium (EST)"
+                premium_value = s["entry_premium"]
+                premium_note = ""
+                status_badge = ""
+            
             st.markdown(f'''
             <div class="trade-card trade-card-{tc}" style="opacity: 0.85;">
                 <div class="trade-header">
                     <div class="trade-name">{di} {s["name"]}</div>
                     <div class="trade-confidence trade-confidence-{s["confidence"].lower()}">{s["confidence"]} CONFIDENCE</div>
                 </div>
+                {status_badge}
                 <div class="trade-contract trade-contract-{tc}">{s["contract"]}</div>
                 <div class="trade-grid">
-                    <div class="trade-metric"><div class="trade-metric-label">Entry Premium</div><div class="trade-metric-value">${s["entry_premium"]:.2f}</div></div>
+                    <div class="trade-metric"><div class="trade-metric-label">{premium_label}</div><div class="trade-metric-value">${premium_value:.2f}</div>{premium_note}</div>
                     <div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{s["entry_level"]:,.2f}</div></div>
                     <div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{s["stop_level"]:,.2f}</div></div>
                 </div>
