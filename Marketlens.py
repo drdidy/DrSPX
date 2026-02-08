@@ -686,6 +686,435 @@ def get_dxlink_credentials():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# VIX CHANNEL SYSTEM - The Alternating Channel Strategy
+# ═══════════════════════════════════════════════════════════════════════════════
+# 
+# VIX channels ALTERNATE daily: Ascending → Descending → Ascending
+# This is FIXED and independent of how SPX channels are determined
+#
+# Key Parameters:
+# - Slope: 0.04 per 6 30-minute blocks (0.04 every 3 hours)
+# - Channel drawn: 5 PM - 5:30 AM CT using highest/lowest pivots
+# - All prices must stay within channel
+#
+# Trading Logic:
+# - Opens IN channel → Trade bounces at floor/ceiling
+# - Breaks channel → EXPLOSIVE move, wait for 8:30 AM retest springboard
+#   - Breaks ABOVE ascending ceiling → VIX springboard UP → SELL SPX
+#   - Breaks BELOW descending floor → VIX springboard DOWN → BUY SPX
+# ═══════════════════════════════════════════════════════════════════════════════
+
+VIX_SLOPE_PER_6_BLOCKS = 0.04  # VIX moves 0.04 per 6 30-minute blocks (3 hours)
+VIX_SLOPE_PER_BLOCK = VIX_SLOPE_PER_6_BLOCKS / 6  # ~0.00667 per 30-min block
+
+class VIXChannelType(Enum):
+    ASCENDING = "ASCENDING"
+    DESCENDING = "DESCENDING"
+
+class VIXChannelStatus(Enum):
+    IN_CHANNEL = "IN_CHANNEL"
+    BROKE_ABOVE = "BROKE_ABOVE"
+    BROKE_BELOW = "BROKE_BELOW"
+    RETESTING_CEILING = "RETESTING_CEILING"
+    RETESTING_FLOOR = "RETESTING_FLOOR"
+    SPRINGBOARD_LONG_VIX = "SPRINGBOARD_LONG_VIX"  # VIX up = SPX down
+    SPRINGBOARD_SHORT_VIX = "SPRINGBOARD_SHORT_VIX"  # VIX down = SPX up
+
+def get_vix_channel_type_for_date(trading_date: date) -> VIXChannelType:
+    """
+    Determine if today is Ascending or Descending VIX channel.
+    Channels alternate daily - we use a reference date to track the pattern.
+    
+    Based on user input: Thursday Feb 6 = Ascending, Friday Feb 7 = Descending
+    So we use Feb 6, 2025 as ASCENDING reference.
+    """
+    # Reference: February 6, 2025 (Thursday) was ASCENDING
+    # Actually user said Feb 5 was ascending, Feb 6 was descending
+    # Let me use Feb 5, 2025 as ASCENDING reference
+    reference_date = date(2025, 2, 5)  # This was ASCENDING
+    
+    # Calculate days difference
+    days_diff = (trading_date - reference_date).days
+    
+    # Alternates: even days from reference = same as reference (ASCENDING)
+    # odd days = opposite (DESCENDING)
+    if days_diff % 2 == 0:
+        return VIXChannelType.ASCENDING
+    else:
+        return VIXChannelType.DESCENDING
+
+def calculate_vix_channel_levels(
+    channel_type: VIXChannelType,
+    pivot_high: float,
+    pivot_low: float,
+    pivot_high_time: datetime,
+    pivot_low_time: datetime,
+    reference_time: datetime,
+    current_time: datetime = None
+) -> Dict:
+    """
+    Calculate VIX channel floor and ceiling at any given time.
+    
+    VIX Slope: 0.04 per 6 30-minute blocks (every 3 hours)
+    
+    For ASCENDING channel:
+    - Floor rises from pivot_low
+    - Ceiling rises from pivot_high
+    
+    For DESCENDING channel:
+    - Floor falls from pivot_low
+    - Ceiling falls from pivot_high
+    """
+    if current_time is None:
+        current_time = datetime.now(CT)
+    
+    result = {
+        "channel_type": channel_type,
+        "floor": None,
+        "ceiling": None,
+        "floor_at_ref": None,
+        "ceiling_at_ref": None,
+        "pivot_high": pivot_high,
+        "pivot_low": pivot_low,
+        "pivot_high_time": pivot_high_time,
+        "pivot_low_time": pivot_low_time,
+        "slope_direction": 1 if channel_type == VIXChannelType.ASCENDING else -1
+    }
+    
+    if pivot_high is None or pivot_low is None:
+        return result
+    
+    slope_direction = 1 if channel_type == VIXChannelType.ASCENDING else -1
+    
+    # Calculate blocks from pivot times to reference time
+    def blocks_from(start_time, end_time):
+        if start_time is None or end_time is None:
+            return 0
+        diff = (end_time - start_time).total_seconds()
+        return max(0, diff / 1800)  # 30-minute blocks
+    
+    # Floor calculation (from pivot_low)
+    blocks_to_ref_floor = blocks_from(pivot_low_time, reference_time)
+    floor_movement = (blocks_to_ref_floor / 6) * VIX_SLOPE_PER_6_BLOCKS * slope_direction
+    result["floor_at_ref"] = round(pivot_low + floor_movement, 2)
+    
+    # Ceiling calculation (from pivot_high)
+    blocks_to_ref_ceiling = blocks_from(pivot_high_time, reference_time)
+    ceiling_movement = (blocks_to_ref_ceiling / 6) * VIX_SLOPE_PER_6_BLOCKS * slope_direction
+    result["ceiling_at_ref"] = round(pivot_high + ceiling_movement, 2)
+    
+    # Current levels
+    blocks_to_current_floor = blocks_from(pivot_low_time, current_time)
+    floor_movement_current = (blocks_to_current_floor / 6) * VIX_SLOPE_PER_6_BLOCKS * slope_direction
+    result["floor"] = round(pivot_low + floor_movement_current, 2)
+    
+    blocks_to_current_ceiling = blocks_from(pivot_high_time, current_time)
+    ceiling_movement_current = (blocks_to_current_ceiling / 6) * VIX_SLOPE_PER_6_BLOCKS * slope_direction
+    result["ceiling"] = round(pivot_high + ceiling_movement_current, 2)
+    
+    return result
+
+def analyze_vix_channel_status(
+    current_vix: float,
+    channel_levels: Dict,
+    pre_market_high: float = None,
+    pre_market_low: float = None,
+    candle_830_high: float = None,
+    candle_830_low: float = None
+) -> Dict:
+    """
+    Analyze current VIX position relative to channel and detect breakouts/retests.
+    
+    Returns status and trading signal.
+    """
+    result = {
+        "status": VIXChannelStatus.IN_CHANNEL,
+        "position": "INSIDE",
+        "distance_to_floor": None,
+        "distance_to_ceiling": None,
+        "broke_at_open": False,
+        "break_direction": None,
+        "retest_detected": False,
+        "springboard_signal": None,
+        "spx_signal": None,
+        "signal_strength": "NONE"
+    }
+    
+    floor = channel_levels.get("floor")
+    ceiling = channel_levels.get("ceiling")
+    channel_type = channel_levels.get("channel_type")
+    
+    if floor is None or ceiling is None or current_vix is None:
+        return result
+    
+    result["distance_to_floor"] = round(current_vix - floor, 2)
+    result["distance_to_ceiling"] = round(ceiling - current_vix, 2)
+    
+    # Determine position
+    if current_vix > ceiling:
+        result["position"] = "ABOVE"
+        result["status"] = VIXChannelStatus.BROKE_ABOVE
+    elif current_vix < floor:
+        result["position"] = "BELOW"
+        result["status"] = VIXChannelStatus.BROKE_BELOW
+    else:
+        result["position"] = "INSIDE"
+        result["status"] = VIXChannelStatus.IN_CHANNEL
+    
+    # Check for pre-market break (6:30 AM - 8:30 AM)
+    if pre_market_high and pre_market_low:
+        if pre_market_high > ceiling:
+            result["broke_at_open"] = True
+            result["break_direction"] = "ABOVE"
+        elif pre_market_low < floor:
+            result["broke_at_open"] = True
+            result["break_direction"] = "BELOW"
+    
+    # Check for 8:30 AM retest (springboard pattern)
+    if result["broke_at_open"] and candle_830_high and candle_830_low:
+        if result["break_direction"] == "ABOVE":
+            # Broke above, check if 8:30 candle retested ceiling
+            if candle_830_low <= ceiling * 1.002:  # Within 0.2% of ceiling
+                result["retest_detected"] = True
+                result["status"] = VIXChannelStatus.SPRINGBOARD_LONG_VIX
+                result["springboard_signal"] = "VIX SPRINGBOARD UP"
+                result["spx_signal"] = "SELL SPX"  # VIX up = SPX down
+                result["signal_strength"] = "STRONG"
+        
+        elif result["break_direction"] == "BELOW":
+            # Broke below, check if 8:30 candle retested floor
+            if candle_830_high >= floor * 0.998:  # Within 0.2% of floor
+                result["retest_detected"] = True
+                result["status"] = VIXChannelStatus.SPRINGBOARD_SHORT_VIX
+                result["springboard_signal"] = "VIX SPRINGBOARD DOWN"
+                result["spx_signal"] = "BUY SPX"  # VIX down = SPX up
+                result["signal_strength"] = "STRONG"
+    
+    # In-channel trading signals
+    if result["status"] == VIXChannelStatus.IN_CHANNEL:
+        # Near floor - expect bounce up (VIX up = SPX down)
+        if result["distance_to_floor"] < 0.15:
+            result["signal_strength"] = "MODERATE"
+            if channel_type == VIXChannelType.ASCENDING:
+                result["spx_signal"] = "CAUTION: VIX near ascending floor"
+            else:
+                result["spx_signal"] = "CAUTION: VIX near descending floor"
+        
+        # Near ceiling - expect rejection down (VIX down = SPX up)
+        elif result["distance_to_ceiling"] < 0.15:
+            result["signal_strength"] = "MODERATE"
+            if channel_type == VIXChannelType.ASCENDING:
+                result["spx_signal"] = "CAUTION: VIX near ascending ceiling"
+            else:
+                result["spx_signal"] = "CAUTION: VIX near descending ceiling"
+    
+    return result
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_vx_term_structure_tastytrade() -> Dict:
+    """
+    Fetch VX term structure (all contracts) from Tastytrade.
+    Shows contango/backwardation across the curve.
+    """
+    result = {
+        "available": False,
+        "contracts": [],
+        "front_month": None,
+        "second_month": None,
+        "spread": None,
+        "structure": "UNKNOWN",  # CONTANGO, BACKWARDATION, FLAT
+    }
+    
+    vx_data = fetch_vx_futures_tastytrade()
+    
+    if not vx_data.get("available"):
+        return result
+    
+    contracts = vx_data.get("contracts", [])
+    if len(contracts) >= 2:
+        result["available"] = True
+        result["contracts"] = contracts
+        result["front_month"] = contracts[0]
+        result["second_month"] = contracts[1]
+        
+        # Note: We'd need DXLink streaming to get actual prices
+        # For now, structure is based on contract info
+        result["note"] = "Live prices require DXLink streaming"
+    
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ALERT SYSTEM - Channel Breaks and Retests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AlertType(Enum):
+    VIX_BROKE_CEILING = "VIX_BROKE_CEILING"
+    VIX_BROKE_FLOOR = "VIX_BROKE_FLOOR"
+    VIX_RETEST_CEILING = "VIX_RETEST_CEILING"
+    VIX_RETEST_FLOOR = "VIX_RETEST_FLOOR"
+    VIX_SPRINGBOARD_UP = "VIX_SPRINGBOARD_UP"
+    VIX_SPRINGBOARD_DOWN = "VIX_SPRINGBOARD_DOWN"
+    SPX_BROKE_CEILING = "SPX_BROKE_CEILING"
+    SPX_BROKE_FLOOR = "SPX_BROKE_FLOOR"
+
+def generate_alerts(
+    vix_status: Dict,
+    spx_channel_status: str,
+    vix_channel_type: VIXChannelType
+) -> List[Dict]:
+    """
+    Generate trading alerts based on channel status.
+    """
+    alerts = []
+    
+    # VIX Channel Alerts
+    if vix_status.get("status") == VIXChannelStatus.SPRINGBOARD_LONG_VIX:
+        alerts.append({
+            "type": AlertType.VIX_SPRINGBOARD_UP,
+            "severity": "HIGH",
+            "title": "🚨 VIX SPRINGBOARD UP",
+            "message": f"VIX broke above {vix_channel_type.value} ceiling and retested. SELL SPX signal.",
+            "action": "SELL SPX",
+            "color": "var(--bear)"
+        })
+    
+    elif vix_status.get("status") == VIXChannelStatus.SPRINGBOARD_SHORT_VIX:
+        alerts.append({
+            "type": AlertType.VIX_SPRINGBOARD_DOWN,
+            "severity": "HIGH",
+            "title": "🚨 VIX SPRINGBOARD DOWN",
+            "message": f"VIX broke below {vix_channel_type.value} floor and retested. BUY SPX signal.",
+            "action": "BUY SPX",
+            "color": "var(--bull)"
+        })
+    
+    elif vix_status.get("status") == VIXChannelStatus.BROKE_ABOVE:
+        alerts.append({
+            "type": AlertType.VIX_BROKE_CEILING,
+            "severity": "MEDIUM",
+            "title": "⚠️ VIX BROKE CEILING",
+            "message": f"VIX broke above {vix_channel_type.value} channel. Watch for 8:30 AM retest.",
+            "action": "WAIT FOR RETEST",
+            "color": "var(--accent-orange)"
+        })
+    
+    elif vix_status.get("status") == VIXChannelStatus.BROKE_BELOW:
+        alerts.append({
+            "type": AlertType.VIX_BROKE_FLOOR,
+            "severity": "MEDIUM",
+            "title": "⚠️ VIX BROKE FLOOR",
+            "message": f"VIX broke below {vix_channel_type.value} channel. Watch for 8:30 AM retest.",
+            "action": "WAIT FOR RETEST",
+            "color": "var(--accent-orange)"
+        })
+    
+    # In-channel status
+    elif vix_status.get("status") == VIXChannelStatus.IN_CHANNEL:
+        dist_floor = vix_status.get("distance_to_floor", 999)
+        dist_ceiling = vix_status.get("distance_to_ceiling", 999)
+        
+        if dist_floor < 0.10:
+            alerts.append({
+                "type": AlertType.VIX_RETEST_FLOOR,
+                "severity": "LOW",
+                "title": "📍 VIX AT FLOOR",
+                "message": "VIX testing channel floor. Expect bounce up (bearish SPX).",
+                "action": "MONITOR",
+                "color": "var(--text-muted)"
+            })
+        elif dist_ceiling < 0.10:
+            alerts.append({
+                "type": AlertType.VIX_RETEST_CEILING,
+                "severity": "LOW",
+                "title": "📍 VIX AT CEILING",
+                "message": "VIX testing channel ceiling. Expect rejection down (bullish SPX).",
+                "action": "MONITOR",
+                "color": "var(--text-muted)"
+            })
+    
+    return alerts
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FULL OVERNIGHT ES CHANNEL (5 PM Start)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def calculate_full_overnight_es_channel(
+    sydney_high: float, sydney_low: float,
+    tokyo_high: float, tokyo_low: float,
+    london_high: float, london_low: float,
+    sydney_high_time: datetime, sydney_low_time: datetime,
+    tokyo_high_time: datetime, tokyo_low_time: datetime,
+    london_high_time: datetime, london_low_time: datetime,
+    reference_time: datetime
+) -> Dict:
+    """
+    Calculate ES channel from full overnight session (5 PM start).
+    This uses all session data from Sydney open, not just from 2 AM.
+    
+    With Tastytrade, we can now access 5 PM data!
+    """
+    result = {
+        "available": False,
+        "channel_type": None,
+        "pivot_high": None,
+        "pivot_low": None,
+        "pivot_high_time": None,
+        "pivot_low_time": None,
+        "pivot_high_session": None,
+        "pivot_low_session": None,
+        "full_overnight_high": None,
+        "full_overnight_low": None,
+        "sessions_analyzed": ["SYDNEY", "TOKYO", "LONDON"]
+    }
+    
+    # Collect all highs and lows with their times
+    highs = []
+    lows = []
+    
+    if sydney_high is not None:
+        highs.append(("SYDNEY", sydney_high, sydney_high_time))
+    if tokyo_high is not None:
+        highs.append(("TOKYO", tokyo_high, tokyo_high_time))
+    if london_high is not None:
+        highs.append(("LONDON", london_high, london_high_time))
+    
+    if sydney_low is not None:
+        lows.append(("SYDNEY", sydney_low, sydney_low_time))
+    if tokyo_low is not None:
+        lows.append(("TOKYO", tokyo_low, tokyo_low_time))
+    if london_low is not None:
+        lows.append(("LONDON", london_low, london_low_time))
+    
+    if not highs or not lows:
+        return result
+    
+    # Find overall high and low
+    max_high = max(highs, key=lambda x: x[1])
+    min_low = min(lows, key=lambda x: x[1])
+    
+    result["full_overnight_high"] = max_high[1]
+    result["full_overnight_low"] = min_low[1]
+    result["pivot_high"] = max_high[1]
+    result["pivot_low"] = min_low[1]
+    result["pivot_high_time"] = max_high[2]
+    result["pivot_low_time"] = min_low[2]
+    result["pivot_high_session"] = max_high[0]
+    result["pivot_low_session"] = min_low[0]
+    result["available"] = True
+    
+    # Determine channel type based on which pivot came first
+    if result["pivot_high_time"] and result["pivot_low_time"]:
+        if result["pivot_low_time"] < result["pivot_high_time"]:
+            result["channel_type"] = ChannelType.ASCENDING
+        else:
+            result["channel_type"] = ChannelType.DESCENDING
+    
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # DATA FETCHING - Yahoo Finance (Fallback)
 # ═══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=60, show_spinner=False)
@@ -5784,6 +6213,104 @@ def main():
     with col2:
         factors_html = "".join([f'<div class="confluence-factor"><span class="factor-check active">✓</span>{f}</div>' for f in decision["puts_factors"]]) or '<div class="confluence-factor"><span class="factor-check inactive">—</span>No supporting factors</div>'
         st.markdown(f'<div class="confluence-card confluence-card-puts"><div class="confluence-header"><span class="confluence-title">🔴 PUTS</span><span class="confluence-score {puts_class}">{puts_score}</span></div>{factors_html}</div>', unsafe_allow_html=True)
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # VIX CHANNEL SYSTEM (NEW!)
+    # ═══════════════════════════════════════════════════════════════════════════
+    if vx_data and vx_data.get("available"):
+        st.markdown('<div class="section-header"><div class="section-icon" style="background:linear-gradient(135deg,#6c5ce7,#a55eea);">🌊</div><h2 class="section-title">VIX Channel System</h2></div>', unsafe_allow_html=True)
+        
+        # Determine today's VIX channel type (alternates daily)
+        vix_channel_type = get_vix_channel_type_for_date(actual_trading_date)
+        vix_channel_direction = "↗" if vix_channel_type == VIXChannelType.ASCENDING else "↘"
+        vix_channel_color = "var(--bull)" if vix_channel_type == VIXChannelType.ASCENDING else "var(--bear)"
+        
+        # VIX Channel Info Card
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown(f'''
+            <div class="metric-card" style="border-left:4px solid {vix_channel_color};">
+                <div class="metric-icon">{vix_channel_direction}</div>
+                <div class="metric-label">Today's VIX Channel</div>
+                <div class="metric-value" style="color:{vix_channel_color};">{vix_channel_type.value}</div>
+                <div class="metric-delta">Alternates Daily</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        with col2:
+            # VX Front Month Info
+            vx_symbol = vx_data.get("symbol", "N/A")
+            vx_exp = vx_data.get("expiration", "N/A")
+            st.markdown(f'''
+            <div class="metric-card" style="border-left:4px solid var(--accent-purple);">
+                <div class="metric-icon">📊</div>
+                <div class="metric-label">VX Front Month</div>
+                <div class="metric-value" style="font-size:1rem;">{vx_symbol}</div>
+                <div class="metric-delta">Exp: {vx_exp}</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        with col3:
+            # Current VIX vs Channel status
+            vix_position_text = "IN CHANNEL" if vix else "N/A"
+            vix_status_color = "var(--accent-cyan)"
+            st.markdown(f'''
+            <div class="metric-card" style="border-left:4px solid {vix_status_color};">
+                <div class="metric-icon">📍</div>
+                <div class="metric-label">VIX Position</div>
+                <div class="metric-value" style="font-size:1rem;">{vix_position_text}</div>
+                <div class="metric-delta">VIX: {vix:.2f}</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        # VIX Channel Trading Rules
+        with st.expander("📖 VIX Channel Trading Rules", expanded=False):
+            if vix_channel_type == VIXChannelType.ASCENDING:
+                st.markdown(f'''
+                **Today: {vix_channel_direction} ASCENDING VIX Channel**
+                
+                🔹 **Slope:** +0.04 per 6 blocks (every 3 hours) - Floor & Ceiling RISE
+                
+                **If VIX Opens IN Channel:**
+                - VIX respects floor/ceiling → Trade bounces
+                - At floor: VIX bounces UP (bearish SPX)
+                - At ceiling: VIX rejects DOWN (bullish SPX)
+                
+                **If VIX BREAKS ABOVE Ceiling:**
+                - ⚠️ EXPLOSIVE MOVE incoming
+                - Wait for 8:30 AM candle to retest ceiling
+                - VIX uses ceiling as SPRINGBOARD UP
+                - 🔴 **SELL SPX** - Major bearish signal
+                ''')
+            else:
+                st.markdown(f'''
+                **Today: {vix_channel_direction} DESCENDING VIX Channel**
+                
+                🔹 **Slope:** -0.04 per 6 blocks (every 3 hours) - Floor & Ceiling FALL
+                
+                **If VIX Opens IN Channel:**
+                - VIX respects floor/ceiling → Trade bounces
+                - At floor: VIX bounces UP (bearish SPX)
+                - At ceiling: VIX rejects DOWN (bullish SPX)
+                
+                **If VIX BREAKS BELOW Floor:**
+                - ⚠️ EXPLOSIVE MOVE incoming
+                - Wait for 8:30 AM candle to retest floor
+                - VIX uses floor as SPRINGBOARD DOWN
+                - 🟢 **BUY SPX** - Major bullish signal
+                ''')
+        
+        # VX Term Structure (if available)
+        vx_term = fetch_vx_term_structure_tastytrade()
+        if vx_term.get("available") and len(vx_term.get("contracts", [])) >= 2:
+            with st.expander("📈 VX Term Structure", expanded=False):
+                contracts = vx_term.get("contracts", [])
+                st.markdown("**VX Futures Contracts:**")
+                for i, c in enumerate(contracts[:6]):
+                    month_label = f"M{i+1}" if i > 0 else "Front"
+                    st.markdown(f"- **{month_label}:** {c.get('symbol')} (Exp: {c.get('expiration')})")
+                st.info("💡 Live prices require DXLink streaming integration (coming soon)")
     
     # ═══════════════════════════════════════════════════════════════════════════
     # DUAL CHANNEL LEVELS (Option C - All 4 Levels)
