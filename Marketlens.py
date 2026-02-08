@@ -14,7 +14,7 @@ import os
 import math
 from datetime import datetime, date, time, timedelta
 from enum import Enum
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Tuple
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -29,10 +29,59 @@ ET = pytz.timezone("America/New_York")
 UTC = pytz.UTC
 
 SLOPE = 0.52
+VIX_SLOPE = 0.04  # VIX channel: 0.04 per 6 30-minute blocks
 SAVE_FILE = "spx_prophet_inputs.json"
 
+# Legacy API keys (fallback)
 POLYGON_API_KEY = "jrbBZ2y12cJAOp2Buqtlay0TdprcTDIm"
 POLYGON_BASE_URL = "https://api.polygon.io"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TASTYTRADE CONFIGURATION - PRIMARY DATA SOURCE
+# ═══════════════════════════════════════════════════════════════════════════════
+def get_tastytrade_config():
+    """Get Tastytrade credentials from Streamlit secrets."""
+    try:
+        return {
+            "client_id": st.secrets.get("tastytrade", {}).get("client_id"),
+            "client_secret": st.secrets.get("tastytrade", {}).get("client_secret"),
+            "refresh_token": st.secrets.get("tastytrade", {}).get("refresh_token"),
+        }
+    except:
+        return {"client_id": None, "client_secret": None, "refresh_token": None}
+
+def is_tastytrade_configured():
+    """Check if Tastytrade credentials are available."""
+    config = get_tastytrade_config()
+    return all([config["client_id"], config["client_secret"], config["refresh_token"]])
+
+@st.cache_data(ttl=840, show_spinner=False)
+def get_tastytrade_access_token():
+    """Get access token from refresh token. Cached for 14 minutes."""
+    config = get_tastytrade_config()
+    if not all([config["client_id"], config["client_secret"], config["refresh_token"]]):
+        return None
+    try:
+        response = requests.post(
+            "https://api.tastytrade.com/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": config["refresh_token"],
+                "client_id": config["client_id"],
+                "client_secret": config["client_secret"],
+            },
+            timeout=30
+        )
+        if response.status_code == 200:
+            return response.json().get("access_token")
+    except:
+        pass
+    return None
+
+def get_tastytrade_headers():
+    """Get headers with valid access token."""
+    token = get_tastytrade_access_token()
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"} if token else None
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENUMS
@@ -59,6 +108,12 @@ class VIXPosition(Enum):
     IN_RANGE = "IN RANGE"
     BELOW_RANGE = "BELOW"
     UNKNOWN = "UNKNOWN"
+
+class DataSource(Enum):
+    TASTYTRADE = "TASTYTRADE"
+    YAHOO = "YAHOO"
+    POLYGON = "POLYGON"
+    FALLBACK = "FALLBACK"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # UTILITIES
@@ -454,7 +509,184 @@ def calculate_premium_at_entry(current_premium, current_spx, entry_spx, strike, 
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DATA FETCHING - Yahoo Finance
+# DATA FETCHING - TASTYTRADE (Primary Source)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_es_current_tastytrade():
+    """Fetch current ES futures price from Tastytrade."""
+    headers = get_tastytrade_headers()
+    if not headers:
+        return None, None
+    
+    try:
+        url = "https://api.tastytrade.com/instruments/futures"
+        params = {"product-code[]": "ES"}
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            futures = data.get("data", {}).get("items", [])
+            
+            today = datetime.now().strftime("%Y-%m-%d")
+            for f in sorted(futures, key=lambda x: x.get("expiration-date", "")):
+                if f.get("product-code") == "ES" and f.get("expiration-date", "") >= today:
+                    symbol = f.get("symbol")
+                    streamer = f.get("streamer-symbol")
+                    return symbol, streamer
+    except:
+        pass
+    return None, None
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_vx_futures_tastytrade():
+    """
+    Fetch VX (VIX) futures data from Tastytrade.
+    KEY for VIX Channel System!
+    """
+    result = {
+        "available": False,
+        "symbol": None,
+        "streamer_symbol": None,
+        "expiration": None,
+        "contracts": []
+    }
+    
+    headers = get_tastytrade_headers()
+    if not headers:
+        return result
+    
+    try:
+        url = "https://api.tastytrade.com/instruments/futures"
+        params = {"product-code[]": "VX"}
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            futures = data.get("data", {}).get("items", [])
+            vx_futures = [f for f in futures if f.get("product-code") == "VX"]
+            
+            if vx_futures:
+                vx_futures.sort(key=lambda x: x.get("expiration-date", ""))
+                today = datetime.now().strftime("%Y-%m-%d")
+                
+                for vx in vx_futures:
+                    if vx.get("expiration-date", "") >= today:
+                        result["symbol"] = vx.get("symbol")
+                        result["streamer_symbol"] = vx.get("streamer-symbol")
+                        result["expiration"] = vx.get("expiration-date")
+                        result["available"] = True
+                        break
+                
+                result["contracts"] = [
+                    {"symbol": vx.get("symbol"), "streamer_symbol": vx.get("streamer-symbol"), "expiration": vx.get("expiration-date")}
+                    for vx in vx_futures if vx.get("expiration-date", "") >= today
+                ][:6]
+    except:
+        pass
+    return result
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_spx_option_chain_tastytrade(trading_date):
+    """Fetch SPX options chain from Tastytrade."""
+    result = {"available": False, "expirations": [], "chain": {}}
+    
+    headers = get_tastytrade_headers()
+    if not headers:
+        return result
+    
+    try:
+        # Try both SPX and SPXW
+        for underlying in ["SPXW", "SPX"]:
+            url = f"https://api.tastytrade.com/option-chains/{underlying}/nested"
+            response = requests.get(url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                expirations = data.get("data", {}).get("items", [])
+                
+                if expirations:
+                    result["expirations"] = [exp.get("expiration-date") for exp in expirations]
+                    result["available"] = True
+                    
+                    target_date = trading_date.strftime("%Y-%m-%d")
+                    for exp in expirations:
+                        if exp.get("expiration-date") == target_date:
+                            result["chain"][target_date] = {
+                                "strikes": exp.get("strikes", []),
+                                "settlement_type": exp.get("settlement-type"),
+                            }
+                            break
+                    break
+    except:
+        pass
+    return result
+
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_spx_option_premium_tastytrade(strike, opt_type, trading_date):
+    """
+    Fetch SPX 0DTE option premium from Tastytrade.
+    Replaces Polygon for options data.
+    """
+    result = {
+        "available": False, "bid": None, "ask": None, "mid": None,
+        "last": None, "delta": None, "ticker": None, "error": None
+    }
+    
+    headers = get_tastytrade_headers()
+    if not headers:
+        result["error"] = "No Tastytrade auth"
+        return result
+    
+    try:
+        # Get the option chain first
+        chain = fetch_spx_option_chain_tastytrade(trading_date)
+        
+        if chain.get("available"):
+            target_date = trading_date.strftime("%Y-%m-%d")
+            chain_data = chain.get("chain", {}).get(target_date, {})
+            strikes = chain_data.get("strikes", [])
+            
+            for s in strikes:
+                if abs(float(s.get("strike-price", 0)) - float(strike)) < 0.5:
+                    option_symbol = s.get("call") if opt_type == "CALL" else s.get("put")
+                    streamer_symbol = s.get("call-streamer-symbol") if opt_type == "CALL" else s.get("put-streamer-symbol")
+                    
+                    if option_symbol:
+                        result["ticker"] = option_symbol
+                        # Note: Real-time quote needs DXLink streaming
+                        # For now, mark as available but without live data
+                        result["available"] = True
+                        result["note"] = "Use DXLink for live quotes"
+                    break
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+@st.cache_data(ttl=840, show_spinner=False)
+def get_dxlink_credentials():
+    """Get DXLink streaming credentials."""
+    result = {"available": False, "dxlink_url": None, "level": None}
+    
+    headers = get_tastytrade_headers()
+    if not headers:
+        return result
+    
+    try:
+        response = requests.get("https://api.tastytrade.com/api-quote-tokens", headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json().get("data", {})
+            result["dxlink_url"] = data.get("dxlink-url")
+            result["level"] = data.get("level")
+            result["available"] = result["dxlink_url"] is not None
+    except:
+        pass
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DATA FETCHING - Yahoo Finance (Fallback)
 # ═══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_es_current():
@@ -5037,6 +5269,17 @@ def main():
     now = now_ct()
     
     # ═══════════════════════════════════════════════════════════════════════════
+    # CHECK DATA SOURCES
+    # ═══════════════════════════════════════════════════════════════════════════
+    tastytrade_available = is_tastytrade_configured()
+    data_source = DataSource.TASTYTRADE if tastytrade_available else DataSource.YAHOO
+    
+    # Store VX futures data for VIX Channel
+    vx_data = None
+    if tastytrade_available:
+        vx_data = fetch_vx_futures_tastytrade()
+    
+    # ═══════════════════════════════════════════════════════════════════════════
     # LOAD DATA (with manual override support)
     # ═══════════════════════════════════════════════════════════════════════════
     with st.spinner("Loading market data..."):
@@ -5045,7 +5288,13 @@ def main():
         if inputs["manual_es"] is not None:
             current_es = inputs["manual_es"]
         else:
-            current_es = fetch_es_current() or 6050
+            # Try Tastytrade first, then Yahoo
+            if tastytrade_available:
+                es_symbol, es_streamer = fetch_es_current_tastytrade()
+                # For now, still use Yahoo for price until DXLink streaming is implemented
+                current_es = fetch_es_current() or 6050
+            else:
+                current_es = fetch_es_current() or 6050
         
         # --- IMPORTANT: Adjust trading date for weekends ---
         # If user selects Saturday/Sunday, use Monday as actual trading date
@@ -5374,6 +5623,16 @@ def main():
     """, unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
+    # DATA SOURCE STATUS
+    # ═══════════════════════════════════════════════════════════════════════════
+    if tastytrade_available:
+        source_badge = '<span style="background:linear-gradient(90deg,#00d4aa,#00b894);color:#000;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:700;margin-left:8px;">TASTYTRADE</span>'
+        vx_badge = '<span style="background:linear-gradient(90deg,#6c5ce7,#a55eea);color:#fff;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:700;margin-left:4px;">VIX CHANNEL</span>' if vx_data and vx_data.get("available") else ''
+    else:
+        source_badge = '<span style="background:linear-gradient(90deg,#636e72,#b2bec3);color:#fff;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:700;margin-left:8px;">YAHOO/POLYGON</span>'
+        vx_badge = ''
+    
+    # ═══════════════════════════════════════════════════════════════════════════
     # QUICK ACTION BAR
     # ═══════════════════════════════════════════════════════════════════════════
     col1, col2, col3 = st.columns([2, 1, 2])
@@ -5388,16 +5647,24 @@ def main():
             <span style="font-family:'Share Tech Mono',monospace;font-size:0.8rem;color:rgba(255,255,255,0.5);">
                 📅 {date_display}{weekend_note}
             </span>
+            {source_badge}{vx_badge}
         </div>
         """, unsafe_allow_html=True)
     with col2:
         if st.button("🔄 Refresh", use_container_width=True, help="Refresh all market data"):
+            # Clear all caches
             fetch_es_current.clear()
             fetch_vix_polygon.clear()
             fetch_vix_yahoo.clear()
             fetch_es_with_ema.clear()
             fetch_retail_positioning.clear()
             fetch_prior_day_rth.clear()
+            # Clear Tastytrade caches
+            if tastytrade_available:
+                fetch_es_current_tastytrade.clear()
+                fetch_vx_futures_tastytrade.clear()
+                fetch_spx_option_chain_tastytrade.clear()
+                get_tastytrade_access_token.clear()
             st.rerun()
     with col3:
         st.markdown(f"""
