@@ -33,11 +33,6 @@ SLOPE = 0.52
 VIX_SLOPE = 0.04  # VIX channel: 0.04 per 6 30-minute blocks
 SAVE_FILE = "spx_prophet_inputs.json"
 
-# Legacy API keys (fallback)
-# Legacy API keys (NO LONGER NEEDED - using Tastytrade + Yahoo)
-# POLYGON_API_KEY = "DEPRECATED"
-# POLYGON_BASE_URL = "https://api.polygon.io"
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # TASTYTRADE CONFIGURATION - PRIMARY DATA SOURCE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -49,7 +44,7 @@ def get_tastytrade_config():
             "client_secret": st.secrets.get("tastytrade", {}).get("client_secret"),
             "refresh_token": st.secrets.get("tastytrade", {}).get("refresh_token"),
         }
-    except:
+    except Exception:
         return {"client_id": None, "client_secret": None, "refresh_token": None}
 
 def is_tastytrade_configured():
@@ -76,7 +71,7 @@ def get_tastytrade_access_token():
         )
         if response.status_code == 200:
             return response.json().get("access_token")
-    except:
+    except Exception:
         pass
     return None
 
@@ -124,77 +119,52 @@ def now_ct():
     return datetime.now(CT)
 
 def blocks_between(start, end):
-    """Calculate 30-minute blocks between two times.
-    Used for intraday projections within the same trading session."""
+    """Calculate 30-minute trading blocks between two times.
+    
+    Handles same-day, cross-day, and weekend-crossing calculations.
+    For same-day: simple elapsed time / 30 min.
+    For cross-day: accounts for RTH close/open and weekend gaps.
+    """
     if start is None or end is None or end <= start:
         return 0
-    return max(0, int((end - start).total_seconds() / 1800))
-
-def trading_blocks_between(start_time, end_time):
-    """Calculate trading blocks between two times for prior day projections.
     
-    For cross-day calculations, we count:
-    - Blocks from anchor time to that day's RTH close (3:00 PM CT)
-    - Overnight blocks to the next trading day's reference time
-    - Weekend is treated as one extended overnight session
+    # If either lacks timezone info or same day, use simple calculation
+    if (start.tzinfo is None or end.tzinfo is None or 
+        start.date() == end.date()):
+        return max(0, int((end - start).total_seconds() / 1800))
     
-    Key insight: The TRADING reference time matters, not the calendar date.
-    If user picks Sunday or Monday, we project to MONDAY's reference time.
-    """
-    if start_time is None or end_time is None:
-        return 0
-    
-    # Ensure both are timezone-aware
-    if start_time.tzinfo is None or end_time.tzinfo is None:
-        return blocks_between(start_time, end_time)
-    
-    start_date = start_time.date()
-    end_date = end_time.date()
-    
-    # If same day, use simple calculation
-    if start_date == end_date:
-        return blocks_between(start_time, end_time)
+    start_date = start.date()
+    end_date = end.date()
     
     # Blocks from start_time to 3:00 PM CT (end of RTH) on start day
-    start_day_close = start_time.replace(hour=15, minute=0, second=0, microsecond=0)
-    if start_time < start_day_close:
-        blocks_to_close = int((start_day_close - start_time).total_seconds() / 1800)
+    start_day_close = start.replace(hour=15, minute=0, second=0, microsecond=0)
+    if start < start_day_close:
+        blocks_to_close = int((start_day_close - start).total_seconds() / 1800)
     else:
         blocks_to_close = 0
     
     # Blocks from 8:30 AM to end_time on final day
-    end_day_open = end_time.replace(hour=8, minute=30, second=0, microsecond=0)
-    if end_time >= end_day_open:
-        blocks_from_open = int((end_time - end_day_open).total_seconds() / 1800)
+    end_day_open = end.replace(hour=8, minute=30, second=0, microsecond=0)
+    if end >= end_day_open:
+        blocks_from_open = int((end - end_day_open).total_seconds() / 1800)
     else:
         blocks_from_open = 0
     
-    # Check if this crosses a weekend
-    # Weekend crossing = start is Friday (4) or earlier, and end is Saturday (5), Sunday (6), or Monday (0)
-    # OR start is Friday and there's a weekend between start and end
-    start_weekday = start_date.weekday()
-    end_weekday = end_date.weekday()
-    
-    # Count weekend days between start and end
+    # Check for weekend crossing
     crosses_weekend = False
     current = start_date + timedelta(days=1)
     while current <= end_date:
-        if current.weekday() in [5, 6]:  # Saturday or Sunday
+        if current.weekday() in [5, 6]:
             crosses_weekend = True
             break
         current += timedelta(days=1)
-    
-    # Also check if end_date itself is a weekend (user picked Sunday)
-    if end_weekday in [5, 6]:
+    if end_date.weekday() in [5, 6]:
         crosses_weekend = True
     
     if crosses_weekend:
-        # Weekend overnight: Friday 3PM → Monday 8:30AM = ~32 blocks for the overnight portion
         OVERNIGHT_WEEKEND_BLOCKS = 32
         total_blocks = blocks_to_close + OVERNIGHT_WEEKEND_BLOCKS + blocks_from_open
     else:
-        # Regular overnight (weekday to weekday, no weekend)
-        # Count trading days between
         trading_days_between = 0
         current = start_date + timedelta(days=1)
         while current < end_date:
@@ -204,7 +174,6 @@ def trading_blocks_between(start_time, end_time):
         
         BLOCKS_PER_FULL_DAY = 26
         OVERNIGHT_REGULAR_BLOCKS = 17
-        
         blocks_middle_days = trading_days_between * BLOCKS_PER_FULL_DAY
         total_blocks = blocks_to_close + blocks_middle_days + OVERNIGHT_REGULAR_BLOCKS + blocks_from_open
     
@@ -214,7 +183,7 @@ def save_inputs(data):
     try:
         with open(SAVE_FILE, 'w') as f:
             json.dump(data, f)
-    except:
+    except Exception:
         pass
 
 def load_inputs():
@@ -222,9 +191,42 @@ def load_inputs():
         if os.path.exists(SAVE_FILE):
             with open(SAVE_FILE, 'r') as f:
                 return json.load(f)
-    except:
+    except Exception:
         pass
     return {}
+
+TRADE_JOURNAL_FILE = "trade_journal.csv"
+
+def log_trade_to_journal(trade_date, channel_type, direction, contract, entry_spx, 
+                          entry_premium, confidence, strike_offset, vix_at_entry, notes=""):
+    """Append trade signal to CSV journal for performance tracking."""
+    try:
+        file_exists = os.path.exists(TRADE_JOURNAL_FILE)
+        with open(TRADE_JOURNAL_FILE, 'a') as f:
+            if not file_exists:
+                f.write("date,channel_type,direction,contract,entry_spx,entry_premium,"
+                        "confidence,strike_offset,vix,notes,exit_premium,profit_pct,result\n")
+            f.write(f"{trade_date},{channel_type},{direction},{contract},{entry_spx},"
+                    f"{entry_premium},{confidence},{strike_offset},{vix_at_entry},"
+                    f"\"{notes}\",,, \n")
+    except Exception:
+        pass
+
+def load_trade_journal():
+    """Load trade journal as list of dicts."""
+    try:
+        if os.path.exists(TRADE_JOURNAL_FILE):
+            trades = []
+            with open(TRADE_JOURNAL_FILE, 'r') as f:
+                header = f.readline().strip().split(',')
+                for line in f:
+                    vals = line.strip().split(',')
+                    if len(vals) >= len(header):
+                        trades.append(dict(zip(header, vals)))
+            return trades
+    except Exception:
+        pass
+    return []
 
 def get_prior_trading_day(ref_date):
     prior = ref_date - timedelta(days=1)
@@ -325,14 +327,12 @@ def estimate_0dte_premium(spot, strike, hours_to_expiry, vix, opt_type):
     return max(round(premium, 2), 0.05)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# REAL SPX OPTIONS PREMIUM - Using Estimation (Polygon-Free)
+# SPX OPTIONS PREMIUM ESTIMATION
 # ═══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=30, show_spinner=False)
-def fetch_real_option_premium(strike, opt_type, trading_date):
+def fetch_real_option_premium(strike, opt_type, trading_date, es_spx_offset=35.0):
     """
     Get SPX 0DTE option premium using Black-Scholes estimation.
-    
-    NO LONGER USES POLYGON - Uses our estimation model instead.
     The estimate_0dte_premium function is actually quite accurate for ATM/near-ATM options.
     
     Args:
@@ -363,8 +363,8 @@ def fetch_real_option_premium(strike, opt_type, trading_date):
             result["error"] = "Could not fetch ES price"
             return result
         
-        # Convert ES to SPX (approximately)
-        current_spx = current_es - 35  # Typical offset
+        # Convert ES to SPX using configured offset
+        current_spx = current_es - es_spx_offset
         result["underlying_price"] = current_spx
         
         # Get current VIX for volatility
@@ -510,7 +510,7 @@ def fetch_es_current_tastytrade():
                     symbol = f.get("symbol")
                     streamer = f.get("streamer-symbol")
                     return symbol, streamer
-    except:
+    except Exception:
         pass
     return None, None
 
@@ -558,7 +558,7 @@ def fetch_vx_futures_tastytrade():
                     {"symbol": vx.get("symbol"), "streamer_symbol": vx.get("streamer-symbol"), "expiration": vx.get("expiration-date")}
                     for vx in vx_futures if vx.get("expiration-date", "") >= today
                 ][:6]
-    except:
+    except Exception:
         pass
     return result
 
@@ -594,53 +594,11 @@ def fetch_spx_option_chain_tastytrade(trading_date):
                             }
                             break
                     break
-    except:
+    except Exception:
         pass
     return result
 
 @st.cache_data(ttl=30, show_spinner=False)
-def fetch_spx_option_premium_tastytrade(strike, opt_type, trading_date):
-    """
-    Fetch SPX 0DTE option premium from Tastytrade.
-    Replaces Polygon for options data.
-    """
-    result = {
-        "available": False, "bid": None, "ask": None, "mid": None,
-        "last": None, "delta": None, "ticker": None, "error": None
-    }
-    
-    headers = get_tastytrade_headers()
-    if not headers:
-        result["error"] = "No Tastytrade auth"
-        return result
-    
-    try:
-        # Get the option chain first
-        chain = fetch_spx_option_chain_tastytrade(trading_date)
-        
-        if chain.get("available"):
-            target_date = trading_date.strftime("%Y-%m-%d")
-            chain_data = chain.get("chain", {}).get(target_date, {})
-            strikes = chain_data.get("strikes", [])
-            
-            for s in strikes:
-                if abs(float(s.get("strike-price", 0)) - float(strike)) < 0.5:
-                    option_symbol = s.get("call") if opt_type == "CALL" else s.get("put")
-                    streamer_symbol = s.get("call-streamer-symbol") if opt_type == "CALL" else s.get("put-streamer-symbol")
-                    
-                    if option_symbol:
-                        result["ticker"] = option_symbol
-                        # Note: Real-time quote needs DXLink streaming
-                        # For now, mark as available but without live data
-                        result["available"] = True
-                        result["note"] = "Use DXLink for live quotes"
-                    break
-    except Exception as e:
-        result["error"] = str(e)
-    
-    return result
-
-@st.cache_data(ttl=840, show_spinner=False)
 def get_dxlink_credentials():
     """Get DXLink streaming credentials."""
     result = {"available": False, "dxlink_url": None, "level": None}
@@ -656,7 +614,7 @@ def get_dxlink_credentials():
             result["dxlink_url"] = data.get("dxlink-url")
             result["level"] = data.get("level")
             result["available"] = result["dxlink_url"] is not None
-    except:
+    except Exception:
         pass
     return result
 
@@ -728,7 +686,7 @@ def load_dxlink_candle_data() -> Dict:
                     if age_seconds > 300:  # 5 minutes
                         result["stale"] = True
                         result["age_seconds"] = age_seconds
-                except:
+                except Exception:
                     pass
         else:
             result["error"] = f"Candle data file not found: {CANDLE_DATA_FILE}"
@@ -796,259 +754,9 @@ def parse_iso_time(time_str):
         if dt.tzinfo is None:
             dt = CT.localize(dt)
         return dt
-    except:
+    except Exception:
         return None
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DXLINK LIVE STREAMING - Real-time Prices for ES, VX, SPX Options
-# ═══════════════════════════════════════════════════════════════════════════════
-# 
-# DXLink provides WebSocket streaming for:
-# - ES Futures quotes (from 5 PM CT)
-# - VX Futures quotes (from 5 PM CT) 
-# - SPX Options quotes (live bid/ask/greeks)
-# - Historical candles (30-min, 1-hour, etc.)
-#
-# For Streamlit, we use a polling approach with REST API
-# Full WebSocket streaming would require a separate service
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_vx_overnight_candles_dxlink(trading_date) -> Dict:
-    """
-    Fetch VX futures overnight candles using DXLink.
-    
-    This function attempts to get 30-minute candles from 5 PM to 5:30 AM CT
-    to automatically determine VIX Channel pivots.
-    
-    Returns:
-        Dict with pivot_high, pivot_low, pivot_high_time, pivot_low_time
-    """
-    result = {
-        "available": False,
-        "pivot_high": None,
-        "pivot_low": None,
-        "pivot_high_time": None,
-        "pivot_low_time": None,
-        "candles": [],
-        "vx_symbol": None,
-        "current_price": None,
-        "error": None
-    }
-    
-    # First get VX symbol and DXLink credentials
-    vx_data = fetch_vx_futures_tastytrade()
-    if not vx_data.get("available"):
-        result["error"] = "VX futures not available"
-        return result
-    
-    result["vx_symbol"] = vx_data.get("symbol")
-    streamer_symbol = vx_data.get("streamer_symbol")
-    
-    dxlink = get_dxlink_credentials()
-    if not dxlink.get("available"):
-        result["error"] = "DXLink not available"
-        return result
-    
-    # DXLink WebSocket URL
-    dxlink_url = dxlink.get("dxlink_url")
-    
-    # For now, we'll use a simplified approach:
-    # The full WebSocket implementation would require async code
-    # Instead, we'll try to use the DXLink REST-like endpoint if available
-    
-    # Note: Full implementation would use websocket-client library:
-    # 1. Connect to wss://tasty-openapi-ws.dxfeed.com/realtime
-    # 2. Authenticate with the token
-    # 3. Subscribe to Candle events for the VX symbol
-    # 4. Request historical candles for the overnight period
-    
-    # For Streamlit compatibility, mark as needing manual input for now
-    # but indicate the system is READY for DXLink integration
-    
-    result["available"] = False
-    result["error"] = "DXLink candle fetch requires WebSocket - use manual input or TradingView"
-    result["dxlink_ready"] = True
-    result["dxlink_url"] = dxlink_url
-    result["streamer_symbol"] = streamer_symbol
-    
-    return result
-
-@st.cache_data(ttl=60, show_spinner=False)
-def fetch_vx_current_price() -> Dict:
-    """
-    Fetch current VX futures price.
-    
-    Tries multiple sources:
-    1. Yahoo Finance (VIX spot as proxy)
-    2. Manual input fallback
-    
-    Returns:
-        Dict with price, symbol, source
-    """
-    result = {
-        "available": False,
-        "price": None,
-        "symbol": None,
-        "source": None,
-        "error": None
-    }
-    
-    # Try Yahoo Finance ^VIX as proxy (usually within 0.1-0.3 of VX front month)
-    try:
-        vix = yf.Ticker("^VIX")
-        data = vix.history(period="1d", interval="1m")
-        if data is not None and not data.empty:
-            result["price"] = round(float(data['Close'].iloc[-1]), 2)
-            result["symbol"] = "^VIX"
-            result["source"] = "YAHOO"
-            result["available"] = True
-            return result
-    except:
-        pass
-    
-    # Fallback - return None, will need manual input
-    result["error"] = "Could not fetch VIX price"
-    return result
-
-@st.cache_data(ttl=15, show_spinner=False)  # 15-second cache for near real-time
-def fetch_live_quote_tastytrade(symbol: str, instrument_type: str = "future") -> Dict:
-    """
-    Fetch live quote for a symbol from Tastytrade.
-    
-    Args:
-        symbol: The streamer symbol (e.g., '/ESH5', '/VXG5')
-        instrument_type: 'future', 'equity', or 'option'
-    
-    Returns:
-        Dict with bid, ask, last, change, volume
-    """
-    result = {
-        "available": False,
-        "symbol": symbol,
-        "bid": None,
-        "ask": None,
-        "last": None,
-        "mid": None,
-        "change": None,
-        "change_pct": None,
-        "volume": None,
-        "timestamp": None,
-        "error": None
-    }
-    
-    headers = get_tastytrade_headers()
-    if not headers:
-        result["error"] = "No auth"
-        return result
-    
-    try:
-        # Try market data endpoint
-        if instrument_type == "future":
-            # Get futures list first to find the symbol
-            url = "https://api.tastytrade.com/instruments/futures"
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                futures = data.get("data", {}).get("items", [])
-                
-                for f in futures:
-                    if f.get("symbol") == symbol or f.get("streamer-symbol") == symbol:
-                        result["symbol"] = f.get("symbol")
-                        result["available"] = True
-                        # Note: Actual price requires DXLink WebSocket
-                        # REST API doesn't provide real-time quotes directly
-                        break
-        
-        # For actual live quotes, we need the market data API
-        # This requires the DXLink WebSocket connection
-        # For now, mark as available but note limitation
-        if result["available"]:
-            result["note"] = "Real-time quotes available via DXLink WebSocket"
-            
-    except Exception as e:
-        result["error"] = str(e)
-    
-    return result
-
-@st.cache_data(ttl=30, show_spinner=False)
-def fetch_live_option_quote_tastytrade(option_symbol: str) -> Dict:
-    """
-    Fetch live quote for an SPX option from Tastytrade.
-    
-    Args:
-        option_symbol: The option symbol from the chain
-    
-    Returns:
-        Dict with bid, ask, mid, last, greeks
-    """
-    result = {
-        "available": False,
-        "symbol": option_symbol,
-        "bid": None,
-        "ask": None,
-        "mid": None,
-        "last": None,
-        "delta": None,
-        "gamma": None,
-        "theta": None,
-        "vega": None,
-        "iv": None,
-        "volume": None,
-        "open_interest": None,
-        "error": None
-    }
-    
-    headers = get_tastytrade_headers()
-    if not headers:
-        result["error"] = "No auth"
-        return result
-    
-    try:
-        # Try to get option quote from market data
-        # Note: Full implementation requires DXLink WebSocket
-        result["available"] = True
-        result["note"] = "Live option quotes available via DXLink WebSocket"
-        
-    except Exception as e:
-        result["error"] = str(e)
-    
-    return result
-
-def get_streaming_symbols() -> Dict:
-    """
-    Get the streamer symbols needed for live data.
-    
-    Returns symbols for:
-    - ES front month
-    - VX front month  
-    - VIX spot (if available)
-    """
-    result = {
-        "es_symbol": None,
-        "es_streamer": None,
-        "vx_symbol": None,
-        "vx_streamer": None,
-        "available": False
-    }
-    
-    # Get ES symbol
-    es_symbol, es_streamer = fetch_es_current_tastytrade()
-    if es_symbol:
-        result["es_symbol"] = es_symbol
-        result["es_streamer"] = es_streamer
-    
-    # Get VX symbol
-    vx_data = fetch_vx_futures_tastytrade()
-    if vx_data.get("available"):
-        result["vx_symbol"] = vx_data.get("symbol")
-        result["vx_streamer"] = vx_data.get("streamer_symbol")
-    
-    result["available"] = result["es_symbol"] is not None or result["vx_symbol"] is not None
-    
-    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1070,228 +778,172 @@ def get_streaming_symbols() -> Dict:
 #   - Breaks BELOW descending floor → VIX springboard DOWN → BUY SPX
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VIX_SLOPE_PER_6_BLOCKS = 0.04  # VIX moves 0.04 per 6 30-minute blocks (3 hours)
-VIX_SLOPE_PER_BLOCK = VIX_SLOPE_PER_6_BLOCKS / 6  # ~0.00667 per 30-min block
 
 class VIXChannelType(Enum):
-    ASCENDING = "ASCENDING"
-    DESCENDING = "DESCENDING"
+    ASCENDING = "ASCENDING"       # Both lines rising
+    DESCENDING = "DESCENDING"     # Both lines falling
+    CONVERGING = "CONVERGING"     # Ceiling falling, floor rising (squeeze)
+    DIVERGING = "DIVERGING"       # Ceiling rising, floor falling (expansion)
+    PARALLEL_UP = "PARALLEL_UP"   # Both rising roughly same slope
+    PARALLEL_DOWN = "PARALLEL_DOWN"  # Both falling roughly same slope
+    FLAT = "FLAT"                 # Both roughly horizontal
 
-class VIXChannelStatus(Enum):
-    IN_CHANNEL = "IN_CHANNEL"
-    BROKE_ABOVE = "BROKE_ABOVE"
-    BROKE_BELOW = "BROKE_BELOW"
-    RETESTING_CEILING = "RETESTING_CEILING"
-    RETESTING_FLOOR = "RETESTING_FLOOR"
-    SPRINGBOARD_LONG_VIX = "SPRINGBOARD_LONG_VIX"  # VIX up = SPX down
-    SPRINGBOARD_SHORT_VIX = "SPRINGBOARD_SHORT_VIX"  # VIX down = SPX up
 
-def count_trading_days_between(start_date: date, end_date: date) -> int:
-    """
-    Count trading days (Mon-Fri) between two dates.
-    Weekends are skipped - Friday to Monday counts as 1 trading day difference.
-    """
-    if start_date > end_date:
-        return -count_trading_days_between(end_date, start_date)
-    
-    trading_days = 0
-    current = start_date
-    
-    while current < end_date:
-        current += timedelta(days=1)
-        # Only count Mon-Fri (weekday 0-4)
-        if current.weekday() < 5:
-            trading_days += 1
-    
-    return trading_days
-
-def get_vix_channel_type_for_date(trading_date: date) -> VIXChannelType:
-    """
-    Determine if today is Ascending or Descending VIX channel.
-    Channels alternate on TRADING DAYS only - weekends are skipped.
-    
-    If Friday = DESCENDING, then Monday = ASCENDING (not continuing weekend count)
-    
-    Based on user input: Thursday Feb 5 = ASCENDING, Friday Feb 6 = DESCENDING
-    Reference: Feb 5, 2026 (Thursday) was ASCENDING
-    """
-    # Reference: February 5, 2026 (Thursday) was ASCENDING
-    reference_date = date(2026, 2, 5)  # This was ASCENDING
-    
-    # Count TRADING DAYS difference (skip weekends)
-    trading_days_diff = count_trading_days_between(reference_date, trading_date)
-    
-    # Alternates: even trading days from reference = same as reference (ASCENDING)
-    # odd trading days = opposite (DESCENDING)
-    if trading_days_diff % 2 == 0:
-        return VIXChannelType.ASCENDING
-    else:
-        return VIXChannelType.DESCENDING
-
-def calculate_vix_channel_levels(
-    channel_type: VIXChannelType,
-    pivot_high: float,
-    pivot_low: float,
-    pivot_high_time: datetime,
-    pivot_low_time: datetime,
-    reference_time: datetime,
+def calculate_vix_structural_channel(
+    asia_high: float, asia_high_time: datetime,
+    europe_high: float, europe_high_time: datetime,
+    asia_low: float, asia_low_time: datetime,
+    europe_low: float, europe_low_time: datetime,
+    reference_time: datetime = None,
     current_time: datetime = None
 ) -> Dict:
     """
-    Calculate VIX channel floor and ceiling at any given time.
+    Build VIX channel from 4 structural pivots - the REAL methodology.
     
-    VIX Slope: 0.04 per 6 30-minute blocks (every 3 hours)
+    Ceiling line: Asia High (5PM-2AM CT) → Europe High (2AM-8AM CT), project into NY
+    Floor line:   Asia Low (5PM-2AM CT) → Europe Low (2AM-8AM CT), project into NY
     
-    For ASCENDING channel:
-    - Floor rises from pivot_low
-    - Ceiling rises from pivot_high
+    Each line has its own data-driven slope (NOT the fixed ES slope).
+    Channel shape emerges naturally from the two anchor points per line.
     
-    For DESCENDING channel:
-    - Floor falls from pivot_low
-    - Ceiling falls from pivot_high
+    VIX ENTRY SIGNALS (confluence for ES/SPX trades):
+    1. VIX touches floor, closes above → BUY PUTS (VIX bounced = SPX down)
+    2. VIX touches ceiling, closes below → BUY CALLS (VIX rejected = SPX up)
+    3. VIX breaks ceiling, retests from above, closes above → BUY PUTS (ceiling became support)
+    4. VIX breaks floor, retests from below, closes below → BUY CALLS (floor became resistance)
     """
     if current_time is None:
         current_time = datetime.now(CT)
+    if reference_time is None:
+        reference_time = current_time
     
     result = {
-        "channel_type": channel_type,
+        "channel_type": VIXChannelType.FLAT,
+        "channel_status": "BUILDING",  # BUILDING until Europe completes, then LOCKED
         "floor": None,
         "ceiling": None,
         "floor_at_ref": None,
         "ceiling_at_ref": None,
-        "pivot_high": pivot_high,
-        "pivot_low": pivot_low,
-        "pivot_high_time": pivot_high_time,
-        "pivot_low_time": pivot_low_time,
-        "slope_direction": 1 if channel_type == VIXChannelType.ASCENDING else -1
+        "pivot_high": asia_high,      # Keep for backward compat
+        "pivot_low": asia_low,        # Keep for backward compat
+        "pivot_high_time": asia_high_time,
+        "pivot_low_time": asia_low_time,
+        "asia_high": asia_high,
+        "asia_low": asia_low,
+        "europe_high": europe_high,
+        "europe_low": europe_low,
+        "ceiling_slope_per_hour": 0.0,
+        "floor_slope_per_hour": 0.0,
+        "channel_width_current": None,
+        "channel_description": "",
+        "slope_direction": 0
     }
     
-    if pivot_high is None or pivot_low is None:
+    if None in (asia_high, europe_high, asia_low, europe_low):
+        return result
+    if None in (asia_high_time, europe_high_time, asia_low_time, europe_low_time):
         return result
     
-    slope_direction = 1 if channel_type == VIXChannelType.ASCENDING else -1
+    # Calculate ceiling slope (VIX points per hour)
+    ceiling_hours = (europe_high_time - asia_high_time).total_seconds() / 3600
+    if ceiling_hours > 0:
+        ceiling_slope = (europe_high - asia_high) / ceiling_hours
+    else:
+        ceiling_slope = 0.0
     
-    # Calculate blocks from pivot times to reference time
-    def blocks_from(start_time, end_time):
-        if start_time is None or end_time is None:
-            return 0
-        diff = (end_time - start_time).total_seconds()
-        return max(0, diff / 1800)  # 30-minute blocks
+    # Calculate floor slope (VIX points per hour)
+    floor_hours = (europe_low_time - asia_low_time).total_seconds() / 3600
+    if floor_hours > 0:
+        floor_slope = (europe_low - asia_low) / floor_hours
+    else:
+        floor_slope = 0.0
     
-    # Floor calculation (from pivot_low)
-    blocks_to_ref_floor = blocks_from(pivot_low_time, reference_time)
-    floor_movement = (blocks_to_ref_floor / 6) * VIX_SLOPE_PER_6_BLOCKS * slope_direction
-    result["floor_at_ref"] = round(pivot_low + floor_movement, 2)
+    result["ceiling_slope_per_hour"] = round(ceiling_slope, 4)
+    result["floor_slope_per_hour"] = round(floor_slope, 4)
     
-    # Ceiling calculation (from pivot_high)
-    blocks_to_ref_ceiling = blocks_from(pivot_high_time, reference_time)
-    ceiling_movement = (blocks_to_ref_ceiling / 6) * VIX_SLOPE_PER_6_BLOCKS * slope_direction
-    result["ceiling_at_ref"] = round(pivot_high + ceiling_movement, 2)
+    # Project ceiling at any time: asia_high + ceiling_slope * hours_since_asia_high
+    def ceiling_at(t):
+        hours = (t - asia_high_time).total_seconds() / 3600
+        return asia_high + ceiling_slope * hours
+    
+    def floor_at(t):
+        hours = (t - asia_low_time).total_seconds() / 3600
+        return asia_low + floor_slope * hours
     
     # Current levels
-    blocks_to_current_floor = blocks_from(pivot_low_time, current_time)
-    floor_movement_current = (blocks_to_current_floor / 6) * VIX_SLOPE_PER_6_BLOCKS * slope_direction
-    result["floor"] = round(pivot_low + floor_movement_current, 2)
+    result["ceiling"] = round(ceiling_at(current_time), 2)
+    result["floor"] = round(floor_at(current_time), 2)
+    result["ceiling_at_ref"] = round(ceiling_at(reference_time), 2)
+    result["floor_at_ref"] = round(floor_at(reference_time), 2)
+    result["channel_width_current"] = round(result["ceiling"] - result["floor"], 2)
     
-    blocks_to_current_ceiling = blocks_from(pivot_high_time, current_time)
-    ceiling_movement_current = (blocks_to_current_ceiling / 6) * VIX_SLOPE_PER_6_BLOCKS * slope_direction
-    result["ceiling"] = round(pivot_high + ceiling_movement_current, 2)
+    # Determine channel shape
+    SLOPE_THRESHOLD = 0.01  # VIX points/hour - below this is "flat"
+    ceiling_up = ceiling_slope > SLOPE_THRESHOLD
+    ceiling_down = ceiling_slope < -SLOPE_THRESHOLD
+    ceiling_flat = not ceiling_up and not ceiling_down
+    floor_up = floor_slope > SLOPE_THRESHOLD
+    floor_down = floor_slope < -SLOPE_THRESHOLD
+    floor_flat = not floor_up and not floor_down
     
-    return result
-
-def analyze_vix_channel_status(
-    current_vix: float,
-    channel_levels: Dict,
-    pre_market_high: float = None,
-    pre_market_low: float = None,
-    candle_830_high: float = None,
-    candle_830_low: float = None
-) -> Dict:
-    """
-    Analyze current VIX position relative to channel and detect breakouts/retests.
-    
-    Returns status and trading signal.
-    """
-    result = {
-        "status": VIXChannelStatus.IN_CHANNEL,
-        "position": "INSIDE",
-        "distance_to_floor": None,
-        "distance_to_ceiling": None,
-        "broke_at_open": False,
-        "break_direction": None,
-        "retest_detected": False,
-        "springboard_signal": None,
-        "spx_signal": None,
-        "signal_strength": "NONE"
-    }
-    
-    floor = channel_levels.get("floor")
-    ceiling = channel_levels.get("ceiling")
-    channel_type = channel_levels.get("channel_type")
-    
-    if floor is None or ceiling is None or current_vix is None:
-        return result
-    
-    result["distance_to_floor"] = round(current_vix - floor, 2)
-    result["distance_to_ceiling"] = round(ceiling - current_vix, 2)
-    
-    # Determine position
-    if current_vix > ceiling:
-        result["position"] = "ABOVE"
-        result["status"] = VIXChannelStatus.BROKE_ABOVE
-    elif current_vix < floor:
-        result["position"] = "BELOW"
-        result["status"] = VIXChannelStatus.BROKE_BELOW
+    # Both moving same direction
+    if ceiling_up and floor_up:
+        result["channel_type"] = VIXChannelType.ASCENDING
+        result["channel_description"] = "Both lines rising → VIX bias UP (SPX bias DOWN)"
+        result["slope_direction"] = 1
+    elif ceiling_down and floor_down:
+        result["channel_type"] = VIXChannelType.DESCENDING
+        result["channel_description"] = "Both lines falling → VIX bias DOWN (SPX bias UP)"
+        result["slope_direction"] = -1
+    # Converging (squeeze) and Diverging (expansion)
+    elif ceiling_down and floor_up:
+        result["channel_type"] = VIXChannelType.CONVERGING
+        result["channel_description"] = "Squeeze forming → Breakout likely, wait for direction"
+        result["slope_direction"] = 0
+    elif ceiling_up and floor_down:
+        result["channel_type"] = VIXChannelType.DIVERGING
+        result["channel_description"] = "Expanding → High uncertainty, wider stops needed"
+        result["slope_direction"] = 0
+    # Both flat
+    elif ceiling_flat and floor_flat:
+        result["channel_type"] = VIXChannelType.FLAT
+        result["channel_description"] = "Parallel flat → Range-bound, play the walls"
+        result["slope_direction"] = 0
+    # Mixed: one line moving, one flat → expanding or tilting
+    elif ceiling_up and floor_flat:
+        result["channel_type"] = VIXChannelType.DIVERGING
+        result["channel_description"] = "Ceiling rising, floor flat → Expanding upward, VIX pressure building"
+        result["slope_direction"] = 1
+    elif ceiling_flat and floor_down:
+        result["channel_type"] = VIXChannelType.DIVERGING
+        result["channel_description"] = "Ceiling flat, floor falling → Expanding downward, volatility increasing"
+        result["slope_direction"] = -1
+    elif ceiling_down and floor_flat:
+        result["channel_type"] = VIXChannelType.CONVERGING
+        result["channel_description"] = "Ceiling falling, floor flat → Narrowing from top, compression"
+        result["slope_direction"] = -1
+    elif ceiling_flat and floor_up:
+        result["channel_type"] = VIXChannelType.CONVERGING
+        result["channel_description"] = "Ceiling flat, floor rising → Narrowing from bottom, squeeze building"
+        result["slope_direction"] = 1
     else:
-        result["position"] = "INSIDE"
-        result["status"] = VIXChannelStatus.IN_CHANNEL
+        result["channel_type"] = VIXChannelType.FLAT
+        result["channel_description"] = "Indeterminate channel shape"
+        result["slope_direction"] = 0
     
-    # Check for pre-market break (6:30 AM - 8:30 AM)
-    if pre_market_high and pre_market_low:
-        if pre_market_high > ceiling:
-            result["broke_at_open"] = True
-            result["break_direction"] = "ABOVE"
-        elif pre_market_low < floor:
-            result["broke_at_open"] = True
-            result["break_direction"] = "BELOW"
+    # Determine channel status: BUILDING until Europe session ENDS at 8 AM CT
+    # This gives you 30 minutes (8:00-8:30) to review the locked channel before RTH opens
+    europe_session_end = current_time.replace(hour=8, minute=0, second=0, microsecond=0)
+    # Handle overnight: if current_time is before midnight, europe_session_end is next day
+    if current_time.hour >= 17:
+        europe_session_end += timedelta(days=1)
     
-    # Check for 8:30 AM retest (springboard pattern)
-    if result["broke_at_open"] and candle_830_high and candle_830_low:
-        if result["break_direction"] == "ABOVE":
-            # Broke above, check if 8:30 candle retested ceiling
-            if candle_830_low <= ceiling * 1.002:  # Within 0.2% of ceiling
-                result["retest_detected"] = True
-                result["status"] = VIXChannelStatus.SPRINGBOARD_LONG_VIX
-                result["springboard_signal"] = "VIX SPRINGBOARD UP"
-                result["spx_signal"] = "SELL SPX"  # VIX up = SPX down
-                result["signal_strength"] = "STRONG"
-        
-        elif result["break_direction"] == "BELOW":
-            # Broke below, check if 8:30 candle retested floor
-            if candle_830_high >= floor * 0.998:  # Within 0.2% of floor
-                result["retest_detected"] = True
-                result["status"] = VIXChannelStatus.SPRINGBOARD_SHORT_VIX
-                result["springboard_signal"] = "VIX SPRINGBOARD DOWN"
-                result["spx_signal"] = "BUY SPX"  # VIX down = SPX up
-                result["signal_strength"] = "STRONG"
-    
-    # In-channel trading signals
-    if result["status"] == VIXChannelStatus.IN_CHANNEL:
-        # Near floor - expect bounce up (VIX up = SPX down)
-        if result["distance_to_floor"] < 0.15:
-            result["signal_strength"] = "MODERATE"
-            if channel_type == VIXChannelType.ASCENDING:
-                result["spx_signal"] = "CAUTION: VIX near ascending floor"
-            else:
-                result["spx_signal"] = "CAUTION: VIX near descending floor"
-        
-        # Near ceiling - expect rejection down (VIX down = SPX up)
-        elif result["distance_to_ceiling"] < 0.15:
-            result["signal_strength"] = "MODERATE"
-            if channel_type == VIXChannelType.ASCENDING:
-                result["spx_signal"] = "CAUTION: VIX near ascending ceiling"
-            else:
-                result["spx_signal"] = "CAUTION: VIX near descending ceiling"
+    europe_complete = (current_time >= europe_session_end)
+    if europe_complete:
+        result["channel_status"] = "LOCKED"
+    else:
+        result["channel_status"] = "BUILDING"
+        result["channel_description"] = "Volatility zone BUILDING — Europe session in progress (locks at 8:00 AM CT)"
     
     return result
 
@@ -1333,183 +985,13 @@ def fetch_vx_term_structure_tastytrade() -> Dict:
 # ALERT SYSTEM - Channel Breaks and Retests
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class AlertType(Enum):
-    VIX_BROKE_CEILING = "VIX_BROKE_CEILING"
-    VIX_BROKE_FLOOR = "VIX_BROKE_FLOOR"
-    VIX_RETEST_CEILING = "VIX_RETEST_CEILING"
-    VIX_RETEST_FLOOR = "VIX_RETEST_FLOOR"
-    VIX_SPRINGBOARD_UP = "VIX_SPRINGBOARD_UP"
-    VIX_SPRINGBOARD_DOWN = "VIX_SPRINGBOARD_DOWN"
-    SPX_BROKE_CEILING = "SPX_BROKE_CEILING"
-    SPX_BROKE_FLOOR = "SPX_BROKE_FLOOR"
-
-def generate_alerts(
-    vix_status: Dict,
-    spx_channel_status: str,
-    vix_channel_type: VIXChannelType
-) -> List[Dict]:
-    """
-    Generate trading alerts based on channel status.
-    """
-    alerts = []
-    
-    # VIX Channel Alerts
-    if vix_status.get("status") == VIXChannelStatus.SPRINGBOARD_LONG_VIX:
-        alerts.append({
-            "type": AlertType.VIX_SPRINGBOARD_UP,
-            "severity": "HIGH",
-            "title": "🚨 VIX SPRINGBOARD UP",
-            "message": f"VIX broke above {vix_channel_type.value} ceiling and retested. SELL SPX signal.",
-            "action": "SELL SPX",
-            "color": "var(--bear)"
-        })
-    
-    elif vix_status.get("status") == VIXChannelStatus.SPRINGBOARD_SHORT_VIX:
-        alerts.append({
-            "type": AlertType.VIX_SPRINGBOARD_DOWN,
-            "severity": "HIGH",
-            "title": "🚨 VIX SPRINGBOARD DOWN",
-            "message": f"VIX broke below {vix_channel_type.value} floor and retested. BUY SPX signal.",
-            "action": "BUY SPX",
-            "color": "var(--bull)"
-        })
-    
-    elif vix_status.get("status") == VIXChannelStatus.BROKE_ABOVE:
-        alerts.append({
-            "type": AlertType.VIX_BROKE_CEILING,
-            "severity": "MEDIUM",
-            "title": "⚠️ VIX BROKE CEILING",
-            "message": f"VIX broke above {vix_channel_type.value} channel. Watch for 8:30 AM retest.",
-            "action": "WAIT FOR RETEST",
-            "color": "var(--accent-orange)"
-        })
-    
-    elif vix_status.get("status") == VIXChannelStatus.BROKE_BELOW:
-        alerts.append({
-            "type": AlertType.VIX_BROKE_FLOOR,
-            "severity": "MEDIUM",
-            "title": "⚠️ VIX BROKE FLOOR",
-            "message": f"VIX broke below {vix_channel_type.value} channel. Watch for 8:30 AM retest.",
-            "action": "WAIT FOR RETEST",
-            "color": "var(--accent-orange)"
-        })
-    
-    # In-channel status
-    elif vix_status.get("status") == VIXChannelStatus.IN_CHANNEL:
-        dist_floor = vix_status.get("distance_to_floor", 999)
-        dist_ceiling = vix_status.get("distance_to_ceiling", 999)
-        
-        if dist_floor < 0.10:
-            alerts.append({
-                "type": AlertType.VIX_RETEST_FLOOR,
-                "severity": "LOW",
-                "title": "📍 VIX AT FLOOR",
-                "message": "VIX testing channel floor. Expect bounce up (bearish SPX).",
-                "action": "MONITOR",
-                "color": "var(--text-muted)"
-            })
-        elif dist_ceiling < 0.10:
-            alerts.append({
-                "type": AlertType.VIX_RETEST_CEILING,
-                "severity": "LOW",
-                "title": "📍 VIX AT CEILING",
-                "message": "VIX testing channel ceiling. Expect rejection down (bullish SPX).",
-                "action": "MONITOR",
-                "color": "var(--text-muted)"
-            })
-    
-    return alerts
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# FULL OVERNIGHT ES CHANNEL (5 PM Start)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def calculate_full_overnight_es_channel(
-    sydney_high: float, sydney_low: float,
-    tokyo_high: float, tokyo_low: float,
-    london_high: float, london_low: float,
-    sydney_high_time: datetime, sydney_low_time: datetime,
-    tokyo_high_time: datetime, tokyo_low_time: datetime,
-    london_high_time: datetime, london_low_time: datetime,
-    reference_time: datetime
-) -> Dict:
-    """
-    Calculate ES channel from full overnight session (5 PM start).
-    This uses all session data from Sydney open, not just from 2 AM.
-    
-    With Tastytrade, we can now access 5 PM data!
-    """
-    result = {
-        "available": False,
-        "channel_type": None,
-        "pivot_high": None,
-        "pivot_low": None,
-        "pivot_high_time": None,
-        "pivot_low_time": None,
-        "pivot_high_session": None,
-        "pivot_low_session": None,
-        "full_overnight_high": None,
-        "full_overnight_low": None,
-        "sessions_analyzed": ["SYDNEY", "TOKYO", "LONDON"]
-    }
-    
-    # Collect all highs and lows with their times
-    highs = []
-    lows = []
-    
-    if sydney_high is not None:
-        highs.append(("SYDNEY", sydney_high, sydney_high_time))
-    if tokyo_high is not None:
-        highs.append(("TOKYO", tokyo_high, tokyo_high_time))
-    if london_high is not None:
-        highs.append(("LONDON", london_high, london_high_time))
-    
-    if sydney_low is not None:
-        lows.append(("SYDNEY", sydney_low, sydney_low_time))
-    if tokyo_low is not None:
-        lows.append(("TOKYO", tokyo_low, tokyo_low_time))
-    if london_low is not None:
-        lows.append(("LONDON", london_low, london_low_time))
-    
-    if not highs or not lows:
-        return result
-    
-    # Find overall high and low
-    max_high = max(highs, key=lambda x: x[1])
-    min_low = min(lows, key=lambda x: x[1])
-    
-    result["full_overnight_high"] = max_high[1]
-    result["full_overnight_low"] = min_low[1]
-    result["pivot_high"] = max_high[1]
-    result["pivot_low"] = min_low[1]
-    result["pivot_high_time"] = max_high[2]
-    result["pivot_low_time"] = min_low[2]
-    result["pivot_high_session"] = max_high[0]
-    result["pivot_low_session"] = min_low[0]
-    result["available"] = True
-    
-    # Determine channel type based on which pivot came first
-    if result["pivot_high_time"] and result["pivot_low_time"]:
-        if result["pivot_low_time"] < result["pivot_high_time"]:
-            result["channel_type"] = ChannelType.ASCENDING
-        else:
-            result["channel_type"] = ChannelType.DESCENDING
-    
-    return result
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DATA FETCHING - Yahoo Finance (Fallback)
-# ═══════════════════════════════════════════════════════════════════════════════
-@st.cache_data(ttl=60, show_spinner=False)
 def fetch_es_current():
     try:
         es = yf.Ticker("ES=F")
         d = es.history(period="2d", interval="5m")
         if d is not None and not d.empty:
             return round(float(d['Close'].iloc[-1]), 2)
-    except:
+    except Exception:
         pass
     return None
 
@@ -1520,7 +1002,7 @@ def fetch_es_candles(days=7):
         data = es.history(period=f"{days}d", interval="30m")
         if data is not None and not data.empty and len(data) > 10:
             return data
-    except:
+    except Exception:
         pass
     return None
 
@@ -1555,37 +1037,36 @@ def fetch_es_with_ema():
                 result["ema_bias"] = Bias.PUTS
             else:
                 result["ema_bias"] = Bias.NEUTRAL
-    except:
+    except Exception:
         pass
     return result
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=15, show_spinner=False)
 def fetch_vix_yahoo():
+    """Fetch current VIX from Yahoo Finance. Single source of truth for VIX price."""
     try:
         vix = yf.Ticker("^VIX")
         data = vix.history(period="2d")
         if data is not None and not data.empty:
             return round(float(data['Close'].iloc[-1]), 2)
-    except:
+    except Exception:
         pass
     return 16.0
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# VIX DATA - Yahoo Finance (Polygon-Free)
-# ═══════════════════════════════════════════════════════════════════════════════
-@st.cache_data(ttl=60, show_spinner=False)
-def fetch_vix_current():
-    """
-    Fetch current VIX from Yahoo Finance.
-    Replaces fetch_vix_polygon().
-    """
-    return fetch_vix_yahoo()
+def fetch_vx_current_price() -> Dict:
+    """Fetch current VX/VIX price as dict with metadata. Uses fetch_vix_yahoo internally."""
+    price = fetch_vix_yahoo()
+    return {
+        "available": price != 16.0,  # 16.0 is the fallback default
+        "price": price,
+        "symbol": "^VIX",
+        "source": "YAHOO",
+        "error": None if price != 16.0 else "Could not fetch VIX price"
+    }
 
-# Alias for backward compatibility
-def fetch_vix_polygon():
-    """DEPRECATED - Now uses Yahoo Finance."""
-    return fetch_vix_yahoo()
-
+# ═══════════════════════════════════════════════════════════════════════════════
+# VIX DATA - Yahoo Finance
+# ═══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_vix_overnight_range(trading_date, zone_start_hour=2, zone_start_min=0, zone_end_hour=5, zone_end_min=30):
     """
@@ -1679,7 +1160,7 @@ def fetch_vix_term_structure():
                 result["structure"] = "BACKWARDATION"  # Fear, volatile
             else:
                 result["structure"] = "FLAT"  # Neutral
-    except:
+    except Exception:
         pass
     return result
 
@@ -1705,7 +1186,7 @@ def fetch_retail_positioning():
                 result["positioning"], result["warning"], result["bias"] = "PUT BUYING EXTREME", "Extreme fear - high fade probability", Bias.CALLS
             elif spread >= 1.5:
                 result["positioning"], result["warning"], result["bias"] = "PUT BUYING HEAVY", "Market often fades the crowd", Bias.CALLS
-    except:
+    except Exception:
         pass
     return result
 
@@ -1905,11 +1386,36 @@ def fetch_prior_day_rth(trading_date):
             
             if not rth_df.empty and len(rth_df) > 3:
                 # ─────────────────────────────────────────────────────────────
-                # PRIMARY HIGH WICK: Highest high of any candle
+                # HIGHEST WICK: Absolute highest high of any candle
+                # Used for: ASCENDING ceiling
                 # ─────────────────────────────────────────────────────────────
                 primary_high_idx = rth_df['High'].idxmax()
                 result["primary_high_wick"] = round(float(rth_df.loc[primary_high_idx, 'High']), 2)
                 result["primary_high_wick_time"] = primary_high_idx
+                
+                # ─────────────────────────────────────────────────────────────
+                # HIGHEST CLOSE: Highest close of any candle
+                # Used for: DESCENDING ceiling (body defines resistance)
+                # ─────────────────────────────────────────────────────────────
+                primary_hc_idx = rth_df['Close'].idxmax()
+                result["primary_high_close"] = round(float(rth_df.loc[primary_hc_idx, 'Close']), 2)
+                result["primary_high_close_time"] = primary_hc_idx
+                
+                # ─────────────────────────────────────────────────────────────
+                # LOWEST WICK: Absolute lowest low of any candle
+                # Used for: DESCENDING floor (wicks mark absolute bottom)
+                # ─────────────────────────────────────────────────────────────
+                primary_lw_idx = rth_df['Low'].idxmin()
+                result["primary_low_wick"] = round(float(rth_df.loc[primary_lw_idx, 'Low']), 2)
+                result["primary_low_wick_time"] = primary_lw_idx
+                
+                # ─────────────────────────────────────────────────────────────
+                # LOWEST CLOSE: Lowest close of any candle
+                # Used for: ASCENDING floor (body defines support)
+                # ─────────────────────────────────────────────────────────────
+                primary_lc_idx = rth_df['Close'].idxmin()
+                result["primary_low_close"] = round(float(rth_df.loc[primary_lc_idx, 'Close']), 2)
+                result["primary_low_close_time"] = primary_lc_idx
                 
                 # ─────────────────────────────────────────────────────────────
                 # SECONDARY HIGH WICK: Lower high made 1hr+ after primary
@@ -1917,7 +1423,6 @@ def fetch_prior_day_rth(trading_date):
                 min_gap = timedelta(hours=1)
                 secondary_high_search = rth_df[rth_df.index >= primary_high_idx + min_gap]
                 if not secondary_high_search.empty:
-                    # Find highest wick after primary (must be lower than primary)
                     secondary_high_candidates = secondary_high_search[
                         secondary_high_search['High'] < result["primary_high_wick"]
                     ]
@@ -1927,40 +1432,31 @@ def fetch_prior_day_rth(trading_date):
                         result["secondary_high_wick_time"] = sec_high_idx
                 
                 # ─────────────────────────────────────────────────────────────
-                # PRIMARY LOW OPEN: Lowest open of any BULLISH candle
-                # Bullish = Close > Open (buyers stepped in and defended)
+                # SECONDARY LOW WICK: Higher low wick made 1hr+ after primary
                 # ─────────────────────────────────────────────────────────────
-                bullish_candles = rth_df[rth_df['Close'] > rth_df['Open']]
-                if not bullish_candles.empty:
-                    primary_low_idx = bullish_candles['Open'].idxmin()
-                    result["primary_low_open"] = round(float(bullish_candles.loc[primary_low_idx, 'Open']), 2)
-                    result["primary_low_open_time"] = primary_low_idx
-                    
-                    # ─────────────────────────────────────────────────────────
-                    # SECONDARY LOW OPEN: Higher low open made 1hr+ after primary (bullish)
-                    # ─────────────────────────────────────────────────────────
-                    secondary_low_search = bullish_candles[bullish_candles.index >= primary_low_idx + min_gap]
-                    if not secondary_low_search.empty:
-                        # Find lowest open after primary (must be higher than primary)
-                        secondary_low_candidates = secondary_low_search[
-                            secondary_low_search['Open'] > result["primary_low_open"]
-                        ]
-                        if not secondary_low_candidates.empty:
-                            sec_low_idx = secondary_low_candidates['Open'].idxmin()
-                            result["secondary_low_open"] = round(float(secondary_low_candidates.loc[sec_low_idx, 'Open']), 2)
-                            result["secondary_low_open_time"] = sec_low_idx
+                secondary_low_search = rth_df[rth_df.index >= primary_lw_idx + min_gap]
+                if not secondary_low_search.empty:
+                    secondary_low_candidates = secondary_low_search[
+                        secondary_low_search['Low'] > result["primary_low_wick"]
+                    ]
+                    if not secondary_low_candidates.empty:
+                        sec_low_idx = secondary_low_candidates['Low'].idxmin()
+                        result["secondary_low_wick"] = round(float(secondary_low_candidates.loc[sec_low_idx, 'Low']), 2)
+                        result["secondary_low_wick_time"] = sec_low_idx
                 
                 # Also store overall H/L/C for display
                 result["high"] = result["primary_high_wick"]
-                result["low"] = round(float(rth_df['Low'].min()), 2)
+                result["low"] = result["primary_low_wick"]
                 result["close"] = round(float(rth_df.iloc[-1]['Close']), 2)
                 result["available"] = True
                 
                 # Legacy keys for backward compatibility
                 result["highest_wick"] = result["primary_high_wick"]
                 result["highest_wick_time"] = result["primary_high_wick_time"]
-                result["lowest_close"] = result["primary_low_open"]  # Now uses low open
-                result["lowest_close_time"] = result["primary_low_open_time"]
+                result["lowest_close"] = result["primary_low_close"]
+                result["lowest_close_time"] = result["primary_low_close_time"]
+                result["primary_low_open"] = result["primary_low_close"]  # Map old key
+                result["primary_low_open_time"] = result["primary_low_close_time"]
                 
     except Exception as e:
         pass
@@ -1969,47 +1465,61 @@ def fetch_prior_day_rth(trading_date):
 def calc_prior_day_targets(prior_rth, ref_time):
     """Calculate BOTH ascending and descending targets from ALL prior day anchors.
     
-    From PRIMARY HIGH WICK:
-    - Ascending line (+0.52/30min) = Resistance (SELL point)
-    - Descending line (-0.52/30min) = Support (BUY point)
+    PIVOT TYPE RULES:
+    - Ascending ceiling  = Highest WICK projected up  (wicks mark absolute tops)
+    - Ascending floor    = Lowest CLOSE projected up  (bodies define support)
+    - Descending ceiling = Highest CLOSE projected down (bodies define resistance)
+    - Descending floor   = Lowest WICK projected down  (wicks mark absolute bottoms)
     
-    From SECONDARY HIGH WICK (if exists):
-    - Ascending line (+0.52/30min) = Resistance (SELL point)
-    - Descending line (-0.52/30min) = Support (BUY point)
+    From PRIMARY HIGH WICK (ascending ceiling anchor):
+    - Ascending line (+0.52/30min) = ascending ceiling target
     
-    From PRIMARY LOW OPEN:
-    - Ascending line (+0.52/30min) = Support (BUY point)
-    - Descending line (-0.52/30min) = Resistance (SELL point)
+    From PRIMARY HIGH CLOSE (descending ceiling anchor):
+    - Descending line (-0.52/30min) = descending ceiling target
     
-    From SECONDARY LOW OPEN (if exists):
-    - Ascending line (+0.52/30min) = Support (BUY point)
-    - Descending line (-0.52/30min) = Resistance (SELL point)
+    From PRIMARY LOW WICK (descending floor anchor):
+    - Descending line (-0.52/30min) = descending floor target
     
-    Returns dict with all eight targets (4 pivots x 2 directions).
+    From PRIMARY LOW CLOSE (ascending floor anchor):
+    - Ascending line (+0.52/30min) = ascending floor target
+    
+    Returns dict with all targets.
     """
     result = {
         "available": False,
-        # Primary High Wick
+        # Primary High Wick (ascending ceiling)
         "primary_high_wick": None,
         "primary_high_wick_time": None,
         "primary_high_wick_ascending": None,
-        "primary_high_wick_descending": None,
-        # Secondary High Wick
+        "primary_high_wick_descending": None,  # Keep for backward compat
+        # Primary High Close (descending ceiling)
+        "primary_high_close": None,
+        "primary_high_close_time": None,
+        "primary_high_close_descending": None,
+        # Primary Low Wick (descending floor)
+        "primary_low_wick": None,
+        "primary_low_wick_time": None,
+        "primary_low_wick_descending": None,
+        # Primary Low Close (ascending floor)
+        "primary_low_close": None,
+        "primary_low_close_time": None,
+        "primary_low_close_ascending": None,
+        # Secondary pivots
         "secondary_high_wick": None,
         "secondary_high_wick_time": None,
         "secondary_high_wick_ascending": None,
         "secondary_high_wick_descending": None,
-        # Primary Low Open
+        "secondary_low_wick": None,
+        "secondary_low_wick_time": None,
+        "secondary_low_wick_descending": None,
+        # Legacy keys for backward compatibility
         "primary_low_open": None,
         "primary_low_open_time": None,
         "primary_low_open_ascending": None,
         "primary_low_open_descending": None,
-        # Secondary Low Open
         "secondary_low_open": None,
-        "secondary_low_open_time": None,
         "secondary_low_open_ascending": None,
         "secondary_low_open_descending": None,
-        # Legacy keys for backward compatibility
         "highest_wick": None,
         "highest_wick_ascending": None,
         "highest_wick_descending": None,
@@ -2024,18 +1534,54 @@ def calc_prior_day_targets(prior_rth, ref_time):
     result["available"] = True
     
     # ─────────────────────────────────────────────────────────────────────────
-    # PRIMARY HIGH WICK
+    # PRIMARY HIGH WICK → Ascending ceiling anchor
     # ─────────────────────────────────────────────────────────────────────────
     if prior_rth.get("primary_high_wick") is not None and prior_rth.get("primary_high_wick_time"):
         result["primary_high_wick"] = prior_rth["primary_high_wick"]
         result["primary_high_wick_time"] = prior_rth["primary_high_wick_time"]
-        blocks = trading_blocks_between(prior_rth["primary_high_wick_time"], ref_time)
+        blocks = blocks_between(prior_rth["primary_high_wick_time"], ref_time)
         result["primary_high_wick_ascending"] = round(prior_rth["primary_high_wick"] + SLOPE * blocks, 2)
         result["primary_high_wick_descending"] = round(prior_rth["primary_high_wick"] - SLOPE * blocks, 2)
-        # Legacy
         result["highest_wick"] = result["primary_high_wick"]
         result["highest_wick_ascending"] = result["primary_high_wick_ascending"]
         result["highest_wick_descending"] = result["primary_high_wick_descending"]
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # PRIMARY HIGH CLOSE → Descending ceiling anchor
+    # ─────────────────────────────────────────────────────────────────────────
+    if prior_rth.get("primary_high_close") is not None and prior_rth.get("primary_high_close_time"):
+        result["primary_high_close"] = prior_rth["primary_high_close"]
+        result["primary_high_close_time"] = prior_rth["primary_high_close_time"]
+        blocks = blocks_between(prior_rth["primary_high_close_time"], ref_time)
+        result["primary_high_close_descending"] = round(prior_rth["primary_high_close"] - SLOPE * blocks, 2)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # PRIMARY LOW WICK → Descending floor anchor
+    # ─────────────────────────────────────────────────────────────────────────
+    if prior_rth.get("primary_low_wick") is not None and prior_rth.get("primary_low_wick_time"):
+        result["primary_low_wick"] = prior_rth["primary_low_wick"]
+        result["primary_low_wick_time"] = prior_rth["primary_low_wick_time"]
+        blocks = blocks_between(prior_rth["primary_low_wick_time"], ref_time)
+        result["primary_low_wick_descending"] = round(prior_rth["primary_low_wick"] - SLOPE * blocks, 2)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # PRIMARY LOW CLOSE → Ascending floor anchor
+    # ─────────────────────────────────────────────────────────────────────────
+    lc_key = "primary_low_close" if prior_rth.get("primary_low_close") else "primary_low_open"
+    lc_time_key = lc_key + "_time"
+    if prior_rth.get(lc_key) is not None and prior_rth.get(lc_time_key):
+        result["primary_low_close"] = prior_rth[lc_key]
+        result["primary_low_close_time"] = prior_rth[lc_time_key]
+        blocks = blocks_between(prior_rth[lc_time_key], ref_time)
+        result["primary_low_close_ascending"] = round(prior_rth[lc_key] + SLOPE * blocks, 2)
+        # Legacy mappings
+        result["primary_low_open"] = result["primary_low_close"]
+        result["primary_low_open_time"] = result["primary_low_close_time"]
+        result["primary_low_open_ascending"] = result["primary_low_close_ascending"]
+        result["primary_low_open_descending"] = round(prior_rth[lc_key] - SLOPE * blocks, 2)
+        result["lowest_close"] = result["primary_low_close"]
+        result["lowest_close_ascending"] = result["primary_low_close_ascending"]
+        result["lowest_close_descending"] = result["primary_low_open_descending"]
     
     # ─────────────────────────────────────────────────────────────────────────
     # SECONDARY HIGH WICK
@@ -2043,33 +1589,24 @@ def calc_prior_day_targets(prior_rth, ref_time):
     if prior_rth.get("secondary_high_wick") is not None and prior_rth.get("secondary_high_wick_time"):
         result["secondary_high_wick"] = prior_rth["secondary_high_wick"]
         result["secondary_high_wick_time"] = prior_rth["secondary_high_wick_time"]
-        blocks = trading_blocks_between(prior_rth["secondary_high_wick_time"], ref_time)
+        blocks = blocks_between(prior_rth["secondary_high_wick_time"], ref_time)
         result["secondary_high_wick_ascending"] = round(prior_rth["secondary_high_wick"] + SLOPE * blocks, 2)
         result["secondary_high_wick_descending"] = round(prior_rth["secondary_high_wick"] - SLOPE * blocks, 2)
     
     # ─────────────────────────────────────────────────────────────────────────
-    # PRIMARY LOW OPEN
+    # SECONDARY LOW WICK
     # ─────────────────────────────────────────────────────────────────────────
-    if prior_rth.get("primary_low_open") is not None and prior_rth.get("primary_low_open_time"):
-        result["primary_low_open"] = prior_rth["primary_low_open"]
-        result["primary_low_open_time"] = prior_rth["primary_low_open_time"]
-        blocks = trading_blocks_between(prior_rth["primary_low_open_time"], ref_time)
-        result["primary_low_open_ascending"] = round(prior_rth["primary_low_open"] + SLOPE * blocks, 2)
-        result["primary_low_open_descending"] = round(prior_rth["primary_low_open"] - SLOPE * blocks, 2)
+    slw_key = "secondary_low_wick" if prior_rth.get("secondary_low_wick") else "secondary_low_open"
+    slw_time_key = slw_key + "_time"
+    if prior_rth.get(slw_key) is not None and prior_rth.get(slw_time_key):
+        result["secondary_low_wick"] = prior_rth[slw_key]
+        result["secondary_low_wick_time"] = prior_rth[slw_time_key]
+        blocks = blocks_between(prior_rth[slw_time_key], ref_time)
+        result["secondary_low_wick_descending"] = round(prior_rth[slw_key] - SLOPE * blocks, 2)
         # Legacy
-        result["lowest_close"] = result["primary_low_open"]
-        result["lowest_close_ascending"] = result["primary_low_open_ascending"]
-        result["lowest_close_descending"] = result["primary_low_open_descending"]
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # SECONDARY LOW OPEN
-    # ─────────────────────────────────────────────────────────────────────────
-    if prior_rth.get("secondary_low_open") is not None and prior_rth.get("secondary_low_open_time"):
-        result["secondary_low_open"] = prior_rth["secondary_low_open"]
-        result["secondary_low_open_time"] = prior_rth["secondary_low_open_time"]
-        blocks = trading_blocks_between(prior_rth["secondary_low_open_time"], ref_time)
-        result["secondary_low_open_ascending"] = round(prior_rth["secondary_low_open"] + SLOPE * blocks, 2)
-        result["secondary_low_open_descending"] = round(prior_rth["secondary_low_open"] - SLOPE * blocks, 2)
+        result["secondary_low_open"] = result["secondary_low_wick"]
+        result["secondary_low_open_ascending"] = round(prior_rth[slw_key] + SLOPE * blocks, 2)
+        result["secondary_low_open_descending"] = result["secondary_low_wick_descending"]
     
     return result
 
@@ -2106,7 +1643,12 @@ def extract_sessions(es_candles, trading_date):
                 "high": round(data['High'].max(), 2),
                 "low": round(data['Low'].min(), 2),
                 "high_time": data['High'].idxmax(),
-                "low_time": data['Low'].idxmin()
+                "low_time": data['Low'].idxmin(),
+                # Close-based pivots for ascending floor / descending ceiling
+                "highest_close": round(data['Close'].max(), 2),
+                "lowest_close": round(data['Close'].min(), 2),
+                "highest_close_time": data['Close'].idxmax(),
+                "lowest_close_time": data['Close'].idxmin(),
             }
     return result
 
@@ -2469,52 +2011,77 @@ def calc_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_ti
         ceiling, floor = upper_pivot, lower_pivot
     return ceiling, floor
 
-def calc_mixed_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time):
-    """Calculate all four levels for MIXED channel: ascending ceiling/floor and descending ceiling/floor."""
-    if upper_pivot is None or lower_pivot is None:
-        return None
-    blocks_high = blocks_between(upper_time, ref_time) if upper_time and ref_time else 0
-    blocks_low = blocks_between(lower_time, ref_time) if lower_time and ref_time else 0
+def get_close_based_pivots(sydney, tokyo, london):
+    """
+    Extract highest close and lowest close across overnight sessions.
+    Used for: descending ceiling (highest close) and ascending floor (lowest close).
     
-    return {
-        "asc_ceiling": round(upper_pivot + SLOPE * blocks_high, 2),   # Ascending ceiling (high going up)
-        "asc_floor": round(lower_pivot + SLOPE * blocks_low, 2),       # Ascending floor (low going up)
-        "desc_ceiling": round(upper_pivot - SLOPE * blocks_high, 2),  # Descending ceiling (high going down)
-        "desc_floor": round(lower_pivot - SLOPE * blocks_low, 2),      # Descending floor (low going down)
+    Returns dict with highest_close, lowest_close, and their times.
+    """
+    result = {
+        "highest_close": None, "highest_close_time": None,
+        "lowest_close": None, "lowest_close_time": None,
     }
-
-def calc_dual_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time):
-    """
-    Calculate ALL FOUR channel levels - always show both ascending and descending.
-    This is the core of Option C - dual channel system.
     
-    Returns:
-        dict with:
-        - asc_floor: Ascending floor (LOW projected up) - CALLS entry
-        - asc_ceiling: Ascending ceiling (HIGH projected up) - CALLS target
-        - desc_ceiling: Descending ceiling (HIGH projected down) - PUTS entry  
-        - desc_floor: Descending floor (LOW projected down) - PUTS target
+    for session in [sydney, tokyo, london]:
+        if session and session.get("highest_close") is not None:
+            if result["highest_close"] is None or session["highest_close"] > result["highest_close"]:
+                result["highest_close"] = session["highest_close"]
+                result["highest_close_time"] = session.get("highest_close_time")
+            if result["lowest_close"] is None or session["lowest_close"] < result["lowest_close"]:
+                result["lowest_close"] = session["lowest_close"]
+                result["lowest_close_time"] = session.get("lowest_close_time")
+    
+    return result
+
+def calc_dual_channel_levels(upper_pivot_wick, lower_pivot_wick, upper_wick_time, lower_wick_time,
+                             ref_time, upper_pivot_close=None, lower_pivot_close=None,
+                             upper_close_time=None, lower_close_time=None):
     """
-    if upper_pivot is None or lower_pivot is None:
+    Calculate ALL FOUR channel levels using correct pivot types per direction.
+    
+    RULE:
+      ASCENDING ceiling  = highest WICK projected up   (wicks mark absolute tops)
+      ASCENDING floor    = lowest CLOSE projected up   (bodies define support)
+      DESCENDING ceiling = highest CLOSE projected down (bodies define resistance)
+      DESCENDING floor   = lowest WICK projected down  (wicks mark absolute bottoms)
+    
+    If close-based pivots not provided, falls back to wick-based for all.
+    """
+    if upper_pivot_wick is None or lower_pivot_wick is None:
         return None
     
-    blocks_high = blocks_between(upper_time, ref_time) if upper_time and ref_time else 0
-    blocks_low = blocks_between(lower_time, ref_time) if lower_time and ref_time else 0
+    # Fall back to wick-based if close-based not available
+    if upper_pivot_close is None:
+        upper_pivot_close = upper_pivot_wick
+    if lower_pivot_close is None:
+        lower_pivot_close = lower_pivot_wick
+    if upper_close_time is None:
+        upper_close_time = upper_wick_time
+    if lower_close_time is None:
+        lower_close_time = lower_wick_time
+    
+    blocks_high_wick = blocks_between(upper_wick_time, ref_time) if upper_wick_time and ref_time else 0
+    blocks_low_wick = blocks_between(lower_wick_time, ref_time) if lower_wick_time and ref_time else 0
+    blocks_high_close = blocks_between(upper_close_time, ref_time) if upper_close_time and ref_time else 0
+    blocks_low_close = blocks_between(lower_close_time, ref_time) if lower_close_time and ref_time else 0
     
     return {
-        # ASCENDING CHANNEL (from overnight low, projecting UP)
-        "asc_floor": round(lower_pivot + SLOPE * blocks_low, 2),      # LOW going UP - CALLS entry
-        "asc_ceiling": round(upper_pivot + SLOPE * blocks_high, 2),   # HIGH going UP - CALLS target
+        # ASCENDING CHANNEL
+        "asc_floor": round(lower_pivot_close + SLOPE * blocks_low_close, 2),    # Lowest CLOSE going UP
+        "asc_ceiling": round(upper_pivot_wick + SLOPE * blocks_high_wick, 2),   # Highest WICK going UP
         
-        # DESCENDING CHANNEL (from overnight high, projecting DOWN)
-        "desc_ceiling": round(upper_pivot - SLOPE * blocks_high, 2),  # HIGH going DOWN - PUTS entry
-        "desc_floor": round(lower_pivot - SLOPE * blocks_low, 2),     # LOW going DOWN - PUTS target
+        # DESCENDING CHANNEL
+        "desc_ceiling": round(upper_pivot_close - SLOPE * blocks_high_close, 2), # Highest CLOSE going DOWN
+        "desc_floor": round(lower_pivot_wick - SLOPE * blocks_low_wick, 2),      # Lowest WICK going DOWN
         
         # Metadata
-        "blocks_high": blocks_high,
-        "blocks_low": blocks_low,
-        "overnight_high": upper_pivot,
-        "overnight_low": lower_pivot,
+        "blocks_high": blocks_high_wick,
+        "blocks_low": blocks_low_wick,
+        "overnight_high": upper_pivot_wick,
+        "overnight_low": lower_pivot_wick,
+        "overnight_high_close": upper_pivot_close,
+        "overnight_low_close": lower_pivot_close,
     }
 
 def get_position(price, ceiling, floor):
@@ -2523,279 +2090,6 @@ def get_position(price, ceiling, floor):
     elif price < floor:
         return Position.BELOW
     return Position.INSIDE
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DECISION ENGINE
-# ═══════════════════════════════════════════════════════════════════════════════
-def analyze_market_state(current_spx, ceiling_spx, floor_spx, channel_type, retail_bias, ema_bias, 
-                         vix_position, vix, session_tests, gap_analysis, prior_close_analysis, vix_structure):
-    """
-    Analyze market state and generate trade scenarios with confluence-based confidence.
-    
-    Confluence Factors:
-    1. EMA alignment (8/21/200)
-    2. Retail positioning (fade the crowd)
-    3. Session level tests (more tests = stronger level)
-    4. Gap position (gap INTO level = better setup)
-    5. Prior close validation (prior close near level = validates it)
-    6. VIX term structure (backwardation = more volatile)
-    """
-    if current_spx is None or ceiling_spx is None or floor_spx is None:
-        return {"no_trade": True, "no_trade_reason": "Missing price data", "calls_factors": [], "puts_factors": [], "primary": None, "alternate": None}
-    
-    result = {"no_trade": False, "no_trade_reason": None, "calls_factors": [], "puts_factors": [], "primary": None, "alternate": None}
-    
-    if current_spx > ceiling_spx:
-        position = Position.ABOVE
-    elif current_spx < floor_spx:
-        position = Position.BELOW
-    else:
-        position = Position.INSIDE
-    
-    def make_scenario(name, direction, entry, stop, trigger, rationale, confidence):
-        if direction == "CALLS":
-            strike = int(math.ceil((entry + 20) / 5) * 5)
-            opt_type = "CALL"
-        else:
-            strike = int(math.floor((entry - 20) / 5) * 5)
-            opt_type = "PUT"
-        entry_premium = estimate_0dte_premium(entry, strike, 6.0, vix, opt_type)
-        target_50, target_75, target_100 = round(entry_premium * 1.50, 2), round(entry_premium * 1.75, 2), round(entry_premium * 2.00, 2)
-        return {
-            "name": name, "direction": direction, "entry": entry, "stop": stop, "trigger": trigger, "rationale": rationale, "confidence": confidence,
-            "strike": strike, "contract": f"SPX {strike}{'C' if direction == 'CALLS' else 'P'} 0DTE", "entry_premium": entry_premium,
-            "target_50": target_50, "target_75": target_75, "target_100": target_100,
-            "profit_50": round((target_50 - entry_premium) * 100, 0), "profit_75": round((target_75 - entry_premium) * 100, 0), "profit_100": round((target_100 - entry_premium) * 100, 0)
-        }
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # CONFLUENCE FACTORS - 6 factors for your 0DTE strategy
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    # Factor 1: Price proximity to key level
-    channel_range = ceiling_spx - floor_spx
-    dist_to_floor = current_spx - floor_spx
-    dist_to_ceiling = ceiling_spx - current_spx
-    near_floor = dist_to_floor <= channel_range * 0.3
-    near_ceiling = dist_to_ceiling <= channel_range * 0.3
-    
-    # Factor 2: EMA alignment (8/21/200)
-    ema_bullish = ema_bias == Bias.CALLS
-    ema_bearish = ema_bias == Bias.PUTS
-    
-    # Factor 3: Retail positioning (fade the crowd)
-    fade_to_calls = retail_bias == Bias.CALLS  # Retail heavy puts
-    fade_to_puts = retail_bias == Bias.PUTS    # Retail heavy calls
-    
-    # Factor 4: Session tests (more sessions tested = stronger level)
-    floor_tested = session_tests["floor_tests"] >= 1
-    floor_multi_test = session_tests["floor_tests"] >= 2
-    ceiling_tested = session_tests["ceiling_tests"] >= 1
-    ceiling_multi_test = session_tests["ceiling_tests"] >= 2
-    
-    # Factor 5: Gap analysis
-    gap_into_floor = gap_analysis["into_floor"]
-    gap_into_ceiling = gap_analysis["into_ceiling"]
-    gap_away_floor = gap_analysis["away_from_floor"]
-    gap_away_ceiling = gap_analysis["away_from_ceiling"]
-    
-    # Factor 6: Prior close validation
-    prior_validates_floor = prior_close_analysis["validates_floor"]
-    prior_validates_ceiling = prior_close_analysis["validates_ceiling"]
-    
-    # Factor 7: VIX term structure (affects volatility, not direction)
-    vix_contango = vix_structure["structure"] == "CONTANGO"  # Normal, stable - tighter moves
-    vix_backwardation = vix_structure["structure"] == "BACKWARDATION"  # Fear - bigger moves both ways
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # BUILD FACTOR LISTS FOR DISPLAY
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    # Calls factors (for CALLS scenarios)
-    if ema_bullish:
-        result["calls_factors"].append("EMA bullish (8>21>200)")
-    if fade_to_calls:
-        result["calls_factors"].append("Retail puts heavy (fade)")
-    if floor_tested:
-        sessions_str = ", ".join(session_tests["floor_sessions"])
-        result["calls_factors"].append(f"Floor tested ({sessions_str})")
-    if floor_multi_test:
-        result["calls_factors"].append("Floor multi-tested ✓✓")
-    if gap_into_floor:
-        result["calls_factors"].append("Gap down INTO floor")
-    if prior_validates_floor:
-        result["calls_factors"].append("Prior close validates floor")
-    
-    # Puts factors (for PUTS scenarios)
-    if ema_bearish:
-        result["puts_factors"].append("EMA bearish (8<21<200)")
-    if fade_to_puts:
-        result["puts_factors"].append("Retail calls heavy (fade)")
-    if ceiling_tested:
-        sessions_str = ", ".join(session_tests["ceiling_sessions"])
-        result["puts_factors"].append(f"Ceiling tested ({sessions_str})")
-    if ceiling_multi_test:
-        result["puts_factors"].append("Ceiling multi-tested ✓✓")
-    if gap_into_ceiling:
-        result["puts_factors"].append("Gap up INTO ceiling")
-    if prior_validates_ceiling:
-        result["puts_factors"].append("Prior close validates ceiling")
-    
-    # VIX structure note (non-directional - applies to both)
-    if vix_backwardation:
-        result["calls_factors"].append("⚡ VIX backwardation (volatile)")
-        result["puts_factors"].append("⚡ VIX backwardation (volatile)")
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # CONFIDENCE CALCULATION
-    # ─────────────────────────────────────────────────────────────────────────
-    def calc_scenario_confidence(direction, key_level, at_key_level, is_structure_break=False):
-        """
-        Calculate confidence based on:
-        1. At key level (not chasing)
-        2. Number of supporting confluence factors FOR THAT SPECIFIC LEVEL
-        3. Whether this is a structure break (lower probability)
-        
-        key_level: "FLOOR" or "CEILING" - which level this scenario trades
-        direction: "CALLS" or "PUTS" - trade direction
-        
-        Note: VIX backwardation is not counted as it's non-directional
-        """
-        support = 0
-        
-        if key_level == "FLOOR":
-            # Floor-based scenarios use floor factors
-            if ema_bullish: support += 1  # Bullish trend supports floor bounce
-            if fade_to_calls: support += 1  # Retail puts = fade to calls at floor
-            if floor_tested: support += 1
-            if floor_multi_test: support += 1
-            if gap_into_floor: support += 1
-            if prior_validates_floor: support += 1
-        else:  # CEILING
-            # Ceiling-based scenarios use ceiling factors
-            if ema_bearish: support += 1  # Bearish trend supports ceiling rejection
-            if fade_to_puts: support += 1  # Retail calls = fade to puts at ceiling
-            if ceiling_tested: support += 1
-            if ceiling_multi_test: support += 1
-            if gap_into_ceiling: support += 1
-            if prior_validates_ceiling: support += 1
-        
-        # Structure breaks max at MEDIUM
-        if is_structure_break:
-            return "MEDIUM" if support >= 3 else "LOW"
-        
-        # Normal scenarios
-        if at_key_level:
-            if support >= 4:
-                return "HIGH"
-            elif support >= 2:
-                return "MEDIUM"
-            else:
-                return "LOW"
-        else:
-            # Not at key level - penalize
-            if support >= 4:
-                return "MEDIUM"
-            else:
-                return "LOW"
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # GENERATE SCENARIOS
-    # ─────────────────────────────────────────────────────────────────────────
-    if channel_type == ChannelType.CONTRACTING:
-        result["no_trade"] = True
-        result["no_trade_reason"] = "CONTRACTING channel - No clear key level"
-        return result
-    if channel_type == ChannelType.UNDETERMINED:
-        result["no_trade"] = True
-        result["no_trade_reason"] = "Cannot determine channel structure"
-        return result
-    
-    if channel_type == ChannelType.ASCENDING:
-        # ASCENDING: Floor is KEY level
-        if position in [Position.INSIDE, Position.ABOVE]:
-            # Both scenarios trade at FLOOR level
-            primary_conf = calc_scenario_confidence("CALLS", "FLOOR", near_floor, is_structure_break=False)
-            alt_conf = calc_scenario_confidence("PUTS", "FLOOR", near_floor, is_structure_break=True)
-            
-            result["primary"] = make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, 
-                "Price at ascending floor",
-                f"Key level: Ascending floor • {len(result['calls_factors'])} confluence factors", primary_conf)
-            result["alternate"] = make_scenario("Floor Break", "PUTS", floor_spx, floor_spx + 5, 
-                "If floor fails",
-                "Structure break scenario", alt_conf)
-        else:
-            # Price below floor - structure broken, now using floor as resistance
-            primary_conf = calc_scenario_confidence("PUTS", "FLOOR", True, is_structure_break=False)
-            alt_conf = calc_scenario_confidence("CALLS", "FLOOR", True, is_structure_break=True)
-            
-            result["primary"] = make_scenario("Breakdown Continuation", "PUTS", floor_spx, floor_spx + 5, 
-                "Floor broken - bearish",
-                f"Structure broken • {len(result['puts_factors'])} confluence factors", primary_conf)
-            result["alternate"] = make_scenario("Floor Reclaim", "CALLS", floor_spx, floor_spx - 5, 
-                "If price reclaims floor",
-                "Recovery scenario", alt_conf)
-    
-    elif channel_type == ChannelType.DESCENDING:
-        # DESCENDING: Ceiling is KEY level
-        if position in [Position.INSIDE, Position.BELOW]:
-            # Both scenarios trade at CEILING level
-            primary_conf = calc_scenario_confidence("PUTS", "CEILING", near_ceiling, is_structure_break=False)
-            alt_conf = calc_scenario_confidence("CALLS", "CEILING", near_ceiling, is_structure_break=True)
-            
-            result["primary"] = make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5, 
-                "Price at descending ceiling",
-                f"Key level: Descending ceiling • {len(result['puts_factors'])} confluence factors", primary_conf)
-            result["alternate"] = make_scenario("Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5, 
-                "If ceiling fails",
-                "Structure break scenario", alt_conf)
-        else:
-            # Price above ceiling - structure broken, now using ceiling as support
-            primary_conf = calc_scenario_confidence("CALLS", "CEILING", True, is_structure_break=False)
-            alt_conf = calc_scenario_confidence("PUTS", "CEILING", True, is_structure_break=True)
-            
-            result["primary"] = make_scenario("Breakout Continuation", "CALLS", ceiling_spx, ceiling_spx - 5, 
-                "Ceiling broken - bullish",
-                f"Structure broken • {len(result['calls_factors'])} confluence factors", primary_conf)
-            result["alternate"] = make_scenario("Failed Breakout", "PUTS", ceiling_spx, ceiling_spx + 5, 
-                "If breakout fails",
-                "Rejection scenario", alt_conf)
-    
-    elif channel_type == ChannelType.MIXED:
-        # MIXED: Both floor AND ceiling are key levels
-        result["scenarios"] = []
-        
-        # Floor scenarios - use FLOOR factors
-        floor_calls_conf = calc_scenario_confidence("CALLS", "FLOOR", near_floor, is_structure_break=False)
-        floor_puts_conf = calc_scenario_confidence("PUTS", "FLOOR", near_floor, is_structure_break=True)
-        
-        result["scenarios"].append(make_scenario("Floor Bounce", "CALLS", floor_spx, floor_spx - 5, 
-            "Price respects ascending floor",
-            f"Key level: Floor • {len(result['calls_factors'])} factors", floor_calls_conf))
-        result["scenarios"].append(make_scenario("Floor Break", "PUTS", floor_spx, floor_spx + 5,
-            "Floor fails",
-            "Structure break", floor_puts_conf))
-        
-        # Ceiling scenarios - use CEILING factors
-        ceil_puts_conf = calc_scenario_confidence("PUTS", "CEILING", near_ceiling, is_structure_break=False)
-        ceil_calls_conf = calc_scenario_confidence("CALLS", "CEILING", near_ceiling, is_structure_break=True)
-        
-        result["scenarios"].append(make_scenario("Ceiling Rejection", "PUTS", ceiling_spx, ceiling_spx + 5,
-            "Price respects descending ceiling",
-            f"Key level: Ceiling • {len(result['puts_factors'])} factors", ceil_puts_conf))
-        result["scenarios"].append(make_scenario("Ceiling Break", "CALLS", ceiling_spx, ceiling_spx - 5,
-            "Ceiling fails",
-            "Structure break", ceil_calls_conf))
-        
-        # Set primary/alternate based on which key level is closer
-        if dist_to_floor <= dist_to_ceiling:
-            result["primary"] = result["scenarios"][0]
-            result["alternate"] = result["scenarios"][2]
-        else:
-            result["primary"] = result["scenarios"][2]
-            result["alternate"] = result["scenarios"][0]
-    
-    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2885,7 +2179,7 @@ def detect_explosive_potential(current_spx, dual_levels, prior_targets, channel_
 def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reason,
                             retail_bias, ema_bias, vix_position, vix, 
                             session_tests, gap_analysis, prior_close_analysis, vix_structure,
-                            prior_targets=None, current_time=None):
+                            prior_targets=None, current_time=None, vix_channel_data=None):
     """
     OPTION C: Dual Channel Decision Engine
     
@@ -2995,6 +2289,78 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
         calls_factors.append("⚡ VIX backwardation (volatile)")
         puts_factors.append("⚡ VIX backwardation (volatile)")
     
+    # VIX Channel structural bias
+    vix_channel_bullish_spx = False
+    vix_channel_bearish_spx = False
+    vix_channel_squeeze = False
+    vix_entry_signal = None  # Track specific VIX entry scenario
+    
+    if vix_channel_data and vix_channel_data.get("floor") is not None:
+        vix_floor = vix_channel_data.get("floor", 0)
+        vix_ceiling = vix_channel_data.get("ceiling", 0)
+        vix_ch_type = vix_channel_data.get("channel_type")
+        vix_ch_status = vix_channel_data.get("channel_status", "BUILDING")
+        
+        if vix_ch_status == "BUILDING":
+            # BUILDING - note it but don't add directional bias
+            calls_factors.append("🌊 VIX zone building (no directional bias yet)")
+            puts_factors.append("🌊 VIX zone building (no directional bias yet)")
+        elif vix and vix_ch_status == "LOCKED":
+            # Calculate proximity to channel walls (within 0.15 VIX pts = "touching")
+            TOUCH_THRESHOLD = 0.15
+            dist_to_floor = vix - vix_floor
+            dist_to_ceiling = vix_ceiling - vix
+            
+            # ─── SCENARIO 1: VIX touches floor, closes above → PUTS ───
+            # VIX came down to floor and bounced = VIX going back up = SPX down
+            if dist_to_floor >= 0 and dist_to_floor <= TOUCH_THRESHOLD:
+                vix_channel_bearish_spx = True
+                vix_entry_signal = "floor_bounce"
+                puts_factors.append("🌊 VIX touching floor & closing above → PUTS (VIX bouncing up)")
+            
+            # ─── SCENARIO 2: VIX touches ceiling, closes below → CALLS ───
+            # VIX went up to ceiling and got rejected = VIX going back down = SPX up
+            elif dist_to_ceiling >= 0 and dist_to_ceiling <= TOUCH_THRESHOLD:
+                vix_channel_bullish_spx = True
+                vix_entry_signal = "ceiling_rejection"
+                calls_factors.append("🌊 VIX touching ceiling & closing below → CALLS (VIX rejected)")
+            
+            # ─── SCENARIO 3: VIX broke above ceiling, retesting from above → PUTS ───
+            # VIX is above ceiling (broke out), came back to touch it = ceiling is now support
+            elif vix > vix_ceiling and dist_to_ceiling >= -TOUCH_THRESHOLD and dist_to_ceiling < 0:
+                vix_channel_bearish_spx = True
+                vix_entry_signal = "ceiling_retest"
+                puts_factors.append("🌊 VIX broke ceiling, retesting from above → PUTS (ceiling=support)")
+            
+            # ─── SCENARIO 4: VIX broke below floor, retesting from below → CALLS ───
+            # VIX is below floor (broke down), came back to touch it = floor is now resistance
+            elif vix < vix_floor and dist_to_floor >= -TOUCH_THRESHOLD and dist_to_floor < 0:
+                vix_channel_bullish_spx = True
+                vix_entry_signal = "floor_retest"
+                calls_factors.append("🌊 VIX broke floor, retesting from below → CALLS (floor=resistance)")
+            
+            # ─── NOT AT A WALL: Use position + channel shape for general bias ───
+            elif vix > vix_ceiling:
+                # VIX above ceiling but not near it = established above
+                vix_channel_bearish_spx = True
+                puts_factors.append("🌊 VIX above channel ceiling (bearish SPX)")
+            elif vix < vix_floor:
+                # VIX below floor but not near it = established below
+                vix_channel_bullish_spx = True
+                calls_factors.append("🌊 VIX below channel floor (bullish SPX)")
+            else:
+                # Inside channel - use shape for directional bias
+                if vix_ch_type == VIXChannelType.DESCENDING:
+                    vix_channel_bullish_spx = True
+                    calls_factors.append("🌊 VIX channel descending (bullish SPX bias)")
+                elif vix_ch_type == VIXChannelType.ASCENDING:
+                    vix_channel_bearish_spx = True
+                    puts_factors.append("🌊 VIX channel ascending (bearish SPX bias)")
+                elif vix_ch_type == VIXChannelType.CONVERGING:
+                    vix_channel_squeeze = True
+                    calls_factors.append("🌊 VIX channel squeezing (breakout pending)")
+                    puts_factors.append("🌊 VIX channel squeezing (breakout pending)")
+    
     # Confidence calculation
     def calc_conf(direction, at_level, is_break=False):
         support = 0
@@ -3005,6 +2371,7 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
             if floor_multi_test: support += 1
             if gap_into_floor: support += 1
             if prior_validates_floor: support += 1
+            if vix_channel_bullish_spx: support += 1  # VIX channel confirms bullish
         else:
             if ema_bearish: support += 1
             if fade_to_puts: support += 1
@@ -3012,6 +2379,7 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
             if ceiling_multi_test: support += 1
             if gap_into_ceiling: support += 1
             if prior_validates_ceiling: support += 1
+            if vix_channel_bearish_spx: support += 1  # VIX channel confirms bearish
         
         if is_break: return "MEDIUM" if support >= 3 else "LOW"
         if at_level:
@@ -3023,27 +2391,60 @@ def analyze_market_state_v2(current_spx, dual_levels, channel_type, channel_reas
     
     # Trade builder
     def make_trade(name, direction, entry, stop, trigger, rationale, confidence, is_primary=True):
+        # VIX-adaptive strike offset: closer ATM in low vol, further OTM in high vol
+        if vix < 15:
+            strike_offset = 10   # Low vol: stay close for higher delta
+        elif vix < 20:
+            strike_offset = 15   # Normal vol
+        elif vix < 25:
+            strike_offset = 20   # Elevated vol
+        else:
+            strike_offset = 25   # High vol: further OTM, cheaper premium
+        
         if direction == "CALLS":
-            strike = int(math.ceil((entry + 20) / 5) * 5)
+            strike = int(math.ceil((entry + strike_offset) / 5) * 5)
             opt_type = "CALL"
         else:
-            strike = int(math.floor((entry - 20) / 5) * 5)
+            strike = int(math.floor((entry - strike_offset) / 5) * 5)
             opt_type = "PUT"
         
-        entry_premium = estimate_0dte_premium(entry, strike, 6.0, vix, opt_type)
-        t1 = round(entry_premium * 1.50, 2)
-        t2 = round(entry_premium * 1.75, 2)
-        t3 = round(entry_premium * 2.00, 2)
+        # Time-aware target scaling
+        ct_now_local = datetime.now(CT)
+        hours_remaining = max(0.1, (CT.localize(datetime.combine(
+            current_time.date() if current_time else ct_now_local.date(), 
+            time(15, 0))) - ct_now_local).total_seconds() / 3600)
+        
+        if hours_remaining >= 5:
+            target_pcts = [0.50, 0.75, 1.00]  # Full targets early
+        elif hours_remaining >= 3:
+            target_pcts = [0.40, 0.60, 0.80]  # Moderate midday
+        elif hours_remaining >= 1.5:
+            target_pcts = [0.30, 0.50, 0.70]  # Reduced afternoon
+        else:
+            target_pcts = [0.20, 0.35, 0.50]  # Scalp mode last 90min
+        
+        entry_premium = estimate_0dte_premium(entry, strike, hours_remaining, vix, opt_type)
+        t1 = round(entry_premium * (1 + target_pcts[0]), 2)
+        t2 = round(entry_premium * (1 + target_pcts[1]), 2)
+        t3 = round(entry_premium * (1 + target_pcts[2]), 2)
+        
+        # Premium-based stop (50% of premium = max loss)
+        stop_premium = round(entry_premium * 0.50, 2)
+        max_loss_dollars = round(entry_premium * 0.50 * 100, 0)
         
         return {
             "name": name, "direction": direction, "entry_level": entry, "stop_level": stop,
             "trigger": trigger, "rationale": rationale, "confidence": confidence, "is_primary": is_primary,
             "strike": strike, "contract": f"SPX {strike}{'C' if direction == 'CALLS' else 'P'} 0DTE",
             "entry_premium": entry_premium,
+            "stop_premium": stop_premium,
+            "max_loss_dollars": max_loss_dollars,
+            "hours_remaining": round(hours_remaining, 1),
+            "target_pcts": target_pcts,
             "targets": {
-                "t1": {"price": t1, "profit_pct": 50, "profit_dollars": round((t1 - entry_premium) * 100, 0)},
-                "t2": {"price": t2, "profit_pct": 75, "profit_dollars": round((t2 - entry_premium) * 100, 0)},
-                "t3": {"price": t3, "profit_pct": 100, "profit_dollars": round((t3 - entry_premium) * 100, 0)},
+                "t1": {"price": t1, "profit_pct": int(target_pcts[0]*100), "profit_dollars": round((t1 - entry_premium) * 100, 0)},
+                "t2": {"price": t2, "profit_pct": int(target_pcts[1]*100), "profit_dollars": round((t2 - entry_premium) * 100, 0)},
+                "t3": {"price": t3, "profit_pct": int(target_pcts[2]*100), "profit_dollars": round((t3 - entry_premium) * 100, 0)},
             }
         }
     
@@ -5810,6 +5211,7 @@ def sidebar():
         # VIX CHANNEL SETTINGS
         # ─────────────────────────────────────────────────────────────────────
         st.markdown("#### 🌊 VIX Channel System")
+        st.caption("Build channel from overnight VIX structure — shape determined by data, not fixed pattern")
         
         # Check if Tastytrade is available for auto-fetch
         tastytrade_configured = is_tastytrade_configured()
@@ -5827,58 +5229,104 @@ def sidebar():
                     st.metric("Current VIX", f"{vx_current.get('price'):.2f}", 
                               delta=None, help="From Yahoo ^VIX (proxy for VX)")
         
-        # For pivots, we still need manual input until DXLink WebSocket is implemented
-        st.markdown("##### Overnight Pivots")
-        st.caption("📝 Enter from TradingView (DXLink auto-fetch coming soon)")
-        
-        # Time options for overnight VIX (5 PM - 5:30 AM next day)
+        # Time options for overnight VIX (5 PM - 8 AM next day)
         vix_time_options = []
         # Evening (5 PM - 11:30 PM)
         for h in range(17, 24):
             for m in [0, 30]:
                 vix_time_options.append(f"{h}:{m:02d}")
-        # Morning (12 AM - 5:30 AM)
-        for h in range(0, 6):
+        # Morning (12 AM - 8:00 AM)
+        for h in range(0, 9):
             for m in [0, 30]:
-                if h == 5 and m == 30:
-                    vix_time_options.append(f"{h}:{m:02d}")
+                if h == 8 and m == 30:
                     break
                 vix_time_options.append(f"{h}:{m:02d}")
         
+        # ASIA SESSION (5 PM - 2 AM CT)
+        st.markdown("##### 🦘 Asia Session (5 PM – 2 AM CT)")
+        st.caption("High = ceiling anchor #1 | Low = floor anchor #1")
+        
         col1, col2 = st.columns(2)
-        vix_pivot_high = col1.number_input("VIX Pivot High", value=18.0, step=0.01, format="%.2f",
-            help="Highest VIX value in overnight session")
-        vix_pivot_high_time = col2.selectbox("High Time (CT)", options=vix_time_options, 
+        asia_vix_high = col1.number_input("Asia High", value=18.0, step=0.01, format="%.2f",
+            key="vix_asia_high", help="Highest VIX point from 5 PM to 2 AM CT")
+        asia_vix_high_time = col2.selectbox("High Time (CT)", options=vix_time_options, 
             index=vix_time_options.index("19:00") if "19:00" in vix_time_options else 4,
-            key="vix_ph_time", help="Time when overnight VIX high occurred")
+            key="vix_asia_high_time")
         
         col1, col2 = st.columns(2)
-        vix_pivot_low = col1.number_input("VIX Pivot Low", value=16.5, step=0.01, format="%.2f",
-            help="Lowest VIX value in overnight session")
-        vix_pivot_low_time = col2.selectbox("Low Time (CT)", options=vix_time_options,
+        asia_vix_low = col1.number_input("Asia Low", value=16.5, step=0.01, format="%.2f",
+            key="vix_asia_low", help="Lowest VIX point from 5 PM to 2 AM CT")
+        asia_vix_low_time = col2.selectbox("Low Time (CT)", options=vix_time_options,
+            index=vix_time_options.index("22:00") if "22:00" in vix_time_options else 10,
+            key="vix_asia_low_time")
+        
+        # EUROPE SESSION (2 AM - 8 AM CT)
+        st.markdown("##### 🏛 Europe Session (2 AM – 8 AM CT)")
+        st.caption("High = ceiling anchor #2 | Low = floor anchor #2")
+        
+        col1, col2 = st.columns(2)
+        europe_vix_high = col1.number_input("Europe High", value=17.8, step=0.01, format="%.2f",
+            key="vix_europe_high", help="Highest VIX point from 2 AM to 8 AM CT")
+        europe_vix_high_time = col2.selectbox("High Time (CT)", options=vix_time_options,
             index=vix_time_options.index("3:00") if "3:00" in vix_time_options else 20,
-            key="vix_pl_time", help="Time when overnight VIX low occurred")
+            key="vix_europe_high_time")
         
-        # Current VIX - ALWAYS use manual input, show auto-fetched as reference only
+        col1, col2 = st.columns(2)
+        europe_vix_low = col1.number_input("Europe Low", value=16.8, step=0.01, format="%.2f",
+            key="vix_europe_low", help="Lowest VIX point from 2 AM to 8 AM CT")
+        europe_vix_low_time = col2.selectbox("Low Time (CT)", options=vix_time_options,
+            index=vix_time_options.index("4:00") if "4:00" in vix_time_options else 22,
+            key="vix_europe_low_time")
+        
+        # Current VIX
         st.markdown("##### Current VIX")
+        # Use session state to persist manual edits across reruns
+        if "vix_manual_override" not in st.session_state:
+            st.session_state.vix_manual_override = None
         
-        # Show auto-fetched VIX as reference (if available)
         if tastytrade_configured and vx_current.get("available"):
-            auto_vix = vx_current.get("price", 0)
-            st.caption(f"📡 Auto-fetched: {auto_vix:.2f} (Yahoo ^VIX)")
+            fetched_vix = vx_current.get("price", 17.0)
+            # Only use fetched value if user hasn't manually edited
+            if st.session_state.vix_manual_override is None:
+                initial_vix = fetched_vix
+            else:
+                initial_vix = st.session_state.vix_manual_override
+            
+            def on_vix_change():
+                new_val = st.session_state.get("manual_vix_input")
+                fetched = vx_current.get("price", 17.0)
+                if new_val is not None and abs(new_val - fetched) > 0.005:
+                    st.session_state.vix_manual_override = new_val
+                else:
+                    st.session_state.vix_manual_override = None
+            
+            manual_vix = st.number_input("Current VIX/VX", value=initial_vix, step=0.01, format="%.2f",
+                key="manual_vix_input", on_change=on_vix_change,
+                help=f"Auto-fetched: {fetched_vix:.2f}. Edit to override (sticky until refresh).")
+        else:
+            manual_vix = st.number_input("Current VIX/VX", value=17.0, step=0.01, format="%.2f",
+                key="manual_vix_input",
+                help="Enter current VIX from TradingView")
         
-        # Manual input - this is what gets used
-        manual_vix = st.number_input("Enter Current VIX/VX", value=17.0, step=0.01, format="%.2f",
-            key="manual_vix_input",
-            help="Enter current VIX from TradingView - THIS VALUE IS USED")
-        
-        # Store VIX channel data (always available now)
+        # Store VIX channel data - 4 pivot structural system
         manual_vix_channel = {
-            "pivot_high": vix_pivot_high,
-            "pivot_low": vix_pivot_low,
-            "pivot_high_time": vix_pivot_high_time,
-            "pivot_low_time": vix_pivot_low_time
+            "asia_high": asia_vix_high,
+            "asia_high_time": asia_vix_high_time,
+            "asia_low": asia_vix_low,
+            "asia_low_time": asia_vix_low_time,
+            "europe_high": europe_vix_high,
+            "europe_high_time": europe_vix_high_time,
+            "europe_low": europe_vix_low,
+            "europe_low_time": europe_vix_low_time,
+            # Backward compat keys
+            "pivot_high": asia_vix_high,
+            "pivot_low": asia_vix_low,
+            "pivot_high_time": asia_vix_high_time,
+            "pivot_low_time": asia_vix_low_time
         }
+        
+        # VIX channel override removed - channel type now structurally determined
+        vix_channel_override = None
         
         # Legacy VIX range settings (hidden but kept for backward compatibility)
         vix_zone_start = time(2, 0)  # Default, not shown in UI
@@ -5892,6 +5340,7 @@ def sidebar():
         # PRIOR DAY RTH DATA
         # ─────────────────────────────────────────────────────────────────────
         st.markdown("#### 📈 Prior Day RTH (ES)")
+        st.caption("Ascending: Ceiling=Highest Wick, Floor=Lowest Close | Descending: Ceiling=Highest Close, Floor=Lowest Wick")
         use_manual_prior = st.checkbox("Manual Prior Day Override", value=False)
         if use_manual_prior:
             # Time inputs with 30-minute granularity (RTH: 8:30 AM - 3:00 PM CT)
@@ -5904,10 +5353,29 @@ def sidebar():
                         continue  # RTH ends at 3:00
                     time_options.append(f"{h}:{m:02d}")
             
-            st.markdown("##### Primary High Wick")
+            st.markdown("##### Primary Highest Wick")
+            st.caption("Ascending ceiling pivot — absolute highest high of any RTH candle")
             col1, col2 = st.columns(2)
-            prior_primary_hw = col1.number_input("Price (ES)", value=6100.0, step=0.5, key="p_hw", help="Highest high of any RTH candle")
-            p_hw_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("9:30") if "9:30" in time_options else 2, key="p_hw_t", help="Time when primary high wick occurred (CT)")
+            prior_primary_hw = col1.number_input("Price (ES)", value=6100.0, step=0.5, key="p_hw", help="Highest high (wick) of any RTH candle → ascending ceiling")
+            p_hw_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("9:30") if "9:30" in time_options else 2, key="p_hw_t")
+            
+            st.markdown("##### Primary Highest Close")
+            st.caption("Descending ceiling pivot — highest close of any RTH candle")
+            col1, col2 = st.columns(2)
+            prior_primary_hc = col1.number_input("Price (ES)", value=6095.0, step=0.5, key="p_hc", help="Highest close (body) of any RTH candle → descending ceiling")
+            p_hc_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("9:30") if "9:30" in time_options else 2, key="p_hc_t")
+            
+            st.markdown("##### Primary Lowest Wick")
+            st.caption("Descending floor pivot — absolute lowest low of any RTH candle")
+            col1, col2 = st.columns(2)
+            prior_primary_lw = col1.number_input("Price (ES)", value=6045.0, step=0.5, key="p_lw", help="Lowest low (wick) of any RTH candle → descending floor")
+            p_lw_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("12:00") if "12:00" in time_options else 7, key="p_lw_t")
+            
+            st.markdown("##### Primary Lowest Close")
+            st.caption("Ascending floor pivot — lowest close of any RTH candle")
+            col1, col2 = st.columns(2)
+            prior_primary_lc = col1.number_input("Price (ES)", value=6050.0, step=0.5, key="p_lc", help="Lowest close (body) of any RTH candle → ascending floor")
+            p_lc_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("12:00") if "12:00" in time_options else 7, key="p_lc_t")
             
             st.markdown("##### Secondary High Wick")
             has_secondary_hw = st.checkbox("Has Secondary High Wick", value=False, key="has_s_hw")
@@ -5919,20 +5387,15 @@ def sidebar():
                 prior_secondary_hw = None
                 s_hw_time_str = "12:00"
             
-            st.markdown("##### Primary Low Open")
-            col1, col2 = st.columns(2)
-            prior_primary_lo = col1.number_input("Price (ES)", value=6050.0, step=0.5, key="p_lo", help="Lowest open of any BULLISH RTH candle")
-            p_lo_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("12:00") if "12:00" in time_options else 7, key="p_lo_t", help="Time when primary low open occurred (CT)")
-            
-            st.markdown("##### Secondary Low Open")
-            has_secondary_lo = st.checkbox("Has Secondary Low Open", value=False, key="has_s_lo")
-            if has_secondary_lo:
+            st.markdown("##### Secondary Low Wick")
+            has_secondary_lw = st.checkbox("Has Secondary Low Wick", value=False, key="has_s_lw")
+            if has_secondary_lw:
                 col1, col2 = st.columns(2)
-                prior_secondary_lo = col1.number_input("Price (ES)", value=6060.0, step=0.5, key="s_lo", help="Higher low open made after primary (bullish candle)")
-                s_lo_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("14:30") if "14:30" in time_options else 10, key="s_lo_t", help="Time when secondary low open occurred (CT)")
+                prior_secondary_lw = col1.number_input("Price (ES)", value=6055.0, step=0.5, key="s_lw", help="Higher low wick made after primary (descending floor)")
+                s_lw_time_str = col2.selectbox("Time", options=time_options, index=time_options.index("14:30") if "14:30" in time_options else 10, key="s_lw_t")
             else:
-                prior_secondary_lo = None
-                s_lo_time_str = "12:00"
+                prior_secondary_lw = None
+                s_lw_time_str = "12:00"
             
             st.markdown("##### RTH Close")
             prior_close = st.number_input("RTH Close (ES)", value=6075.0, step=0.5, help="Final RTH close")
@@ -5943,21 +5406,27 @@ def sidebar():
                 return int(parts[0]), int(parts[1])
             
             p_hw_hour, p_hw_min = parse_time_str(p_hw_time_str)
+            p_hc_hour, p_hc_min = parse_time_str(p_hc_time_str)
+            p_lw_hour, p_lw_min = parse_time_str(p_lw_time_str)
+            p_lc_hour, p_lc_min = parse_time_str(p_lc_time_str)
             s_hw_hour, s_hw_min = parse_time_str(s_hw_time_str)
-            p_lo_hour, p_lo_min = parse_time_str(p_lo_time_str)
-            s_lo_hour, s_lo_min = parse_time_str(s_lo_time_str)
+            s_lw_hour, s_lw_min = parse_time_str(s_lw_time_str)
         else:
             prior_primary_hw = None
+            prior_primary_hc = None
+            prior_primary_lw = None
+            prior_primary_lc = None
             prior_secondary_hw = None
-            prior_primary_lo = None
-            prior_secondary_lo = None
+            prior_secondary_lw = None
             p_hw_hour, p_hw_min = 9, 30
+            p_hc_hour, p_hc_min = 9, 30
+            p_lw_hour, p_lw_min = 12, 0
+            p_lc_hour, p_lc_min = 12, 0
             s_hw_hour, s_hw_min = 14, 30
-            p_lo_hour, p_lo_min = 12, 0
-            s_lo_hour, s_lo_min = 14, 30
+            s_lw_hour, s_lw_min = 14, 30
             prior_close = None
             has_secondary_hw = False
-            has_secondary_lo = False
+            has_secondary_lw = False
         
         st.divider()
         
@@ -6109,7 +5578,6 @@ def sidebar():
         if col2.button("🔄 Refresh", use_container_width=True):
             # Clear only market data caches
             fetch_es_current.clear()
-            fetch_vix_polygon.clear()
             fetch_vix_yahoo.clear()
             fetch_es_with_ema.clear()
             fetch_retail_positioning.clear()
@@ -6127,21 +5595,28 @@ def sidebar():
         "manual_vix": manual_vix,
         "manual_vix_range": None,  # Deprecated - now using VIX Channel system
         "manual_vix_channel": manual_vix_channel,  # VIX Channel pivots
+        "vix_channel_override": vix_channel_override,  # Manual channel type override
         "manual_prior": {
-            "primary_high_wick": prior_primary_hw, 
+            "primary_high_wick": prior_primary_hw,       # Ascending ceiling anchor
+            "primary_high_close": prior_primary_hc,      # Descending ceiling anchor
+            "primary_low_wick": prior_primary_lw,        # Descending floor anchor
+            "primary_low_close": prior_primary_lc,       # Ascending floor anchor
             "secondary_high_wick": prior_secondary_hw if has_secondary_hw else None,
-            "primary_low_open": prior_primary_lo, 
-            "secondary_low_open": prior_secondary_lo if has_secondary_lo else None,
+            "secondary_low_wick": prior_secondary_lw if has_secondary_lw else None,
             "close": prior_close, 
             "p_hw_hour": p_hw_hour, "p_hw_min": p_hw_min,
+            "p_hc_hour": p_hc_hour, "p_hc_min": p_hc_min,
+            "p_lw_hour": p_lw_hour, "p_lw_min": p_lw_min,
+            "p_lc_hour": p_lc_hour, "p_lc_min": p_lc_min,
             "s_hw_hour": s_hw_hour, "s_hw_min": s_hw_min,
-            "p_lo_hour": p_lo_hour, "p_lo_min": p_lo_min,
-            "s_lo_hour": s_lo_hour, "s_lo_min": s_lo_min,
+            "s_lw_hour": s_lw_hour, "s_lw_min": s_lw_min,
             # Legacy keys for backward compatibility
+            "primary_low_open": prior_primary_lc,  # Map old key to lowest close
+            "secondary_low_open": prior_secondary_lw if has_secondary_lw else None,
             "highest_wick": prior_primary_hw,
-            "lowest_close": prior_primary_lo,
+            "lowest_close": prior_primary_lc,
             "hw_hour": p_hw_hour, "hw_min": p_hw_min,
-            "lc_hour": p_lo_hour, "lc_min": p_lo_min,
+            "lc_hour": p_lc_hour, "lc_min": p_lc_min,
         } if use_manual_prior else None,
         "manual_overnight": {"high": on_high, "low": on_low, "high_hour": on_high_hour, "high_min": on_high_min, "low_hour": on_low_hour, "low_min": on_low_min} if use_manual_overnight else None,
         "manual_sessions": {
@@ -6276,10 +5751,17 @@ def main():
                 overnight = sessions.get("overnight")
         
         # --- VIX/VX Data ---
-        # ALWAYS use manual input from sidebar (user controls this)
-        vix = inputs["manual_vix"]
+        # Priority: 1) Manual input, 2) DXLink collector, 3) Yahoo Finance
+        dxlink_vix_channel = get_vix_channel_from_dxlink()
         
-        # Safety fallback if somehow None
+        if inputs["manual_vix"] is not None:
+            vix = inputs["manual_vix"]
+        elif dxlink_vix_channel and dxlink_vix_channel.get("current_price"):
+            vix = dxlink_vix_channel.get("current_price")
+        else:
+            vix = fetch_vix_yahoo()
+        
+        # Safety fallback if VIX fetch failed
         if vix is None:
             vix = 16.0  # Default to neutral VIX
         
@@ -6312,36 +5794,50 @@ def main():
             # Parse all pivot times
             p_hw_hour = m.get("p_hw_hour", m.get("hw_hour", 9))
             p_hw_min = m.get("p_hw_min", m.get("hw_min", 30))
+            p_hc_hour = m.get("p_hc_hour", p_hw_hour)  # Default to same as high wick
+            p_hc_min = m.get("p_hc_min", p_hw_min)
+            p_lw_hour = m.get("p_lw_hour", m.get("lc_hour", 12))
+            p_lw_min = m.get("p_lw_min", m.get("lc_min", 0))
+            p_lc_hour = m.get("p_lc_hour", p_lw_hour)  # Default to same as low wick
+            p_lc_min = m.get("p_lc_min", p_lw_min)
             s_hw_hour = m.get("s_hw_hour", 14)
             s_hw_min = m.get("s_hw_min", 30)
-            p_lo_hour = m.get("p_lo_hour", m.get("lc_hour", 12))
-            p_lo_min = m.get("p_lo_min", m.get("lc_min", 0))
-            s_lo_hour = m.get("s_lo_hour", 14)
-            s_lo_min = m.get("s_lo_min", 30)
+            s_lw_hour = m.get("s_lw_hour", 14)
+            s_lw_min = m.get("s_lw_min", 30)
             
             prior_rth = {
-                # Primary High Wick
+                # Primary High Wick (ascending ceiling)
                 "primary_high_wick": m.get("primary_high_wick", m.get("highest_wick")),
                 "primary_high_wick_time": CT.localize(datetime.combine(prior_day, time(p_hw_hour, p_hw_min))),
+                # Primary High Close (descending ceiling)
+                "primary_high_close": m.get("primary_high_close", m.get("primary_high_wick", m.get("highest_wick"))),
+                "primary_high_close_time": CT.localize(datetime.combine(prior_day, time(p_hc_hour, p_hc_min))),
+                # Primary Low Wick (descending floor)
+                "primary_low_wick": m.get("primary_low_wick", m.get("primary_low_open", m.get("lowest_close"))),
+                "primary_low_wick_time": CT.localize(datetime.combine(prior_day, time(p_lw_hour, p_lw_min))),
+                # Primary Low Close (ascending floor)
+                "primary_low_close": m.get("primary_low_close", m.get("primary_low_open", m.get("lowest_close"))),
+                "primary_low_close_time": CT.localize(datetime.combine(prior_day, time(p_lc_hour, p_lc_min))),
                 # Secondary High Wick
                 "secondary_high_wick": m.get("secondary_high_wick"),
                 "secondary_high_wick_time": CT.localize(datetime.combine(prior_day, time(s_hw_hour, s_hw_min))) if m.get("secondary_high_wick") else None,
-                # Primary Low Open
-                "primary_low_open": m.get("primary_low_open", m.get("lowest_close")),
-                "primary_low_open_time": CT.localize(datetime.combine(prior_day, time(p_lo_hour, p_lo_min))),
-                # Secondary Low Open
-                "secondary_low_open": m.get("secondary_low_open"),
-                "secondary_low_open_time": CT.localize(datetime.combine(prior_day, time(s_lo_hour, s_lo_min))) if m.get("secondary_low_open") else None,
+                # Secondary Low Wick
+                "secondary_low_wick": m.get("secondary_low_wick", m.get("secondary_low_open")),
+                "secondary_low_wick_time": CT.localize(datetime.combine(prior_day, time(s_lw_hour, s_lw_min))) if m.get("secondary_low_wick", m.get("secondary_low_open")) else None,
                 # Overall stats
                 "high": m.get("primary_high_wick", m.get("highest_wick")),
-                "low": m.get("primary_low_open", m.get("lowest_close")),
+                "low": m.get("primary_low_wick", m.get("primary_low_open", m.get("lowest_close"))),
                 "close": m.get("close"),
                 "available": True,
                 # Legacy keys for backward compatibility
                 "highest_wick": m.get("primary_high_wick", m.get("highest_wick")),
                 "highest_wick_time": CT.localize(datetime.combine(prior_day, time(p_hw_hour, p_hw_min))),
-                "lowest_close": m.get("primary_low_open", m.get("lowest_close")),
-                "lowest_close_time": CT.localize(datetime.combine(prior_day, time(p_lo_hour, p_lo_min))),
+                "lowest_close": m.get("primary_low_close", m.get("primary_low_open", m.get("lowest_close"))),
+                "lowest_close_time": CT.localize(datetime.combine(prior_day, time(p_lc_hour, p_lc_min))),
+                "primary_low_open": m.get("primary_low_close", m.get("primary_low_open", m.get("lowest_close"))),
+                "primary_low_open_time": CT.localize(datetime.combine(prior_day, time(p_lc_hour, p_lc_min))),
+                "secondary_low_open": m.get("secondary_low_wick", m.get("secondary_low_open")),
+                "secondary_low_open_time": CT.localize(datetime.combine(prior_day, time(s_lw_hour, s_lw_min))) if m.get("secondary_low_wick", m.get("secondary_low_open")) else None,
             }
         else:
             prior_rth = fetch_prior_day_rth(actual_trading_date)
@@ -6397,11 +5893,24 @@ def main():
     # ─────────────────────────────────────────────────────────────────────────
     # DUAL CHANNEL LEVELS (Option C - Always show BOTH ascending and descending)
     # ─────────────────────────────────────────────────────────────────────────
-    dual_levels_es = calc_dual_channel_levels(upper_pivot, lower_pivot, upper_time, lower_time, ref_time_dt)
+    # Extract close-based pivots from overnight sessions for correct pivot type per direction
+    close_pivots = get_close_based_pivots(sydney, tokyo, london)
+    
+    dual_levels_es = calc_dual_channel_levels(
+        upper_pivot, lower_pivot, upper_time, lower_time, ref_time_dt,
+        upper_pivot_close=close_pivots.get("highest_close"),
+        lower_pivot_close=close_pivots.get("lowest_close"),
+        upper_close_time=close_pivots.get("highest_close_time"),
+        lower_close_time=close_pivots.get("lowest_close_time")
+    )
     
     # Also calculate ORIGINAL dual levels
     original_dual_levels_es = calc_dual_channel_levels(
-        original_upper_pivot, original_lower_pivot, original_upper_time, original_lower_time, ref_time_dt
+        original_upper_pivot, original_lower_pivot, original_upper_time, original_lower_time, ref_time_dt,
+        upper_pivot_close=close_pivots.get("highest_close"),
+        lower_pivot_close=close_pivots.get("lowest_close"),
+        upper_close_time=close_pivots.get("highest_close_time"),
+        lower_close_time=close_pivots.get("lowest_close_time")
     )
     
     # Convert to SPX
@@ -6459,12 +5968,42 @@ def main():
     # Get current CT time for channel lock determination
     ct_now = datetime.now(CT)
     
+    # VIX structural channel - calculate BEFORE decision engine so bias feeds in
+    vix_channel_levels = None
+    if inputs.get("manual_vix_channel"):
+        mvc = inputs["manual_vix_channel"]
+        def parse_vix_time_early(time_str, trading_date):
+            parts = time_str.split(":")
+            hour = int(parts[0])
+            minute = int(parts[1])
+            if hour >= 17:
+                prior_day = trading_date - timedelta(days=1)
+                return CT.localize(datetime.combine(prior_day, time(hour, minute)))
+            else:
+                return CT.localize(datetime.combine(trading_date, time(hour, minute)))
+        
+        asia_high_time_e = parse_vix_time_early(mvc["asia_high_time"], actual_trading_date)
+        asia_low_time_e = parse_vix_time_early(mvc["asia_low_time"], actual_trading_date)
+        europe_high_time_e = parse_vix_time_early(mvc["europe_high_time"], actual_trading_date)
+        europe_low_time_e = parse_vix_time_early(mvc["europe_low_time"], actual_trading_date)
+        
+        ref_hour, ref_min = inputs["ref_time"]
+        reference_time_e = CT.localize(datetime.combine(actual_trading_date, time(ref_hour, ref_min)))
+        
+        vix_channel_levels = calculate_vix_structural_channel(
+            asia_high=mvc["asia_high"], asia_high_time=asia_high_time_e,
+            europe_high=mvc["europe_high"], europe_high_time=europe_high_time_e,
+            asia_low=mvc["asia_low"], asia_low_time=asia_low_time_e,
+            europe_low=mvc["europe_low"], europe_low_time=europe_low_time_e,
+            reference_time=reference_time_e, current_time=ct_now
+        )
+    
     # OPTION C: Use the new dual-channel decision engine
     decision = analyze_market_state_v2(
         current_spx, dual_levels_spx, channel_type, channel_reason,
         retail_data["bias"], ema_data["ema_bias"], vix_pos, vix,
         session_tests, gap_analysis, prior_close_validation, vix_term,
-        prior_targets, ct_now
+        prior_targets, ct_now, vix_channel_data=vix_channel_levels
     )
     
     # ═══════════════════════════════════════════════════════════════════════════
@@ -6559,7 +6098,6 @@ def main():
         if st.button("🔄 Refresh", use_container_width=True, help="Refresh all market data"):
             # Clear all caches
             fetch_es_current.clear()
-            fetch_vix_polygon.clear()
             fetch_vix_yahoo.clear()
             fetch_es_with_ema.clear()
             fetch_retail_positioning.clear()
@@ -6598,622 +6136,7 @@ def main():
     with col4:
         st.markdown(f'<div class="metric-card"><div class="metric-icon icon-clock">🕐</div><div class="metric-label">Time</div><div class="metric-value">{now.strftime("%I:%M")}</div><div class="metric-delta live-indicator"><span class="live-dot"></span> {now.strftime("%p CT")}</div></div>', unsafe_allow_html=True)
     
-    # ═══════════════════════════════════════════════════════════════════════════
-    # TODAY'S BIAS
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">🎯</div><h2 class="section-title">Today\'s Bias</h2></div>', unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        chan_class = channel_type.value.lower()
-        chan_icon = {"ASCENDING": "↗", "DESCENDING": "↘", "MIXED": "⟷", "CONTRACTING": "⟶"}.get(channel_type.value, "○")
-        st.markdown(f'<div class="glass-card"><div class="channel-badge channel-badge-{chan_class}"><span style="font-size:1.2rem;">{chan_icon}</span><span>{channel_type.value}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{channel_reason}</p></div>', unsafe_allow_html=True)
-    with col2:
-        ema_class = "calls" if ema_data["above_200"] else "puts"
-        ema_icon = "↑" if ema_data["above_200"] else "↓"
-        ema_text = "Above 200 EMA" if ema_data["above_200"] else "Below 200 EMA"
-        st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{ema_class}"><span>{ema_icon}</span><span>{ema_text}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{"Supports CALLS" if ema_data["above_200"] else "Supports PUTS"}</p></div>', unsafe_allow_html=True)
-    with col3:
-        cross_class = "calls" if ema_data["ema_cross"] == "BULLISH" else "puts"
-        cross_icon = "✓" if ema_data["ema_cross"] == "BULLISH" else "✗"
-        st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{cross_class}"><span>{cross_icon}</span><span>8/21 {ema_data["ema_cross"]}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{"8 EMA > 21 EMA" if ema_data["ema_cross"] == "BULLISH" else "8 EMA < 21 EMA"}</p></div>', unsafe_allow_html=True)
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # EXPLOSIVE MOVE ALERT (Based on Target Distance ONLY)
-    # ═══════════════════════════════════════════════════════════════════════════
-    if explosive["explosive_score"] >= 30:
-        score = explosive["explosive_score"]
-        direction = explosive.get("direction_bias", "")
-        target_dist = explosive.get("target_distance", 0)
-        conviction = explosive.get("conviction", "LOW")
-        
-        # Determine styling based on conviction
-        if conviction == "EXTREME":
-            alert_class = "danger"
-            score_icon = "🔥"
-        elif conviction == "HIGH":
-            alert_class = "warning" 
-            score_icon = "⚡"
-        else:
-            alert_class = "info"
-            score_icon = "📊"
-        
-        direction_icon = "🐻" if direction == "PUTS" else "🐂" if direction == "CALLS" else "⚖️"
-        
-        st.markdown(f'''
-        <div class="alert-box alert-box-{alert_class}" style="border-width:2px;">
-            <div class="alert-icon-large" style="font-size:4rem;">{direction_icon}</div>
-            <div class="alert-content">
-                <div class="alert-title" style="font-size:1.3rem;">{score_icon} EXPLOSIVE POTENTIAL: {conviction}</div>
-                <div class="alert-values" style="font-size:1.1rem;margin-top:8px;border:none;padding:0;">
-                    Target Runway: <strong>{target_dist:.0f} pts</strong> &nbsp;|&nbsp; If structure breaks: <strong>{direction}</strong>
-                </div>
-            </div>
-        </div>
-        ''', unsafe_allow_html=True)
-    
-    # Retail positioning alert
-    if retail_data["positioning"] != "BALANCED":
-        alert_class = "warning" if "HEAVY" in retail_data["positioning"] else "danger"
-        # Bull icon for CALL buying (fade to puts), Bear icon for PUT buying (fade to calls)
-        alert_icon = "🐂" if "CALL" in retail_data["positioning"] else "🐻"
-        # Show the actual VIX values so user can verify data is real
-        vix_vals = f"VIX: {retail_data['vix']} | VIX3M: {retail_data['vix3m']} | Spread: {retail_data['spread']}" if retail_data['vix'] else "Data unavailable"
-        st.markdown(f'<div class="alert-box alert-box-{alert_class}"><div class="alert-icon-large">{alert_icon}</div><div class="alert-content"><div class="alert-title">{retail_data["positioning"]}</div><div class="alert-text">{retail_data["warning"]}</div><div class="alert-values">{vix_vals}</div></div></div>', unsafe_allow_html=True)
-    else:
-        # Check if we actually have data or if it failed silently
-        if retail_data['vix'] is not None:
-            vix_vals = f"VIX: {retail_data['vix']} | VIX3M: {retail_data['vix3m']} | Spread: {retail_data['spread']}"
-            st.markdown(f'<div class="alert-box alert-box-success"><div class="alert-icon-large">⚖️</div><div class="alert-content"><div class="alert-title">BALANCED POSITIONING</div><div class="alert-text">No crowd pressure detected - trade freely with structure</div><div class="alert-values">{vix_vals}</div></div></div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="alert-box alert-box-info"><div class="alert-icon-large">❓</div><div class="alert-content"><div class="alert-title">POSITIONING UNKNOWN</div><div class="alert-text">Could not fetch VIX term structure data</div></div></div>', unsafe_allow_html=True)
-    
-    # VIX Position
-    if vix_range["available"]:
-        vix_icon = {"ABOVE": "▲", "IN RANGE": "◆", "BELOW": "▼"}.get(vix_pos.value, "○")
-        st.markdown(f'<div class="alert-box alert-box-info"><span class="alert-icon">{vix_icon}</span><div class="alert-content"><div class="alert-title">VIX {vix_pos.value}</div><div class="alert-text">Overnight range: {vix_range["bottom"]} - {vix_range["top"]} | Current: {vix}</div></div></div>', unsafe_allow_html=True)
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # CONFLUENCE
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">⚖️</div><h2 class="section-title">Confluence Analysis</h2></div>', unsafe_allow_html=True)
-    
-    calls_score, puts_score = len(decision["calls_factors"]), len(decision["puts_factors"])
-    calls_class = "high" if calls_score >= 3 else "medium" if calls_score >= 2 else "low"
-    puts_class = "high" if puts_score >= 3 else "medium" if puts_score >= 2 else "low"
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        factors_html = "".join([f'<div class="confluence-factor"><span class="factor-check active">✓</span>{f}</div>' for f in decision["calls_factors"]]) or '<div class="confluence-factor"><span class="factor-check inactive">—</span>No supporting factors</div>'
-        st.markdown(f'<div class="confluence-card confluence-card-calls"><div class="confluence-header"><span class="confluence-title">🟢 CALLS</span><span class="confluence-score {calls_class}">{calls_score}</span></div>{factors_html}</div>', unsafe_allow_html=True)
-    with col2:
-        factors_html = "".join([f'<div class="confluence-factor"><span class="factor-check active">✓</span>{f}</div>' for f in decision["puts_factors"]]) or '<div class="confluence-factor"><span class="factor-check inactive">—</span>No supporting factors</div>'
-        st.markdown(f'<div class="confluence-card confluence-card-puts"><div class="confluence-header"><span class="confluence-title">🔴 PUTS</span><span class="confluence-score {puts_class}">{puts_score}</span></div>{factors_html}</div>', unsafe_allow_html=True)
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # VIX CHANNEL SYSTEM - Always show (doesn't require Tastytrade)
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon" style="background:linear-gradient(135deg,#6c5ce7,#a55eea);">🌊</div><h2 class="section-title">VIX Channel System</h2></div>', unsafe_allow_html=True)
-    
-    # Determine today's VIX channel type (alternates daily on trading days)
-    vix_channel_type = get_vix_channel_type_for_date(actual_trading_date)
-    vix_channel_direction = "↗" if vix_channel_type == VIXChannelType.ASCENDING else "↘"
-    vix_channel_color = "var(--bull)" if vix_channel_type == VIXChannelType.ASCENDING else "var(--bear)"
-    
-    # Calculate VIX channel levels if manual pivots provided
-    vix_channel_levels = None
-    if inputs.get("manual_vix_channel"):
-        mvc = inputs["manual_vix_channel"]
-        # Parse pivot times
-        def parse_vix_time(time_str, trading_date):
-            parts = time_str.split(":")
-            hour = int(parts[0])
-            minute = int(parts[1])
-            # Evening times (17-23) are on prior day
-            if hour >= 17:
-                prior_day = trading_date - timedelta(days=1)
-                return CT.localize(datetime.combine(prior_day, time(hour, minute)))
-            else:
-                return CT.localize(datetime.combine(trading_date, time(hour, minute)))
-        
-        pivot_high_time = parse_vix_time(mvc["pivot_high_time"], actual_trading_date)
-        pivot_low_time = parse_vix_time(mvc["pivot_low_time"], actual_trading_date)
-        
-        # Reference time for level calculation
-        ref_hour, ref_min = inputs["ref_time"]
-        reference_time = CT.localize(datetime.combine(actual_trading_date, time(ref_hour, ref_min)))
-        
-        vix_channel_levels = calculate_vix_channel_levels(
-            channel_type=vix_channel_type,
-            pivot_high=mvc["pivot_high"],
-            pivot_low=mvc["pivot_low"],
-            pivot_high_time=pivot_high_time,
-            pivot_low_time=pivot_low_time,
-            reference_time=reference_time,
-            current_time=now
-        )
-        
-        # VIX Channel Info Card - Show 4 cards if we have levels
-        if vix_channel_levels and vix_channel_levels.get("floor"):
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.markdown(f'''
-                <div class="metric-card" style="border-left:4px solid {vix_channel_color};">
-                    <div class="metric-icon">{vix_channel_direction}</div>
-                    <div class="metric-label">VIX Channel</div>
-                    <div class="metric-value" style="color:{vix_channel_color};font-size:1.2rem;">{vix_channel_type.value}</div>
-                    <div class="metric-delta">0.04 / 6 blocks</div>
-                </div>
-                ''', unsafe_allow_html=True)
-            
-            with col2:
-                vix_floor = vix_channel_levels.get("floor_at_ref", 0)
-                dist_floor = round(vix - vix_floor, 2) if vix else 0
-                floor_status = "🟢" if dist_floor > 0.1 else "⚠️" if dist_floor > 0 else "🔴"
-                st.markdown(f'''
-                <div class="metric-card" style="border-left:4px solid var(--bull);">
-                    <div class="metric-icon">{floor_status}</div>
-                    <div class="metric-label">VIX Floor</div>
-                    <div class="metric-value" style="color:var(--bull);font-size:1.3rem;">{vix_floor:.2f}</div>
-                    <div class="metric-delta">VIX {dist_floor:+.2f} above</div>
-                </div>
-                ''', unsafe_allow_html=True)
-            
-            with col3:
-                vix_ceiling = vix_channel_levels.get("ceiling_at_ref", 0)
-                dist_ceiling = round(vix_ceiling - vix, 2) if vix else 0
-                ceiling_status = "🟢" if dist_ceiling > 0.1 else "⚠️" if dist_ceiling > 0 else "🔴"
-                st.markdown(f'''
-                <div class="metric-card" style="border-left:4px solid var(--bear);">
-                    <div class="metric-icon">{ceiling_status}</div>
-                    <div class="metric-label">VIX Ceiling</div>
-                    <div class="metric-value" style="color:var(--bear);font-size:1.3rem;">{vix_ceiling:.2f}</div>
-                    <div class="metric-delta">VIX {dist_ceiling:.2f} below</div>
-                </div>
-                ''', unsafe_allow_html=True)
-            
-            with col4:
-                # Determine position and signal
-                if vix > vix_ceiling:
-                    pos_text = "ABOVE ↑"
-                    pos_color = "var(--bear)"
-                    signal = "SELL SPX" if vix_channel_type == VIXChannelType.ASCENDING else "Watch retest"
-                elif vix < vix_floor:
-                    pos_text = "BELOW ↓"
-                    pos_color = "var(--bull)"
-                    signal = "BUY SPX" if vix_channel_type == VIXChannelType.DESCENDING else "Watch retest"
-                else:
-                    pos_text = "IN CHANNEL"
-                    pos_color = "var(--accent-cyan)"
-                    signal = "Trade bounces"
-                
-                st.markdown(f'''
-                <div class="metric-card" style="border-left:4px solid {pos_color};">
-                    <div class="metric-icon">📍</div>
-                    <div class="metric-label">VIX: {vix:.2f}</div>
-                    <div class="metric-value" style="color:{pos_color};font-size:1rem;">{pos_text}</div>
-                    <div class="metric-delta">{signal}</div>
-                </div>
-                ''', unsafe_allow_html=True)
-            
-            # Alert if VIX broke channel
-            if vix > vix_ceiling:
-                st.markdown(f'''
-                <div class="alert-box alert-box-danger" style="margin-top:10px;">
-                    <div class="alert-icon-large">🚨</div>
-                    <div class="alert-content">
-                        <div class="alert-title">VIX BROKE ABOVE {vix_channel_type.value} CEILING!</div>
-                        <div class="alert-text">Wait for 8:30 AM candle to retest {vix_ceiling:.2f}. VIX springboard UP = SELL SPX</div>
-                    </div>
-                </div>
-                ''', unsafe_allow_html=True)
-            elif vix < vix_floor:
-                st.markdown(f'''
-                <div class="alert-box alert-box-success" style="margin-top:10px;">
-                    <div class="alert-icon-large">🚨</div>
-                    <div class="alert-content">
-                        <div class="alert-title">VIX BROKE BELOW {vix_channel_type.value} FLOOR!</div>
-                        <div class="alert-text">Wait for 8:30 AM candle to retest {vix_floor:.2f}. VIX springboard DOWN = BUY SPX</div>
-                    </div>
-                </div>
-                ''', unsafe_allow_html=True)
-        
-        else:
-            # Original 3-column layout if no manual pivots
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.markdown(f'''
-                <div class="metric-card" style="border-left:4px solid {vix_channel_color};">
-                    <div class="metric-icon">{vix_channel_direction}</div>
-                    <div class="metric-label">Today's VIX Channel</div>
-                    <div class="metric-value" style="color:{vix_channel_color};">{vix_channel_type.value}</div>
-                    <div class="metric-delta">Alternates Daily</div>
-                </div>
-                ''', unsafe_allow_html=True)
-            
-            with col2:
-                # VX Front Month Info (if available from Tastytrade)
-                if vx_data and vx_data.get("available"):
-                    vx_symbol = vx_data.get("symbol", "N/A")
-                    vx_exp = vx_data.get("expiration", "N/A")
-                else:
-                    vx_symbol = "N/A"
-                    vx_exp = "Tastytrade not connected"
-                st.markdown(f'''
-                <div class="metric-card" style="border-left:4px solid var(--accent-purple);">
-                    <div class="metric-icon">📊</div>
-                    <div class="metric-label">VX Front Month</div>
-                    <div class="metric-value" style="font-size:1rem;">{vx_symbol}</div>
-                    <div class="metric-delta">Exp: {vx_exp}</div>
-                </div>
-                ''', unsafe_allow_html=True)
-            
-            with col3:
-                # Current VIX
-                st.markdown(f'''
-                <div class="metric-card" style="border-left:4px solid var(--accent-cyan);">
-                    <div class="metric-icon">📍</div>
-                    <div class="metric-label">Current VIX</div>
-                    <div class="metric-value" style="font-size:1.3rem;">{vix:.2f}</div>
-                    <div class="metric-delta">Enter pivots for levels</div>
-                </div>
-                ''', unsafe_allow_html=True)
-        
-        # VIX Channel Trading Rules
-        with st.expander("📖 VIX Channel Trading Rules", expanded=False):
-            if vix_channel_type == VIXChannelType.ASCENDING:
-                st.markdown(f'''
-                **Today: {vix_channel_direction} ASCENDING VIX Channel**
-                
-                🔹 **Slope:** +0.04 per 6 blocks (every 3 hours) - Floor & Ceiling RISE
-                
-                **If VIX Opens IN Channel:**
-                - VIX respects floor/ceiling → Trade bounces
-                - At floor: VIX bounces UP (bearish SPX)
-                - At ceiling: VIX rejects DOWN (bullish SPX)
-                
-                **If VIX BREAKS ABOVE Ceiling:**
-                - ⚠️ EXPLOSIVE MOVE incoming
-                - Wait for 8:30 AM candle to retest ceiling
-                - VIX uses ceiling as SPRINGBOARD UP
-                - 🔴 **SELL SPX** - Major bearish signal
-                ''')
-            else:
-                st.markdown(f'''
-                **Today: {vix_channel_direction} DESCENDING VIX Channel**
-                
-                🔹 **Slope:** -0.04 per 6 blocks (every 3 hours) - Floor & Ceiling FALL
-                
-                **If VIX Opens IN Channel:**
-                - VIX respects floor/ceiling → Trade bounces
-                - At floor: VIX bounces UP (bearish SPX)
-                - At ceiling: VIX rejects DOWN (bullish SPX)
-                
-                **If VIX BREAKS BELOW Floor:**
-                - ⚠️ EXPLOSIVE MOVE incoming
-                - Wait for 8:30 AM candle to retest floor
-                - VIX uses floor as SPRINGBOARD DOWN
-                - 🟢 **BUY SPX** - Major bullish signal
-                ''')
-        
-        # VX Term Structure (if available)
-        vx_term = fetch_vx_term_structure_tastytrade()
-        if vx_term.get("available") and len(vx_term.get("contracts", [])) >= 2:
-            with st.expander("📈 VX Term Structure", expanded=False):
-                contracts = vx_term.get("contracts", [])
-                st.markdown("**VX Futures Contracts:**")
-                for i, c in enumerate(contracts[:6]):
-                    month_label = f"M{i+1}" if i > 0 else "Front"
-                    st.markdown(f"- **{month_label}:** {c.get('symbol')} (Exp: {c.get('expiration')})")
-                st.info("💡 Live prices require DXLink streaming integration (coming soon)")
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # DUAL CHANNEL LEVELS (Option C - All 4 Levels)
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown(f'<div class="section-header"><div class="section-icon">📊</div><h2 class="section-title">Dual Channel Levels @ {inputs["ref_time"][0]}:{inputs["ref_time"][1]:02d} AM</h2></div>', unsafe_allow_html=True)
-    
-    if dual_levels_spx:
-        asc_floor = dual_levels_spx["asc_floor"]
-        asc_ceiling = dual_levels_spx["asc_ceiling"]
-        desc_ceiling = dual_levels_spx["desc_ceiling"]
-        desc_floor = dual_levels_spx["desc_floor"]
-        
-        dist_asc_floor = round(current_spx - asc_floor, 1)
-        dist_asc_ceiling = round(asc_ceiling - current_spx, 1)
-        dist_desc_ceiling = round(desc_ceiling - current_spx, 1)
-        dist_desc_floor = round(current_spx - desc_floor, 1)
-        
-        # Determine which level is KEY based on channel type
-        is_ascending = channel_type == ChannelType.ASCENDING
-        is_descending = channel_type == ChannelType.DESCENDING
-        
-        # Position summary from decision
-        pos_summary = decision.get("position_summary", f"Position: {position.value}")
-        
-        # Position summary
-        st.markdown(f'<div class="levels-container"><div style="padding:14px 16px;background:linear-gradient(90deg,var(--bg-elevated) 0%,transparent 100%);border-radius:10px;margin-bottom:16px;border-left:4px solid var(--accent-cyan);"><span style="font-family:Share Tech Mono,monospace;font-size:0.9rem;color:var(--text-primary);">{pos_summary}</span></div></div>', unsafe_allow_html=True)
-        
-        # Check if floor or ceiling was adjusted
-        floor_adjusted = dual_levels_spx.get("floor_was_adjusted", False)
-        ceiling_adjusted = dual_levels_spx.get("ceiling_was_adjusted", False)
-        original_asc_floor = dual_levels_spx.get("original_asc_floor")
-        original_desc_ceiling = dual_levels_spx.get("original_desc_ceiling")
-        floor_adj_session = (dual_levels_spx.get("floor_adjustment_session") or "").upper()
-        ceiling_adj_session = (dual_levels_spx.get("ceiling_adjustment_session") or "").upper()
-        
-        # Show adjustment alert if floor was adjusted
-        if floor_adjusted and original_asc_floor:
-            st.markdown(f'''
-            <div class="alert-box alert-box-info" style="margin-bottom:16px;">
-                <span class="alert-icon">🔄</span>
-                <div class="alert-content">
-                    <div class="alert-title">Floor Adjusted by {floor_adj_session}</div>
-                    <div class="alert-text">Original floor: {original_asc_floor:,.2f} → Adjusted floor: {asc_floor:,.2f}<br>
-                    <strong>Note:</strong> Market may still respect original level (like today!)</div>
-                </div>
-            </div>
-            ''', unsafe_allow_html=True)
-        
-        if ceiling_adjusted and original_desc_ceiling:
-            st.markdown(f'''
-            <div class="alert-box alert-box-info" style="margin-bottom:16px;">
-                <span class="alert-icon">🔄</span>
-                <div class="alert-content">
-                    <div class="alert-title">Ceiling Adjusted by {ceiling_adj_session}</div>
-                    <div class="alert-text">Original ceiling: {original_desc_ceiling:,.2f} → Adjusted ceiling: {desc_ceiling:,.2f}<br>
-                    <strong>Note:</strong> Market may still respect original level!</div>
-                </div>
-            </div>
-            ''', unsafe_allow_html=True)
-        
-        # Ascending Channel Header
-        asc_label = "↗ ASCENDING CHANNEL (DOMINANT)" if is_ascending else "↗ ASCENDING CHANNEL"
-        st.markdown(f'<div style="font-size:0.8rem;color:var(--bull);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px 0;font-weight:600;">{asc_label}</div>', unsafe_allow_html=True)
-        
-        # Ascending Floor Row - show BOTH if adjusted
-        if is_ascending:
-            if floor_adjusted and original_asc_floor:
-                # Show both original and adjusted
-                dist_original = current_spx - original_asc_floor
-                st.markdown(f'''
-                <div class="levels-container" style="border-left:3px solid var(--bull);">
-                    <div class="level-row">
-                        <div class="level-label floor"><span>▼</span><span>ASC FLOOR (ADJ)</span></div>
-                        <div class="level-value floor">{asc_floor:,.2f}</div>
-                        <div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div>
-                    </div>
-                </div>
-                <div class="levels-container" style="border-left:3px dashed var(--accent-gold);margin-top:-8px;opacity:0.85;">
-                    <div class="level-row">
-                        <div class="level-label" style="color:var(--accent-gold);"><span>▼</span><span>ORIGINAL FLOOR</span></div>
-                        <div class="level-value" style="color:var(--accent-gold);">{original_asc_floor:,.2f}</div>
-                        <div class="level-note" style="color:var(--accent-gold);">May still act as support • {dist_original:+.1f} pts</div>
-                    </div>
-                </div>
-                ''', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bull);"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="levels-container" style="opacity:0.7;"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
-        
-        # Ascending Ceiling Row
-        st.markdown(f'<div class="levels-container" style="opacity:0.5;margin-top:-8px;"><div class="level-row"><div class="level-label" style="color:var(--bull);"><span>▲</span><span>ASC CEIL</span></div><div class="level-value" style="color:var(--bull);">{asc_ceiling:,.2f}</div><div class="level-note">CALLS target • {dist_asc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
-        
-        # Current Price
-        st.markdown(f'<div class="levels-container" style="background:linear-gradient(90deg,rgba(245,184,0,0.15) 0%,transparent 100%);margin:12px 0;"><div class="level-row"><div class="level-label current"><span>●</span><span>CURRENT</span></div><div class="level-value current">{current_spx:,.2f}</div><div class="level-note">ES: {current_es:,.2f}</div></div></div>', unsafe_allow_html=True)
-        
-        # Descending Channel Header
-        desc_label = "↘ DESCENDING CHANNEL (DOMINANT)" if is_descending else "↘ DESCENDING CHANNEL"
-        st.markdown(f'<div style="font-size:0.8rem;color:var(--bear);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px 0;font-weight:600;">{desc_label}</div>', unsafe_allow_html=True)
-        
-        # Descending Ceiling Row - show BOTH if adjusted
-        if is_descending:
-            if ceiling_adjusted and original_desc_ceiling:
-                # Show both original and adjusted
-                dist_original = current_spx - original_desc_ceiling
-                st.markdown(f'''
-                <div class="levels-container" style="border-left:3px solid var(--bear);">
-                    <div class="level-row">
-                        <div class="level-label ceiling"><span>▲</span><span>DESC CEIL (ADJ)</span></div>
-                        <div class="level-value ceiling">{desc_ceiling:,.2f}</div>
-                        <div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div>
-                    </div>
-                </div>
-                <div class="levels-container" style="border-left:3px dashed var(--accent-gold);margin-top:-8px;opacity:0.85;">
-                    <div class="level-row">
-                        <div class="level-label" style="color:var(--accent-gold);"><span>▲</span><span>ORIGINAL CEIL</span></div>
-                        <div class="level-value" style="color:var(--accent-gold);">{original_desc_ceiling:,.2f}</div>
-                        <div class="level-note" style="color:var(--accent-gold);">May still act as resistance • {dist_original:+.1f} pts</div>
-                    </div>
-                </div>
-                ''', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bear);"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="levels-container" style="opacity:0.7;"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
-        
-        # Descending Floor Row
-        st.markdown(f'<div class="levels-container" style="opacity:0.5;margin-top:-8px;"><div class="level-row"><div class="level-label" style="color:var(--bear);"><span>▼</span><span>DESC FLOOR</span></div><div class="level-value" style="color:var(--bear);">{desc_floor:,.2f}</div><div class="level-note">PUTS target • {dist_desc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
-        
-        # Structure Alerts
-        if decision.get("structure_alerts"):
-            for alert in decision["structure_alerts"]:
-                st.markdown(f'<div class="alert-box alert-box-warning"><span class="alert-icon">⚠️</span><div class="alert-content"><div class="alert-title">Structure Break Alert</div><div class="alert-text">{alert}</div></div></div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="alert-box alert-box-danger"><span class="alert-icon">❌</span><div class="alert-content"><div class="alert-title">Dual Levels Unavailable</div><div class="alert-text">Missing overnight session data</div></div></div>', unsafe_allow_html=True)
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    # PRIOR DAY INTERMEDIATE LEVELS (4 Pivots x 2 Directions = 8 Levels)
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">📍</div><h2 class="section-title">Prior Day Intermediate Levels</h2></div>', unsafe_allow_html=True)
-    
-    if prior_targets["available"]:
-        # Convert all ES targets to SPX
-        def to_spx(val):
-            return round(val - offset, 2) if val is not None else None
-        
-        # Primary High Wick
-        p_hw = to_spx(prior_targets.get("primary_high_wick"))
-        p_hw_asc = to_spx(prior_targets.get("primary_high_wick_ascending"))
-        p_hw_desc = to_spx(prior_targets.get("primary_high_wick_descending"))
-        
-        # Secondary High Wick
-        s_hw = to_spx(prior_targets.get("secondary_high_wick"))
-        s_hw_asc = to_spx(prior_targets.get("secondary_high_wick_ascending"))
-        s_hw_desc = to_spx(prior_targets.get("secondary_high_wick_descending"))
-        
-        # Primary Low Open
-        p_lo = to_spx(prior_targets.get("primary_low_open"))
-        p_lo_asc = to_spx(prior_targets.get("primary_low_open_ascending"))
-        p_lo_desc = to_spx(prior_targets.get("primary_low_open_descending"))
-        
-        # Secondary Low Open
-        s_lo = to_spx(prior_targets.get("secondary_low_open"))
-        s_lo_asc = to_spx(prior_targets.get("secondary_low_open_ascending"))
-        s_lo_desc = to_spx(prior_targets.get("secondary_low_open_descending"))
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # PRIMARY PIVOTS (Expandable)
-        # ─────────────────────────────────────────────────────────────────────
-        with st.expander("📍 **PRIMARY PIVOTS** (High Wick & Low Open)", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if p_hw is not None and p_hw_asc is not None and p_hw_desc is not None:
-                    st.markdown(f'''
-                    <div class="prior-levels-section" style="margin-bottom:0;">
-                        <div class="prior-levels-header">
-                            <span class="prior-levels-icon">🔺</span>
-                            <span class="prior-levels-title">Primary High Wick</span>
-                            <span class="prior-levels-anchor">{p_hw:,.2f}</span>
-                        </div>
-                        <div class="prior-levels-grid">
-                            <div class="prior-level-item prior-level-sell">
-                                <div class="prior-level-direction">↗ Ascending</div>
-                                <div class="prior-level-value">{p_hw_asc:,.2f}</div>
-                                <div class="prior-level-action">SELL (Resistance)</div>
-                            </div>
-                            <div class="prior-level-item prior-level-buy">
-                                <div class="prior-level-direction">↘ Descending</div>
-                                <div class="prior-level-value">{p_hw_desc:,.2f}</div>
-                                <div class="prior-level-action">BUY (Support)</div>
-                            </div>
-                        </div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Primary High Wick: N/A</div>', unsafe_allow_html=True)
-            
-            with col2:
-                if p_lo is not None and p_lo_asc is not None and p_lo_desc is not None:
-                    st.markdown(f'''
-                    <div class="prior-levels-section" style="margin-bottom:0;">
-                        <div class="prior-levels-header">
-                            <span class="prior-levels-icon">🔻</span>
-                            <span class="prior-levels-title">Primary Low Open</span>
-                            <span class="prior-levels-anchor">{p_lo:,.2f}</span>
-                        </div>
-                        <div class="prior-levels-grid">
-                            <div class="prior-level-item prior-level-buy">
-                                <div class="prior-level-direction">↗ Ascending</div>
-                                <div class="prior-level-value">{p_lo_asc:,.2f}</div>
-                                <div class="prior-level-action">BUY (Support)</div>
-                            </div>
-                            <div class="prior-level-item prior-level-sell">
-                                <div class="prior-level-direction">↘ Descending</div>
-                                <div class="prior-level-value">{p_lo_desc:,.2f}</div>
-                                <div class="prior-level-action">SELL (Resistance)</div>
-                            </div>
-                        </div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Primary Low Open: N/A<br><small>(No bullish candle found)</small></div>', unsafe_allow_html=True)
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # SECONDARY PIVOTS (Expandable)
-        # ─────────────────────────────────────────────────────────────────────
-        has_secondary = s_hw is not None or s_lo is not None
-        secondary_label = "📍 **SECONDARY PIVOTS** (Lower High & Higher Low)" if has_secondary else "📍 **SECONDARY PIVOTS** (None Detected)"
-        
-        with st.expander(secondary_label, expanded=has_secondary):
-            if not has_secondary:
-                st.markdown('''
-                <div style="padding:20px;text-align:center;color:var(--text-muted);">
-                    <div style="font-size:1.2rem;margin-bottom:8px;">No Secondary Pivots Detected</div>
-                    <div style="font-size:0.85rem;">Secondary pivots require a rejection 1+ hour after the primary pivot</div>
-                </div>
-                ''', unsafe_allow_html=True)
-            else:
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    if s_hw is not None and s_hw_asc is not None and s_hw_desc is not None:
-                        st.markdown(f'''
-                        <div class="prior-levels-section" style="margin-bottom:0;opacity:0.9;">
-                            <div class="prior-levels-header">
-                                <span class="prior-levels-icon">🔸</span>
-                                <span class="prior-levels-title">Secondary High Wick</span>
-                                <span class="prior-levels-anchor">{s_hw:,.2f}</span>
-                            </div>
-                            <div class="prior-levels-grid">
-                                <div class="prior-level-item prior-level-sell">
-                                    <div class="prior-level-direction">↗ Ascending</div>
-                                    <div class="prior-level-value">{s_hw_asc:,.2f}</div>
-                                    <div class="prior-level-action">SELL (Resistance)</div>
-                                </div>
-                                <div class="prior-level-item prior-level-buy">
-                                    <div class="prior-level-direction">↘ Descending</div>
-                                    <div class="prior-level-value">{s_hw_desc:,.2f}</div>
-                                    <div class="prior-level-action">BUY (Support)</div>
-                                </div>
-                            </div>
-                            <div class="prior-levels-note">Lower high after primary rejection</div>
-                        </div>
-                        ''', unsafe_allow_html=True)
-                    else:
-                        st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Secondary High Wick: N/A</div>', unsafe_allow_html=True)
-                
-                with col2:
-                    if s_lo is not None and s_lo_asc is not None and s_lo_desc is not None:
-                        st.markdown(f'''
-                        <div class="prior-levels-section" style="margin-bottom:0;opacity:0.9;">
-                            <div class="prior-levels-header">
-                                <span class="prior-levels-icon">🔹</span>
-                                <span class="prior-levels-title">Secondary Low Open</span>
-                                <span class="prior-levels-anchor">{s_lo:,.2f}</span>
-                            </div>
-                            <div class="prior-levels-grid">
-                                <div class="prior-level-item prior-level-buy">
-                                    <div class="prior-level-direction">↗ Ascending</div>
-                                    <div class="prior-level-value">{s_lo_asc:,.2f}</div>
-                                    <div class="prior-level-action">BUY (Support)</div>
-                                </div>
-                                <div class="prior-level-item prior-level-sell">
-                                    <div class="prior-level-direction">↘ Descending</div>
-                                    <div class="prior-level-value">{s_lo_desc:,.2f}</div>
-                                    <div class="prior-level-action">SELL (Resistance)</div>
-                                </div>
-                            </div>
-                            <div class="prior-levels-note">Higher low after primary defense (bullish)</div>
-                        </div>
-                        ''', unsafe_allow_html=True)
-                    else:
-                        st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Secondary Low Open: N/A</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('''
-        <div class="alert-box" style="background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3);">
-            <span style="font-size:1.2rem;">⚠️</span>
-            <div>
-                <div style="font-weight:600;color:var(--accent-gold);margin-bottom:4px;">Prior Day Data Unavailable</div>
-                <div style="font-size:0.85rem;color:var(--text-secondary);">Use Manual Prior Day Override in sidebar to enable intermediate levels</div>
-            </div>
-        </div>
-        ''', unsafe_allow_html=True)
-    
-    # ═══════════════════════════════════════════════════════════════════════════
+
     # TRADE SETUPS (Option C - Primary + Secondary)
     # ═══════════════════════════════════════════════════════════════════════════
     
@@ -7249,38 +6172,34 @@ def main():
             entry_level = trade["entry_level"]
             
             # Determine if trade has already triggered
-            # For CALLS: Trade triggers when price drops TO the floor (entry), then rises
-            #            If current price > entry, we're either approaching or past target
-            # For PUTS: Trade triggers when price rises TO the ceiling (entry), then drops
-            #            If current price < entry, the trade has triggered and is in profit
+            # For CALLS at ascending floor: price drops TO floor, then bounces UP
+            #   Triggered = current price has bounced above entry by meaningful amount
+            # For PUTS at descending ceiling: price rises TO ceiling, then drops DOWN
+            #   Triggered = current price has dropped below entry by meaningful amount
+            
+            BOUNCE_THRESHOLD = 5  # SPX points beyond entry to confirm trigger
             
             if opt_type == "CALL":
-                trade_triggered = current_spx > entry_level  # Price above entry = either not reached or past
-                # Actually for calls at floor: price drops to floor, then rises
-                # If price is BELOW floor, trade hasn't triggered yet (approaching)
-                # If price is ABOVE floor, either: never reached floor, or reached and bounced
-                # We need to check if price is moving toward or away from entry
-                trade_triggered = False  # For calls, we calculate entry premium (price dropping to floor)
-                
+                # Call at floor: triggered when price is meaningfully above entry (bounced)
+                trade_triggered = current_spx >= entry_level + BOUNCE_THRESHOLD
             else:  # PUT
-                # For puts at ceiling: price rises to ceiling, then drops
-                # If current price < entry level, the trade has TRIGGERED (price dropped below entry)
-                trade_triggered = current_spx < entry_level
+                # Put at ceiling: triggered when price is meaningfully below entry (rejected)
+                trade_triggered = current_spx <= entry_level - BOUNCE_THRESHOLD
             
             if is_rth and current_spx:
-                # Fetch real premium from Polygon
-                real_data = fetch_real_option_premium(strike, opt_type, trading_date)
+                # Fetch option premium estimate
+                real_data = fetch_real_option_premium(strike, opt_type, trading_date, es_spx_offset=offset)
                 
                 # Store debug info
                 trade = trade.copy()
-                trade["polygon_ticker"] = real_data.get("ticker")
-                trade["polygon_error"] = real_data.get("error")
-                trade["polygon_available"] = real_data.get("available")
-                trade["polygon_bid"] = real_data.get("bid")
-                trade["polygon_ask"] = real_data.get("ask")
-                trade["polygon_mid"] = real_data.get("mid")
-                trade["polygon_last"] = real_data.get("last")
-                trade["polygon_delta"] = real_data.get("delta")
+                trade["option_ticker"] = real_data.get("ticker")
+                trade["option_error"] = real_data.get("error")
+                trade["option_available"] = real_data.get("available")
+                trade["option_bid"] = real_data.get("bid")
+                trade["option_ask"] = real_data.get("ask")
+                trade["option_mid"] = real_data.get("mid")
+                trade["option_last"] = real_data.get("last")
+                trade["option_delta"] = real_data.get("delta")
                 
                 if real_data["available"]:
                     current_premium = real_data["mid"] or real_data["last"]
@@ -7342,6 +6261,67 @@ def main():
         # Update primary trade with real premium if in RTH
         p = get_trade_premium(decision["primary"], current_spx, actual_trading_date, is_rth)
         
+        # ═══════════════════════════════════════════════════════════════════
+        # TRADE PLAYBOOK - Single-glance execution summary
+        # ═══════════════════════════════════════════════════════════════════
+        if p:
+            alt = decision.get("alternate")
+            # Direction labels: We're always BUYING options (calls or puts)
+            playbook_dir = "↗ BUY CALLS" if p["direction"] == "CALLS" else "↘ BUY PUTS"
+            playbook_color = "var(--bull)" if p["direction"] == "CALLS" else "var(--bear)"
+            playbook_alt_color = "var(--bear)" if p["direction"] == "CALLS" else "var(--bull)"
+            t = p["targets"]
+            
+            # Stop direction depends on trade type:
+            # CALLS: stop if SPX drops BELOW stop level (market going against you)
+            # PUTS: stop if SPX rises ABOVE stop level (market going against you)
+            if p["direction"] == "CALLS":
+                stop_word = "below"
+            else:
+                stop_word = "above"
+            
+            # Channel status context
+            channel_lock_text = "Channel LOCKED ✓" if decision.get("channel_locked") else "Channel BUILDING ⏳"
+            hours_left = p.get("hours_remaining", 6.0)
+            time_context = f"{hours_left:.0f}h to expiry" if hours_left >= 1 else f"{hours_left*60:.0f}min to expiry"
+            
+            # No-trade zone warnings
+            no_trade_warning = ""
+            ct_now_check = datetime.now(CT)
+            ct_decimal = ct_now_check.hour + ct_now_check.minute / 60.0
+            if 12.0 <= ct_decimal < 13.0:
+                no_trade_warning = '<div style="background:rgba(254,228,64,0.15);border:1px solid rgba(254,228,64,0.3);border-radius:8px;padding:8px 12px;margin-top:8px;font-size:0.75rem;color:var(--accent-gold);">⚠️ LUNCH ZONE (12-1 PM): Signals less reliable. Consider waiting for 1:00 PM confirmation.</div>'
+            elif ct_decimal >= 14.25:
+                no_trade_warning = '<div style="background:rgba(254,228,64,0.15);border:1px solid rgba(254,228,64,0.3);border-radius:8px;padding:8px 12px;margin-top:8px;font-size:0.75rem;color:var(--accent-gold);">⚠️ LATE SESSION: Gamma acceleration zone. Tighter stops, reduced targets.</div>'
+            
+            # Alternate plan
+            alt_text = ""
+            if alt:
+                alt_dir = "BUY CALLS" if alt["direction"] == "CALLS" else "BUY PUTS"
+                alt_text = f'<div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(0,245,212,0.15);"><span style="color:var(--text-muted);font-size:0.85rem;font-weight:500;">⟳ IF WRONG:</span> <span style="color:{playbook_alt_color};font-size:0.95rem;font-weight:700;">{alt["name"]} → {alt_dir} {alt["contract"]}</span></div>'
+            
+            pb = ''
+            pb += '<div style="background:linear-gradient(135deg, rgba(0,245,212,0.08) 0%, rgba(0,187,249,0.05) 50%, rgba(0,245,212,0.03) 100%);border:2px solid rgba(0,245,212,0.45);border-radius:20px;padding:28px 32px;margin-bottom:28px;box-shadow:0 0 40px rgba(0,245,212,0.15), 0 0 80px rgba(0,245,212,0.05), inset 0 1px 0 rgba(255,255,255,0.05);position:relative;overflow:hidden;">'
+            pb += '<div style="position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg, transparent, rgba(0,245,212,0.6), transparent);"></div>'
+            pb += f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><span style="font-family:Orbitron,sans-serif;font-size:1rem;font-weight:700;color:var(--accent-cyan);letter-spacing:3px;text-shadow:0 0 20px rgba(0,245,212,0.3);">◈ TRADE PLAYBOOK</span><span style="font-size:0.8rem;color:var(--text-muted);background:rgba(255,255,255,0.04);padding:4px 12px;border-radius:20px;border:1px solid var(--border-subtle);">{channel_lock_text} | {time_context}</span></div>'
+            pb += f'<div style="font-size:1.5rem;font-weight:700;color:var(--text-bright);margin-bottom:14px;line-height:1.3;"><span style="color:{playbook_color};text-shadow:0 0 15px {playbook_color};">{playbook_dir}</span> {p["contract"]} at <span style="color:var(--accent-cyan);font-size:1.6rem;text-shadow:0 0 15px rgba(0,245,212,0.4);">${p["entry_premium"]:.2f}</span></div>'
+            pb += '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;">'
+            pb += f'<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:12px;padding:10px 16px;flex:1;min-width:160px;"><div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Entry Level</div><div style="font-size:1.15rem;font-weight:700;color:var(--text-bright);">SPX {p["entry_level"]:,.2f}</div></div>'
+            pb += f'<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:12px;padding:10px 16px;flex:1;min-width:160px;"><div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Stop if {stop_word}</div><div style="font-size:1.15rem;font-weight:700;color:var(--bear);">{p["stop_level"]:,.2f} <span style="font-size:0.8rem;font-weight:400;color:var(--text-muted);">(prem: ${p.get("stop_premium", 0):.2f})</span></div></div>'
+            pb += f'<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:12px;padding:10px 16px;flex:1;min-width:120px;"><div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:1px;">Max Risk</div><div style="font-size:1.15rem;font-weight:700;color:var(--bear);">-${p.get("max_loss_dollars", 0):,.0f}</div></div>'
+            pb += '</div>'
+            pb += '<div style="background:rgba(0,245,212,0.04);border:1px solid rgba(0,245,212,0.15);border-radius:12px;padding:12px 16px;margin-bottom:4px;">'
+            pb += '<div style="font-size:0.75rem;color:var(--accent-cyan);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">◎ Profit Targets</div>'
+            pb += '<div style="display:flex;gap:16px;flex-wrap:wrap;">'
+            pb += f'<div style="flex:1;min-width:80px;text-align:center;"><div style="font-size:0.7rem;color:var(--text-muted);">T1 ({t["t1"]["profit_pct"]}%)</div><div style="font-size:1.1rem;font-weight:700;color:var(--bull);">${t["t1"]["price"]:.2f}</div><div style="font-size:0.8rem;color:var(--bull);">+${t["t1"]["profit_dollars"]:,.0f}</div></div>'
+            pb += f'<div style="flex:1;min-width:80px;text-align:center;"><div style="font-size:0.7rem;color:var(--text-muted);">T2 ({t["t2"]["profit_pct"]}%)</div><div style="font-size:1.1rem;font-weight:700;color:var(--bull);">${t["t2"]["price"]:.2f}</div><div style="font-size:0.8rem;color:var(--bull);">+${t["t2"]["profit_dollars"]:,.0f}</div></div>'
+            pb += f'<div style="flex:1;min-width:80px;text-align:center;"><div style="font-size:0.7rem;color:var(--text-muted);">T3 ({t["t3"]["profit_pct"]}%)</div><div style="font-size:1.1rem;font-weight:700;color:var(--bull);">${t["t3"]["price"]:.2f}</div><div style="font-size:0.8rem;color:var(--bull);">+${t["t3"]["profit_dollars"]:,.0f}</div></div>'
+            pb += '</div></div>'
+            pb += alt_text
+            pb += no_trade_warning
+            pb += '</div>'
+            st.markdown(pb, unsafe_allow_html=True)
+        
         # PRIMARY TRADE
         st.markdown('<div class="section-header"><div class="section-icon icon-rocket">🚀</div><h2 class="section-title">PRIMARY Trade Setup</h2></div>', unsafe_allow_html=True)
         
@@ -7378,14 +6358,14 @@ def main():
                 premium_note = ""
                 premium_note_style = ""
                 show_triggered = False
-                if p.get("polygon_ticker"):
-                    premium_note = f'Polygon: {p.get("polygon_error", "No data")}'
+                if p.get("option_ticker"):
+                    premium_note = f'Source: {p.get("option_error", "Estimated")}'
                     premium_note_style = 'font-size:0.65rem;color:var(--text-muted);margin-top:4px;'
             
             # Build HTML in parts
             card_html = f'<div class="trade-card trade-card-{tc}">'
             card_html += f'<div class="trade-header"><div class="trade-name">{di} {p["name"]}</div>'
-            card_html += f'<div class="trade-confidence trade-confidence-{p["confidence"].lower()}">{p["confidence"]} CONFIDENCE</div></div>'
+            card_html += f'<div class="trade-confidence trade-confidence-{p["confidence"].lower()}">{p["confidence"]} CONFIDENCE {"✓" if decision.get("channel_locked") else "⏳"}</div></div>'
             
             if show_triggered:
                 card_html += '<div style="background:var(--bull);color:#000;padding:4px 12px;border-radius:20px;font-size:0.7rem;font-weight:700;display:inline-block;margin-bottom:8px;">✓ TRADE TRIGGERED</div>'
@@ -7398,11 +6378,13 @@ def main():
             card_html += '</div>'
             card_html += f'<div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{p["entry_level"]:,.2f}</div></div>'
             card_html += f'<div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{p["stop_level"]:,.2f}</div></div>'
+            if p.get("stop_premium"):
+                card_html += f'<div class="trade-metric"><div class="trade-metric-label">Premium Stop</div><div class="trade-metric-value" style="color:var(--bear);">${p["stop_premium"]:.2f}</div><div style="font-size:0.65rem;color:var(--text-muted);margin-top:2px;">Max loss: -${p["max_loss_dollars"]:,.0f}</div></div>'
             card_html += '</div>'
             card_html += '<div class="trade-targets"><div class="targets-header">◎ Profit Targets</div><div class="targets-grid">'
-            card_html += f'<div class="target-item"><div class="target-label">50%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>'
-            card_html += f'<div class="target-item"><div class="target-label">75%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>'
-            card_html += f'<div class="target-item"><div class="target-label">100%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>'
+            card_html += f'<div class="target-item"><div class="target-label">{t["t1"]["profit_pct"]}%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>'
+            card_html += f'<div class="target-item"><div class="target-label">{t["t2"]["profit_pct"]}%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>'
+            card_html += f'<div class="target-item"><div class="target-label">{t["t3"]["profit_pct"]}%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>'
             card_html += '</div></div>'
             card_html += f'<div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{p["trigger"]}</div></div>'
             card_html += '</div>'
@@ -7410,19 +6392,19 @@ def main():
             st.markdown(card_html, unsafe_allow_html=True)
             with st.expander("📋 Trade Rationale"):
                 st.write(p["rationale"])
-            # Debug: Show Polygon API details during RTH
-            if is_rth and p.get("polygon_ticker"):
-                with st.expander("🔧 Polygon API Debug"):
-                    debug_text = f"""Ticker: {p.get('polygon_ticker')}
-Available: {p.get('polygon_available')}
-Error: {p.get('polygon_error')}
+            # Debug: Show option pricing details during RTH
+            if is_rth and p.get("option_ticker"):
+                with st.expander("🔧 Option Pricing Debug"):
+                    debug_text = f"""Ticker: {p.get('option_ticker')}
+Available: {p.get('option_available')}
+Error: {p.get('option_error')}
 
 --- Raw Data ---
-Bid: {p.get('polygon_bid')}
-Ask: {p.get('polygon_ask')}
-Mid: {p.get('polygon_mid')}
-Last: {p.get('polygon_last')}
-Delta: {p.get('polygon_delta')}
+Bid: {p.get('option_bid')}
+Ask: {p.get('option_ask')}
+Mid: {p.get('option_mid')}
+Last: {p.get('option_last')}
+Delta: {p.get('option_delta')}
 
 --- Calculation ---
 Current Premium: {p.get('calc_current_premium')}
@@ -7432,6 +6414,22 @@ Delta Used: {p.get('calc_delta_used')}
 Calculated Entry Premium: {p.get('calc_result')}
 """
                     st.code(debug_text)
+            
+            # Trade Journal - Log button
+            if st.button("📝 Log This Trade to Journal", key="log_primary", help="Save this trade signal to trade_journal.csv for performance tracking"):
+                log_trade_to_journal(
+                    trade_date=actual_trading_date.strftime("%Y-%m-%d"),
+                    channel_type=channel_type.value if channel_type else "UNKNOWN",
+                    direction=p["direction"],
+                    contract=p["contract"],
+                    entry_spx=p["entry_level"],
+                    entry_premium=p["entry_premium"],
+                    confidence=p["confidence"],
+                    strike_offset=p["strike"] - p["entry_level"],
+                    vix_at_entry=vix,
+                    notes=p["name"]
+                )
+                st.success("✓ Trade logged to journal!")
         
         # ALTERNATE TRADE (If structure breaks)
         if decision.get("alternate"):
@@ -7488,9 +6486,9 @@ Calculated Entry Premium: {p.get('calc_result')}
             card_html += f'<div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{a["stop_level"]:,.2f}</div></div>'
             card_html += '</div>'
             card_html += '<div class="trade-targets"><div class="targets-header">◎ Profit Targets</div><div class="targets-grid">'
-            card_html += f'<div class="target-item"><div class="target-label">50%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>'
-            card_html += f'<div class="target-item"><div class="target-label">75%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>'
-            card_html += f'<div class="target-item"><div class="target-label">100%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>'
+            card_html += f'<div class="target-item"><div class="target-label">{t["t1"]["profit_pct"]}%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>'
+            card_html += f'<div class="target-item"><div class="target-label">{t["t2"]["profit_pct"]}%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>'
+            card_html += f'<div class="target-item"><div class="target-label">{t["t3"]["profit_pct"]}%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>'
             card_html += '</div></div>'
             card_html += f'<div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{a["trigger"]}</div></div>'
             card_html += '</div>'
@@ -7499,76 +6497,289 @@ Calculated Entry Premium: {p.get('calc_result')}
             with st.expander("📋 Trade Rationale"):
                 st.write(a["rationale"])
         
-        # SECONDARY TRADE (other side of channel)
+        # SECONDARY TRADE (collapsed - other side of channel)
         if decision.get("secondary"):
             s = get_trade_premium(decision["secondary"], current_spx, actual_trading_date, is_rth)
-            st.markdown('<div class="section-header"><div class="section-icon icon-rotate">🔄</div><h2 class="section-title">SECONDARY Trade Setup</h2></div>', unsafe_allow_html=True)
-            tc = "calls" if s["direction"] == "CALLS" else "puts"
-            di = "↗" if s["direction"] == "CALLS" else "↘"
-            t = s["targets"]
+            with st.expander("🔄 Secondary Trade Setup — Other Side of Channel", expanded=False):
+                st.markdown('<div class="section-header"><div class="section-icon icon-rotate">🔄</div><h2 class="section-title">SECONDARY Trade Setup</h2></div>', unsafe_allow_html=True)
+                tc = "calls" if s["direction"] == "CALLS" else "puts"
+                di = "↗" if s["direction"] == "CALLS" else "↘"
+                t = s["targets"]
             
-            # Determine display based on trade status
-            trade_status = s.get("trade_status", "PENDING")
+                # Determine display based on trade status
+                trade_status = s.get("trade_status", "PENDING")
             
-            if trade_status == "TRIGGERED" and s.get("live_current_premium"):
-                premium_label = "Current Premium (LIVE)"
-                current_prem = s["live_current_premium"]
-                profit_pct = s.get("current_profit_pct", 0)
-                profit_dollars = s.get("current_profit_dollars", 0)
-                profit_color = "var(--bull)" if profit_pct >= 0 else "var(--bear)"
-                profit_sign = "+" if profit_pct >= 0 else ""
-                premium_note = f'P/L: {profit_sign}{profit_pct:.1f}% ({profit_sign}${profit_dollars:,.0f})'
-                premium_note_style = f'font-size:0.7rem;color:{profit_color};margin-top:4px;font-weight:600;'
-                premium_value = current_prem
-                show_triggered = True
-            elif s.get("real_premium"):
-                premium_label = "Entry Premium (LIVE)"
-                premium_value = s.get("entry_premium", 0)
-                current_prem_display = s.get("current_premium", 0)
-                current_spx_display = s.get("current_spx", 0)
-                premium_note = f'Current: ${current_prem_display:.2f} @ SPX {current_spx_display:,.0f}'
-                premium_note_style = 'font-size:0.7rem;color:var(--accent-cyan);margin-top:4px;'
-                show_triggered = False
-            else:
-                premium_label = "Entry Premium (EST)"
-                premium_value = s.get("entry_premium", 0)
-                premium_note = ""
-                premium_note_style = ""
-                show_triggered = False
+                if trade_status == "TRIGGERED" and s.get("live_current_premium"):
+                    premium_label = "Current Premium (LIVE)"
+                    current_prem = s["live_current_premium"]
+                    profit_pct = s.get("current_profit_pct", 0)
+                    profit_dollars = s.get("current_profit_dollars", 0)
+                    profit_color = "var(--bull)" if profit_pct >= 0 else "var(--bear)"
+                    profit_sign = "+" if profit_pct >= 0 else ""
+                    premium_note = f'P/L: {profit_sign}{profit_pct:.1f}% ({profit_sign}${profit_dollars:,.0f})'
+                    premium_note_style = f'font-size:0.7rem;color:{profit_color};margin-top:4px;font-weight:600;'
+                    premium_value = current_prem
+                    show_triggered = True
+                elif s.get("real_premium"):
+                    premium_label = "Entry Premium (LIVE)"
+                    premium_value = s.get("entry_premium", 0)
+                    current_prem_display = s.get("current_premium", 0)
+                    current_spx_display = s.get("current_spx", 0)
+                    premium_note = f'Current: ${current_prem_display:.2f} @ SPX {current_spx_display:,.0f}'
+                    premium_note_style = 'font-size:0.7rem;color:var(--accent-cyan);margin-top:4px;'
+                    show_triggered = False
+                else:
+                    premium_label = "Entry Premium (EST)"
+                    premium_value = s.get("entry_premium", 0)
+                    premium_note = ""
+                    premium_note_style = ""
+                    show_triggered = False
             
-            # Build HTML in parts
-            card_html = f'<div class="trade-card trade-card-{tc}" style="opacity: 0.85;">'
-            card_html += f'<div class="trade-header"><div class="trade-name">{di} {s["name"]}</div>'
-            card_html += f'<div class="trade-confidence trade-confidence-{s["confidence"].lower()}">{s["confidence"]} CONFIDENCE</div></div>'
+                # Build HTML in parts
+                card_html = f'<div class="trade-card trade-card-{tc}" style="opacity: 0.85;">'
+                card_html += f'<div class="trade-header"><div class="trade-name">{di} {s["name"]}</div>'
+                card_html += f'<div class="trade-confidence trade-confidence-{s["confidence"].lower()}">{s["confidence"]} CONFIDENCE</div></div>'
             
-            if show_triggered:
-                card_html += '<div style="background:var(--bull);color:#000;padding:4px 12px;border-radius:20px;font-size:0.7rem;font-weight:700;display:inline-block;margin-bottom:8px;">✓ TRADE TRIGGERED</div>'
+                if show_triggered:
+                    card_html += '<div style="background:var(--bull);color:#000;padding:4px 12px;border-radius:20px;font-size:0.7rem;font-weight:700;display:inline-block;margin-bottom:8px;">✓ TRADE TRIGGERED</div>'
             
-            card_html += f'<div class="trade-contract trade-contract-{tc}">{s["contract"]}</div>'
-            card_html += '<div class="trade-grid">'
-            card_html += f'<div class="trade-metric"><div class="trade-metric-label">{premium_label}</div><div class="trade-metric-value">${premium_value:.2f}</div>'
-            if premium_note:
-                card_html += f'<div style="{premium_note_style}">{premium_note}</div>'
-            card_html += '</div>'
-            card_html += f'<div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{s["entry_level"]:,.2f}</div></div>'
-            card_html += f'<div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{s["stop_level"]:,.2f}</div></div>'
-            card_html += '</div>'
-            card_html += '<div class="trade-targets"><div class="targets-header">◎ Profit Targets</div><div class="targets-grid">'
-            card_html += f'<div class="target-item"><div class="target-label">50%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>'
-            card_html += f'<div class="target-item"><div class="target-label">75%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>'
-            card_html += f'<div class="target-item"><div class="target-label">100%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>'
-            card_html += '</div></div>'
-            card_html += f'<div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{s["trigger"]}</div></div>'
-            card_html += '</div>'
+                card_html += f'<div class="trade-contract trade-contract-{tc}">{s["contract"]}</div>'
+                card_html += '<div class="trade-grid">'
+                card_html += f'<div class="trade-metric"><div class="trade-metric-label">{premium_label}</div><div class="trade-metric-value">${premium_value:.2f}</div>'
+                if premium_note:
+                    card_html += f'<div style="{premium_note_style}">{premium_note}</div>'
+                card_html += '</div>'
+                card_html += f'<div class="trade-metric"><div class="trade-metric-label">SPX Entry</div><div class="trade-metric-value">{s["entry_level"]:,.2f}</div></div>'
+                card_html += f'<div class="trade-metric"><div class="trade-metric-label">SPX Stop</div><div class="trade-metric-value">{s["stop_level"]:,.2f}</div></div>'
+                card_html += '</div>'
+                card_html += '<div class="trade-targets"><div class="targets-header">◎ Profit Targets</div><div class="targets-grid">'
+                card_html += f'<div class="target-item"><div class="target-label">{t["t1"]["profit_pct"]}%</div><div class="target-price">${t["t1"]["price"]:.2f}</div><div class="target-profit">+${t["t1"]["profit_dollars"]:,.0f}</div></div>'
+                card_html += f'<div class="target-item"><div class="target-label">{t["t2"]["profit_pct"]}%</div><div class="target-price">${t["t2"]["price"]:.2f}</div><div class="target-profit">+${t["t2"]["profit_dollars"]:,.0f}</div></div>'
+                card_html += f'<div class="target-item"><div class="target-label">{t["t3"]["profit_pct"]}%</div><div class="target-price">${t["t3"]["price"]:.2f}</div><div class="target-profit">+${t["t3"]["profit_dollars"]:,.0f}</div></div>'
+                card_html += '</div></div>'
+                card_html += f'<div class="trade-trigger"><div class="trigger-label">◈ Entry Trigger</div><div class="trigger-text">{s["trigger"]}</div></div>'
+                card_html += '</div>'
             
-            st.markdown(card_html, unsafe_allow_html=True)
-            with st.expander("📋 Trade Rationale"):
-                st.write(s["rationale"])
+                st.markdown(card_html, unsafe_allow_html=True)
+                with st.expander("📋 Trade Rationale"):
+                    st.write(s["rationale"])
     
     # ═══════════════════════════════════════════════════════════════════════════
+
+    # VIX CHANNEL SYSTEM - Always show (doesn't require Tastytrade)
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.markdown('<div class="section-header"><div class="section-icon" style="background:linear-gradient(135deg,#6c5ce7,#a55eea);">🌊</div><h2 class="section-title">VIX Channel System</h2></div>', unsafe_allow_html=True)
+    
+    # vix_channel_levels already calculated above (before decision engine)
+    vix_channel_type = vix_channel_levels["channel_type"] if vix_channel_levels else VIXChannelType.FLAT
+    
+    # Direction/color for display
+    direction_map = {
+        VIXChannelType.ASCENDING: ("↗", "var(--bear)"),      # VIX up = SPX bearish
+        VIXChannelType.DESCENDING: ("↘", "var(--bull)"),     # VIX down = SPX bullish
+        VIXChannelType.CONVERGING: ("⊳", "var(--accent-gold)"),  # Squeeze
+        VIXChannelType.DIVERGING: ("⊲", "var(--accent-purple)"),  # Expansion
+        VIXChannelType.FLAT: ("═", "var(--accent-cyan)"),
+        VIXChannelType.PARALLEL_UP: ("↗↗", "var(--bear)"),
+        VIXChannelType.PARALLEL_DOWN: ("↘↘", "var(--bull)"),
+    }
+    vix_channel_direction, vix_channel_color = direction_map.get(
+        vix_channel_type, ("?", "var(--text-muted)"))
+    
+    # VIX Channel display cards
+    vix_channel_status = vix_channel_levels.get("channel_status", "BUILDING") if vix_channel_levels else "BUILDING"
+    
+    if vix_channel_levels and vix_channel_levels.get("floor") is not None:
+        
+        if vix_channel_status == "BUILDING":
+            # ── BUILDING STATE: Only show status + current VIX + Asia anchors ──
+            st.markdown('<div class="alert-box alert-box-info" style="margin-bottom:16px;"><div class="alert-icon-large">🔄</div><div class="alert-content"><div class="alert-title">VOLATILITY ZONE BUILDING</div><div class="alert-text">Europe/London session still in progress. Channel shape (ascending, descending, cone, flat) will be determined once London completes (~6 AM CT). Do NOT trade VIX channel signals until LOCKED.</div></div></div>', unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown(f'<div class="metric-card" style="border-left:4px solid var(--accent-gold);"><div class="metric-icon">⏳</div><div class="metric-label">VIX Channel</div><div class="metric-value" style="color:var(--accent-gold);font-size:1rem;">BUILDING</div><div class="metric-delta">Waiting for London to complete</div></div>', unsafe_allow_html=True)
+            with col2:
+                st.markdown(f'<div class="metric-card" style="border-left:4px solid var(--accent-cyan);"><div class="metric-icon">📍</div><div class="metric-label">Current VIX</div><div class="metric-value" style="font-size:1.3rem;">{vix:.2f}</div><div class="metric-delta">Channel shape TBD</div></div>', unsafe_allow_html=True)
+            with col3:
+                asia_h = vix_channel_levels.get("asia_high", 0)
+                asia_l = vix_channel_levels.get("asia_low", 0)
+                st.markdown(f'<div class="metric-card" style="border-left:4px solid var(--text-muted);"><div class="metric-icon">🦘</div><div class="metric-label">Asia Anchors</div><div class="metric-value" style="font-size:1rem;">H: {asia_h:.2f} | L: {asia_l:.2f}</div><div class="metric-delta">Ceiling & Floor anchor #1 set</div></div>', unsafe_allow_html=True)
+        
+        else:
+            # ── LOCKED STATE: Full channel display with floor, ceiling, position, alerts ──
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                ceil_slope = vix_channel_levels.get("ceiling_slope_per_hour", 0)
+                floor_slope = vix_channel_levels.get("floor_slope_per_hour", 0)
+                slope_text = f"Ceil: {ceil_slope:+.3f}/hr | Floor: {floor_slope:+.3f}/hr"
+                st.markdown(f'<div class="metric-card" style="border-left:4px solid {vix_channel_color};"><div class="metric-icon">{vix_channel_direction}</div><div class="metric-label">VIX Channel 🔒 LOCKED</div><div class="metric-value" style="color:{vix_channel_color};font-size:1rem;">{vix_channel_type.value}</div><div class="metric-delta" style="font-size:0.6rem;">{slope_text}</div></div>', unsafe_allow_html=True)
+            
+            with col2:
+                vix_floor = vix_channel_levels.get("floor_at_ref", 0)
+                dist_floor = round(vix - vix_floor, 2) if vix else 0
+                floor_status = "🟢" if dist_floor > 0.1 else "⚠️" if dist_floor > 0 else "🔴"
+                if dist_floor >= 0:
+                    floor_label = f"VIX is {dist_floor:.2f} above floor"
+                else:
+                    floor_label = f"VIX is {abs(dist_floor):.2f} BELOW floor"
+                st.markdown(f'<div class="metric-card" style="border-left:4px solid var(--bull);"><div class="metric-icon">{floor_status}</div><div class="metric-label">VIX Floor</div><div class="metric-value" style="color:var(--bull);font-size:1.3rem;">{vix_floor:.2f}</div><div class="metric-delta">{floor_label}</div></div>', unsafe_allow_html=True)
+            
+            with col3:
+                vix_ceiling = vix_channel_levels.get("ceiling_at_ref", 0)
+                dist_ceiling = round(vix_ceiling - vix, 2) if vix else 0
+                ceiling_status = "🟢" if dist_ceiling > 0.1 else "⚠️" if dist_ceiling > 0 else "🔴"
+                if dist_ceiling >= 0:
+                    ceiling_label = f"VIX is {dist_ceiling:.2f} below ceiling"
+                else:
+                    ceiling_label = f"VIX is {abs(dist_ceiling):.2f} ABOVE ceiling"
+                st.markdown(f'<div class="metric-card" style="border-left:4px solid var(--bear);"><div class="metric-icon">{ceiling_status}</div><div class="metric-label">VIX Ceiling</div><div class="metric-value" style="color:var(--bear);font-size:1.3rem;">{vix_ceiling:.2f}</div><div class="metric-delta">{ceiling_label}</div></div>', unsafe_allow_html=True)
+            
+            with col4:
+                width = vix_channel_levels.get("channel_width_current", 0)
+                TOUCH_THRESHOLD = 0.15
+                dist_floor_raw = vix - vix_floor if vix else 0
+                dist_ceiling_raw = vix_ceiling - vix if vix else 0
+                
+                if vix > vix_ceiling:
+                    if dist_ceiling_raw >= -TOUCH_THRESHOLD:
+                        # Just above ceiling, retesting
+                        pos_text = "RETESTING CEILING"
+                        pos_color = "var(--bear)"
+                        signal = "Broke ceiling, back at it → PUTS"
+                    else:
+                        pos_text = "ABOVE CEILING ↑"
+                        pos_color = "var(--bear)"
+                        signal = "VIX established above → PUTS bias"
+                elif vix < vix_floor:
+                    if dist_floor_raw >= -TOUCH_THRESHOLD:
+                        # Just below floor, retesting
+                        pos_text = "RETESTING FLOOR"
+                        pos_color = "var(--bull)"
+                        signal = "Broke floor, back at it → CALLS"
+                    else:
+                        pos_text = "BELOW FLOOR ↓"
+                        pos_color = "var(--bull)"
+                        signal = "VIX established below → CALLS bias"
+                else:
+                    # Inside channel
+                    if dist_floor_raw <= TOUCH_THRESHOLD:
+                        pos_text = "AT FLOOR"
+                        pos_color = "var(--bear)"
+                        signal = "VIX bouncing off floor → PUTS"
+                    elif dist_ceiling_raw <= TOUCH_THRESHOLD:
+                        pos_text = "AT CEILING"
+                        pos_color = "var(--bull)"
+                        signal = "VIX rejected at ceiling → CALLS"
+                    else:
+                        if width > 0:
+                            pct_pos = round(((vix - vix_floor) / width) * 100)
+                            pos_text = f"IN CHANNEL ({pct_pos}%)"
+                        else:
+                            pos_text = "IN CHANNEL"
+                        pos_color = "var(--accent-cyan)"
+                        signal = "Wait for wall touch to trade"
+                st.markdown(f'<div class="metric-card" style="border-left:4px solid {pos_color};"><div class="metric-icon">📍</div><div class="metric-label">VIX: {vix:.2f}</div><div class="metric-value" style="color:{pos_color};font-size:0.9rem;">{pos_text}</div><div class="metric-delta">{signal}</div></div>', unsafe_allow_html=True)
+            
+            # Channel shape description
+            channel_desc = vix_channel_levels.get("channel_description", "")
+            if channel_desc:
+                st.markdown(f'<div style="text-align:center;padding:8px;font-size:0.8rem;color:var(--text-muted);font-style:italic;">{channel_desc} | Width: {width:.2f} VIX pts</div>', unsafe_allow_html=True)
+            
+            # ── VIX Entry Signal Alerts (4 scenarios) ──
+            TOUCH_ALERT = 0.15
+            d_floor = vix - vix_floor if vix else 0
+            d_ceiling = vix_ceiling - vix if vix else 0
+            
+            # Scenario 1: VIX at floor, closing above → PUTS
+            if d_floor >= 0 and d_floor <= TOUCH_ALERT:
+                st.markdown(f'<div class="alert-box alert-box-danger" style="margin-top:10px;"><div class="alert-icon-large">🔴</div><div class="alert-content"><div class="alert-title">VIX AT FLOOR — PUTS SIGNAL</div><div class="alert-text">VIX touching {vix_floor:.2f} and closing above. VIX bouncing up = SPX heading down. Enter PUTS.</div></div></div>', unsafe_allow_html=True)
+            
+            # Scenario 2: VIX at ceiling, closing below → CALLS
+            elif d_ceiling >= 0 and d_ceiling <= TOUCH_ALERT:
+                st.markdown(f'<div class="alert-box alert-box-success" style="margin-top:10px;"><div class="alert-icon-large">🟢</div><div class="alert-content"><div class="alert-title">VIX AT CEILING — CALLS SIGNAL</div><div class="alert-text">VIX touching {vix_ceiling:.2f} and closing below. VIX rejected = SPX heading up. Enter CALLS.</div></div></div>', unsafe_allow_html=True)
+            
+            # Scenario 3: VIX broke above ceiling, retesting → PUTS
+            elif vix > vix_ceiling and d_ceiling >= -TOUCH_ALERT:
+                st.markdown(f'<div class="alert-box alert-box-danger" style="margin-top:10px;"><div class="alert-icon-large">🚨</div><div class="alert-content"><div class="alert-title">VIX CEILING RETEST — PUTS SIGNAL</div><div class="alert-text">VIX broke above {vix_ceiling:.2f}, came back to retest. Ceiling is now support. Enter PUTS.</div></div></div>', unsafe_allow_html=True)
+            
+            # Scenario 4: VIX broke below floor, retesting → CALLS
+            elif vix < vix_floor and d_floor >= -TOUCH_ALERT:
+                st.markdown(f'<div class="alert-box alert-box-success" style="margin-top:10px;"><div class="alert-icon-large">🚨</div><div class="alert-content"><div class="alert-title">VIX FLOOR RETEST — CALLS SIGNAL</div><div class="alert-text">VIX broke below {vix_floor:.2f}, came back to retest. Floor is now resistance. Enter CALLS.</div></div></div>', unsafe_allow_html=True)
+            
+            # Established breaks (far from wall)
+            elif vix > vix_ceiling:
+                st.markdown(f'<div class="alert-box alert-box-danger" style="margin-top:10px;"><div class="alert-icon-large">🚨</div><div class="alert-content"><div class="alert-title">VIX ABOVE CEILING</div><div class="alert-text">VIX established above {vix_ceiling:.2f}. Bearish SPX. Watch for retest of ceiling for PUTS entry.</div></div></div>', unsafe_allow_html=True)
+            elif vix < vix_floor:
+                st.markdown(f'<div class="alert-box alert-box-success" style="margin-top:10px;"><div class="alert-icon-large">🚨</div><div class="alert-content"><div class="alert-title">VIX BELOW FLOOR</div><div class="alert-text">VIX established below {vix_floor:.2f}. Bullish SPX. Watch for retest of floor for CALLS entry.</div></div></div>', unsafe_allow_html=True)
+    
+    else:
+        # No pivots entered - show prompt
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f'<div class="metric-card" style="border-left:4px solid var(--text-muted);"><div class="metric-icon">🌊</div><div class="metric-label">VIX Channel</div><div class="metric-value" style="color:var(--text-muted);">AWAITING DATA</div><div class="metric-delta">Enter 4 pivots in sidebar</div></div>', unsafe_allow_html=True)
+        with col2:
+            st.markdown(f'<div class="metric-card" style="border-left:4px solid var(--accent-cyan);"><div class="metric-icon">📍</div><div class="metric-label">Current VIX</div><div class="metric-value" style="font-size:1.3rem;">{vix:.2f}</div><div class="metric-delta">Enter pivots for channel</div></div>', unsafe_allow_html=True)
+        with col3:
+            if vx_data and vx_data.get("available"):
+                vx_symbol = vx_data.get("symbol", "N/A")
+                vx_exp = vx_data.get("expiration", "N/A")
+            else:
+                vx_symbol = "N/A"
+                vx_exp = "Tastytrade not connected"
+            st.markdown(f'<div class="metric-card" style="border-left:4px solid var(--accent-purple);"><div class="metric-icon">📊</div><div class="metric-label">VX Front Month</div><div class="metric-value" style="font-size:1rem;">{vx_symbol}</div><div class="metric-delta">Exp: {vx_exp}</div></div>', unsafe_allow_html=True)
+    
+    # VIX Channel Trading Rules
+    with st.expander("📖 VIX Channel Trading Rules", expanded=False):
+        st.markdown(f'''
+        **Channel Shape: {vix_channel_type.value}** {vix_channel_direction}
+        
+        The VIX channel is built by connecting overnight structural pivots:
+        - **Ceiling:** Asia highest wick (5PM-1AM) → Europe highest point (1AM-6AM)
+        - **Floor:** Asia lowest wick (5PM-1AM) → Europe lowest wick (1AM-6AM)
+        
+        The shape emerges from the data — it could be ascending, descending, converging (squeeze), 
+        diverging (expansion), or flat. At 8:30 AM CT (RTH open), where VIX sits relative to the projected 
+        channel determines the day's bias.
+        
+        **If VIX is IN Channel:**
+        - Trade bounces off ceiling (VIX rejects down → BUY SPX)
+        - Trade bounces off floor (VIX bounces up → SELL SPX)
+        
+        **If VIX BREAKS ABOVE Ceiling:**
+        - Wait for 8:30 AM candle retest of ceiling
+        - VIX uses ceiling as springboard UP → 🔴 **SELL SPX**
+        
+        **If VIX BREAKS BELOW Floor:**
+        - Wait for 8:30 AM candle retest of floor
+        - VIX uses floor as springboard DOWN → 🟢 **BUY SPX**
+        
+        **Channel Shapes:**
+        - CONVERGING (squeeze): Expect breakout — wait for direction, don't predict
+        - DIVERGING (expansion): Wide range day — use wider stops
+        - FLAT: Range-bound — play the walls aggressively
+        ''')
+        
+        # VX Term Structure (if available)
+        vx_term = fetch_vx_term_structure_tastytrade()
+        if vx_term.get("available") and len(vx_term.get("contracts", [])) >= 2:
+            with st.expander("📈 VX Term Structure", expanded=False):
+                contracts = vx_term.get("contracts", [])
+                st.markdown("**VX Futures Contracts:**")
+                for i, c in enumerate(contracts[:6]):
+                    month_label = f"M{i+1}" if i > 0 else "Front"
+                    st.markdown(f"- **{month_label}:** {c.get('symbol')} (Exp: {c.get('expiration')})")
+                st.info("💡 Live prices require DXLink streaming integration (coming soon)")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+
     # SESSIONS
     # ═══════════════════════════════════════════════════════════════════════════
     st.markdown('<div class="section-header"><div class="section-icon">🌍</div><h2 class="section-title">Global Sessions</h2></div>', unsafe_allow_html=True)
+    
+    # Data source warning
+    if data_source_sessions == "YAHOO" and not sydney:
+        st.markdown('<div style="background:rgba(254,228,64,0.1);border:1px solid rgba(254,228,64,0.25);border-radius:8px;padding:8px 14px;margin-bottom:12px;font-size:0.75rem;color:var(--accent-gold);">⚠️ Yahoo data starts ~2 AM CT — Sydney/Tokyo may be incomplete. Use manual override for best accuracy.</div>', unsafe_allow_html=True)
     
     session_data = [("🦘", "Sydney", sydney, "icon-kangaroo"), ("🗼", "Tokyo", tokyo, ""), ("🏛", "London", london, ""), ("🌙", "Overnight", overnight, "icon-glow-purple")]
     cols = st.columns(4)
@@ -7582,25 +6793,440 @@ Calculated Entry Premium: {p.get('calc_result')}
                 st.markdown(f'<div class="session-card" style="opacity:0.5;"><div class="session-icon {anim_class}">{icon}</div><div class="session-name">{name}</div><div class="session-data"><div style="color:var(--text-muted);font-size:0.85rem;">No data</div></div></div>', unsafe_allow_html=True)
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # INDICATORS
+
+    
     # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<div class="section-header"><div class="section-icon">📈</div><h2 class="section-title">Technical Indicators</h2></div>', unsafe_allow_html=True)
+    # SUPPORTING ANALYSIS (Collapsed)
+    # ═══════════════════════════════════════════════════════════════════════════
+    with st.expander("📊 Supporting Analysis — Confluence, Bias & Technical Indicators", expanded=False):
+        # TODAY'S BIAS
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown('<div class="section-header"><div class="section-icon">🎯</div><h2 class="section-title">Today\'s Bias</h2></div>', unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        sc = "bullish" if ema_data["above_200"] else "bearish"
-        st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📊</div><div class="indicator-title">200 EMA Bias</div></div><div class="indicator-row"><span class="indicator-label">Price</span><span class="indicator-value">{ema_data.get("price", "N/A")}</span></div><div class="indicator-row"><span class="indicator-label">200 EMA</span><span class="indicator-value">{ema_data.get("ema_200", "N/A")}</span></div><div class="indicator-status indicator-status-{sc}">{"✓ ABOVE" if ema_data["above_200"] else "✗ BELOW"}</div></div>', unsafe_allow_html=True)
-    with col2:
-        sc = "bullish" if ema_data["ema_cross"] == "BULLISH" else "bearish"
-        st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📈</div><div class="indicator-title">8/21 EMA Cross</div></div><div class="indicator-row"><span class="indicator-label">8 EMA</span><span class="indicator-value">{ema_data.get("ema_8", "N/A")}</span></div><div class="indicator-row"><span class="indicator-label">21 EMA</span><span class="indicator-value">{ema_data.get("ema_21", "N/A")}</span></div><div class="indicator-status indicator-status-{sc}">{"✓" if ema_data["ema_cross"] == "BULLISH" else "✗"} {ema_data["ema_cross"]}</div></div>', unsafe_allow_html=True)
-    with col3:
-        if vix_range["available"]:
-            vix_icon_ind = {"ABOVE": "▲", "IN RANGE": "◆", "BELOW": "▼"}.get(vix_pos.value, "○")
-            sc = "bearish" if vix_pos == VIXPosition.ABOVE_RANGE else "bullish"
-            st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📉</div><div class="indicator-title">VIX Overnight</div></div><div class="indicator-row"><span class="indicator-label">Range</span><span class="indicator-value">{vix_range["bottom"]} - {vix_range["top"]}</span></div><div class="indicator-row"><span class="indicator-label">Current</span><span class="indicator-value">{vix}</span></div><div class="indicator-status indicator-status-{sc}">{vix_icon_ind} {vix_pos.value}</div></div>', unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            chan_class = channel_type.value.lower()
+            chan_icon = {"ASCENDING": "↗", "DESCENDING": "↘", "MIXED": "⟷", "CONTRACTING": "⟶"}.get(channel_type.value, "○")
+            st.markdown(f'<div class="glass-card"><div class="channel-badge channel-badge-{chan_class}"><span style="font-size:1.2rem;">{chan_icon}</span><span>{channel_type.value}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{channel_reason}</p></div>', unsafe_allow_html=True)
+        with col2:
+            ema_class = "calls" if ema_data["above_200"] else "puts"
+            ema_icon = "↑" if ema_data["above_200"] else "↓"
+            ema_text = "Above 200 EMA" if ema_data["above_200"] else "Below 200 EMA"
+            st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{ema_class}"><span>{ema_icon}</span><span>{ema_text}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{"Supports CALLS" if ema_data["above_200"] else "Supports PUTS"}</p></div>', unsafe_allow_html=True)
+        with col3:
+            cross_class = "calls" if ema_data["ema_cross"] == "BULLISH" else "puts"
+            cross_icon = "✓" if ema_data["ema_cross"] == "BULLISH" else "✗"
+            st.markdown(f'<div class="glass-card"><div class="bias-pill bias-pill-{cross_class}"><span>{cross_icon}</span><span>8/21 {ema_data["ema_cross"]}</span></div><p style="margin-top:10px;color:var(--text-secondary);font-size:0.875rem;">{"8 EMA > 21 EMA" if ema_data["ema_cross"] == "BULLISH" else "8 EMA < 21 EMA"}</p></div>', unsafe_allow_html=True)
+    
+        # ═══════════════════════════════════════════════════════════════════════════
+        # EXPLOSIVE MOVE ALERT (Based on Target Distance ONLY)
+        # ═══════════════════════════════════════════════════════════════════════════
+        if explosive["explosive_score"] >= 30:
+            score = explosive["explosive_score"]
+            direction = explosive.get("direction_bias", "")
+            target_dist = explosive.get("target_distance", 0)
+            conviction = explosive.get("conviction", "LOW")
+        
+            # Determine styling based on conviction
+            if conviction == "EXTREME":
+                alert_class = "danger"
+                score_icon = "🔥"
+            elif conviction == "HIGH":
+                alert_class = "warning" 
+                score_icon = "⚡"
+            else:
+                alert_class = "info"
+                score_icon = "📊"
+        
+            direction_icon = "🐻" if direction == "PUTS" else "🐂" if direction == "CALLS" else "⚖️"
+        
+            st.markdown(f'''
+            <div class="alert-box alert-box-{alert_class}" style="border-width:2px;">
+                <div class="alert-icon-large" style="font-size:4rem;">{direction_icon}</div>
+                <div class="alert-content">
+                    <div class="alert-title" style="font-size:1.3rem;">{score_icon} EXPLOSIVE POTENTIAL: {conviction}</div>
+                    <div class="alert-values" style="font-size:1.1rem;margin-top:8px;border:none;padding:0;">
+                        Target Runway: <strong>{target_dist:.0f} pts</strong> &nbsp;|&nbsp; If structure breaks: <strong>{direction}</strong>
+                    </div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+    
+        # Retail positioning alert
+        if retail_data["positioning"] != "BALANCED":
+            alert_class = "warning" if "HEAVY" in retail_data["positioning"] else "danger"
+            # Bull icon for CALL buying (fade to puts), Bear icon for PUT buying (fade to calls)
+            alert_icon = "🐂" if "CALL" in retail_data["positioning"] else "🐻"
+            # Show the actual VIX values so user can verify data is real
+            vix_vals = f"VIX: {retail_data['vix']} | VIX3M: {retail_data['vix3m']} | Spread: {retail_data['spread']}" if retail_data['vix'] else "Data unavailable"
+            st.markdown(f'<div class="alert-box alert-box-{alert_class}"><div class="alert-icon-large">{alert_icon}</div><div class="alert-content"><div class="alert-title">{retail_data["positioning"]}</div><div class="alert-text">{retail_data["warning"]}</div><div class="alert-values">{vix_vals}</div></div></div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📉</div><div class="indicator-title">VIX Overnight</div></div><div class="indicator-row"><span class="indicator-label">Current</span><span class="indicator-value">{vix}</span></div><div style="margin-top:8px;color:var(--text-muted);font-size:0.85rem;">Range data unavailable</div></div>', unsafe_allow_html=True)
+            # Check if we actually have data or if it failed silently
+            if retail_data['vix'] is not None:
+                vix_vals = f"VIX: {retail_data['vix']} | VIX3M: {retail_data['vix3m']} | Spread: {retail_data['spread']}"
+                st.markdown(f'<div class="alert-box alert-box-success"><div class="alert-icon-large">⚖️</div><div class="alert-content"><div class="alert-title">BALANCED POSITIONING</div><div class="alert-text">No crowd pressure detected - trade freely with structure</div><div class="alert-values">{vix_vals}</div></div></div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="alert-box alert-box-info"><div class="alert-icon-large">❓</div><div class="alert-content"><div class="alert-title">POSITIONING UNKNOWN</div><div class="alert-text">Could not fetch VIX term structure data</div></div></div>', unsafe_allow_html=True)
     
+        # VIX Position
+        if vix_range["available"]:
+            vix_icon = {"ABOVE": "▲", "IN RANGE": "◆", "BELOW": "▼"}.get(vix_pos.value, "○")
+            st.markdown(f'<div class="alert-box alert-box-info"><span class="alert-icon">{vix_icon}</span><div class="alert-content"><div class="alert-title">VIX {vix_pos.value}</div><div class="alert-text">Overnight range: {vix_range["bottom"]} - {vix_range["top"]} | Current: {vix}</div></div></div>', unsafe_allow_html=True)
+    
+        # ═══════════════════════════════════════════════════════════════════════════
+        # CONFLUENCE
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown('<div class="section-header"><div class="section-icon">⚖️</div><h2 class="section-title">Confluence Analysis</h2></div>', unsafe_allow_html=True)
+    
+        calls_score, puts_score = len(decision["calls_factors"]), len(decision["puts_factors"])
+        calls_class = "high" if calls_score >= 3 else "medium" if calls_score >= 2 else "low"
+        puts_class = "high" if puts_score >= 3 else "medium" if puts_score >= 2 else "low"
+    
+        col1, col2 = st.columns(2)
+        with col1:
+            factors_html = "".join([f'<div class="confluence-factor"><span class="factor-check active">✓</span>{f}</div>' for f in decision["calls_factors"]]) or '<div class="confluence-factor"><span class="factor-check inactive">—</span>No supporting factors</div>'
+            st.markdown(f'<div class="confluence-card confluence-card-calls"><div class="confluence-header"><span class="confluence-title">🟢 CALLS</span><span class="confluence-score {calls_class}">{calls_score}</span></div>{factors_html}</div>', unsafe_allow_html=True)
+        with col2:
+            factors_html = "".join([f'<div class="confluence-factor"><span class="factor-check active">✓</span>{f}</div>' for f in decision["puts_factors"]]) or '<div class="confluence-factor"><span class="factor-check inactive">—</span>No supporting factors</div>'
+            st.markdown(f'<div class="confluence-card confluence-card-puts"><div class="confluence-header"><span class="confluence-title">🔴 PUTS</span><span class="confluence-score {puts_class}">{puts_score}</span></div>{factors_html}</div>', unsafe_allow_html=True)
+    
+        # ═══════════════════════════════════════════════════════════════════════════
+        # INDICATORS
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown('<div class="section-header"><div class="section-icon">📈</div><h2 class="section-title">Technical Indicators</h2></div>', unsafe_allow_html=True)
+    
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            sc = "bullish" if ema_data["above_200"] else "bearish"
+            st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📊</div><div class="indicator-title">200 EMA Bias</div></div><div class="indicator-row"><span class="indicator-label">Price</span><span class="indicator-value">{ema_data.get("price", "N/A")}</span></div><div class="indicator-row"><span class="indicator-label">200 EMA</span><span class="indicator-value">{ema_data.get("ema_200", "N/A")}</span></div><div class="indicator-status indicator-status-{sc}">{"✓ ABOVE" if ema_data["above_200"] else "✗ BELOW"}</div></div>', unsafe_allow_html=True)
+        with col2:
+            sc = "bullish" if ema_data["ema_cross"] == "BULLISH" else "bearish"
+            st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📈</div><div class="indicator-title">8/21 EMA Cross</div></div><div class="indicator-row"><span class="indicator-label">8 EMA</span><span class="indicator-value">{ema_data.get("ema_8", "N/A")}</span></div><div class="indicator-row"><span class="indicator-label">21 EMA</span><span class="indicator-value">{ema_data.get("ema_21", "N/A")}</span></div><div class="indicator-status indicator-status-{sc}">{"✓" if ema_data["ema_cross"] == "BULLISH" else "✗"} {ema_data["ema_cross"]}</div></div>', unsafe_allow_html=True)
+        with col3:
+            if vix_range["available"]:
+                vix_icon_ind = {"ABOVE": "▲", "IN RANGE": "◆", "BELOW": "▼"}.get(vix_pos.value, "○")
+                sc = "bearish" if vix_pos == VIXPosition.ABOVE_RANGE else "bullish"
+                st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📉</div><div class="indicator-title">VIX Overnight</div></div><div class="indicator-row"><span class="indicator-label">Range</span><span class="indicator-value">{vix_range["bottom"]} - {vix_range["top"]}</span></div><div class="indicator-row"><span class="indicator-label">Current</span><span class="indicator-value">{vix}</span></div><div class="indicator-status indicator-status-{sc}">{vix_icon_ind} {vix_pos.value}</div></div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="indicator-card"><div class="indicator-header"><div class="indicator-icon">📉</div><div class="indicator-title">VIX Overnight</div></div><div class="indicator-row"><span class="indicator-label">Current</span><span class="indicator-value">{vix}</span></div><div style="margin-top:8px;color:var(--text-muted);font-size:0.85rem;">Range data unavailable</div></div>', unsafe_allow_html=True)
+    
+
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # DUAL CHANNEL LEVELS (Collapsed)
+    # ═══════════════════════════════════════════════════════════════════════════
+    with st.expander("📊 Dual Channel Levels — All 4 Structural Levels", expanded=False):
+        # DUAL CHANNEL LEVELS (Option C - All 4 Levels)
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown(f'<div class="section-header"><div class="section-icon">📊</div><h2 class="section-title">Dual Channel Levels @ {inputs["ref_time"][0]}:{inputs["ref_time"][1]:02d} AM</h2></div>', unsafe_allow_html=True)
+    
+        if dual_levels_spx:
+            asc_floor = dual_levels_spx["asc_floor"]
+            asc_ceiling = dual_levels_spx["asc_ceiling"]
+            desc_ceiling = dual_levels_spx["desc_ceiling"]
+            desc_floor = dual_levels_spx["desc_floor"]
+        
+            dist_asc_floor = round(current_spx - asc_floor, 1)
+            dist_asc_ceiling = round(asc_ceiling - current_spx, 1)
+            dist_desc_ceiling = round(desc_ceiling - current_spx, 1)
+            dist_desc_floor = round(current_spx - desc_floor, 1)
+        
+            # Determine which level is KEY based on channel type
+            is_ascending = channel_type == ChannelType.ASCENDING
+            is_descending = channel_type == ChannelType.DESCENDING
+        
+            # Position summary from decision
+            pos_summary = decision.get("position_summary", f"Position: {position.value}")
+        
+            # Position summary
+            st.markdown(f'<div class="levels-container"><div style="padding:14px 16px;background:linear-gradient(90deg,var(--bg-elevated) 0%,transparent 100%);border-radius:10px;margin-bottom:16px;border-left:4px solid var(--accent-cyan);"><span style="font-family:Share Tech Mono,monospace;font-size:0.9rem;color:var(--text-primary);">{pos_summary}</span></div></div>', unsafe_allow_html=True)
+        
+            # Check if floor or ceiling was adjusted
+            floor_adjusted = dual_levels_spx.get("floor_was_adjusted", False)
+            ceiling_adjusted = dual_levels_spx.get("ceiling_was_adjusted", False)
+            original_asc_floor = dual_levels_spx.get("original_asc_floor")
+            original_desc_ceiling = dual_levels_spx.get("original_desc_ceiling")
+            floor_adj_session = (dual_levels_spx.get("floor_adjustment_session") or "").upper()
+            ceiling_adj_session = (dual_levels_spx.get("ceiling_adjustment_session") or "").upper()
+        
+            # Show adjustment alert if floor was adjusted
+            if floor_adjusted and original_asc_floor:
+                st.markdown(f'''
+                <div class="alert-box alert-box-info" style="margin-bottom:16px;">
+                    <span class="alert-icon">🔄</span>
+                    <div class="alert-content">
+                        <div class="alert-title">Floor Adjusted by {floor_adj_session}</div>
+                        <div class="alert-text">Original floor: {original_asc_floor:,.2f} → Adjusted floor: {asc_floor:,.2f}<br>
+                        <strong>Note:</strong> Market may still respect original level (like today!)</div>
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
+        
+            if ceiling_adjusted and original_desc_ceiling:
+                st.markdown(f'''
+                <div class="alert-box alert-box-info" style="margin-bottom:16px;">
+                    <span class="alert-icon">🔄</span>
+                    <div class="alert-content">
+                        <div class="alert-title">Ceiling Adjusted by {ceiling_adj_session}</div>
+                        <div class="alert-text">Original ceiling: {original_desc_ceiling:,.2f} → Adjusted ceiling: {desc_ceiling:,.2f}<br>
+                        <strong>Note:</strong> Market may still respect original level!</div>
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
+        
+            # Ascending Channel Header
+            asc_label = "↗ ASCENDING CHANNEL (DOMINANT)" if is_ascending else "↗ ASCENDING CHANNEL"
+            st.markdown(f'<div style="font-size:0.8rem;color:var(--bull);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px 0;font-weight:600;">{asc_label}</div>', unsafe_allow_html=True)
+        
+            # Ascending Floor Row - show BOTH if adjusted
+            if is_ascending:
+                if floor_adjusted and original_asc_floor:
+                    # Show both original and adjusted
+                    dist_original = current_spx - original_asc_floor
+                    st.markdown(f'''
+                    <div class="levels-container" style="border-left:3px solid var(--bull);">
+                        <div class="level-row">
+                            <div class="level-label floor"><span>▼</span><span>ASC FLOOR (ADJ)</span></div>
+                            <div class="level-value floor">{asc_floor:,.2f}</div>
+                            <div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div>
+                        </div>
+                    </div>
+                    <div class="levels-container" style="border-left:3px dashed var(--accent-gold);margin-top:-8px;opacity:0.85;">
+                        <div class="level-row">
+                            <div class="level-label" style="color:var(--accent-gold);"><span>▼</span><span>ORIGINAL FLOOR</span></div>
+                            <div class="level-value" style="color:var(--accent-gold);">{original_asc_floor:,.2f}</div>
+                            <div class="level-note" style="color:var(--accent-gold);">May still act as support • {dist_original:+.1f} pts</div>
+                        </div>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bull);"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="levels-container" style="opacity:0.7;"><div class="level-row"><div class="level-label floor"><span>▼</span><span>ASC FLOOR</span></div><div class="level-value floor">{asc_floor:,.2f}</div><div class="level-note">CALLS entry • {dist_asc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        
+            # Ascending Ceiling Row
+            st.markdown(f'<div class="levels-container" style="opacity:0.5;margin-top:-8px;"><div class="level-row"><div class="level-label" style="color:var(--bull);"><span>▲</span><span>ASC CEIL</span></div><div class="level-value" style="color:var(--bull);">{asc_ceiling:,.2f}</div><div class="level-note">CALLS target • {dist_asc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        
+            # Current Price
+            st.markdown(f'<div class="levels-container" style="background:linear-gradient(90deg,rgba(245,184,0,0.15) 0%,transparent 100%);margin:12px 0;"><div class="level-row"><div class="level-label current"><span>●</span><span>CURRENT</span></div><div class="level-value current">{current_spx:,.2f}</div><div class="level-note">ES: {current_es:,.2f}</div></div></div>', unsafe_allow_html=True)
+        
+            # Descending Channel Header
+            desc_label = "↘ DESCENDING CHANNEL (DOMINANT)" if is_descending else "↘ DESCENDING CHANNEL"
+            st.markdown(f'<div style="font-size:0.8rem;color:var(--bear);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px 0;font-weight:600;">{desc_label}</div>', unsafe_allow_html=True)
+        
+            # Descending Ceiling Row - show BOTH if adjusted
+            if is_descending:
+                if ceiling_adjusted and original_desc_ceiling:
+                    # Show both original and adjusted
+                    dist_original = current_spx - original_desc_ceiling
+                    st.markdown(f'''
+                    <div class="levels-container" style="border-left:3px solid var(--bear);">
+                        <div class="level-row">
+                            <div class="level-label ceiling"><span>▲</span><span>DESC CEIL (ADJ)</span></div>
+                            <div class="level-value ceiling">{desc_ceiling:,.2f}</div>
+                            <div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div>
+                        </div>
+                    </div>
+                    <div class="levels-container" style="border-left:3px dashed var(--accent-gold);margin-top:-8px;opacity:0.85;">
+                        <div class="level-row">
+                            <div class="level-label" style="color:var(--accent-gold);"><span>▲</span><span>ORIGINAL CEIL</span></div>
+                            <div class="level-value" style="color:var(--accent-gold);">{original_desc_ceiling:,.2f}</div>
+                            <div class="level-note" style="color:var(--accent-gold);">May still act as resistance • {dist_original:+.1f} pts</div>
+                        </div>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="levels-container" style="border-left:3px solid var(--bear);"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+            else:
+                st.markdown(f'<div class="levels-container" style="opacity:0.7;"><div class="level-row"><div class="level-label ceiling"><span>▲</span><span>DESC CEIL</span></div><div class="level-value ceiling">{desc_ceiling:,.2f}</div><div class="level-note">PUTS entry • {dist_desc_ceiling:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        
+            # Descending Floor Row
+            st.markdown(f'<div class="levels-container" style="opacity:0.5;margin-top:-8px;"><div class="level-row"><div class="level-label" style="color:var(--bear);"><span>▼</span><span>DESC FLOOR</span></div><div class="level-value" style="color:var(--bear);">{desc_floor:,.2f}</div><div class="level-note">PUTS target • {dist_desc_floor:+.1f} pts</div></div></div>', unsafe_allow_html=True)
+        
+            # Structure Alerts
+            if decision.get("structure_alerts"):
+                for alert in decision["structure_alerts"]:
+                    st.markdown(f'<div class="alert-box alert-box-warning"><span class="alert-icon">⚠️</span><div class="alert-content"><div class="alert-title">Structure Break Alert</div><div class="alert-text">{alert}</div></div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="alert-box alert-box-danger"><span class="alert-icon">❌</span><div class="alert-content"><div class="alert-title">Dual Levels Unavailable</div><div class="alert-text">Missing overnight session data</div></div></div>', unsafe_allow_html=True)
+    
+        # ═══════════════════════════════════════════════════════════════════════════
+
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PRIOR DAY LEVELS (Collapsed)
+    # ═══════════════════════════════════════════════════════════════════════════
+    with st.expander("📍 Prior Day Intermediate Levels — 8 Projected Levels", expanded=False):
+        # PRIOR DAY INTERMEDIATE LEVELS (4 Pivots x 2 Directions = 8 Levels)
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown('<div class="section-header"><div class="section-icon">📍</div><h2 class="section-title">Prior Day Intermediate Levels</h2></div>', unsafe_allow_html=True)
+    
+        if prior_targets["available"]:
+            # Convert all ES targets to SPX
+            def to_spx(val):
+                return round(val - offset, 2) if val is not None else None
+        
+            # Primary High Wick
+            p_hw = to_spx(prior_targets.get("primary_high_wick"))
+            p_hw_asc = to_spx(prior_targets.get("primary_high_wick_ascending"))
+            p_hw_desc = to_spx(prior_targets.get("primary_high_wick_descending"))
+        
+            # Secondary High Wick
+            s_hw = to_spx(prior_targets.get("secondary_high_wick"))
+            s_hw_asc = to_spx(prior_targets.get("secondary_high_wick_ascending"))
+            s_hw_desc = to_spx(prior_targets.get("secondary_high_wick_descending"))
+        
+            # Primary Low Open
+            p_lo = to_spx(prior_targets.get("primary_low_open"))
+            p_lo_asc = to_spx(prior_targets.get("primary_low_open_ascending"))
+            p_lo_desc = to_spx(prior_targets.get("primary_low_open_descending"))
+        
+            # Secondary Low Open
+            s_lo = to_spx(prior_targets.get("secondary_low_open"))
+            s_lo_asc = to_spx(prior_targets.get("secondary_low_open_ascending"))
+            s_lo_desc = to_spx(prior_targets.get("secondary_low_open_descending"))
+        
+            # ─────────────────────────────────────────────────────────────────────
+            # PRIMARY PIVOTS (Expandable)
+            # ─────────────────────────────────────────────────────────────────────
+            with st.expander("📍 **PRIMARY PIVOTS** (High Wick & Low Open)", expanded=True):
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    if p_hw is not None and p_hw_asc is not None and p_hw_desc is not None:
+                        st.markdown(f'''
+                        <div class="prior-levels-section" style="margin-bottom:0;">
+                            <div class="prior-levels-header">
+                                <span class="prior-levels-icon">🔺</span>
+                                <span class="prior-levels-title">Primary High Wick</span>
+                                <span class="prior-levels-anchor">{p_hw:,.2f}</span>
+                            </div>
+                            <div class="prior-levels-grid">
+                                <div class="prior-level-item prior-level-sell">
+                                    <div class="prior-level-direction">↗ Ascending</div>
+                                    <div class="prior-level-value">{p_hw_asc:,.2f}</div>
+                                    <div class="prior-level-action">SELL (Resistance)</div>
+                                </div>
+                                <div class="prior-level-item prior-level-buy">
+                                    <div class="prior-level-direction">↘ Descending</div>
+                                    <div class="prior-level-value">{p_hw_desc:,.2f}</div>
+                                    <div class="prior-level-action">BUY (Support)</div>
+                                </div>
+                            </div>
+                        </div>
+                        ''', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Primary High Wick: N/A</div>', unsafe_allow_html=True)
+            
+                with col2:
+                    if p_lo is not None and p_lo_asc is not None and p_lo_desc is not None:
+                        st.markdown(f'''
+                        <div class="prior-levels-section" style="margin-bottom:0;">
+                            <div class="prior-levels-header">
+                                <span class="prior-levels-icon">🔻</span>
+                                <span class="prior-levels-title">Primary Low Open</span>
+                                <span class="prior-levels-anchor">{p_lo:,.2f}</span>
+                            </div>
+                            <div class="prior-levels-grid">
+                                <div class="prior-level-item prior-level-buy">
+                                    <div class="prior-level-direction">↗ Ascending</div>
+                                    <div class="prior-level-value">{p_lo_asc:,.2f}</div>
+                                    <div class="prior-level-action">BUY (Support)</div>
+                                </div>
+                                <div class="prior-level-item prior-level-sell">
+                                    <div class="prior-level-direction">↘ Descending</div>
+                                    <div class="prior-level-value">{p_lo_desc:,.2f}</div>
+                                    <div class="prior-level-action">SELL (Resistance)</div>
+                                </div>
+                            </div>
+                        </div>
+                        ''', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Primary Low Open: N/A<br><small>(No bullish candle found)</small></div>', unsafe_allow_html=True)
+        
+            # ─────────────────────────────────────────────────────────────────────
+            # SECONDARY PIVOTS (Expandable)
+            # ─────────────────────────────────────────────────────────────────────
+            has_secondary = s_hw is not None or s_lo is not None
+            secondary_label = "📍 **SECONDARY PIVOTS** (Lower High & Higher Low)" if has_secondary else "📍 **SECONDARY PIVOTS** (None Detected)"
+        
+            with st.expander(secondary_label, expanded=has_secondary):
+                if not has_secondary:
+                    st.markdown('''
+                    <div style="padding:20px;text-align:center;color:var(--text-muted);">
+                        <div style="font-size:1.2rem;margin-bottom:8px;">No Secondary Pivots Detected</div>
+                        <div style="font-size:0.85rem;">Secondary pivots require a rejection 1+ hour after the primary pivot</div>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                else:
+                    col1, col2 = st.columns(2)
+                
+                    with col1:
+                        if s_hw is not None and s_hw_asc is not None and s_hw_desc is not None:
+                            st.markdown(f'''
+                            <div class="prior-levels-section" style="margin-bottom:0;opacity:0.9;">
+                                <div class="prior-levels-header">
+                                    <span class="prior-levels-icon">🔸</span>
+                                    <span class="prior-levels-title">Secondary High Wick</span>
+                                    <span class="prior-levels-anchor">{s_hw:,.2f}</span>
+                                </div>
+                                <div class="prior-levels-grid">
+                                    <div class="prior-level-item prior-level-sell">
+                                        <div class="prior-level-direction">↗ Ascending</div>
+                                        <div class="prior-level-value">{s_hw_asc:,.2f}</div>
+                                        <div class="prior-level-action">SELL (Resistance)</div>
+                                    </div>
+                                    <div class="prior-level-item prior-level-buy">
+                                        <div class="prior-level-direction">↘ Descending</div>
+                                        <div class="prior-level-value">{s_hw_desc:,.2f}</div>
+                                        <div class="prior-level-action">BUY (Support)</div>
+                                    </div>
+                                </div>
+                                <div class="prior-levels-note">Lower high after primary rejection</div>
+                            </div>
+                            ''', unsafe_allow_html=True)
+                        else:
+                            st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Secondary High Wick: N/A</div>', unsafe_allow_html=True)
+                
+                    with col2:
+                        if s_lo is not None and s_lo_asc is not None and s_lo_desc is not None:
+                            st.markdown(f'''
+                            <div class="prior-levels-section" style="margin-bottom:0;opacity:0.9;">
+                                <div class="prior-levels-header">
+                                    <span class="prior-levels-icon">🔹</span>
+                                    <span class="prior-levels-title">Secondary Low Open</span>
+                                    <span class="prior-levels-anchor">{s_lo:,.2f}</span>
+                                </div>
+                                <div class="prior-levels-grid">
+                                    <div class="prior-level-item prior-level-buy">
+                                        <div class="prior-level-direction">↗ Ascending</div>
+                                        <div class="prior-level-value">{s_lo_asc:,.2f}</div>
+                                        <div class="prior-level-action">BUY (Support)</div>
+                                    </div>
+                                    <div class="prior-level-item prior-level-sell">
+                                        <div class="prior-level-direction">↘ Descending</div>
+                                        <div class="prior-level-value">{s_lo_desc:,.2f}</div>
+                                        <div class="prior-level-action">SELL (Resistance)</div>
+                                    </div>
+                                </div>
+                                <div class="prior-levels-note">Higher low after primary defense (bullish)</div>
+                            </div>
+                            ''', unsafe_allow_html=True)
+                        else:
+                            st.markdown('<div style="padding:20px;text-align:center;color:var(--text-muted);">Secondary Low Open: N/A</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('''
+            <div class="alert-box" style="background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3);">
+                <span style="font-size:1.2rem;">⚠️</span>
+                <div>
+                    <div style="font-weight:600;color:var(--accent-gold);margin-bottom:4px;">Prior Day Data Unavailable</div>
+                    <div style="font-size:0.85rem;color:var(--text-secondary);">Use Manual Prior Day Override in sidebar to enable intermediate levels</div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+    
+        # ═══════════════════════════════════════════════════════════════════════════
+
     # Footer
     st.markdown('<div style="margin-top:40px;padding:20px 0;border-top:1px solid var(--border-subtle);text-align:center;"><p style="font-family:\'Share Tech Mono\',monospace;font-size:0.75rem;color:var(--text-muted);letter-spacing:2px;">SPX PROPHET • STRUCTURAL 0DTE TRADING SYSTEM</p></div>', unsafe_allow_html=True)
 
