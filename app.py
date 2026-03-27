@@ -1025,44 +1025,40 @@ def main():
         """, unsafe_allow_html=True)
 
         # Lowest Bounce
-        st.markdown("**Lowest Bounce**")
         lb1, lb2, lb3 = st.columns([3, 1, 1])
         with lb1:
-            man_lowest_bounce = st.number_input("LB Price", value=0.0, format="%.2f", key="lb", label_visibility="collapsed")
+            man_lowest_bounce = st.number_input("Lowest Bounce", value=0.0, format="%.2f", key="lb")
         with lb2:
-            man_lb_hour = st.number_input("Hr", min_value=12, max_value=15, value=13, key="lb_h")
+            man_lb_hour = st.number_input("LB Hr", min_value=12, max_value=15, value=13, key="lb_h")
         with lb3:
-            man_lb_min = st.number_input("Min", min_value=0, max_value=59, value=30, key="lb_m")
+            man_lb_min = st.number_input("LB Min", min_value=0, max_value=59, value=30, key="lb_m")
 
         # Highest Rejection
-        st.markdown("**Highest Rejection**")
         hr1, hr2, hr3 = st.columns([3, 1, 1])
         with hr1:
-            man_highest_rej = st.number_input("HR Price", value=0.0, format="%.2f", key="hr", label_visibility="collapsed")
+            man_highest_rej = st.number_input("Highest Rejection", value=0.0, format="%.2f", key="hr")
         with hr2:
-            man_hr_hour = st.number_input("Hr", min_value=12, max_value=15, value=14, key="hr_h")
+            man_hr_hour = st.number_input("HR Hr", min_value=12, max_value=15, value=14, key="hr_h")
         with hr3:
-            man_hr_min = st.number_input("Min", min_value=0, max_value=59, value=0, key="hr_m")
+            man_hr_min = st.number_input("HR Min", min_value=0, max_value=59, value=0, key="hr_m")
 
         # Highest Wick
-        st.markdown("**Highest Wick**")
         hw1, hw2, hw3 = st.columns([3, 1, 1])
         with hw1:
-            man_highest_wick = st.number_input("HW Price", value=0.0, format="%.2f", key="hw", label_visibility="collapsed")
+            man_highest_wick = st.number_input("Highest Wick", value=0.0, format="%.2f", key="hw")
         with hw2:
-            man_hw_hour = st.number_input("Hr", min_value=12, max_value=15, value=13, key="hw_h")
+            man_hw_hour = st.number_input("HW Hr", min_value=12, max_value=15, value=13, key="hw_h")
         with hw3:
-            man_hw_min = st.number_input("Min", min_value=0, max_value=59, value=0, key="hw_m")
+            man_hw_min = st.number_input("HW Min", min_value=0, max_value=59, value=0, key="hw_m")
 
         # Lowest Wick
-        st.markdown("**Lowest Wick**")
         lw1, lw2, lw3 = st.columns([3, 1, 1])
         with lw1:
-            man_lowest_wick = st.number_input("LW Price", value=0.0, format="%.2f", key="lw", label_visibility="collapsed")
+            man_lowest_wick = st.number_input("Lowest Wick", value=0.0, format="%.2f", key="lw")
         with lw2:
-            man_lw_hour = st.number_input("Hr", min_value=12, max_value=15, value=14, key="lw_h")
+            man_lw_hour = st.number_input("LW Hr", min_value=12, max_value=15, value=14, key="lw_h")
         with lw3:
-            man_lw_min = st.number_input("Min", min_value=0, max_value=59, value=30, key="lw_m")
+            man_lw_min = st.number_input("LW Min", min_value=0, max_value=59, value=30, key="lw_m")
 
         st.markdown("")
         if st.button("🔄 REFRESH DATA", use_container_width=True):
