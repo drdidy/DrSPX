@@ -1002,6 +1002,18 @@ def main():
     inject_premium_css()
     render_hero()
 
+    # ─── Initialize session state defaults (persist across refreshes) ───
+    defaults = {
+        "lb": 0.0, "lb_h": 13, "lb_m": 30,
+        "hr": 0.0, "hr_h": 14, "hr_m": 0,
+        "hw": 0.0, "hw_h": 13, "hw_m": 0,
+        "lw": 0.0, "lw_h": 14, "lw_m": 30,
+        "offset_input": 45.0,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
     # ─── CONTROL PANEL (in main body) ───
     with st.expander("⚙️ COMMAND CENTER", expanded=True):
         trading_date = st.date_input(
@@ -1017,7 +1029,7 @@ def main():
         )
         day_type_lower = day_type.lower()
 
-        manual_offset = st.number_input("ES - SPX OFFSET", value=45.0, format="%.2f", key="offset_input")
+        manual_offset = st.number_input("ES - SPX OFFSET", format="%.2f", key="offset_input")
 
         st.markdown("---")
         st.markdown("""
@@ -1027,38 +1039,38 @@ def main():
         # Lowest Bounce
         lb1, lb2, lb3 = st.columns([3, 1, 1])
         with lb1:
-            man_lowest_bounce = st.number_input("Lowest Bounce", value=0.0, format="%.2f", key="lb")
+            man_lowest_bounce = st.number_input("Lowest Bounce", format="%.2f", key="lb")
         with lb2:
-            man_lb_hour = st.number_input("LB Hr", min_value=12, max_value=15, value=13, key="lb_h")
+            man_lb_hour = st.number_input("LB Hr", min_value=12, max_value=15, key="lb_h")
         with lb3:
-            man_lb_min = st.number_input("LB Min", min_value=0, max_value=59, value=30, key="lb_m")
+            man_lb_min = st.number_input("LB Min", min_value=0, max_value=59, key="lb_m")
 
         # Highest Rejection
         hr1, hr2, hr3 = st.columns([3, 1, 1])
         with hr1:
-            man_highest_rej = st.number_input("Highest Rejection", value=0.0, format="%.2f", key="hr")
+            man_highest_rej = st.number_input("Highest Rejection", format="%.2f", key="hr")
         with hr2:
-            man_hr_hour = st.number_input("HR Hr", min_value=12, max_value=15, value=14, key="hr_h")
+            man_hr_hour = st.number_input("HR Hr", min_value=12, max_value=15, key="hr_h")
         with hr3:
-            man_hr_min = st.number_input("HR Min", min_value=0, max_value=59, value=0, key="hr_m")
+            man_hr_min = st.number_input("HR Min", min_value=0, max_value=59, key="hr_m")
 
         # Highest Wick
         hw1, hw2, hw3 = st.columns([3, 1, 1])
         with hw1:
-            man_highest_wick = st.number_input("Highest Wick", value=0.0, format="%.2f", key="hw")
+            man_highest_wick = st.number_input("Highest Wick", format="%.2f", key="hw")
         with hw2:
-            man_hw_hour = st.number_input("HW Hr", min_value=12, max_value=15, value=13, key="hw_h")
+            man_hw_hour = st.number_input("HW Hr", min_value=12, max_value=15, key="hw_h")
         with hw3:
-            man_hw_min = st.number_input("HW Min", min_value=0, max_value=59, value=0, key="hw_m")
+            man_hw_min = st.number_input("HW Min", min_value=0, max_value=59, key="hw_m")
 
         # Lowest Wick
         lw1, lw2, lw3 = st.columns([3, 1, 1])
         with lw1:
-            man_lowest_wick = st.number_input("Lowest Wick", value=0.0, format="%.2f", key="lw")
+            man_lowest_wick = st.number_input("Lowest Wick", format="%.2f", key="lw")
         with lw2:
-            man_lw_hour = st.number_input("LW Hr", min_value=12, max_value=15, value=14, key="lw_h")
+            man_lw_hour = st.number_input("LW Hr", min_value=12, max_value=15, key="lw_h")
         with lw3:
-            man_lw_min = st.number_input("LW Min", min_value=0, max_value=59, value=30, key="lw_m")
+            man_lw_min = st.number_input("LW Min", min_value=0, max_value=59, key="lw_m")
 
         st.markdown("")
         if st.button("🔄 REFRESH DATA", use_container_width=True):
