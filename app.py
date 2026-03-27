@@ -1396,15 +1396,26 @@ def main():
         """, unsafe_allow_html=True)
 
     # ─── ANCHOR POINTS DEBUG ───
-    with st.expander("🔧 Channel Anchor Points"):
+    with st.expander("🔧 Channel Anchor Points (Debug)"):
         for ap in channels.anchor_points:
-            st.markdown(f"""
-            <div style="padding: 0.4rem 0; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
-                <span style="color: var(--cyan);">{ap.label}</span> &nbsp;|&nbsp;
-                <span style="color: var(--text-primary);">{ap.price:,.2f}</span> &nbsp;|&nbsp;
-                <span style="color: var(--text-muted);">{ap.timestamp.strftime('%b %d, %I:%M %p CT')}</span>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="padding: 0.4rem 0; font-family: JetBrains Mono, monospace; font-size: 0.8rem;">'
+                f'<span style="color: var(--cyan);">{ap.label}</span> | '
+                f'<span style="color: var(--text-primary);">{ap.price:,.2f}</span> | '
+                f'<span style="color: var(--text-muted);">{ap.timestamp.strftime("%b %d %Y, %I:%M %p CT")}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        # Show block count diagnostics
+        test_target = CT.localize(datetime.combine(trading_date, dtime(18, 0)))
+        test_blocks = count_blocks(channels.anchor_points[0].timestamp, test_target)
+        st.markdown(
+            f'<div style="padding: 0.5rem 0; font-family: JetBrains Mono, monospace; font-size: 0.75rem; color: var(--gold);">'
+            f'DEBUG: Blocks from {channels.anchor_points[0].label} to 6:00 PM today = {test_blocks:.1f} | '
+            f'Expected change = {0.52 * test_blocks:.2f} pts'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
     # ─── FOOTER ───
     st.markdown("""
