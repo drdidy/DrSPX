@@ -862,21 +862,14 @@ def render_scenario_card(scenario, trading_date=None):
             f'</div>'
         )
 
-    # Build strike + contract HTML
+    # Build strike HTML — simple format like 6650C or 6590P
     strike_html = ""
     if scenario.strike and scenario.direction in ("CALLS", "PUTS"):
-        is_call = scenario.direction == "CALLS"
-        if trading_date is None:
-            trading_date = date.today()
-        ticker = format_spxw_ticker(scenario.strike, trading_date, is_call)
+        cp = "C" if scenario.direction == "CALLS" else "P"
         strike_html = (
             f'<div style="margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--border-subtle);">'
-            f'<div style="display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;">'
-            f'<div><span class="card-sub">Strike: </span>'
-            f'<span class="signal-strike {strike_class}">{scenario.strike}</span></div>'
-            f'<div><span class="card-sub">Contract: </span>'
-            f'<span style="font-family: JetBrains Mono, monospace; color: var(--cyan); font-size: 0.8rem;">{ticker}</span></div>'
-            f'</div></div>'
+            f'<span class="signal-strike {strike_class}">{scenario.strike}{cp}</span>'
+            f'</div>'
         )
 
     st.markdown(
