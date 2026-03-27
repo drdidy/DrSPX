@@ -14,6 +14,14 @@ CT = pytz.timezone("America/Chicago")
 STRIKE_OFFSET = 20  # ±20 from entry for 0DTE strike selection
 
 
+STOP_LOSS_POINTS = 6       # SPX points for stop loss
+TP1_PCT = 0.25             # 25% of channel width
+TP2_PCT = 0.50             # 50% of channel width
+TP3_PCT = 0.75             # 75% of channel width
+ES_STOP_TICKS = 8          # ES ticks for prop firm stop (8 ticks = 2 pts)
+ES_TP_MULTIPLIER = 2.0     # Risk:Reward for ES trades
+
+
 @dataclass
 class TradeScenario:
     """A potential trade scenario based on price position and day type."""
@@ -24,6 +32,11 @@ class TradeScenario:
     target_level: Optional[float] = None
     target_label: Optional[str] = None
     strike: Optional[int] = None
+    contract_ticker: Optional[str] = None
+    stop_loss: Optional[float] = None
+    take_profit_1: Optional[float] = None
+    take_profit_2: Optional[float] = None
+    take_profit_3: Optional[float] = None
     is_primary: bool = True
     strength: str = "STANDARD"  # "STRONG", "STANDARD", "CAUTION"
 
@@ -248,12 +261,21 @@ def assess_position_ascending_day(
             strength="STRONG"
         ))
 
-    # Calculate strikes
+    # Calculate strikes, stop loss, take profits, and contract ticker
+    channel_width = ac - af
     for s in scenarios:
         if s.direction == "CALLS":
             s.strike = round_strike(s.entry_level - STRIKE_OFFSET)
+            s.stop_loss = s.entry_level - STOP_LOSS_POINTS
+            s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
+            s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
+            s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
         else:
             s.strike = round_strike(s.entry_level + STRIKE_OFFSET)
+            s.stop_loss = s.entry_level + STOP_LOSS_POINTS
+            s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
+            s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
+            s.take_profit_3 = s.entry_level - (channel_width * TP3_PCT)
 
     return PositionAssessment(
         zone=zone,
@@ -383,12 +405,21 @@ def assess_position_descending_day(
             strength="STRONG"
         ))
 
-    # Calculate strikes
+    # Calculate strikes, stop loss, take profits, and contract ticker
+    channel_width = dc - df_
     for s in scenarios:
         if s.direction == "CALLS":
             s.strike = round_strike(s.entry_level - STRIKE_OFFSET)
+            s.stop_loss = s.entry_level - STOP_LOSS_POINTS
+            s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
+            s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
+            s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
         else:
             s.strike = round_strike(s.entry_level + STRIKE_OFFSET)
+            s.stop_loss = s.entry_level + STOP_LOSS_POINTS
+            s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
+            s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
+            s.take_profit_3 = s.entry_level - (channel_width * TP3_PCT)
 
     return PositionAssessment(
         zone=zone,
