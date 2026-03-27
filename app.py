@@ -1064,11 +1064,23 @@ def main():
             man_lw_min = st.number_input("└ Minute", min_value=0, max_value=59, value=30, key="lw_m")
 
         st.markdown("---")
-
-        # ES-SPX offset override
-        auto_offset = st.checkbox("Auto-detect ES-SPX offset", value=True)
-        if not auto_offset:
-            manual_offset = st.number_input("Manual ES-SPX Offset", value=10.0, format="%.2f")
+        st.markdown("#### ES-SPX OFFSET")
+        st.markdown("""
+        <div style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+            Check both prices on TradingView.<br>Offset = ES price - SPX price
+        </div>
+        """, unsafe_allow_html=True)
+        offset_method = st.radio(
+            "Offset Method",
+            options=["Manual (recommended)", "Auto-detect"],
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        if offset_method == "Manual (recommended)":
+            manual_offset = st.number_input("ES - SPX Offset", value=45.0, format="%.2f",
+                help="Enter current ES price minus current SPX price from TradingView")
+        auto_offset = offset_method == "Auto-detect"
 
         st.markdown("---")
 
