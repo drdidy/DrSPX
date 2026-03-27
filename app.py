@@ -1002,89 +1002,73 @@ def main():
     inject_premium_css()
     render_hero()
 
-    # ─── CONTROL PANEL (in main body, not sidebar) ───
-    with st.expander("⚙️ COMMAND CENTER — Tap to enter anchors", expanded=True):
-        row1_col1, row1_col2, row1_col3 = st.columns(3)
+    # ─── CONTROL PANEL (in main body) ───
+    with st.expander("⚙️ COMMAND CENTER", expanded=True):
+        trading_date = st.date_input(
+            "TRADING DATE",
+            value=date.today()
+        )
 
-        with row1_col1:
-            trading_date = st.date_input(
-                "TRADING DATE",
-                value=date.today(),
-                help="The day you are trading. Enter anchors from the prior trading day's 12-3 PM."
-            )
+        day_type = st.radio(
+            "DAY TYPE",
+            options=["ASCENDING", "DESCENDING"],
+            index=0,
+            horizontal=True
+        )
+        day_type_lower = day_type.lower()
 
-        with row1_col2:
-            day_type = st.radio(
-                "DAY TYPE",
-                options=["ASCENDING", "DESCENDING"],
-                index=0,
-                horizontal=True
-            )
-            day_type_lower = day_type.lower()
-
-        with row1_col3:
-            manual_offset = st.number_input("ES - SPX OFFSET", value=45.0, format="%.2f", key="offset_input",
-                help="ES price minus SPX price from TradingView")
+        manual_offset = st.number_input("ES - SPX OFFSET", value=45.0, format="%.2f", key="offset_input")
 
         st.markdown("---")
         st.markdown("""
-        <div class="card-label" style="margin-bottom: 0.3rem;">12-3 PM ANCHORS (ES values from TradingView)</div>
+        <div class="card-label" style="margin-bottom: 0.5rem;">12-3 PM ANCHORS (ES from TradingView)</div>
         """, unsafe_allow_html=True)
 
-        # Row for Lowest Bounce and Highest Rejection
-        anchor_col1, anchor_col2 = st.columns(2)
+        # Lowest Bounce
+        st.markdown("**Lowest Bounce**")
+        lb1, lb2, lb3 = st.columns([3, 1, 1])
+        with lb1:
+            man_lowest_bounce = st.number_input("LB Price", value=0.0, format="%.2f", key="lb", label_visibility="collapsed")
+        with lb2:
+            man_lb_hour = st.number_input("Hr", min_value=12, max_value=15, value=13, key="lb_h")
+        with lb3:
+            man_lb_min = st.number_input("Min", min_value=0, max_value=59, value=30, key="lb_m")
 
-        with anchor_col1:
-            st.markdown("**Lowest Bounce**")
-            lb_c1, lb_c2, lb_c3 = st.columns([2, 1, 1])
-            with lb_c1:
-                man_lowest_bounce = st.number_input("Price", value=0.0, format="%.2f", key="lb", label_visibility="collapsed")
-            with lb_c2:
-                man_lb_hour = st.number_input("Hr", min_value=12, max_value=15, value=13, key="lb_h")
-            with lb_c3:
-                man_lb_min = st.number_input("Min", min_value=0, max_value=59, value=30, key="lb_m")
+        # Highest Rejection
+        st.markdown("**Highest Rejection**")
+        hr1, hr2, hr3 = st.columns([3, 1, 1])
+        with hr1:
+            man_highest_rej = st.number_input("HR Price", value=0.0, format="%.2f", key="hr", label_visibility="collapsed")
+        with hr2:
+            man_hr_hour = st.number_input("Hr", min_value=12, max_value=15, value=14, key="hr_h")
+        with hr3:
+            man_hr_min = st.number_input("Min", min_value=0, max_value=59, value=0, key="hr_m")
 
-        with anchor_col2:
-            st.markdown("**Highest Rejection**")
-            hr_c1, hr_c2, hr_c3 = st.columns([2, 1, 1])
-            with hr_c1:
-                man_highest_rej = st.number_input("Price", value=0.0, format="%.2f", key="hr", label_visibility="collapsed")
-            with hr_c2:
-                man_hr_hour = st.number_input("Hr", min_value=12, max_value=15, value=14, key="hr_h")
-            with hr_c3:
-                man_hr_min = st.number_input("Min", min_value=0, max_value=59, value=0, key="hr_m")
+        # Highest Wick
+        st.markdown("**Highest Wick**")
+        hw1, hw2, hw3 = st.columns([3, 1, 1])
+        with hw1:
+            man_highest_wick = st.number_input("HW Price", value=0.0, format="%.2f", key="hw", label_visibility="collapsed")
+        with hw2:
+            man_hw_hour = st.number_input("Hr", min_value=12, max_value=15, value=13, key="hw_h")
+        with hw3:
+            man_hw_min = st.number_input("Min", min_value=0, max_value=59, value=0, key="hw_m")
 
-        # Row for Highest Wick and Lowest Wick
-        wick_col1, wick_col2 = st.columns(2)
-
-        with wick_col1:
-            st.markdown("**Highest Wick**")
-            hw_c1, hw_c2, hw_c3 = st.columns([2, 1, 1])
-            with hw_c1:
-                man_highest_wick = st.number_input("Price", value=0.0, format="%.2f", key="hw", label_visibility="collapsed")
-            with hw_c2:
-                man_hw_hour = st.number_input("Hr", min_value=12, max_value=15, value=13, key="hw_h")
-            with hw_c3:
-                man_hw_min = st.number_input("Min", min_value=0, max_value=59, value=0, key="hw_m")
-
-        with wick_col2:
-            st.markdown("**Lowest Wick**")
-            lw_c1, lw_c2, lw_c3 = st.columns([2, 1, 1])
-            with lw_c1:
-                man_lowest_wick = st.number_input("Price", value=0.0, format="%.2f", key="lw", label_visibility="collapsed")
-            with lw_c2:
-                man_lw_hour = st.number_input("Hr", min_value=12, max_value=15, value=14, key="lw_h")
-            with lw_c3:
-                man_lw_min = st.number_input("Min", min_value=0, max_value=59, value=30, key="lw_m")
+        # Lowest Wick
+        st.markdown("**Lowest Wick**")
+        lw1, lw2, lw3 = st.columns([3, 1, 1])
+        with lw1:
+            man_lowest_wick = st.number_input("LW Price", value=0.0, format="%.2f", key="lw", label_visibility="collapsed")
+        with lw2:
+            man_lw_hour = st.number_input("Hr", min_value=12, max_value=15, value=14, key="lw_h")
+        with lw3:
+            man_lw_min = st.number_input("Min", min_value=0, max_value=59, value=30, key="lw_m")
 
         st.markdown("")
-        ref_col1, ref_col2 = st.columns(2)
-        with ref_col1:
-            if st.button("🔄 REFRESH DATA", use_container_width=True):
-                st.cache_data.clear()
-                st.rerun()
-        with ref_col2:
-            auto_refresh = st.checkbox("Auto-refresh (30s)", value=False)
+        if st.button("🔄 REFRESH DATA", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+        auto_refresh = st.checkbox("Auto-refresh (30s)", value=False)
 
     # ─── FETCH DATA ───
     with st.spinner("Loading market data..."):
