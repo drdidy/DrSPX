@@ -143,6 +143,19 @@ def inject_premium_css():
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #060e1e 0%, #0a1628 50%, #060e1e 100%) !important;
         border-right: 1px solid var(--border-subtle) !important;
+        min-width: 320px !important;
+    }
+
+    /* Make sidebar toggle button visible */
+    [data-testid="collapsedControl"] {
+        background: rgba(0, 200, 255, 0.15) !important;
+        border: 1px solid rgba(0, 200, 255, 0.3) !important;
+        border-radius: 8px !important;
+        color: var(--cyan) !important;
+    }
+    [data-testid="collapsedControl"] svg {
+        fill: var(--cyan) !important;
+        stroke: var(--cyan) !important;
     }
 
     [data-testid="stSidebar"] [data-testid="stMarkdown"] p,
@@ -1033,47 +1046,41 @@ def main():
 
         st.markdown("---")
 
-        # Manual overrides
-        st.markdown("#### MANUAL OVERRIDES")
+        # Channel Anchors — always manual, simplified
+        st.markdown("#### 12-3 PM ANCHORS (ES)")
+        st.markdown("""
+        <div style="font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+            Enter from TradingView line chart
+        </div>
+        """, unsafe_allow_html=True)
 
-        use_manual_anchors = st.checkbox("Manual Channel Anchors", value=False)
+        man_lowest_bounce = st.number_input("Lowest Bounce Price", value=0.0, format="%.2f", key="lb")
+        man_lb_hour = st.number_input("Bounce Hour (CT)", min_value=12, max_value=15, value=13, key="lb_h")
+        man_lb_min = st.number_input("Bounce Minute", min_value=0, max_value=59, value=30, key="lb_m")
 
-        if use_manual_anchors:
-            st.markdown("##### Anchor Points (ES values)")
-            man_lowest_bounce = st.number_input("Lowest Bounce (12-3 PM)", value=0.0, format="%.2f", key="lb")
-            man_lb_hour = st.number_input("└ Hour (CT)", min_value=12, max_value=15, value=13, key="lb_h")
-            man_lb_min = st.number_input("└ Minute", min_value=0, max_value=59, value=30, key="lb_m")
+        st.markdown("")
+        man_highest_rej = st.number_input("Highest Rejection Price", value=0.0, format="%.2f", key="hr")
+        man_hr_hour = st.number_input("Rejection Hour (CT)", min_value=12, max_value=15, value=14, key="hr_h")
+        man_hr_min = st.number_input("Rejection Minute", min_value=0, max_value=59, value=0, key="hr_m")
 
-            man_highest_rej = st.number_input("Highest Rejection (12-3 PM)", value=0.0, format="%.2f", key="hr")
-            man_hr_hour = st.number_input("└ Hour (CT)", min_value=12, max_value=15, value=14, key="hr_h")
-            man_hr_min = st.number_input("└ Minute", min_value=0, max_value=59, value=0, key="hr_m")
+        st.markdown("")
+        man_highest_wick = st.number_input("Highest Wick Price", value=0.0, format="%.2f", key="hw")
+        man_hw_hour = st.number_input("H Wick Hour (CT)", min_value=12, max_value=15, value=13, key="hw_h")
+        man_hw_min = st.number_input("H Wick Minute", min_value=0, max_value=59, value=0, key="hw_m")
 
-            man_highest_wick = st.number_input("Highest Wick (12-3 PM)", value=0.0, format="%.2f", key="hw")
-            man_hw_hour = st.number_input("└ Hour (CT)", min_value=12, max_value=15, value=13, key="hw_h")
-            man_hw_min = st.number_input("└ Minute", min_value=0, max_value=59, value=0, key="hw_m")
-
-            man_lowest_wick = st.number_input("Lowest Wick (12-3 PM)", value=0.0, format="%.2f", key="lw")
-            man_lw_hour = st.number_input("└ Hour (CT)", min_value=12, max_value=15, value=14, key="lw_h")
-            man_lw_min = st.number_input("└ Minute", min_value=0, max_value=59, value=30, key="lw_m")
+        st.markdown("")
+        man_lowest_wick = st.number_input("Lowest Wick Price", value=0.0, format="%.2f", key="lw")
+        man_lw_hour = st.number_input("L Wick Hour (CT)", min_value=12, max_value=15, value=14, key="lw_h")
+        man_lw_min = st.number_input("L Wick Minute", min_value=0, max_value=59, value=30, key="lw_m")
 
         st.markdown("---")
         st.markdown("#### ES-SPX OFFSET")
         st.markdown("""
         <div style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-            Check both prices on TradingView.<br>Offset = ES price - SPX price
+            ES price minus SPX price from TradingView
         </div>
         """, unsafe_allow_html=True)
-        offset_method = st.radio(
-            "Offset Method",
-            options=["Manual (recommended)", "Auto-detect"],
-            index=0,
-            horizontal=True,
-            label_visibility="collapsed"
-        )
-        if offset_method == "Manual (recommended)":
-            manual_offset = st.number_input("ES - SPX Offset", value=45.0, format="%.2f",
-                help="Enter current ES price minus current SPX price from TradingView")
-        auto_offset = offset_method == "Auto-detect"
+        manual_offset = st.number_input("ES - SPX Offset", value=45.0, format="%.2f", key="offset_input")
 
         st.markdown("---")
 
@@ -1089,24 +1096,27 @@ def main():
     with st.spinner("Loading market data..."):
         es_price = fetch_es_price()
         spx_price = fetch_spx_price()
-
-        if auto_offset:
-            offset = get_es_spx_offset()
-        else:
-            offset = manual_offset
-
+        offset = manual_offset
         session_mode = get_session_mode()
         es_1min = fetch_es_1min()
 
     # ─── LIVE BAR ───
     render_live_bar(es_price, spx_price, offset, session_mode)
 
-    # ─── BUILD CHANNELS ───
+    # ─── BUILD CHANNELS (manual only) ───
     channels = None
 
-    if use_manual_anchors and man_lowest_bounce > 0 and man_highest_rej > 0:
-        # Use manual anchors
-        prior_date = trading_date - timedelta(days=1)
+    if man_lowest_bounce > 0 and man_highest_rej > 0:
+        # Calculate prior trading date (skip weekends)
+        prior_date = trading_date
+        if prior_date.weekday() == 0:  # Monday -> use Friday
+            prior_date = trading_date - timedelta(days=3)
+        elif prior_date.weekday() == 6:  # Sunday -> use Friday
+            prior_date = trading_date - timedelta(days=2)
+        elif prior_date.weekday() == 5:  # Saturday -> use Friday
+            prior_date = trading_date - timedelta(days=1)
+        # Otherwise use trading_date itself (the anchors are FROM this day, for TOMORROW)
+
         try:
             lb_anchor = AnchorPoint(
                 price=man_lowest_bounce,
@@ -1130,25 +1140,18 @@ def main():
             )
             channels = build_channels(lb_anchor, hr_anchor, hw_anchor, lw_anchor)
         except Exception as e:
-            st.error(f"Error building channels from manual inputs: {e}")
-    else:
-        # Auto-detect from yfinance data
-        with st.spinner("Detecting channel anchors from prior day..."):
-            df_1min = fetch_1min_for_afternoon(trading_date)
-            df_30min = fetch_prior_day_afternoon(trading_date)
-            if not df_1min.empty:
-                channels = auto_build_channels(df_1min, df_30min)
+            st.error(f"Error building channels: {e}")
 
     if channels is None:
         st.markdown("""
         <div class="prophet-card" style="text-align: center; padding: 2rem;">
-            <div style="font-size: 2rem; margin-bottom: 0.5rem;">⚠️</div>
+            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📝</div>
             <div style="font-family: 'Outfit', sans-serif; color: var(--gold); font-size: 1rem; font-weight: 600;">
-                NO CHANNEL DATA DETECTED
+                ENTER CHANNEL ANCHORS
             </div>
             <div class="card-sub" style="margin-top: 0.5rem;">
-                Enable "Manual Channel Anchors" in the sidebar to input prior day's 12-3 PM levels,
-                or wait for market data to become available.
+                Open the sidebar (tap ☰ top-left) and enter the prior day's 12-3 PM
+                Lowest Bounce and Highest Rejection from TradingView.
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1168,27 +1171,30 @@ def main():
     with tab_asian:
         st.markdown("")
 
-        # Asian session projection table (6 PM - 9 PM in 30-min slots)
+        # Asian session projection table (5 PM - 9 PM in 30-min slots)
         st.markdown("""
         <div class="card-label" style="margin-bottom: 0.5rem;">ASIAN SESSION PROJECTIONS — ES VALUES</div>
         """, unsafe_allow_html=True)
 
         asian_times = [
+            ("5:00 PM", dtime(17, 0)), ("5:30 PM", dtime(17, 30)),
             ("6:00 PM", dtime(18, 0)), ("6:30 PM", dtime(18, 30)),
             ("7:00 PM", dtime(19, 0)), ("7:30 PM", dtime(19, 30)),
             ("8:00 PM", dtime(20, 0)), ("8:30 PM", dtime(20, 30)),
             ("9:00 PM", dtime(21, 0)),
         ]
         asian_rows = []
-        for label, t in asian_times:
-            target = CT.localize(datetime.combine(trading_date, t))
-            vals = get_channel_values_at_time(channels, target)
+        base_target = CT.localize(datetime.combine(trading_date, asian_times[0][1]))
+        base_vals = get_channel_values_at_time(channels, base_target)
+        for i, (label, t) in enumerate(asian_times):
+            # Calculate incremental offset: each 30-min slot = 1 block = 0.52 pts
+            block_offset = i  # Each row is one 30-min block from the first row
             asian_rows.append({
                 "Time (CT)": label,
-                "Desc Ceiling": round(vals["desc_ceiling"], 2),
-                "Desc Floor": round(vals["desc_floor"], 2),
-                "Asc Ceiling": round(vals["asc_ceiling"], 2),
-                "Asc Floor": round(vals["asc_floor"], 2),
+                "Desc Ceiling": round(base_vals["desc_ceiling"] - (0.52 * block_offset), 2),
+                "Desc Floor": round(base_vals["desc_floor"] - (0.52 * block_offset), 2),
+                "Asc Ceiling": round(base_vals["asc_ceiling"] + (0.52 * block_offset), 2),
+                "Asc Floor": round(base_vals["asc_floor"] + (0.52 * block_offset), 2),
             })
         asian_df = pd.DataFrame(asian_rows)
         st.dataframe(asian_df, use_container_width=True, hide_index=True)
@@ -1297,15 +1303,16 @@ def main():
             ("1:00 PM", dtime(13, 0)),
         ]
         rth_rows = []
-        for label, t in rth_times:
-            target = CT.localize(datetime.combine(trading_date, t))
-            vals = get_channel_values_at_time(channels, target)
+        base_target = CT.localize(datetime.combine(trading_date, rth_times[0][1]))
+        base_vals = get_channel_values_at_time(channels, base_target)
+        for i, (label, t) in enumerate(rth_times):
+            block_offset = i
             rth_rows.append({
                 "Time (CT)": label,
-                "Asc Ceiling": round(vals["asc_ceiling"] - offset, 2),
-                "Asc Floor": round(vals["asc_floor"] - offset, 2),
-                "Desc Ceiling": round(vals["desc_ceiling"] - offset, 2),
-                "Desc Floor": round(vals["desc_floor"] - offset, 2),
+                "Asc Ceiling": round(base_vals["asc_ceiling"] + (0.52 * block_offset) - offset, 2),
+                "Asc Floor": round(base_vals["asc_floor"] + (0.52 * block_offset) - offset, 2),
+                "Desc Ceiling": round(base_vals["desc_ceiling"] - (0.52 * block_offset) - offset, 2),
+                "Desc Floor": round(base_vals["desc_floor"] - (0.52 * block_offset) - offset, 2),
             })
         rth_df = pd.DataFrame(rth_rows)
         st.dataframe(rth_df, use_container_width=True, hide_index=True)
