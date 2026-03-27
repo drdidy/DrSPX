@@ -748,6 +748,13 @@ def render_day_type_indicator(day_type):
 def render_channel_values(channel_vals, is_es=True):
     """Render current channel projected values."""
     unit = "ES" if is_es else "SPX"
+    asc_ext = f"{channel_vals['asc_extreme']:,.2f}" if channel_vals.get('asc_extreme') else "—"
+    asc_ceil = f"{channel_vals['asc_ceiling']:,.2f}"
+    asc_flr = f"{channel_vals['asc_floor']:,.2f}"
+    desc_ceil = f"{channel_vals['desc_ceiling']:,.2f}"
+    desc_flr = f"{channel_vals['desc_floor']:,.2f}"
+    desc_ext = f"{channel_vals['desc_extreme']:,.2f}" if channel_vals.get('desc_extreme') else "—"
+
     st.markdown(f"""
     <div class="prophet-card">
         <div class="card-label">CHANNEL PROJECTIONS — {unit} VALUES</div>
@@ -757,19 +764,19 @@ def render_channel_values(channel_vals, is_es=True):
                 <div style="display: flex; justify-content: space-between; margin-top: 0.4rem;">
                     <span class="card-sub">Extreme</span>
                     <span style="font-family: 'JetBrains Mono', monospace; color: rgba(0, 232, 143, 0.5); font-size: 0.9rem;">
-                        {channel_vals['asc_extreme']:,.2f if channel_vals['asc_extreme'] else '—'}
+                        {asc_ext}
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between;">
                     <span class="card-sub">Ceiling</span>
                     <span style="font-family: 'JetBrains Mono', monospace; color: var(--green); font-size: 0.9rem; font-weight: 600;">
-                        {channel_vals['asc_ceiling']:,.2f}
+                        {asc_ceil}
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between;">
                     <span class="card-sub">Floor</span>
                     <span style="font-family: 'JetBrains Mono', monospace; color: var(--green); font-size: 0.9rem; font-weight: 600;">
-                        {channel_vals['asc_floor']:,.2f}
+                        {asc_flr}
                     </span>
                 </div>
             </div>
@@ -778,19 +785,19 @@ def render_channel_values(channel_vals, is_es=True):
                 <div style="display: flex; justify-content: space-between; margin-top: 0.4rem;">
                     <span class="card-sub">Ceiling</span>
                     <span style="font-family: 'JetBrains Mono', monospace; color: var(--red); font-size: 0.9rem; font-weight: 600;">
-                        {channel_vals['desc_ceiling']:,.2f}
+                        {desc_ceil}
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between;">
                     <span class="card-sub">Floor</span>
                     <span style="font-family: 'JetBrains Mono', monospace; color: var(--red); font-size: 0.9rem; font-weight: 600;">
-                        {channel_vals['desc_floor']:,.2f}
+                        {desc_flr}
                     </span>
                 </div>
                 <div style="display: flex; justify-content: space-between;">
                     <span class="card-sub">Extreme</span>
                     <span style="font-family: 'JetBrains Mono', monospace; color: rgba(255, 68, 102, 0.5); font-size: 0.9rem;">
-                        {channel_vals['desc_extreme']:,.2f if channel_vals['desc_extreme'] else '—'}
+                        {desc_ext}
                     </span>
                 </div>
             </div>
