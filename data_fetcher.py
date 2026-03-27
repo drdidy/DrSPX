@@ -107,8 +107,9 @@ def fetch_prior_day_afternoon(trading_date: datetime = None) -> pd.DataFrame:
     if trading_date is None:
         trading_date = datetime.now(CT).date()
 
-    # Find prior trading day
+    # Find prior trading day (skips weekends automatically)
     check_date = trading_date - timedelta(days=1)
+    day_data = pd.DataFrame()
     attempts = 0
     while attempts < 5:
         day_data = df[df.index.date == check_date]
@@ -143,8 +144,9 @@ def fetch_1min_for_afternoon(trading_date: datetime = None) -> pd.DataFrame:
         if trading_date is None:
             trading_date = datetime.now(CT).date()
 
-        # Find prior trading day
+        # Find prior trading day (skips weekends automatically)
         check_date = trading_date - timedelta(days=1)
+        day_data = pd.DataFrame()
         attempts = 0
         while attempts < 5:
             day_data = df[df.index.date == check_date]
