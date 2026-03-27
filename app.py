@@ -806,8 +806,9 @@ def render_channel_values(channel_vals, is_es=True):
     """, unsafe_allow_html=True)
 
 
-def render_scenario_card(scenario):
-    """Render a trade scenario card."""
+def render_scenario_card(scenario, trading_date=None):
+    """Render a trade scenario card with full trade management details."""
+    from trade_logic import format_spxw_ticker
     is_bullish = scenario.direction in ("CALLS", "LONG ES")
 
     if is_bullish:
@@ -822,47 +823,76 @@ def render_scenario_card(scenario):
     strength_class = f"strength-{scenario.strength.lower()}"
     primary_label = "PRIMARY" if scenario.is_primary else "ALTERNATE"
 
+    # Build target HTML
     target_html = ""
     if scenario.target_level:
-        target_html = f"""
-        <div style="margin-top: 0.5rem;">
-            <span class="card-sub">Target → </span>
-            <span style="font-family: 'JetBrains Mono', monospace; color: {dir_color};">
-                {scenario.target_level:,.2f}
-            </span>
-            <span class="card-sub"> ({scenario.target_label})</span>
-        </div>
-        """
+        target_html = (
+            f'<div style="margin-top: 0.5rem;">'
+            f'<span class="card-sub">Target: </span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: {dir_color};">{scenario.target_level:,.2f}</span>'
+            f'<span class="card-sub"> ({scenario.target_label})</span>'
+            f'</div>'
+        )
 
+    # Build stop loss HTML
+    sl_html = ""
+    if scenario.stop_loss:
+        sl_html = (
+            f'<div style="margin-top: 0.3rem;">'
+            f'<span class="card-sub">Stop Loss: </span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--red); font-weight: 600;">{scenario.stop_loss:,.2f}</span>'
+            f'</div>'
+        )
+
+    # Build take profit HTML
+    tp_html = ""
+    if scenario.take_profit_1:
+        tp_html = (
+            f'<div style="display: flex; gap: 1rem; margin-top: 0.3rem; flex-wrap: wrap;">'
+            f'<div><span class="card-sub">TP1 (25%): </span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{scenario.take_profit_1:,.2f}</span></div>'
+            f'<div><span class="card-sub">TP2 (50%): </span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{scenario.take_profit_2:,.2f}</span></div>'
+            f'<div><span class="card-sub">TP3 (75%): </span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{scenario.take_profit_3:,.2f}</span></div>'
+            f'</div>'
+        )
+
+    # Build strike + contract HTML
     strike_html = ""
-    if scenario.strike:
-        strike_html = f"""
-        <div class="signal-strike {strike_class}">
-            STRIKE: {scenario.strike}
-        </div>
-        """
+    if scenario.strike and scenario.direction in ("CALLS", "PUTS"):
+        is_call = scenario.direction == "CALLS"
+        if trading_date is None:
+            trading_date = date.today()
+        ticker = format_spxw_ticker(scenario.strike, trading_date, is_call)
+        strike_html = (
+            f'<div style="margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--border-subtle);">'
+            f'<div style="display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;">'
+            f'<div><span class="card-sub">Strike: </span>'
+            f'<span class="signal-strike {strike_class}">{scenario.strike}</span></div>'
+            f'<div><span class="card-sub">Contract: </span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--cyan); font-size: 0.8rem;">{ticker}</span></div>'
+            f'</div></div>'
+        )
 
-    st.markdown(f"""
-    <div class="signal-card {signal_class}">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                <span class="{strength_class}">{scenario.strength}</span>
-                <span style="margin-left: 8px; font-size: 0.7rem; color: var(--text-muted);">{primary_label}</span>
-            </div>
-        </div>
-        <div style="margin-top: 0.8rem;">
-            <span class="signal-direction" style="color: {dir_color};">{scenario.direction}</span>
-            <span style="color: var(--text-muted); font-size: 0.85rem; margin-left: 0.5rem;">at</span>
-        </div>
-        <div class="signal-entry" style="color: {dir_color}; margin-top: 0.3rem;">
-            {scenario.entry_level:,.2f}
-        </div>
-        <div class="card-sub">{scenario.entry_label}</div>
-        <div class="signal-meta">{scenario.rationale}</div>
-        {target_html}
-        {strike_html}
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="signal-card {signal_class}">'
+        f'<div style="display: flex; justify-content: space-between; align-items: center;">'
+        f'<div><span class="{strength_class}">{scenario.strength}</span>'
+        f'<span style="margin-left: 8px; font-size: 0.7rem; color: var(--text-muted);">{primary_label}</span></div></div>'
+        f'<div style="margin-top: 0.8rem;">'
+        f'<span class="signal-direction" style="color: {dir_color};">{scenario.direction}</span>'
+        f'<span style="color: var(--text-muted); font-size: 0.85rem; margin-left: 0.5rem;">at</span></div>'
+        f'<div class="signal-entry" style="color: {dir_color}; margin-top: 0.3rem;">{scenario.entry_level:,.2f}</div>'
+        f'<div class="card-sub">{scenario.entry_label}</div>'
+        f'<div class="signal-meta">{scenario.rationale}</div>'
+        f'{target_html}'
+        f'{sl_html}'
+        f'{tp_html}'
+        f'{strike_html}'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
 
 def render_cross_monitor(state):
@@ -1173,7 +1203,7 @@ def main():
 
             # Scenarios with SPX strikes
             for scenario in rth_assessment.scenarios:
-                render_scenario_card(scenario)
+                render_scenario_card(scenario, trading_date=trading_date)
 
     # ═══ PROJECTIONS TAB ═══
     with tab_projection:
