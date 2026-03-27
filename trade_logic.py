@@ -521,6 +521,21 @@ def assess_asian_session(
             strength="CAUTION"
         ))
 
+    # Calculate stop loss and take profit for ES trades
+    channel_width = abs(dc - df_)
+    es_stop = 2.0  # 2 ES points stop loss for prop firm
+    for s in scenarios:
+        if s.direction == "LONG ES":
+            s.stop_loss = s.entry_level - es_stop
+            s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
+            s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
+            s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
+        elif s.direction == "SHORT ES":
+            s.stop_loss = s.entry_level + es_stop
+            s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
+            s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
+            s.take_profit_3 = s.entry_level - (channel_width * TP3_PCT)
+
     return PositionAssessment(
         zone=zone,
         zone_label=zone_label,
