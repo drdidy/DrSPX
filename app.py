@@ -836,25 +836,29 @@ def render_scenario_card(scenario, trading_date=None):
 
     # Build stop loss HTML
     sl_html = ""
-    if scenario.stop_loss:
+    sl = getattr(scenario, 'stop_loss', None)
+    if sl:
         sl_html = (
             f'<div style="margin-top: 0.3rem;">'
             f'<span class="card-sub">Stop Loss: </span>'
-            f'<span style="font-family: JetBrains Mono, monospace; color: var(--red); font-weight: 600;">{scenario.stop_loss:,.2f}</span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--red); font-weight: 600;">{sl:,.2f}</span>'
             f'</div>'
         )
 
     # Build take profit HTML
     tp_html = ""
-    if scenario.take_profit_1:
+    tp1 = getattr(scenario, 'take_profit_1', None)
+    tp2 = getattr(scenario, 'take_profit_2', None)
+    tp3 = getattr(scenario, 'take_profit_3', None)
+    if tp1:
         tp_html = (
             f'<div style="display: flex; gap: 1rem; margin-top: 0.3rem; flex-wrap: wrap;">'
             f'<div><span class="card-sub">TP1 (25%): </span>'
-            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{scenario.take_profit_1:,.2f}</span></div>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{tp1:,.2f}</span></div>'
             f'<div><span class="card-sub">TP2 (50%): </span>'
-            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{scenario.take_profit_2:,.2f}</span></div>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{tp2:,.2f}</span></div>'
             f'<div><span class="card-sub">TP3 (75%): </span>'
-            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{scenario.take_profit_3:,.2f}</span></div>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--gold); font-size: 0.85rem;">{tp3:,.2f}</span></div>'
             f'</div>'
         )
 
@@ -1006,8 +1010,23 @@ def main():
 
         st.markdown("---")
 
-        # Trading date
-        trading_date = st.date_input("TRADING DATE", value=date.today())
+        # Trading date — this is the day you're TRADING (today)
+        trading_date = st.date_input(
+            "TRADING DATE (today)",
+            value=date.today(),
+            help="The day you are trading. The app will automatically use the prior trading day's 12-3 PM data for channel construction. Weekends are skipped (Monday uses Friday)."
+        )
+
+        # Show which prior day will be used
+        prior = trading_date - timedelta(days=1)
+        while prior.weekday() >= 5:  # Skip Sat/Sun
+            prior -= timedelta(days=1)
+        st.markdown(f"""
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: var(--text-muted);
+             padding: 0.3rem 0;">
+            Channel source: {prior.strftime('%A, %b %d')} 12-3 PM
+        </div>
+        """, unsafe_allow_html=True)
 
         # Day type toggle
         st.markdown("---")
