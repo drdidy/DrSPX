@@ -583,7 +583,7 @@ def get_session_mode(current_time: datetime = None) -> str:
     hour = current_time.hour
     minute = current_time.minute
 
-    if 18 <= hour <= 20:  # 6 PM - 9 PM
+    if 17 <= hour <= 20:  # 5 PM - 9 PM CT (ES market open)
         return "asian"
     elif 5 <= hour < 8 or (hour == 8 and minute < 30):
         return "pre_rth"
