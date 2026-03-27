@@ -1167,6 +1167,33 @@ def main():
     # ═══ ASIAN SESSION TAB ═══
     with tab_asian:
         st.markdown("")
+
+        # Asian session projection table (6 PM - 9 PM in 30-min slots)
+        st.markdown("""
+        <div class="card-label" style="margin-bottom: 0.5rem;">ASIAN SESSION PROJECTIONS — ES VALUES</div>
+        """, unsafe_allow_html=True)
+
+        asian_times = [
+            ("6:00 PM", dtime(18, 0)), ("6:30 PM", dtime(18, 30)),
+            ("7:00 PM", dtime(19, 0)), ("7:30 PM", dtime(19, 30)),
+            ("8:00 PM", dtime(20, 0)), ("8:30 PM", dtime(20, 30)),
+            ("9:00 PM", dtime(21, 0)),
+        ]
+        asian_rows = []
+        for label, t in asian_times:
+            target = CT.localize(datetime.combine(trading_date, t))
+            vals = get_channel_values_at_time(channels, target)
+            asian_rows.append({
+                "Time (CT)": label,
+                "Desc Ceiling": round(vals["desc_ceiling"], 2),
+                "Desc Floor": round(vals["desc_floor"], 2),
+                "Asc Ceiling": round(vals["asc_ceiling"], 2),
+                "Asc Floor": round(vals["asc_floor"], 2),
+            })
+        asian_df = pd.DataFrame(asian_rows)
+        st.dataframe(asian_df, use_container_width=True, hide_index=True)
+
+        st.markdown("")
         render_channel_values(es_channel_vals, is_es=True)
 
         # Asian session position assessment
@@ -1199,18 +1226,47 @@ def main():
     with tab_rth:
         st.markdown("")
 
-        # Convert to SPX values
-        spx_channel_vals = convert_es_to_spx(es_channel_vals, offset)
-        render_channel_values(spx_channel_vals, is_es=False)
+        # ─── 9 AM ENTRY CARD (the main event) ───
+        nine_am = CT.localize(datetime.combine(trading_date, dtime(9, 0)))
+        vals_9am = get_channel_values_at_time(channels, nine_am)
+        spx_9am = convert_es_to_spx(vals_9am, offset)
 
-        # RTH position assessment
+        st.markdown(
+            f'<div class="prophet-card" style="border-color: var(--gold); box-shadow: 0 0 20px var(--gold-glow);">'
+            f'<div style="display: flex; justify-content: space-between; align-items: center;">'
+            f'<div class="card-label" style="color: var(--gold); font-size: 0.8rem;">9:00 AM CT — PRIMARY ENTRY LEVELS (SPX)</div>'
+            f'<span class="status-badge" style="background: var(--gold-glow); border: 1px solid rgba(255,215,0,0.3); color: var(--gold);">INSTITUTIONAL OPEN</span>'
+            f'</div>'
+            f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem;">'
+            f'<div style="border-left: 3px solid var(--green); padding-left: 1rem;">'
+            f'<div class="card-label" style="color: var(--green);">ASCENDING CHANNEL</div>'
+            f'<div style="display: flex; justify-content: space-between; margin-top: 0.4rem;">'
+            f'<span class="card-sub">Ceiling</span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--green); font-size: 1.1rem; font-weight: 700;">{spx_9am["asc_ceiling"]:,.2f}</span></div>'
+            f'<div style="display: flex; justify-content: space-between;">'
+            f'<span class="card-sub">Floor</span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--green); font-size: 1.1rem; font-weight: 700;">{spx_9am["asc_floor"]:,.2f}</span></div>'
+            f'</div>'
+            f'<div style="border-left: 3px solid var(--red); padding-left: 1rem;">'
+            f'<div class="card-label" style="color: var(--red);">DESCENDING CHANNEL</div>'
+            f'<div style="display: flex; justify-content: space-between; margin-top: 0.4rem;">'
+            f'<span class="card-sub">Ceiling</span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--red); font-size: 1.1rem; font-weight: 700;">{spx_9am["desc_ceiling"]:,.2f}</span></div>'
+            f'<div style="display: flex; justify-content: space-between;">'
+            f'<span class="card-sub">Floor</span>'
+            f'<span style="font-family: JetBrains Mono, monospace; color: var(--red); font-size: 1.1rem; font-weight: 700;">{spx_9am["desc_floor"]:,.2f}</span></div>'
+            f'</div></div></div>',
+            unsafe_allow_html=True
+        )
+
+        # ─── Trade scenarios based on 9 AM SPX values ───
         price_for_rth = spx_price if spx_price > 0 else (es_price - offset if es_price > 0 else 0)
 
         if price_for_rth > 0:
             if day_type_lower == "ascending":
-                rth_assessment = assess_position_ascending_day(price_for_rth, spx_channel_vals)
+                rth_assessment = assess_position_ascending_day(price_for_rth, spx_9am)
             else:
-                rth_assessment = assess_position_descending_day(price_for_rth, spx_channel_vals)
+                rth_assessment = assess_position_descending_day(price_for_rth, spx_9am)
 
             st.markdown(f"""
             <div class="prophet-card">
@@ -1225,9 +1281,34 @@ def main():
             </div>
             """, unsafe_allow_html=True)
 
-            # Scenarios with SPX strikes
             for scenario in rth_assessment.scenarios:
                 render_scenario_card(scenario, trading_date=trading_date)
+
+        # ─── Full RTH projection table ───
+        st.markdown("")
+        st.markdown("""
+        <div class="card-label" style="margin-bottom: 0.5rem;">RTH PROJECTIONS — SPX VALUES</div>
+        """, unsafe_allow_html=True)
+
+        rth_times = [
+            ("8:30 AM", dtime(8, 30)), ("★ 9:00 AM", dtime(9, 0)), ("9:30 AM", dtime(9, 30)),
+            ("10:00 AM", dtime(10, 0)), ("10:30 AM", dtime(10, 30)), ("11:00 AM", dtime(11, 0)),
+            ("11:30 AM", dtime(11, 30)), ("12:00 PM", dtime(12, 0)), ("12:30 PM", dtime(12, 30)),
+            ("1:00 PM", dtime(13, 0)),
+        ]
+        rth_rows = []
+        for label, t in rth_times:
+            target = CT.localize(datetime.combine(trading_date, t))
+            vals = get_channel_values_at_time(channels, target)
+            rth_rows.append({
+                "Time (CT)": label,
+                "Asc Ceiling": round(vals["asc_ceiling"] - offset, 2),
+                "Asc Floor": round(vals["asc_floor"] - offset, 2),
+                "Desc Ceiling": round(vals["desc_ceiling"] - offset, 2),
+                "Desc Floor": round(vals["desc_floor"] - offset, 2),
+            })
+        rth_df = pd.DataFrame(rth_rows)
+        st.dataframe(rth_df, use_container_width=True, hide_index=True)
 
     # ═══ PROJECTIONS TAB ═══
     with tab_projection:
