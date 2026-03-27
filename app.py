@@ -1093,15 +1093,13 @@ def main():
     channels = None
 
     if man_lowest_bounce > 0 and man_highest_rej > 0:
-        # Calculate prior trading date (skip weekends)
-        prior_date = trading_date
-        if prior_date.weekday() == 0:  # Monday -> use Friday
-            prior_date = trading_date - timedelta(days=3)
-        elif prior_date.weekday() == 6:  # Sunday -> use Friday
-            prior_date = trading_date - timedelta(days=2)
-        elif prior_date.weekday() == 5:  # Saturday -> use Friday
-            prior_date = trading_date - timedelta(days=1)
-        # Otherwise use trading_date itself (the anchors are FROM this day, for TOMORROW)
+        # Anchors are from the day BEFORE the trading date
+        # Trading date = the day you will trade (tomorrow)
+        # Anchors = today's 12-3 PM data
+        prior_date = trading_date - timedelta(days=1)
+        # Skip weekends: if prior_date lands on weekend, go back to Friday
+        while prior_date.weekday() >= 5:
+            prior_date -= timedelta(days=1)
 
         try:
             lb_anchor = AnchorPoint(
