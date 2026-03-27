@@ -265,13 +265,13 @@ def assess_position_ascending_day(
     channel_width = ac - af
     for s in scenarios:
         if s.direction == "CALLS":
-            s.strike = round_strike(s.entry_level - STRIKE_OFFSET)
+            s.strike = round_strike(s.entry_level + STRIKE_OFFSET)  # OTM above
             s.stop_loss = s.entry_level - STOP_LOSS_POINTS
             s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
             s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
             s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
         else:
-            s.strike = round_strike(s.entry_level + STRIKE_OFFSET)
+            s.strike = round_strike(s.entry_level - STRIKE_OFFSET)  # OTM below
             s.stop_loss = s.entry_level + STOP_LOSS_POINTS
             s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
             s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
@@ -409,13 +409,13 @@ def assess_position_descending_day(
     channel_width = dc - df_
     for s in scenarios:
         if s.direction == "CALLS":
-            s.strike = round_strike(s.entry_level - STRIKE_OFFSET)
+            s.strike = round_strike(s.entry_level + STRIKE_OFFSET)  # OTM above
             s.stop_loss = s.entry_level - STOP_LOSS_POINTS
             s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
             s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
             s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
         else:
-            s.strike = round_strike(s.entry_level + STRIKE_OFFSET)
+            s.strike = round_strike(s.entry_level - STRIKE_OFFSET)  # OTM below
             s.stop_loss = s.entry_level + STOP_LOSS_POINTS
             s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
             s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
@@ -587,9 +587,9 @@ def get_session_mode(current_time: datetime = None) -> str:
         return "asian"
     elif 5 <= hour < 8 or (hour == 8 and minute < 30):
         return "pre_rth"
-    elif (hour == 8 and minute >= 30) or (8 < hour < 11) or (hour == 11 and minute <= 30):
+    elif (hour == 8 and minute >= 30) or (8 < hour < 13):  # 8:30 AM - 1 PM CT
         return "rth"
-    elif 11 < hour < 15:
+    elif 13 <= hour < 15:
         return "afternoon"
     else:
         return "off"
