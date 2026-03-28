@@ -231,20 +231,20 @@ def render_channel_card(vals, label="ES"):
     </div></div>""", unsafe_allow_html=True)
 
 
-def make_projection_table(channels, trading_date, times_list, offset=0):
-    """Build projection table. Each row = base + incremental 0.52 blocks."""
+def make_projection_table(channels, target_date, times_list, offset=0):
+    """Build projection table. Each row projects directly from anchors using count_blocks."""
     if not times_list:
         return pd.DataFrame()
-    base_t = CT.localize(datetime.combine(trading_date, times_list[0][1]))
-    bv = get_channel_values_at_time(channels, base_t)
     rows = []
-    for i, (label, t) in enumerate(times_list):
+    for label, t in times_list:
+        target_t = CT.localize(datetime.combine(target_date, t))
+        vals = get_channel_values_at_time(channels, target_t)
         rows.append({
             "Time (CT)": label,
-            "Asc Ceil": round(bv["asc_ceiling"] + (SLOPE * i) - offset, 2),
-            "Asc Floor": round(bv["asc_floor"] + (SLOPE * i) - offset, 2),
-            "Desc Ceil": round(bv["desc_ceiling"] - (SLOPE * i) - offset, 2),
-            "Desc Floor": round(bv["desc_floor"] - (SLOPE * i) - offset, 2),
+            "Asc Ceil": round(vals["asc_ceiling"] - offset, 2),
+            "Asc Floor": round(vals["asc_floor"] - offset, 2),
+            "Desc Ceil": round(vals["desc_ceiling"] - offset, 2),
+            "Desc Floor": round(vals["desc_floor"] - offset, 2),
         })
     return pd.DataFrame(rows)
 
@@ -441,30 +441,13 @@ def main():
     # ═══ PROJECTIONS TAB ═══
     with tab_proj:
         st.markdown('<div class="card-label">FULL ES PROJECTION TABLE</div>', unsafe_allow_html=True)
-        # Evening session: prior_date 5 PM - 11:30 PM
+        # Evening: anchor day 5 PM - 11:30 PM
         eve_times = [(f"{h}:{m:02d} PM", dtime(h, m)) for h in range(17, 24) for m in (0, 30)]
         eve_df = make_projection_table(channels, asian_date, eve_times)
-        # Overnight + morning: trading_date 12 AM - 1 PM
+        # Morning: trading day 12 AM - 1 PM
         morn_times = [(f"{h}:{m:02d} AM" if h < 12 else f"{h-12 if h > 12 else 12}:{m:02d} PM", dtime(h, m)) for h in range(0, 14) for m in (0, 30)]
-        # For morning, base calculation needs to continue from where evening left off
-        if not eve_df.empty:
-            last_eve_row = len(eve_times)
-            base_t = CT.localize(datetime.combine(asian_date, dtime(17, 0)))
-            bv = get_channel_values_at_time(channels, base_t)
-            morn_rows = []
-            for i, (label, t) in enumerate(morn_times):
-                block_i = last_eve_row + i
-                morn_rows.append({
-                    "Time (CT)": label,
-                    "Asc Ceil": round(bv["asc_ceiling"] + (SLOPE * block_i), 2),
-                    "Asc Floor": round(bv["asc_floor"] + (SLOPE * block_i), 2),
-                    "Desc Ceil": round(bv["desc_ceiling"] - (SLOPE * block_i), 2),
-                    "Desc Floor": round(bv["desc_floor"] - (SLOPE * block_i), 2),
-                })
-            morn_df = pd.DataFrame(morn_rows)
-            full_df = pd.concat([eve_df, morn_df], ignore_index=True)
-        else:
-            full_df = pd.DataFrame()
+        morn_df = make_projection_table(channels, trading_date, morn_times)
+        full_df = pd.concat([eve_df, morn_df], ignore_index=True) if not eve_df.empty else morn_df
         st.dataframe(full_df, use_container_width=True, hide_index=True, height=600)
 
     # ─── CROSS MONITOR ───
