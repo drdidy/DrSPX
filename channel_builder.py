@@ -180,12 +180,16 @@ def build_channels(lb: AnchorPoint, hr: AnchorPoint, hw: AnchorPoint, lw: Anchor
 def auto_detect_anchors(df_1min: pd.DataFrame, df_30min: pd.DataFrame) -> Optional[dict]:
     """
     Auto-detect the 4 anchor points from afternoon data.
+    Uses 30-min candle CLOSE for bounces/rejections (line chart).
+    Uses 30-min High/Low for wicks.
     Returns dict with 'lb', 'hr', 'hw', 'lw' AnchorPoints or None.
     """
-    if df_1min.empty:
+    # Prefer 30-min data for bounce/rejection (matches TradingView line chart)
+    bounce_df = df_30min if not df_30min.empty else df_1min
+    if bounce_df.empty:
         return None
 
-    bounces, rejections = find_bounces_and_rejections(df_1min, lookback=5)
+    bounces, rejections = find_bounces_and_rejections(bounce_df, lookback=2)
     if not bounces or not rejections:
         return None
 
@@ -194,6 +198,7 @@ def auto_detect_anchors(df_1min: pd.DataFrame, df_30min: pd.DataFrame) -> Option
     hr = max(rejections, key=lambda r: r.price)
     hr.label = "Highest Rejection"
 
+    # Wicks from 30-min High/Low
     wick_df = df_30min if not df_30min.empty else df_1min
     hw, lw = find_extreme_wicks(wick_df)
 
