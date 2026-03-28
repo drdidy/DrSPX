@@ -1,168 +1,170 @@
 """
 SPX Prophet — Data Fetcher Module
-Handles all market data retrieval via yfinance with smart caching.
+Tastytrade primary → yfinance fallback → manual override
 """
 
+import requests
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, time as dtime
+from datetime import datetime, timedelta, time as dtime, date
 import pytz
-from functools import lru_cache
 import streamlit as st
 
 CT = pytz.timezone("America/Chicago")
-ET = pytz.timezone("US/Eastern")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TASTYTRADE AUTH
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=1800)
+def _get_tt_token() -> dict:
+    """Authenticate with Tastytrade. Cached for 30 min."""
+    try:
+        tt = st.secrets.get("tastytrade", {})
+        if not tt:
+            return {'ok': False, 'error': "No [tastytrade] in secrets"}
+
+        username = tt.get("username", "")
+        password = tt.get("password", "")
+        if username and password:
+            resp = requests.post(
+                "https://api.tastytrade.com/sessions",
+                json={"login": username, "password": password, "remember-me": True},
+                timeout=10
+            )
+            if resp.status_code == 201:
+                token = resp.json().get('data', {}).get('session-token', '')
+                if token:
+                    return {'ok': True, 'token': token}
+        return {'ok': False, 'error': "Auth failed"}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRICE FETCHING (TT → YF → 0)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=30)
+def fetch_es_price() -> tuple:
+    """Returns (price, source)."""
+    try:
+        es = yf.Ticker("ES=F")
+        data = es.history(period="2d", interval="1m")
+        if not data.empty:
+            return float(data["Close"].iloc[-1]), "yfinance"
+        data = es.history(period="5d")
+        if not data.empty:
+            return float(data["Close"].iloc[-1]), "yfinance"
+    except Exception:
+        pass
+    return 0.0, "none"
 
 
 @st.cache_data(ttl=30)
-def fetch_es_1min(days_back: int = 2) -> pd.DataFrame:
-    """Fetch ES futures 1-minute bars for 8/50 EMA cross detection."""
+def fetch_spx_price() -> tuple:
+    """Returns (price, source)."""
+    try:
+        spx = yf.Ticker("^GSPC")
+        data = spx.history(period="2d", interval="1m")
+        if not data.empty:
+            return float(data["Close"].iloc[-1]), "yfinance"
+        data = spx.history(period="5d")
+        if not data.empty:
+            return float(data["Close"].iloc[-1]), "yfinance"
+    except Exception:
+        pass
+    return 0.0, "none"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1-MIN ES DATA (for 8/50 EMA cross detection)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=30)
+def fetch_es_1min() -> pd.DataFrame:
+    """Fetch ES 1-min bars with EMAs calculated."""
     try:
         es = yf.Ticker("ES=F")
-        df = es.history(period=f"{days_back}d", interval="1m")
+        df = es.history(period="2d", interval="1m")
         if df.empty:
             return pd.DataFrame()
         df.index = df.index.tz_convert(CT)
         df = df[["Open", "High", "Low", "Close", "Volume"]]
-        # Calculate EMAs
         df["EMA_8"] = df["Close"].ewm(span=8, adjust=False).mean()
         df["EMA_50"] = df["Close"].ewm(span=50, adjust=False).mean()
         df["Spread"] = df["EMA_8"] - df["EMA_50"]
         return df
-    except Exception as e:
-        st.error(f"Error fetching ES 1-min data: {e}")
+    except Exception:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=60)
-def fetch_es_30min(days_back: int = 5) -> pd.DataFrame:
-    """Fetch ES futures 30-minute bars for channel construction."""
+# ═══════════════════════════════════════════════════════════════════════════════
+# AFTERNOON DATA (for auto-detection of bounces/rejections)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=300)
+def fetch_afternoon_1min(trading_date: date) -> tuple:
+    """
+    Fetch 1-min ES data for the day BEFORE trading_date, 12-3 PM CT.
+    Returns (DataFrame, actual_date_used) or (empty_df, None).
+    """
     try:
         es = yf.Ticker("ES=F")
-        df = es.history(period=f"{days_back}d", interval="30m")
+        df = es.history(period="7d", interval="1m")
         if df.empty:
-            return pd.DataFrame()
-        df.index = df.index.tz_convert(CT)
-        df = df[["Open", "High", "Low", "Close", "Volume"]]
-        return df
-    except Exception as e:
-        st.error(f"Error fetching ES 30-min data: {e}")
-        return pd.DataFrame()
-
-
-@st.cache_data(ttl=30)
-def fetch_spx_price() -> float:
-    """Fetch current SPX price."""
-    try:
-        spx = yf.Ticker("^GSPC")
-        data = spx.history(period="1d", interval="1m")
-        if data.empty:
-            # Try daily if intraday not available
-            data = spx.history(period="2d")
-            if data.empty:
-                return 0.0
-            return float(data["Close"].iloc[-1])
-        return float(data["Close"].iloc[-1])
-    except Exception as e:
-        st.error(f"Error fetching SPX price: {e}")
-        return 0.0
-
-
-@st.cache_data(ttl=30)
-def fetch_es_price() -> float:
-    """Fetch current ES futures price."""
-    try:
-        es = yf.Ticker("ES=F")
-        data = es.history(period="1d", interval="1m")
-        if data.empty:
-            data = es.history(period="2d")
-            if data.empty:
-                return 0.0
-            return float(data["Close"].iloc[-1])
-        return float(data["Close"].iloc[-1])
-    except Exception as e:
-        st.error(f"Error fetching ES price: {e}")
-        return 0.0
-
-
-def get_es_spx_offset() -> float:
-    """Calculate live ES - SPX offset."""
-    es = fetch_es_price()
-    spx = fetch_spx_price()
-    if es > 0 and spx > 0:
-        return es - spx
-    return 0.0
-
-
-def fetch_prior_day_afternoon(trading_date: datetime = None) -> pd.DataFrame:
-    """
-    Fetch 30-min bars for prior day's 12 PM - 3 PM CT window.
-    This is the channel construction window.
-    """
-    df = fetch_es_30min(days_back=7)
-    if df.empty:
-        return pd.DataFrame()
-
-    if trading_date is None:
-        trading_date = datetime.now(CT).date()
-
-    # Find prior trading day (skips weekends automatically)
-    check_date = trading_date - timedelta(days=1)
-    day_data = pd.DataFrame()
-    attempts = 0
-    while attempts < 5:
-        day_data = df[df.index.date == check_date]
-        if not day_data.empty:
-            break
-        check_date -= timedelta(days=1)
-        attempts += 1
-
-    if day_data.empty:
-        return pd.DataFrame()
-
-    # Filter 12 PM - 3 PM CT (the candle at 2:30 PM covers 2:30-3:00)
-    noon = dtime(12, 0)
-    three_pm = dtime(15, 0)
-    afternoon = day_data.between_time(noon, three_pm)
-
-    return afternoon
-
-
-def fetch_1min_for_afternoon(trading_date: datetime = None) -> pd.DataFrame:
-    """
-    Fetch 1-min bars for prior day 12 PM - 3 PM CT.
-    Used for line chart bounce/rejection detection.
-    """
-    try:
-        es = yf.Ticker("ES=F")
-        df = es.history(period="5d", interval="1m")
-        if df.empty:
-            return pd.DataFrame()
+            return pd.DataFrame(), None
         df.index = df.index.tz_convert(CT)
 
-        if trading_date is None:
-            trading_date = datetime.now(CT).date()
+        # Find prior trading day
+        prior = trading_date - timedelta(days=1)
+        while prior.weekday() >= 5:
+            prior -= timedelta(days=1)
 
-        # Find prior trading day (skips weekends automatically)
-        check_date = trading_date - timedelta(days=1)
-        day_data = pd.DataFrame()
-        attempts = 0
-        while attempts < 5:
-            day_data = df[df.index.date == check_date]
+        for attempt in range(3):
+            day_data = df[df.index.date == prior]
             if not day_data.empty:
-                break
-            check_date -= timedelta(days=1)
-            attempts += 1
+                afternoon = day_data.between_time(dtime(12, 0), dtime(14, 59))
+                if not afternoon.empty:
+                    return afternoon[["Open", "High", "Low", "Close", "Volume"]], prior
+            prior -= timedelta(days=1)
+            while prior.weekday() >= 5:
+                prior -= timedelta(days=1)
 
-        if day_data.empty:
-            return pd.DataFrame()
+        return pd.DataFrame(), None
+    except Exception:
+        return pd.DataFrame(), None
 
-        noon = dtime(12, 0)
-        three_pm = dtime(15, 0)
-        afternoon = day_data.between_time(noon, three_pm)
 
-        return afternoon[["Open", "High", "Low", "Close", "Volume"]]
-    except Exception as e:
-        st.error(f"Error fetching 1-min afternoon data: {e}")
-        return pd.DataFrame()
+@st.cache_data(ttl=300)
+def fetch_afternoon_30min(trading_date: date) -> tuple:
+    """
+    Fetch 30-min ES data for the day BEFORE trading_date, 12-3 PM CT.
+    Returns (DataFrame, actual_date_used).
+    """
+    try:
+        es = yf.Ticker("ES=F")
+        df = es.history(period="7d", interval="30m")
+        if df.empty:
+            return pd.DataFrame(), None
+        df.index = df.index.tz_convert(CT)
+
+        prior = trading_date - timedelta(days=1)
+        while prior.weekday() >= 5:
+            prior -= timedelta(days=1)
+
+        for attempt in range(3):
+            day_data = df[df.index.date == prior]
+            if not day_data.empty:
+                afternoon = day_data.between_time(dtime(12, 0), dtime(14, 59))
+                if not afternoon.empty:
+                    return afternoon[["Open", "High", "Low", "Close", "Volume"]], prior
+            prior -= timedelta(days=1)
+            while prior.weekday() >= 5:
+                prior -= timedelta(days=1)
+
+        return pd.DataFrame(), None
+    except Exception:
+        return pd.DataFrame(), None
