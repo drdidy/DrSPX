@@ -404,6 +404,9 @@ def main():
         v9 = get_channel_values_at_time(channels, nine_am)
         s9 = convert_es_to_spx(v9, offset)
 
+        ae_9 = f"{s9['asc_extreme']:,.2f}" if s9.get('asc_extreme') else "—"
+        de_9 = f"{s9['desc_extreme']:,.2f}" if s9.get('desc_extreme') else "—"
+
         st.markdown(
             f'<div class="prophet-card gold-card" style="position:relative;overflow:hidden;">'
             f'<div style="display:flex;justify-content:space-between;align-items:center;">'
@@ -411,17 +414,29 @@ def main():
             f'<span class="status-badge" style="background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.3);color:var(--gold);">INSTITUTIONAL OPEN</span></div>'
             f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem;">'
             f'<div style="border-left:3px solid var(--green);padding-left:1rem;"><div class="card-label" style="color:var(--green);">ASCENDING</div>'
-            f'<div style="display:flex;justify-content:space-between;margin-top:0.3rem;"><span class="card-sub">Ceiling</span><span style="font-family:JetBrains Mono;color:var(--green);font-size:1.1rem;font-weight:700;">{s9["asc_ceiling"]:,.2f}</span></div>'
+            f'<div style="display:flex;justify-content:space-between;margin-top:0.3rem;"><span class="card-sub">Extreme</span><span style="font-family:JetBrains Mono;color:rgba(0,232,143,0.5);font-size:0.9rem;">{ae_9}</span></div>'
+            f'<div style="display:flex;justify-content:space-between;"><span class="card-sub">Ceiling</span><span style="font-family:JetBrains Mono;color:var(--green);font-size:1.1rem;font-weight:700;">{s9["asc_ceiling"]:,.2f}</span></div>'
             f'<div style="display:flex;justify-content:space-between;"><span class="card-sub">Floor</span><span style="font-family:JetBrains Mono;color:var(--green);font-size:1.1rem;font-weight:700;">{s9["asc_floor"]:,.2f}</span></div></div>'
             f'<div style="border-left:3px solid var(--red);padding-left:1rem;"><div class="card-label" style="color:var(--red);">DESCENDING</div>'
             f'<div style="display:flex;justify-content:space-between;margin-top:0.3rem;"><span class="card-sub">Ceiling</span><span style="font-family:JetBrains Mono;color:var(--red);font-size:1.1rem;font-weight:700;">{s9["desc_ceiling"]:,.2f}</span></div>'
-            f'<div style="display:flex;justify-content:space-between;"><span class="card-sub">Floor</span><span style="font-family:JetBrains Mono;color:var(--red);font-size:1.1rem;font-weight:700;">{s9["desc_floor"]:,.2f}</span></div></div>'
+            f'<div style="display:flex;justify-content:space-between;"><span class="card-sub">Floor</span><span style="font-family:JetBrains Mono;color:var(--red);font-size:1.1rem;font-weight:700;">{s9["desc_floor"]:,.2f}</span></div>'
+            f'<div style="display:flex;justify-content:space-between;"><span class="card-sub">Extreme</span><span style="font-family:JetBrains Mono;color:rgba(255,68,102,0.5);font-size:0.9rem;">{de_9}</span></div></div>'
             f'</div></div>',
             unsafe_allow_html=True
         )
 
-        # Scenarios from 9 AM values
-        price_rth = spx_price if spx_price > 0 else (es_price - offset if es_price > 0 else 0)
+        # Position & scenarios — use live price for today, manual input for historical
+        is_historical = trading_date != date.today()
+
+        if is_historical:
+            st.markdown('<div class="card-label" style="margin-top:0.5rem;">SIMULATE: Enter SPX price at 9 AM</div>', unsafe_allow_html=True)
+            if "sim_price" not in st.session_state:
+                st.session_state["sim_price"] = 0.0
+            sim_price = st.number_input("SPX at 9 AM", format="%.2f", key="sim_price", label_visibility="collapsed")
+            price_rth = sim_price
+        else:
+            price_rth = spx_price if spx_price > 0 else (es_price - offset if es_price > 0 else 0)
+
         if price_rth > 0:
             rth_assess = assess_ascending_day(price_rth, s9) if day_type_lower == "ascending" else assess_descending_day(price_rth, s9)
             st.markdown(f'<div class="prophet-card"><div class="card-label">POSITION — SPX @ {price_rth:,.2f}</div><div style="font-family:Sora;font-size:1.1rem;font-weight:700;color:var(--cyan);margin-top:0.5rem;">{rth_assess.zone_label}</div><div class="card-sub">Nearest: {rth_assess.nearest_line} ({rth_assess.nearest_distance:.2f} pts)</div></div>', unsafe_allow_html=True)
