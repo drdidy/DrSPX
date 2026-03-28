@@ -1,9 +1,8 @@
 """
 SPX Prophet — Data Fetcher Module
-Tastytrade primary → yfinance fallback → manual override
+yfinance for prices → manual override available
 """
 
-import requests
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -12,35 +11,6 @@ import pytz
 import streamlit as st
 
 CT = pytz.timezone("America/Chicago")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TASTYTRADE AUTH
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@st.cache_data(ttl=1800)
-def _get_tt_token() -> dict:
-    """Authenticate with Tastytrade. Cached for 30 min."""
-    try:
-        tt = st.secrets.get("tastytrade", {})
-        if not tt:
-            return {'ok': False, 'error': "No [tastytrade] in secrets"}
-
-        username = tt.get("username", "")
-        password = tt.get("password", "")
-        if username and password:
-            resp = requests.post(
-                "https://api.tastytrade.com/sessions",
-                json={"login": username, "password": password, "remember-me": True},
-                timeout=10
-            )
-            if resp.status_code == 201:
-                token = resp.json().get('data', {}).get('session-token', '')
-                if token:
-                    return {'ok': True, 'token': token}
-        return {'ok': False, 'error': "Auth failed"}
-    except Exception as e:
-        return {'ok': False, 'error': str(e)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
