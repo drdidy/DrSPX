@@ -180,40 +180,49 @@ def build_channels(lb: AnchorPoint, hr: AnchorPoint, hw: AnchorPoint, lw: Anchor
 def auto_detect_anchors(df_1min: pd.DataFrame, df_30min: pd.DataFrame) -> Optional[dict]:
     """
     Auto-detect the 4 anchor points from afternoon data.
-    Tries 30-min data first (matches TradingView line chart), falls back to 1-min.
-    Returns dict with 'lb', 'hr', 'hw', 'lw' AnchorPoints or None.
+    Uses full data window for pattern detection but only selects anchors from 12:00-2:59 PM CT.
     """
     detected = None
+    noon = dtime(12, 0)
+    three_pm = dtime(15, 0)
 
     # Try 30-min data first (preferred — matches line chart)
     if not df_30min.empty and len(df_30min) >= 3:
         bounces, rejections = find_bounces_and_rejections(df_30min, lookback=1)
+        # Filter to only 12:00-2:59 PM
+        bounces = [b for b in bounces if noon <= b.timestamp.time() < three_pm]
+        rejections = [r for r in rejections if noon <= r.timestamp.time() < three_pm]
         if bounces and rejections:
-            detected = (bounces, rejections, df_30min)
+            detected = (bounces, rejections)
 
     # Fallback to 1-min data, round timestamps to nearest 30-min
     if detected is None and not df_1min.empty:
         bounces, rejections = find_bounces_and_rejections(df_1min, lookback=5)
+        # Round timestamps and filter to 12:00-2:59 PM
+        for b in bounces:
+            b.timestamp = _round_to_30min(b.timestamp)
+        for r in rejections:
+            r.timestamp = _round_to_30min(r.timestamp)
+        bounces = [b for b in bounces if noon <= b.timestamp.time() < three_pm]
+        rejections = [r for r in rejections if noon <= r.timestamp.time() < three_pm]
         if bounces and rejections:
-            # Round timestamps to nearest 30-min mark
-            for b in bounces:
-                b.timestamp = _round_to_30min(b.timestamp)
-            for r in rejections:
-                r.timestamp = _round_to_30min(r.timestamp)
-            detected = (bounces, rejections, df_1min)
+            detected = (bounces, rejections)
 
     if detected is None:
         return None
 
-    bounces, rejections, wick_df = detected
+    bounces, rejections = detected
     lb = min(bounces, key=lambda b: b.price)
     lb.label = "Lowest Bounce"
     hr = max(rejections, key=lambda r: r.price)
     hr.label = "Highest Rejection"
 
-    # Wicks from whichever data we have
+    # Wicks — filter to 12:00-2:59 PM only
     wick_source = df_30min if not df_30min.empty else df_1min
-    hw, lw = find_extreme_wicks(wick_source)
+    wick_filtered = wick_source.between_time(noon, dtime(14, 59))
+    if wick_filtered.empty:
+        wick_filtered = wick_source
+    hw, lw = find_extreme_wicks(wick_filtered)
 
     return {'lb': lb, 'hr': hr, 'hw': hw, 'lw': lw}
 
