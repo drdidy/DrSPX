@@ -126,7 +126,7 @@ def fetch_afternoon_1min(trading_date: date) -> tuple:
         for attempt in range(3):
             day_data = df[df.index.date == prior]
             if not day_data.empty:
-                afternoon = day_data.between_time(dtime(12, 0), dtime(15, 5))
+                afternoon = day_data.between_time(dtime(11, 25), dtime(15, 5))
                 if not afternoon.empty:
                     return afternoon[["Open", "High", "Low", "Close", "Volume"]], prior
             prior -= timedelta(days=1)
@@ -141,7 +141,8 @@ def fetch_afternoon_1min(trading_date: date) -> tuple:
 @st.cache_data(ttl=300)
 def fetch_afternoon_30min(trading_date: date) -> tuple:
     """
-    Fetch 30-min ES data for the day BEFORE trading_date, 12-3 PM CT.
+    Fetch 30-min ES data for the day BEFORE trading_date, 11:30 AM - 3:05 PM CT.
+    Includes 11:30 for context before 12:00 and 3:00 for context after 2:30.
     Returns (DataFrame, actual_date_used).
     """
     try:
@@ -158,7 +159,7 @@ def fetch_afternoon_30min(trading_date: date) -> tuple:
         for attempt in range(3):
             day_data = df[df.index.date == prior]
             if not day_data.empty:
-                afternoon = day_data.between_time(dtime(12, 0), dtime(15, 5))
+                afternoon = day_data.between_time(dtime(11, 25), dtime(15, 5))
                 if not afternoon.empty:
                     return afternoon[["Open", "High", "Low", "Close", "Volume"]], prior
             prior -= timedelta(days=1)
