@@ -1,595 +1,215 @@
 """
 SPX Prophet — Trade Logic Module
-Handles alternating day logic, trade scenarios, position assessment,
-strike calculation, and prop firm risk management.
+Alternating day logic, trade scenarios, position assessment, strike calculation, prop firm risk.
 """
 
-from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from dataclasses import dataclass, field
+from typing import Optional, List
 from datetime import datetime, date, time as dtime
 import pytz
 
 CT = pytz.timezone("America/Chicago")
-
-STRIKE_OFFSET = 20  # ±20 from entry for 0DTE strike selection
-
-
-STOP_LOSS_POINTS = 6       # SPX points for stop loss
-TP1_PCT = 0.25             # 25% of channel width
-TP2_PCT = 0.50             # 50% of channel width
-TP3_PCT = 0.75             # 75% of channel width
-ES_STOP_TICKS = 8          # ES ticks for prop firm stop (8 ticks = 2 pts)
-ES_TP_MULTIPLIER = 2.0     # Risk:Reward for ES trades
+STRIKE_OFFSET = 20
+STOP_LOSS_POINTS = 6
+TP1_PCT, TP2_PCT, TP3_PCT = 0.25, 0.50, 0.75
 
 
 @dataclass
 class TradeScenario:
-    """A potential trade scenario based on price position and day type."""
-    direction: str          # "CALLS" or "PUTS"
-    entry_level: float      # Price level for entry
-    entry_label: str        # Which line (e.g., "Ascending Floor")
-    rationale: str          # Why this trade
+    direction: str
+    entry_level: float
+    entry_label: str
+    rationale: str
     target_level: Optional[float] = None
     target_label: Optional[str] = None
     strike: Optional[int] = None
-    contract_ticker: Optional[str] = None
     stop_loss: Optional[float] = None
     take_profit_1: Optional[float] = None
     take_profit_2: Optional[float] = None
     take_profit_3: Optional[float] = None
     is_primary: bool = True
-    strength: str = "STANDARD"  # "STRONG", "STANDARD", "CAUTION"
+    strength: str = "STANDARD"
 
 
 @dataclass
 class PositionAssessment:
-    """Assessment of where price is relative to the channels."""
-    zone: str               # "ABOVE_ASC", "IN_ASC", "BETWEEN", "IN_DESC", "BELOW_DESC"
-    zone_label: str         # Human-readable zone description
-    nearest_line: str       # Nearest channel line
-    nearest_distance: float # Distance to nearest line
-    day_type: str           # "ascending" or "descending"
-    scenarios: List[TradeScenario] = None
-
-    def __post_init__(self):
-        if self.scenarios is None:
-            self.scenarios = []
+    zone: str
+    zone_label: str
+    nearest_line: str
+    nearest_distance: float
+    day_type: str
+    scenarios: List[TradeScenario] = field(default_factory=list)
 
 
 @dataclass
 class PropFirmRisk:
-    """Prop firm risk tracking for The Futures Desk."""
-    max_es_contracts: int = 4
-    max_mes_contracts: int = 40
+    max_es: int = 4
+    max_mes: int = 40
     daily_loss_limit: float = 400.0
-    current_contracts_es: int = 0
-    current_contracts_mes: int = 0
     current_pnl: float = 0.0
 
     @property
-    def remaining_loss_capacity(self) -> float:
-        return self.daily_loss_limit + self.current_pnl  # pnl is negative when losing
+    def risk_pct(self):
+        return min(100, (abs(self.current_pnl) / self.daily_loss_limit) * 100) if self.current_pnl < 0 else 0.0
 
     @property
-    def risk_pct(self) -> float:
-        if self.current_pnl >= 0:
-            return 0.0
-        return min(100.0, (abs(self.current_pnl) / self.daily_loss_limit) * 100)
-
-    @property
-    def risk_status(self) -> str:
-        pct = self.risk_pct
-        if pct == 0:
-            return "CLEAR"
-        elif pct < 50:
-            return "ACTIVE"
-        elif pct < 75:
-            return "CAUTION"
-        elif pct < 100:
-            return "DANGER"
-        else:
-            return "LIMIT HIT"
+    def risk_status(self):
+        p = self.risk_pct
+        if p == 0: return "CLEAR"
+        if p < 50: return "ACTIVE"
+        if p < 75: return "CAUTION"
+        if p < 100: return "DANGER"
+        return "LIMIT HIT"
 
 
-def determine_position(
-    price: float,
-    asc_floor: float,
-    asc_ceiling: float,
-    desc_floor: float,
-    desc_ceiling: float,
-    asc_extreme: Optional[float] = None,
-    desc_extreme: Optional[float] = None
-) -> str:
-    """
-    Determine where price is relative to the channels.
-    Returns zone identifier.
-    """
-    if price > asc_ceiling:
-        if asc_extreme and price > asc_extreme:
-            return "ABOVE_ASC_EXTREME"
-        return "ABOVE_ASC"
-    elif price >= asc_floor:
-        return "IN_ASC"
-    elif price > desc_ceiling:
-        return "BETWEEN"
-    elif price >= desc_floor:
-        return "IN_DESC"
-    else:
-        if desc_extreme and price < desc_extreme:
-            return "BELOW_DESC_EXTREME"
-        return "BELOW_DESC"
+def _find_nearest(price, lines):
+    nearest = min(lines.keys(), key=lambda k: abs(price - lines[k]))
+    return nearest, abs(price - lines[nearest])
 
 
-def get_zone_label(zone: str) -> str:
-    """Human-readable zone label."""
-    labels = {
-        "ABOVE_ASC_EXTREME": "Above Ascending Extreme",
-        "ABOVE_ASC": "Above Ascending Channel",
-        "IN_ASC": "Inside Ascending Channel",
-        "BETWEEN": "Between Channels",
-        "IN_DESC": "Inside Descending Channel",
-        "BELOW_DESC": "Below Descending Channel",
-        "BELOW_DESC_EXTREME": "Below Descending Extreme",
-    }
-    return labels.get(zone, zone)
+def _determine_zone(price, af, ac, df_, dc):
+    if price > ac: return "ABOVE_ASC", "Above Ascending Channel"
+    if price >= af: return "IN_ASC", "Inside Ascending Channel"
+    if price > dc: return "BETWEEN", "Between Channels"
+    if price >= df_: return "IN_DESC", "Inside Descending Channel"
+    return "BELOW_DESC", "Below Descending Channel"
 
 
-def assess_position_ascending_day(
-    price: float,
-    channel_values: dict
-) -> PositionAssessment:
-    """
-    Assess position and generate trade scenarios for an ASCENDING day.
-    On ascending days, the ascending channel is the active channel.
-    """
-    af = channel_values["asc_floor"]
-    ac = channel_values["asc_ceiling"]
-    df_ = channel_values["desc_floor"]
-    dc = channel_values["desc_ceiling"]
-    ae = channel_values.get("asc_extreme")
-    de = channel_values.get("desc_extreme")
+def _add_trade_details(scenarios, channel_width, is_spx=True):
+    """Add stop loss, take profits, and strikes to scenarios."""
+    for s in scenarios:
+        if s.direction in ("CALLS", "LONG ES"):
+            if is_spx:
+                s.strike = round_strike(s.entry_level + STRIKE_OFFSET)
+            s.stop_loss = s.entry_level - (STOP_LOSS_POINTS if is_spx else 2.0)
+            s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
+            s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
+            s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
+        elif s.direction in ("PUTS", "SHORT ES"):
+            if is_spx:
+                s.strike = round_strike(s.entry_level - STRIKE_OFFSET)
+            s.stop_loss = s.entry_level + (STOP_LOSS_POINTS if is_spx else 2.0)
+            s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
+            s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
+            s.take_profit_3 = s.entry_level - (channel_width * TP3_PCT)
 
-    zone = determine_position(price, af, ac, df_, dc, ae, de)
-    zone_label = get_zone_label(zone)
 
-    # Find nearest line
-    lines = {
-        "Asc Floor": af, "Asc Ceiling": ac,
-        "Desc Floor": df_, "Desc Ceiling": dc,
-    }
-    if ae:
-        lines["Asc Extreme"] = ae
-    if de:
-        lines["Desc Extreme"] = de
-
-    nearest_line = min(lines.keys(), key=lambda k: abs(price - lines[k]))
-    nearest_dist = abs(price - lines[nearest_line])
-
+def assess_ascending_day(price, cv) -> PositionAssessment:
+    af, ac, df_, dc = cv["asc_floor"], cv["asc_ceiling"], cv["desc_floor"], cv["desc_ceiling"]
+    zone, zone_label = _determine_zone(price, af, ac, df_, dc)
+    lines = {"Asc Floor": af, "Asc Ceiling": ac, "Desc Floor": df_, "Desc Ceiling": dc}
+    nearest, dist = _find_nearest(price, lines)
     scenarios = []
 
     if zone == "IN_ASC":
-        # Inside ascending channel on ascending day
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=af,
-            entry_label="Ascending Floor",
-            rationale="Buy off the ascending channel floor on ascending day",
-            target_level=ac,
-            target_label="Ascending Ceiling",
-            strength="STRONG"
-        ))
-        scenarios.append(TradeScenario(
-            direction="PUTS",
-            entry_level=ac,
-            entry_label="Ascending Ceiling",
-            rationale="Sell off the ascending channel ceiling",
-            target_level=af,
-            target_label="Ascending Floor",
-            is_primary=False
-        ))
-
-    elif zone == "ABOVE_ASC" or zone == "ABOVE_ASC_EXTREME":
-        # Above ascending channel on ascending day
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=ac,
-            entry_label="Ascending Ceiling",
-            rationale="Ascending ceiling becomes support — buy higher",
-            target_level=ae,
-            target_label="Ascending Extreme",
-            strength="STRONG"
-        ))
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=af,
-            entry_label="Ascending Floor",
-            rationale="If drops to ascending floor, buy for bounce",
-            is_primary=False
-        ))
-
+        scenarios = [
+            TradeScenario("CALLS", af, "Ascending Floor", "Buy off ascending floor", ac, "Ascending Ceiling", strength="STRONG"),
+            TradeScenario("PUTS", ac, "Ascending Ceiling", "Sell off ascending ceiling", af, "Ascending Floor", is_primary=False),
+        ]
+    elif zone == "ABOVE_ASC":
+        scenarios = [
+            TradeScenario("CALLS", ac, "Ascending Ceiling", "Ceiling becomes support — buy higher", strength="STRONG"),
+            TradeScenario("CALLS", af, "Ascending Floor", "If drops to floor, buy bounce", is_primary=False),
+        ]
     elif zone == "BETWEEN":
-        # Between channels on ascending day
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=dc,
-            entry_label="Descending Ceiling",
-            rationale="Rally from descending ceiling up to ascending floor",
-            target_level=af,
-            target_label="Ascending Floor",
-            strength="STRONG"
-        ))
-        scenarios.append(TradeScenario(
-            direction="PUTS",
-            entry_level=af,
-            entry_label="Ascending Floor",
-            rationale="Rejected at ascending floor — sell back to descending ceiling",
-            target_level=dc,
-            target_label="Descending Ceiling",
-            is_primary=False,
-            strength="CAUTION"
-        ))
-
+        scenarios = [
+            TradeScenario("CALLS", dc, "Descending Ceiling", "Rally from desc ceiling to asc floor", af, "Ascending Floor", strength="STRONG"),
+            TradeScenario("PUTS", af, "Ascending Floor", "Rejected at asc floor, sell to desc ceiling", dc, "Descending Ceiling", is_primary=False, strength="CAUTION"),
+        ]
     elif zone == "IN_DESC":
-        # Inside descending channel on ascending day — could rally through
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=df_,
-            entry_label="Descending Floor",
-            rationale="On ascending day, market can rally through descending channel to ascending boundary",
-            target_level=af,
-            target_label="Ascending Floor",
-            strength="STRONG"
-        ))
-        scenarios.append(TradeScenario(
-            direction="PUTS",
-            entry_level=dc,
-            entry_label="Descending Ceiling",
-            rationale="Rejection at descending ceiling before continuation lower",
-            is_primary=False,
-            strength="CAUTION"
-        ))
-
-    elif zone in ("BELOW_DESC", "BELOW_DESC_EXTREME"):
-        # Below descending channel on ascending day — strong rally potential
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=df_,
-            entry_label="Descending Floor",
-            rationale="Far below on ascending day — market could rally through descending to ascending channel",
-            target_level=af,
-            target_label="Ascending Floor",
-            strength="STRONG"
-        ))
-
-    # Calculate strikes, stop loss, take profits, and contract ticker
-    channel_width = ac - af
-    for s in scenarios:
-        if s.direction == "CALLS":
-            s.strike = round_strike(s.entry_level + STRIKE_OFFSET)  # OTM above
-            s.stop_loss = s.entry_level - STOP_LOSS_POINTS
-            s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
-            s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
-            s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
-        else:
-            s.strike = round_strike(s.entry_level - STRIKE_OFFSET)  # OTM below
-            s.stop_loss = s.entry_level + STOP_LOSS_POINTS
-            s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
-            s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
-            s.take_profit_3 = s.entry_level - (channel_width * TP3_PCT)
-
-    return PositionAssessment(
-        zone=zone,
-        zone_label=zone_label,
-        nearest_line=nearest_line,
-        nearest_distance=nearest_dist,
-        day_type="ascending",
-        scenarios=scenarios
-    )
-
-
-def assess_position_descending_day(
-    price: float,
-    channel_values: dict
-) -> PositionAssessment:
-    """
-    Assess position and generate trade scenarios for a DESCENDING day.
-    On descending days, the descending channel is the active channel.
-    """
-    af = channel_values["asc_floor"]
-    ac = channel_values["asc_ceiling"]
-    df_ = channel_values["desc_floor"]
-    dc = channel_values["desc_ceiling"]
-    ae = channel_values.get("asc_extreme")
-    de = channel_values.get("desc_extreme")
-
-    zone = determine_position(price, af, ac, df_, dc, ae, de)
-    zone_label = get_zone_label(zone)
-
-    lines = {
-        "Asc Floor": af, "Asc Ceiling": ac,
-        "Desc Floor": df_, "Desc Ceiling": dc,
-    }
-    if ae:
-        lines["Asc Extreme"] = ae
-    if de:
-        lines["Desc Extreme"] = de
-
-    nearest_line = min(lines.keys(), key=lambda k: abs(price - lines[k]))
-    nearest_dist = abs(price - lines[nearest_line])
-
-    scenarios = []
-
-    if zone == "IN_DESC":
-        # Inside descending channel on descending day
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=df_,
-            entry_label="Descending Floor",
-            rationale="Buy off the descending channel floor on descending day",
-            target_level=dc,
-            target_label="Descending Ceiling",
-        ))
-        scenarios.append(TradeScenario(
-            direction="PUTS",
-            entry_level=dc,
-            entry_label="Descending Ceiling",
-            rationale="Sell off the descending channel ceiling",
-            target_level=df_,
-            target_label="Descending Floor",
-            strength="STRONG"
-        ))
-
-    elif zone in ("BELOW_DESC", "BELOW_DESC_EXTREME"):
-        # Below descending channel on descending day
-        scenarios.append(TradeScenario(
-            direction="PUTS",
-            entry_level=df_,
-            entry_label="Descending Floor",
-            rationale="Descending floor becomes resistance — sell lower",
-            target_level=de,
-            target_label="Descending Extreme",
-            strength="STRONG"
-        ))
-
-    elif zone == "BETWEEN":
-        # Between channels on descending day
-        scenarios.append(TradeScenario(
-            direction="PUTS",
-            entry_level=af,
-            entry_label="Ascending Floor",
-            rationale="Drop from ascending floor to descending ceiling",
-            target_level=dc,
-            target_label="Descending Ceiling",
-            strength="STRONG"
-        ))
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=dc,
-            entry_label="Descending Ceiling",
-            rationale="Bounce at descending ceiling back to ascending floor",
-            target_level=af,
-            target_label="Ascending Floor",
-            is_primary=False,
-            strength="CAUTION"
-        ))
-
-    elif zone == "IN_ASC":
-        # Inside ascending channel on descending day — could drop through
-        scenarios.append(TradeScenario(
-            direction="PUTS",
-            entry_level=ac,
-            entry_label="Ascending Ceiling",
-            rationale="On descending day, market can drop through ascending channel to descending boundary",
-            target_level=dc,
-            target_label="Descending Ceiling",
-            strength="STRONG"
-        ))
-        scenarios.append(TradeScenario(
-            direction="CALLS",
-            entry_level=af,
-            entry_label="Ascending Floor",
-            rationale="Bounce at ascending floor before continuation",
-            is_primary=False,
-            strength="CAUTION"
-        ))
-
-    elif zone in ("ABOVE_ASC", "ABOVE_ASC_EXTREME"):
-        # Above ascending channel on descending day — strong drop potential
-        scenarios.append(TradeScenario(
-            direction="PUTS",
-            entry_level=ac,
-            entry_label="Ascending Ceiling",
-            rationale="Far above on descending day — market could drop through ascending to descending channel",
-            target_level=dc,
-            target_label="Descending Ceiling",
-            strength="STRONG"
-        ))
-
-    # Calculate strikes, stop loss, take profits, and contract ticker
-    channel_width = dc - df_
-    for s in scenarios:
-        if s.direction == "CALLS":
-            s.strike = round_strike(s.entry_level + STRIKE_OFFSET)  # OTM above
-            s.stop_loss = s.entry_level - STOP_LOSS_POINTS
-            s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
-            s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
-            s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
-        else:
-            s.strike = round_strike(s.entry_level - STRIKE_OFFSET)  # OTM below
-            s.stop_loss = s.entry_level + STOP_LOSS_POINTS
-            s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
-            s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
-            s.take_profit_3 = s.entry_level - (channel_width * TP3_PCT)
-
-    return PositionAssessment(
-        zone=zone,
-        zone_label=zone_label,
-        nearest_line=nearest_line,
-        nearest_distance=nearest_dist,
-        day_type="descending",
-        scenarios=scenarios
-    )
-
-
-def assess_asian_session(
-    price: float,
-    channel_values: dict
-) -> PositionAssessment:
-    """
-    Assess position for Asian session prop firm trading (6 PM - 9 PM CT).
-    Asian session primarily uses the descending channel.
-    All values in ES terms (no SPX conversion needed).
-    """
-    df_ = channel_values["desc_floor"]
-    dc = channel_values["desc_ceiling"]
-    de = channel_values.get("desc_extreme")
-
-    # For Asian session, we focus on descending channel
-    if price > dc:
-        zone = "ABOVE_DESC"
-        zone_label = "Above Descending Channel"
-    elif price >= df_:
-        zone = "IN_DESC"
-        zone_label = "Inside Descending Channel"
-    else:
-        zone = "BELOW_DESC"
-        zone_label = "Below Descending Channel"
-
-    lines = {"Desc Floor": df_, "Desc Ceiling": dc}
-    if de:
-        lines["Desc Extreme"] = de
-    nearest_line = min(lines.keys(), key=lambda k: abs(price - lines[k]))
-    nearest_dist = abs(price - lines[nearest_line])
-
-    scenarios = []
-
-    if zone == "IN_DESC":
-        scenarios.append(TradeScenario(
-            direction="LONG ES",
-            entry_level=df_,
-            entry_label="Descending Floor",
-            rationale="Buy off descending floor for bounce to ceiling",
-            target_level=dc,
-            target_label="Descending Ceiling",
-        ))
-        scenarios.append(TradeScenario(
-            direction="SHORT ES",
-            entry_level=dc,
-            entry_label="Descending Ceiling",
-            rationale="Sell off descending ceiling for drop to floor",
-            target_level=df_,
-            target_label="Descending Floor",
-        ))
-
-    elif zone == "ABOVE_DESC":
-        # Broke above — ceiling becomes support
-        scenarios.append(TradeScenario(
-            direction="LONG ES",
-            entry_level=dc,
-            entry_label="Descending Ceiling",
-            rationale="Broke above ceiling — ceiling becomes support, buy higher",
-            strength="STRONG"
-        ))
-        scenarios.append(TradeScenario(
-            direction="SHORT ES",
-            entry_level=dc,
-            entry_label="Descending Ceiling",
-            rationale="If fails to hold above ceiling, sell back to floor",
-            target_level=df_,
-            target_label="Descending Floor",
-            is_primary=False,
-            strength="CAUTION"
-        ))
-
+        scenarios = [
+            TradeScenario("CALLS", df_, "Descending Floor", "Rally through desc channel to ascending", af, "Ascending Floor", strength="STRONG"),
+            TradeScenario("PUTS", dc, "Descending Ceiling", "Rejection at desc ceiling", is_primary=False, strength="CAUTION"),
+        ]
     elif zone == "BELOW_DESC":
-        # Broke below — floor becomes resistance
-        scenarios.append(TradeScenario(
-            direction="SHORT ES",
-            entry_level=df_,
-            entry_label="Descending Floor",
-            rationale="Broke below floor — floor becomes resistance, sell lower",
-            strength="STRONG"
-        ))
-        scenarios.append(TradeScenario(
-            direction="LONG ES",
-            entry_level=df_,
-            entry_label="Descending Floor",
-            rationale="If reclaims above floor, buy back to ceiling",
-            target_level=dc,
-            target_label="Descending Ceiling",
-            is_primary=False,
-            strength="CAUTION"
-        ))
+        scenarios = [
+            TradeScenario("CALLS", df_, "Descending Floor", "Far below on asc day — rally to ascending", af, "Ascending Floor", strength="STRONG"),
+        ]
 
-    # Calculate stop loss and take profit for ES trades
-    channel_width = abs(dc - df_)
-    es_stop = 2.0  # 2 ES points stop loss for prop firm
-    for s in scenarios:
-        if s.direction == "LONG ES":
-            s.stop_loss = s.entry_level - es_stop
-            s.take_profit_1 = s.entry_level + (channel_width * TP1_PCT)
-            s.take_profit_2 = s.entry_level + (channel_width * TP2_PCT)
-            s.take_profit_3 = s.entry_level + (channel_width * TP3_PCT)
-        elif s.direction == "SHORT ES":
-            s.stop_loss = s.entry_level + es_stop
-            s.take_profit_1 = s.entry_level - (channel_width * TP1_PCT)
-            s.take_profit_2 = s.entry_level - (channel_width * TP2_PCT)
-            s.take_profit_3 = s.entry_level - (channel_width * TP3_PCT)
-
-    return PositionAssessment(
-        zone=zone,
-        zone_label=zone_label,
-        nearest_line=nearest_line,
-        nearest_distance=nearest_dist,
-        day_type="asian_session",
-        scenarios=scenarios
-    )
+    _add_trade_details(scenarios, ac - af, is_spx=True)
+    return PositionAssessment(zone, zone_label, nearest, dist, "ascending", scenarios)
 
 
-def round_strike(price: float, increment: int = 5) -> int:
-    """Round to nearest strike increment (default 5 for SPX)."""
+def assess_descending_day(price, cv) -> PositionAssessment:
+    af, ac, df_, dc = cv["asc_floor"], cv["asc_ceiling"], cv["desc_floor"], cv["desc_ceiling"]
+    zone, zone_label = _determine_zone(price, af, ac, df_, dc)
+    lines = {"Asc Floor": af, "Asc Ceiling": ac, "Desc Floor": df_, "Desc Ceiling": dc}
+    nearest, dist = _find_nearest(price, lines)
+    scenarios = []
+
+    if zone == "IN_DESC":
+        scenarios = [
+            TradeScenario("CALLS", df_, "Descending Floor", "Buy off descending floor", dc, "Descending Ceiling"),
+            TradeScenario("PUTS", dc, "Descending Ceiling", "Sell off descending ceiling", df_, "Descending Floor", strength="STRONG"),
+        ]
+    elif zone == "BELOW_DESC":
+        scenarios = [
+            TradeScenario("PUTS", df_, "Descending Floor", "Floor becomes resistance — sell lower", strength="STRONG"),
+        ]
+    elif zone == "BETWEEN":
+        scenarios = [
+            TradeScenario("PUTS", af, "Ascending Floor", "Drop from asc floor to desc ceiling", dc, "Descending Ceiling", strength="STRONG"),
+            TradeScenario("CALLS", dc, "Descending Ceiling", "Bounce at desc ceiling to asc floor", af, "Ascending Floor", is_primary=False, strength="CAUTION"),
+        ]
+    elif zone == "IN_ASC":
+        scenarios = [
+            TradeScenario("PUTS", ac, "Ascending Ceiling", "Drop through ascending to descending", dc, "Descending Ceiling", strength="STRONG"),
+            TradeScenario("CALLS", af, "Ascending Floor", "Bounce at asc floor", is_primary=False, strength="CAUTION"),
+        ]
+    elif zone == "ABOVE_ASC":
+        scenarios = [
+            TradeScenario("PUTS", ac, "Ascending Ceiling", "Far above on desc day — drop to descending", dc, "Descending Ceiling", strength="STRONG"),
+        ]
+
+    _add_trade_details(scenarios, dc - df_, is_spx=True)
+    return PositionAssessment(zone, zone_label, nearest, dist, "descending", scenarios)
+
+
+def assess_asian_session(price, cv) -> PositionAssessment:
+    df_, dc = cv["desc_floor"], cv["desc_ceiling"]
+    lines = {"Desc Floor": df_, "Desc Ceiling": dc}
+    nearest, dist = _find_nearest(price, lines)
+    scenarios = []
+
+    if price > dc:
+        zone, label = "ABOVE_DESC", "Above Descending Channel"
+        scenarios = [
+            TradeScenario("LONG ES", dc, "Descending Ceiling", "Broke above — ceiling becomes support", strength="STRONG"),
+            TradeScenario("SHORT ES", dc, "Descending Ceiling", "If fails, sell back to floor", df_, "Descending Floor", is_primary=False, strength="CAUTION"),
+        ]
+    elif price >= df_:
+        zone, label = "IN_DESC", "Inside Descending Channel"
+        scenarios = [
+            TradeScenario("LONG ES", df_, "Descending Floor", "Buy off floor for bounce to ceiling", dc, "Descending Ceiling"),
+            TradeScenario("SHORT ES", dc, "Descending Ceiling", "Sell off ceiling for drop to floor", df_, "Descending Floor"),
+        ]
+    else:
+        zone, label = "BELOW_DESC", "Below Descending Channel"
+        scenarios = [
+            TradeScenario("SHORT ES", df_, "Descending Floor", "Broke below — floor becomes resistance", strength="STRONG"),
+            TradeScenario("LONG ES", df_, "Descending Floor", "If reclaims, buy to ceiling", dc, "Descending Ceiling", is_primary=False, strength="CAUTION"),
+        ]
+
+    _add_trade_details(scenarios, abs(dc - df_), is_spx=False)
+    return PositionAssessment(zone, label, nearest, dist, "asian", scenarios)
+
+
+def round_strike(price, increment=5):
     return int(round(price / increment) * increment)
 
 
-def format_spxw_ticker(strike: int, expiration_date: date, is_call: bool) -> str:
-    """Format SPXW option ticker symbol."""
-    date_str = expiration_date.strftime("%y%m%d")
-    cp = "C" if is_call else "P"
-    strike_str = f"{strike * 1000:08d}"
-    return f"O:SPXW{date_str}{cp}{strike_str}"
+def convert_es_to_spx(es_vals, offset):
+    return {k: (v - offset if v is not None else None) for k, v in es_vals.items()}
 
 
-def convert_es_to_spx(es_values: dict, offset: float) -> dict:
-    """Convert all ES channel values to SPX by subtracting the offset."""
-    spx_values = {}
-    for key, value in es_values.items():
-        if value is not None:
-            spx_values[key] = value - offset
-        else:
-            spx_values[key] = None
-    return spx_values
-
-
-def get_session_mode(current_time: datetime = None) -> str:
-    """
-    Determine which trading mode based on current time.
-    Returns: 'asian', 'pre_rth', 'rth', 'afternoon', 'off'
-    """
+def get_session_mode(current_time=None):
     if current_time is None:
         current_time = datetime.now(CT)
     else:
         current_time = current_time.astimezone(CT)
-
-    hour = current_time.hour
-    minute = current_time.minute
-
-    if 17 <= hour <= 20:  # 5 PM - 9 PM CT (ES market open)
-        return "asian"
-    elif 5 <= hour < 8 or (hour == 8 and minute < 30):
-        return "pre_rth"
-    elif (hour == 8 and minute >= 30) or (8 < hour < 13):  # 8:30 AM - 1 PM CT
-        return "rth"
-    elif 13 <= hour < 15:
-        return "afternoon"
-    else:
-        return "off"
+    h, m = current_time.hour, current_time.minute
+    if 17 <= h <= 20: return "asian"
+    if 5 <= h < 8 or (h == 8 and m < 30): return "pre_rth"
+    if (h == 8 and m >= 30) or (8 < h < 13): return "rth"
+    if 13 <= h < 15: return "afternoon"
+    return "off"
