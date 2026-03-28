@@ -67,11 +67,13 @@ def _find_nearest(price, lines):
     return nearest, abs(price - lines[nearest])
 
 
-def _determine_zone(price, af, ac, df_, dc):
+def _determine_zone(price, af, ac, df_, dc, ae=None, de=None):
+    if ae and price > ae: return "ABOVE_ASC_EXT", "Above Ascending Extreme"
     if price > ac: return "ABOVE_ASC", "Above Ascending Channel"
     if price >= af: return "IN_ASC", "Inside Ascending Channel"
     if price > dc: return "BETWEEN", "Between Channels"
     if price >= df_: return "IN_DESC", "Inside Descending Channel"
+    if de and price < de: return "BELOW_DESC_EXT", "Below Descending Extreme"
     return "BELOW_DESC", "Below Descending Channel"
 
 
@@ -95,9 +97,14 @@ def _add_trade_details(scenarios, channel_width, is_spx=True):
 
 
 def assess_ascending_day(price, cv) -> PositionAssessment:
-    af, ac, df_, dc = cv["asc_floor"], cv["asc_ceiling"], cv["desc_floor"], cv["desc_ceiling"]
-    zone, zone_label = _determine_zone(price, af, ac, df_, dc)
+    af, ac = cv["asc_floor"], cv["asc_ceiling"]
+    df_, dc = cv["desc_floor"], cv["desc_ceiling"]
+    ae, de = cv.get("asc_extreme"), cv.get("desc_extreme")
+    zone, zone_label = _determine_zone(price, af, ac, df_, dc, ae, de)
+
     lines = {"Asc Floor": af, "Asc Ceiling": ac, "Desc Floor": df_, "Desc Ceiling": dc}
+    if ae: lines["Asc Extreme"] = ae
+    if de: lines["Desc Extreme"] = de
     nearest, dist = _find_nearest(price, lines)
     scenarios = []
 
@@ -106,7 +113,7 @@ def assess_ascending_day(price, cv) -> PositionAssessment:
             TradeScenario("CALLS", af, "Ascending Floor", "Buy off ascending floor", ac, "Ascending Ceiling", strength="STRONG"),
             TradeScenario("PUTS", ac, "Ascending Ceiling", "Sell off ascending ceiling", af, "Ascending Floor", is_primary=False),
         ]
-    elif zone == "ABOVE_ASC":
+    elif zone == "ABOVE_ASC" or zone == "ABOVE_ASC_EXT":
         scenarios = [
             TradeScenario("CALLS", ac, "Ascending Ceiling", "Ceiling becomes support — buy higher", strength="STRONG"),
             TradeScenario("CALLS", af, "Ascending Floor", "If drops to floor, buy bounce", is_primary=False),
@@ -118,12 +125,21 @@ def assess_ascending_day(price, cv) -> PositionAssessment:
         ]
     elif zone == "IN_DESC":
         scenarios = [
-            TradeScenario("CALLS", df_, "Descending Floor", "Rally through desc channel to ascending", af, "Ascending Floor", strength="STRONG"),
-            TradeScenario("PUTS", dc, "Descending Ceiling", "Rejection at desc ceiling", is_primary=False, strength="CAUTION"),
+            TradeScenario("CALLS", df_, "Descending Floor", "Buy off desc floor, rally through to ascending", af, "Ascending Floor", strength="STRONG"),
+            TradeScenario("PUTS", dc, "Descending Ceiling", "Rejection at desc ceiling", df_, "Descending Floor", is_primary=False, strength="CAUTION"),
         ]
     elif zone == "BELOW_DESC":
+        # Below descending but above extreme — market may rally to desc floor/ceiling then sell
         scenarios = [
-            TradeScenario("CALLS", df_, "Descending Floor", "Far below on asc day — rally to ascending", af, "Ascending Floor", strength="STRONG"),
+            TradeScenario("CALLS", price, "Current Level", "Quick rally to descending floor", df_, "Descending Floor"),
+            TradeScenario("PUTS", df_, "Descending Floor", "Rally to desc floor then rejected — sell", dc, "Descending Ceiling", strength="STRONG"),
+            TradeScenario("CALLS", df_, "Descending Floor", "If reclaims desc floor, could rally to ascending", af, "Ascending Floor", is_primary=False, strength="CAUTION"),
+        ]
+    elif zone == "BELOW_DESC_EXT":
+        # Way below everything — market rallies to extreme line (lowest wick) and sells back down
+        scenarios = [
+            TradeScenario("PUTS", de, "Descending Extreme", "Rally to extreme line then heavy selling", df_, "Descending Floor", strength="STRONG"),
+            TradeScenario("CALLS", price, "Current Level", "Quick scalp rally to extreme line", de, "Descending Extreme", is_primary=False, strength="CAUTION"),
         ]
 
     _add_trade_details(scenarios, ac - af, is_spx=True)
@@ -131,9 +147,14 @@ def assess_ascending_day(price, cv) -> PositionAssessment:
 
 
 def assess_descending_day(price, cv) -> PositionAssessment:
-    af, ac, df_, dc = cv["asc_floor"], cv["asc_ceiling"], cv["desc_floor"], cv["desc_ceiling"]
-    zone, zone_label = _determine_zone(price, af, ac, df_, dc)
+    af, ac = cv["asc_floor"], cv["asc_ceiling"]
+    df_, dc = cv["desc_floor"], cv["desc_ceiling"]
+    ae, de = cv.get("asc_extreme"), cv.get("desc_extreme")
+    zone, zone_label = _determine_zone(price, af, ac, df_, dc, ae, de)
+
     lines = {"Asc Floor": af, "Asc Ceiling": ac, "Desc Floor": df_, "Desc Ceiling": dc}
+    if ae: lines["Asc Extreme"] = ae
+    if de: lines["Desc Extreme"] = de
     nearest, dist = _find_nearest(price, lines)
     scenarios = []
 
@@ -144,7 +165,12 @@ def assess_descending_day(price, cv) -> PositionAssessment:
         ]
     elif zone == "BELOW_DESC":
         scenarios = [
-            TradeScenario("PUTS", df_, "Descending Floor", "Floor becomes resistance — sell lower", strength="STRONG"),
+            TradeScenario("PUTS", df_, "Descending Floor", "Floor becomes resistance — sell lower", de, "Descending Extreme", strength="STRONG"),
+        ]
+    elif zone == "BELOW_DESC_EXT":
+        # Way below on descending day — continue selling
+        scenarios = [
+            TradeScenario("PUTS", de, "Descending Extreme", "Extreme becomes resistance — sell lower", strength="STRONG"),
         ]
     elif zone == "BETWEEN":
         scenarios = [
@@ -157,8 +183,16 @@ def assess_descending_day(price, cv) -> PositionAssessment:
             TradeScenario("CALLS", af, "Ascending Floor", "Bounce at asc floor", is_primary=False, strength="CAUTION"),
         ]
     elif zone == "ABOVE_ASC":
+        # Above ascending but below extreme — drop to ascending ceiling then continue
         scenarios = [
-            TradeScenario("PUTS", ac, "Ascending Ceiling", "Far above on desc day — drop to descending", dc, "Descending Ceiling", strength="STRONG"),
+            TradeScenario("PUTS", ac, "Ascending Ceiling", "Drop from above ascending to descending", dc, "Descending Ceiling", strength="STRONG"),
+            TradeScenario("CALLS", ac, "Ascending Ceiling", "If holds above ceiling, quick scalp", is_primary=False, strength="CAUTION"),
+        ]
+    elif zone == "ABOVE_ASC_EXT":
+        # Way above everything on descending day — drops to extreme line and buys back
+        scenarios = [
+            TradeScenario("CALLS", ae, "Ascending Extreme", "Drop to extreme line then heavy buying", ac, "Ascending Ceiling", strength="STRONG"),
+            TradeScenario("PUTS", price, "Current Level", "Quick scalp drop to extreme line", ae, "Ascending Extreme", is_primary=False, strength="CAUTION"),
         ]
 
     _add_trade_details(scenarios, dc - df_, is_spx=True)
