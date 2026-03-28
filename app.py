@@ -274,7 +274,8 @@ def main():
             if st.button("🔍 AUTO-DETECT", use_container_width=True):
                 with st.spinner("Fetching..."):
                     df_1m, used_date = fetch_afternoon_1min(trading_date)
-                    df_30m, _ = fetch_afternoon_30min(trading_date)
+                    df_30m, used_date_30 = fetch_afternoon_30min(trading_date)
+                    actual_date = used_date or used_date_30
                     if not df_1m.empty or not df_30m.empty:
                         detected = auto_detect_anchors(df_1m, df_30m)
                         if detected:
@@ -282,8 +283,10 @@ def main():
                                 st.session_state[key] = ap.price
                                 st.session_state[f"{key}_h"] = ap.timestamp.hour
                                 st.session_state[f"{key}_m"] = ap.timestamp.minute
+                            if actual_date:
+                                st.session_state["anchor_date"] = actual_date.isoformat()
                             st.session_state["auto_detected"] = True
-                            st.success(f"Detected from {used_date.strftime('%b %d') if used_date else 'data'}")
+                            st.success(f"Detected from {actual_date.strftime('%b %d') if actual_date else 'data'}")
                             st.rerun()
                         else:
                             st.warning("Could not detect. Enter manually.")
@@ -329,13 +332,21 @@ def main():
     while prior_date.weekday() >= 5:
         prior_date -= timedelta(days=1)
 
+    # Use actual detected date if available (more accurate than calculated prior_date)
+    anchor_date = prior_date
+    if "anchor_date" in st.session_state and st.session_state["anchor_date"]:
+        try:
+            anchor_date = date.fromisoformat(st.session_state["anchor_date"])
+        except Exception:
+            anchor_date = prior_date
+
     if man_lb > 0 and man_hr > 0:
         try:
             channels = build_channels(
-                AnchorPoint(man_lb, CT.localize(datetime.combine(prior_date, dtime(man_lb_h, man_lb_m))), "Lowest Bounce"),
-                AnchorPoint(man_hr, CT.localize(datetime.combine(prior_date, dtime(man_hr_h, man_hr_m))), "Highest Rejection"),
-                AnchorPoint(man_hw if man_hw > 0 else man_hr, CT.localize(datetime.combine(prior_date, dtime(man_hw_h, man_hw_m))), "Highest Wick"),
-                AnchorPoint(man_lw if man_lw > 0 else man_lb, CT.localize(datetime.combine(prior_date, dtime(man_lw_h, man_lw_m))), "Lowest Wick"),
+                AnchorPoint(man_lb, CT.localize(datetime.combine(anchor_date, dtime(man_lb_h, man_lb_m))), "Lowest Bounce"),
+                AnchorPoint(man_hr, CT.localize(datetime.combine(anchor_date, dtime(man_hr_h, man_hr_m))), "Highest Rejection"),
+                AnchorPoint(man_hw if man_hw > 0 else man_hr, CT.localize(datetime.combine(anchor_date, dtime(man_hw_h, man_hw_m))), "Highest Wick"),
+                AnchorPoint(man_lw if man_lw > 0 else man_lb, CT.localize(datetime.combine(anchor_date, dtime(man_lw_h, man_lw_m))), "Lowest Wick"),
             )
         except Exception as e:
             st.error(f"Channel error: {e}")
@@ -352,7 +363,7 @@ def main():
 
     now_ct = datetime.now(CT)
     es_vals = get_channel_values_at_time(channels, now_ct)
-    asian_date = prior_date
+    asian_date = anchor_date
 
     # ─── TABS ───
     tab_asian, tab_rth, tab_proj = st.tabs(["🌏 ASIAN", "📈 RTH", "📊 PROJECTIONS"])
