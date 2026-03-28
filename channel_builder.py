@@ -180,29 +180,55 @@ def build_channels(lb: AnchorPoint, hr: AnchorPoint, hw: AnchorPoint, lw: Anchor
 def auto_detect_anchors(df_1min: pd.DataFrame, df_30min: pd.DataFrame) -> Optional[dict]:
     """
     Auto-detect the 4 anchor points from afternoon data.
-    Uses 30-min candle CLOSE for bounces/rejections (line chart).
-    Uses 30-min High/Low for wicks.
+    Tries 30-min data first (matches TradingView line chart), falls back to 1-min.
     Returns dict with 'lb', 'hr', 'hw', 'lw' AnchorPoints or None.
     """
-    # Prefer 30-min data for bounce/rejection (matches TradingView line chart)
-    bounce_df = df_30min if not df_30min.empty else df_1min
-    if bounce_df.empty:
+    detected = None
+
+    # Try 30-min data first (preferred — matches line chart)
+    if not df_30min.empty and len(df_30min) >= 3:
+        bounces, rejections = find_bounces_and_rejections(df_30min, lookback=1)
+        if bounces and rejections:
+            detected = (bounces, rejections, df_30min)
+
+    # Fallback to 1-min data, round timestamps to nearest 30-min
+    if detected is None and not df_1min.empty:
+        bounces, rejections = find_bounces_and_rejections(df_1min, lookback=5)
+        if bounces and rejections:
+            # Round timestamps to nearest 30-min mark
+            for b in bounces:
+                b.timestamp = _round_to_30min(b.timestamp)
+            for r in rejections:
+                r.timestamp = _round_to_30min(r.timestamp)
+            detected = (bounces, rejections, df_1min)
+
+    if detected is None:
         return None
 
-    bounces, rejections = find_bounces_and_rejections(bounce_df, lookback=2)
-    if not bounces or not rejections:
-        return None
-
+    bounces, rejections, wick_df = detected
     lb = min(bounces, key=lambda b: b.price)
     lb.label = "Lowest Bounce"
     hr = max(rejections, key=lambda r: r.price)
     hr.label = "Highest Rejection"
 
-    # Wicks from 30-min High/Low
-    wick_df = df_30min if not df_30min.empty else df_1min
-    hw, lw = find_extreme_wicks(wick_df)
+    # Wicks from whichever data we have
+    wick_source = df_30min if not df_30min.empty else df_1min
+    hw, lw = find_extreme_wicks(wick_source)
 
     return {'lb': lb, 'hr': hr, 'hw': hw, 'lw': lw}
+
+
+def _round_to_30min(ts: datetime) -> datetime:
+    """Round a timestamp to the nearest 30-minute mark."""
+    minute = ts.minute
+    if minute < 15:
+        rounded_min = 0
+    elif minute < 45:
+        rounded_min = 30
+    else:
+        rounded_min = 0
+        ts = ts + timedelta(hours=1)
+    return ts.replace(minute=rounded_min, second=0, microsecond=0)
 
 
 def get_channel_values_at_time(channels: ChannelSystem, t: datetime) -> dict:
